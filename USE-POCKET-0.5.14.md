@@ -15,7 +15,7 @@ Pocket remains a launcher and native app suite running on Nothing OS. Select it 
 
 ## Optional online features
 
-Drive sync starts **off**. Settings → Cloud sync requests explicit Google authorization. It syncs notes, Parking, Receipt, Dice lists and Journal pages/photos to Pocket's hidden folder in your own Drive. Tasks, calls, SMS, contacts and the Pocket Camera album are excluded. The APK adds Internet/network-state permissions for Drive and optional Journal reading.
+Drive sync starts **off**. Settings → Cloud sync requests explicit Google authorization. It syncs notes, Parking, Receipt, Dice lists and Journal pages/photos to Pocket's hidden folder in your own Drive. Tasks, calls, SMS, contacts and the Pocket Camera album are excluded. The APK adds Internet permission for Drive and optional Journal reading; network-state access was already present in the previous APK.
 
 Google authorization needs an Android OAuth client for `org.textphone.launcher` and the release certificate SHA-1 `57651e7742d17aa12af0e1c823bd5f73759e9dbf`. See [CLOUD.md](CLOUD.md) for configuration and the web workstation. This build does not prove that the Google Cloud project is configured for the release key or that GitHub Pages is deployed.
 
