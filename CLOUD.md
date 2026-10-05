@@ -57,6 +57,8 @@ Journal (a Pocket app you can put on a tile) keeps photos of paper journal pages
 
 Sonnet 5.5 was chosen in a comparison on real handwriting (German cursive, two inks, bleed-through, a brace): it read about 98–100% of the words and placed every line on the photo, where Claude Haiku 4.5 got about three quarters of the words right. The instructions are in `JournalReader.PROMPT`.
 
+Pages can also be added on the web: "+ page" in the notes tab (or dropping photos onto it) uploads the photo to Drive as a waiting page; the phone fetches and reads it on its next sync, since only the phone holds the Claude key.
+
 Each page becomes a note. One note line per handwritten line, so each line keeps its position on the photo (`note_line`, `top`, `bottom`); a page titled "Todos" becomes `- [ ]` items, and a brace with a time such as "ab 16:30" becomes a thought line `>> … @16:30` that parks itself until then. The photo stays the original: on the phone, tap a line of the page to unfold its strip of handwriting, or switch to "paper"; on the web, notes read from a page get "paper" and a ▸ per line in preview.
 
 Thought lines also accept a clock time: `@16:30` comes back at the next 16:30.

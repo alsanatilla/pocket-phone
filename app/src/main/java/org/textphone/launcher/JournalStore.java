@@ -108,6 +108,9 @@ final class JournalStore {
         if (out != decoded) decoded.recycle(); return out;
     }
 
+    /** Whether any page waits to be read, including pages uploaded from the web. */
+    static boolean unread(Context c) { for (JSONObject p : visible(c)) if (WAITING.equals(p.optString("state"))) return true; return false; }
+
     /** Images upload once; a local flag that never syncs remembers which ones are in Drive. */
     static boolean uploaded(Context c, String uid) { return prefs(c).getBoolean("uploaded_" + uid, false); }
     static void markUploaded(Context c, String uid) { prefs(c).edit().putBoolean("uploaded_" + uid, true).apply(); }

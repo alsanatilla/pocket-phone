@@ -68,6 +68,17 @@ export async function readBlob(name) {
   if (!response.ok) return null;
   return response.blob();
 }
+/** Uploads a new image into the app folder, for example a journal page photo. Images are never overwritten. */
+export async function writeImage(name, blob) {
+  if (!connected()) throw new Expired();
+  const boundary = "pocket" + Date.now();
+  const body = new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name, parents: ["appDataFolder"] })}\r\n`
+    + `--${boundary}\r\nContent-Type: image/jpeg\r\n\r\n`, blob, `\r\n--${boundary}--\r\n`]);
+  const response = await fetch(`${UPLOAD}?uploadType=multipart&fields=id`, { method: "POST", body,
+    headers: { Authorization: "Bearer " + token, "Content-Type": `multipart/related; boundary=${boundary}` } });
+  if (response.status === 401 || response.status === 403) { token = null; sessionStorage.removeItem("pocket:token"); throw new Expired(); }
+  if (!response.ok) throw new Error("Drive answered " + response.status + ".");
+}
 export async function write(name, doc) {
   const json = JSON.stringify(doc), id = await fileId(name);
   if (id && (await http("PATCH", `${UPLOAD}/${id}?uploadType=media`, json, "application/json; charset=UTF-8")) !== null) return;

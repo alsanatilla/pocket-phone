@@ -99,6 +99,8 @@ final class CloudSync {
                     upload(c, token, name, merged.toString());
                 }
                 pageImages(c, token);
+                // Pages added on the web wait here for this phone to read them.
+                if (JournalStore.unread(c)) JournalJob.schedule(c);
             } catch (JSONException error) { throw new IOException("A synced file is damaged.", error); }
             catch (Unauthorized expired) { throw new SignInNeeded(); }
             prefs(c).edit().putLong("last_ok", System.currentTimeMillis()).remove("last_error").apply();
@@ -175,6 +177,28 @@ final class CloudSync {
         return http(method, address, token, type, body == null ? null : body.getBytes(StandardCharsets.UTF_8));
     }
     private static String http(String method, String address, String token, String type, byte[] bytes) throws IOException {
+        return new String(raw(method, address, token, type, bytes), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * A page photographed or uploaded elsewhere (for example dropped onto the web page) has no photo on this phone yet.
+     * Downloads "page-<uid>.jpg" from the app folder. False when sync is off or the photo isn't in Drive.
+     */
+    static boolean downloadPageImage(Context c, String uid) throws IOException, SignInNeeded {
+        if (!enabled(c)) return false;
+        String token = token(c);
+        try {
+            String id = fileId(c, token, "page-" + uid + ".jpg"); if (id == null) return false;
+            byte[] photo = raw("GET", DRIVE + "/" + id + "?alt=media", token, null, null);
+            java.io.File target = JournalStore.image(c, uid), partial = new java.io.File(target.getPath() + ".part");
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(partial)) { out.write(photo); }
+            if (!partial.renameTo(target)) throw new IOException("Could not store the page photo.");
+            JournalStore.markUploaded(c, uid); return true;
+        } catch (NotFound gone) { return false; }
+        catch (Unauthorized expired) { throw new SignInNeeded(); }
+        catch (JSONException damaged) { throw new IOException("Drive answered with something unreadable.", damaged); }
+    }
+    private static byte[] raw(String method, String address, String token, String type, byte[] bytes) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection();
         try {
             connection.setConnectTimeout(15_000); connection.setReadTimeout(60_000);
@@ -191,8 +215,8 @@ final class CloudSync {
             if (status < 200 || status >= 300) throw new IOException("Drive answered " + status + ".");
             try (InputStream in = connection.getInputStream()) {
                 ByteArrayOutputStream out = new ByteArrayOutputStream(); byte[] buffer = new byte[8192];
-                for (int read; (read = in.read(buffer)) > 0; ) { out.write(buffer, 0, read); if (out.size() > 4_000_000) throw new IOException("Synced file is too large."); }
-                return out.toString("UTF-8");
+                for (int read; (read = in.read(buffer)) > 0; ) { out.write(buffer, 0, read); if (out.size() > 12_000_000) throw new IOException("Synced file is too large."); }
+                return out.toByteArray();
             }
         } finally { connection.disconnect(); }
     }

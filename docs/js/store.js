@@ -53,6 +53,18 @@ export const merge = {
 
 // ── Journal pages: photographed on the phone, read by Claude; each line knows where it sits on the photo. ──
 export const journal = {
+  /** A page uploaded here waits until the phone reads it: only the phone holds the Claude key. */
+  addWaiting(uid) {
+    const doc = load("journal.json"), now = Date.now();
+    doc.pages.push({ uid, created: now, updated: now, state: "waiting", title: "", lines: [], groups: [], source: "web" });
+    save("journal.json", doc); changed("journal.json");
+  },
+  /** Pages without a note yet, newest first: waiting, being read, or failed. */
+  unread() { return load("journal.json").pages.filter(p => !p.deleted && p.state !== "done").sort((a, b) => b.created - a.created); },
+  remove(uid) {
+    const doc = load("journal.json"), page = doc.pages.find(p => p.uid === uid); if (!page) return;
+    Object.assign(page, { deleted: true, lines: [], groups: [], updated: Date.now() }); save("journal.json", doc); changed("journal.json");
+  },
   forNote(noteUid) { return noteUid ? load("journal.json").pages.find(p => p.note === noteUid && !p.deleted) || null : null; },
   /** The page line a note line came from, matched by its exact text, so edited lines simply lose their strip. */
   lineFor(page, noteLine) { const key = noteLine.trim(); return key && page ? (page.lines || []).find(l => (l.note_line || "").trim() === key && l.bottom > l.top) || null : null; },

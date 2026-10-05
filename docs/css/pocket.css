@@ -142,3 +142,5 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
 .paper-frame img { width: 100%; height: auto; display: block; }
 .paper-frame .band { position: absolute; left: 0; right: 0; background: rgba(249, 245, 148, .14); box-shadow: inset 0 -1px 0 rgba(249, 245, 148, .5); }
 .paper-frame .band:hover { background: rgba(249, 245, 148, .32); }
+.tool-notes.dropping { box-shadow: inset 0 0 0 2px var(--accent); }
+.dialog .paper-view { min-height: 0; max-height: 60vh; overflow-y: auto; }

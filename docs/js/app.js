@@ -125,8 +125,18 @@ let noteQuery = "", previewing = false, saveTimer = 0;
 function notesView(uid) {
   const open = uid === "new" ? null : uid ? notes.get(uid) : null;
   const editing = uid === "new" || Boolean(open);
-  const body = view("notes", [["+ new note", () => go("/notes/new")]]);
+  const picker = h("input", { type: "file", accept: "image/*", multiple: true, hidden: true, onchange: e => { uploadPages([...e.target.files]); e.target.value = ""; } });
+  const body = view("notes", [["+ page", () => picker.click(), { title: "Upload photos of journal pages" }], ["+ new note", () => go("/notes/new")]]);
   body.classList.toggle("editing", editing);
+  // Photos of journal pages can also be dropped anywhere on the notes tab.
+  body.addEventListener("dragover", event => { if ([...event.dataTransfer.types].includes("Files")) { event.preventDefault(); body.classList.add("dropping"); } });
+  body.addEventListener("dragleave", event => { if (event.target === body) body.classList.remove("dropping"); });
+  body.addEventListener("drop", event => { event.preventDefault(); body.classList.remove("dropping"); uploadPages([...event.dataTransfer.files]); });
+  const waiting = journal.unread();
+  const pages = waiting.length ? [section(`PAGES [${waiting.length}]`, "accent"), waiting.map(page => rowButton(
+    "Journal page · " + new Date(page.created).toLocaleDateString([], { day: "2-digit", month: "short" }),
+    page.state === "failed" ? page.error || "could not be read" : page.state === "reading" ? "your phone is reading it…" : page.error || "waiting for your phone to read it",
+    () => pageDialog(page)))] : null;
   const search = h("input", { placeholder: "find in notes…", "aria-label": "Find in notes", oninput: e => { noteQuery = e.target.value; renderList(location.hash.split("/")[2]); } });
   search.value = noteQuery;
   const list = h("div", { class: "note-list" });
@@ -137,7 +147,43 @@ function notesView(uid) {
       : [h("p", { class: "small muted", text: q ? "No note matches." : "No notes yet. Notes from the phone appear here after a sync." })]));
   };
   renderList();
-  split(body, [search, list], editing ? editor(open, renderList) : h("div", { class: "empty" }, h("div", { class: "empty-title", text: "NOTES" }), h("p", { class: "small muted", text: "Pick a note on the left, or start a new one." })));
+  split(body, [picker, pages, search, list], editing ? editor(open, renderList) : h("div", { class: "empty" }, h("div", { class: "empty-title", text: "NOTES" }),
+    h("p", { class: "small muted", text: "Pick a note on the left, or start a new one. Drop photos of journal pages here: your phone reads them and they become notes." })));
+}
+/** Scales a photo like the phone does (long edge 2000 px, upright, JPEG) so Drive and the phone get the same kind of file. */
+async function pagePhoto(file) {
+  let bitmap;
+  try { bitmap = await createImageBitmap(file, { imageOrientation: "from-image" }); }
+  catch { throw new Error(`${file.name} can't be opened here. Use a JPEG or PNG.`); }
+  const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas"); canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close();
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.85));
+  if (!blob) throw new Error(`${file.name} could not be converted.`);
+  return { blob, width: canvas.width, height: canvas.height };
+}
+/** Uploads journal photos to Drive as waiting pages. The phone reads them: only it holds the Claude key. */
+async function uploadPages(files) {
+  const images = files.filter(f => f.type.startsWith("image/"));
+  if (!images.length) { say("Drop photos (JPEG or PNG) of journal pages."); return; }
+  if (!drive.connected()) { say("Connect Google Drive first (sync, top right): pages go to your Drive and your phone reads them."); return; }
+  let done = 0;
+  for (const file of images) {
+    say(`Uploading page ${done + 1} of ${images.length}…`);
+    try {
+      const photo = await pagePhoto(file), uid = crypto.randomUUID();
+      await drive.writeImage(`page-${uid}.jpg`, photo.blob);
+      photos.set(uid, Promise.resolve({ url: URL.createObjectURL(photo.blob), width: photo.width, height: photo.height }));
+      journal.addWaiting(uid); done++;
+    } catch (error) { say(error.message); return; }
+  }
+  if (location.hash.startsWith("#/notes")) notesView(location.hash.split("/")[2]);
+  say(done === 1 ? "Page uploaded. Your phone reads it on its next sync and it becomes a note." : `${done} pages uploaded. Your phone reads them on its next sync.`);
+}
+/** A page that has no note yet: show the photo, and allow taking it back. */
+async function pageDialog(page) {
+  const choice = await dialog("Journal page", paperView(page), [["remove", "remove"], ["close", null]]);
+  if (choice === "remove" && await confirmBox("Remove this page? Its photo stays in Drive until your phone syncs.", "remove")) { journal.remove(page.uid); notesView(location.hash.split("/")[2]); }
 }
 /** Under a note's title: the date and a plain-text snippet, then its thoughts marked like the preview, by state. */
 function summary(n) {

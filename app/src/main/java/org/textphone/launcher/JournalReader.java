@@ -59,6 +59,12 @@ final class JournalReader {
     static void read(Context c, String uid) throws Later {
         String key = ClaudeKey.read(c);
         if (key == null) { fail(c, uid, "Add your Claude API key in Journal → Settings to read this page."); return; }
+        // A page uploaded on the web has its photo only in Drive until this phone fetches it.
+        if (!JournalStore.image(c, uid).isFile()) {
+            try { if (!CloudSync.downloadPageImage(c, uid)) { fail(c, uid, "The photo isn't on this phone. Turn on Settings → Cloud sync to read pages added on the web."); return; } }
+            catch (CloudSync.SignInNeeded e) { fail(c, uid, "Sign in again in Settings → Cloud sync to fetch this page's photo."); return; }
+            catch (IOException e) { throw later(c, uid, "Offline; the photo is fetched once the phone is online."); }
+        }
         JournalStore.update(c, uid, p -> p.put("state", JournalStore.READING));
         AnthropicClient client = AnthropicOkHttpClient.builder().apiKey(key).timeout(Duration.ofSeconds(90)).maxRetries(2).build();
         try {
