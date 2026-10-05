@@ -121,6 +121,10 @@
         </activity>
         <activity android:name=".FilesActivity" android:label="Pocket Files" android:taskAffinity="org.textphone.launcher.files" android:exported="false" />
         <activity android:name=".AgendaActivity" android:label="Pocket Agenda" android:taskAffinity="org.textphone.launcher.agenda" android:exported="false" />
+        <activity android:name=".TileGroupActivity" android:label="Pocket Group" android:taskAffinity="org.textphone.launcher.group" android:exported="false" />
+        <activity android:name=".DiceActivity" android:label="Pocket Dice" android:taskAffinity="org.textphone.launcher.dice" android:exported="false" />
+        <activity android:name=".ParkingActivity" android:label="Pocket Parking Lot" android:taskAffinity="org.textphone.launcher.parking" android:exported="false" />
+        <activity android:name=".ReceiptActivity" android:label="Pocket Receipt" android:taskAffinity="org.textphone.launcher.receipt" android:exported="false" />
         <activity android:name=".DeviceSettingsActivity" android:label="Pocket Settings" android:taskAffinity="org.textphone.launcher.settings" android:exported="false" />
         <activity android:name=".PermissionsActivity" android:label="Pocket Permissions" android:taskAffinity="org.textphone.launcher.permissions" android:exported="false" />
         <activity android:name=".NotificationSetupActivity" android:label="Pocket Notification Setup" android:taskAffinity="org.textphone.launcher.notification_setup" android:exported="false" />
@@ -153,6 +157,12 @@
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" /><action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name=".ParkingReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" /><action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" /><action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
         <provider android:name=".MmsFiles" android:authorities="org.textphone.launcher.mms" android:exported="false" android:grantUriPermissions="true" />

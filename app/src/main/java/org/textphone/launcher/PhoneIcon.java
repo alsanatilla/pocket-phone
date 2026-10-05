@@ -9,7 +9,7 @@ import android.graphics.RectF;
 import android.graphics.Bitmap;
 import android.view.View;
 
-/** Original vector drawings of the nine symbols visible in the public product photograph. */
+/** Original vector drawings of the nine symbols visible in the public product photograph, plus Pocket's own additions. */
 final class PhoneIcon extends View {
     private final int kind;
     private final Paint paint = new Paint();
@@ -176,6 +176,38 @@ final class PhoneIcon extends View {
                 fill();
                 for (int y = 12; y < 21; y += 4)
                     for (int x = 6; x < 20; x += 5) canvas.drawRect(x, y, x + 2, y + 2, paint);
+                break;
+            case 14: // Tile group: a small grid of nine.
+                fill();
+                for (int y = 2; y < 22; y += 7)
+                    for (int x = 2; x < 22; x += 7) canvas.drawRect(x, y, x + 5, y + 5, paint);
+                break;
+            case 15: // Die showing five.
+                fill();
+                canvas.drawRoundRect(bounds(2, 2, 22, 22), 3, 3, paint);
+                paint.setColor(cutout);
+                for (float[] pip : new float[][]{{7, 7}, {17, 7}, {12, 12}, {7, 17}, {17, 17}}) canvas.drawCircle(pip[0], pip[1], 2, paint);
+                break;
+            case 16: // Parking sign.
+                fill();
+                canvas.drawRoundRect(bounds(2, 2, 22, 22), 2, 2, paint);
+                paint.setColor(cutout);
+                canvas.drawRect(8, 6, 11, 19, paint);
+                canvas.drawRect(8, 6, 15, 9, paint);
+                canvas.drawRect(8, 12, 15, 15, paint);
+                canvas.drawRect(14, 7, 17, 14, paint);
+                break;
+            case 17: // Receipt with a torn edge.
+                fill();
+                polygon(canvas, 4, 1, 20, 1, 20, 22, 18, 20, 16, 22, 14, 20, 12, 22, 10, 20, 8, 22, 6, 20, 4, 22);
+                paint.setColor(cutout);
+                canvas.drawRect(7, 5, 17, 7, paint);
+                canvas.drawRect(7, 10, 14, 12, paint);
+                canvas.drawRect(7, 15, 17, 17, paint);
+                break;
+            case 18: // Any installed app.
+                canvas.drawRoundRect(bounds(3, 3, 21, 21), 4, 4, paint);
+                fill(); canvas.drawRect(9, 9, 15, 15, paint);
                 break;
             default: break;
         }
