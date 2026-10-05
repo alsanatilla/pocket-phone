@@ -13,7 +13,7 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
 /**
- * The user's own Claude API key for reading journal pages. It is stored only encrypted, with a key that lives in the
+ * The user's own Claude API key for chat and reading journal pages. It is stored only encrypted, with a key that lives in the
  * Android Keystore and never leaves this phone. Never logged, synced or shown again after saving.
  */
 final class ClaudeKey {

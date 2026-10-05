@@ -134,6 +134,7 @@ public class MainActivity extends Activity {
     private boolean torchOwned;
     private NativeNavigation navigation;
     private PageMotion motion;
+    private ClaudeSidebar claude;
     private final Handler draftUi = new Handler(Looper.getMainLooper());
     private Runnable draftSave;
     private View launchOrigin;
@@ -184,14 +185,17 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(BACKGROUND);
         getWindow().getDecorView().setSystemUiVisibility(0);
         if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarContrastEnforced(false);
-        motion = new PageMotion(this); if (savedInstanceState != null) motion.restore(savedInstanceState.getBundle("page_scrolls")); setContentView(motion.host());
+        motion = new PageMotion(this); if (savedInstanceState != null) motion.restore(savedInstanceState.getBundle("page_scrolls"));
+        claude = new ClaudeSidebar(this, motion.host(), () -> { if (navigation != null) navigation.update(); },
+                () -> !noteWheelShowing() && ("home".equals(screen) || "today".equals(screen) || "tools".equals(screen)));
+        setContentView(claude);
         navigation = new NativeNavigation(this, new NativeNavigation.Page() {
-            public boolean internal() { return noteWheelShowing() || trail.peek()!=null || !workspace() || !"today".equals(screen); }
+            public boolean internal() { return claude.isOpen() || noteWheelShowing() || trail.peek()!=null || !workspace() || !"today".equals(screen); }
             public void back() { onBackPressed(); }
-            public View content() { return "home".equals(screen) ? null : content; }
-            public void started(boolean fromLeft) { if (!noteWheelShowing() && !"home".equals(screen)) motion.startBack(backPageKey(), fromLeft); }
-            public void progressed(float progress) { if (!noteWheelShowing()) motion.progressBack(progress); }
-            public void cancelled() { if (!noteWheelShowing()) motion.cancelBack(); }
+            public View content() { return claude.isOpen() || "home".equals(screen) ? null : content; }
+            public void started(boolean fromLeft) { if (!claude.isOpen() && !noteWheelShowing() && !"home".equals(screen)) motion.startBack(backPageKey(), fromLeft); }
+            public void progressed(float progress) { if (!claude.isOpen() && !noteWheelShowing()) motion.progressBack(progress); }
+            public void cancelled() { if (!claude.isOpen() && !noteWheelShowing()) motion.cancelBack(); }
         });
         if (savedInstanceState != null) screen = savedInstanceState.getString("screen", "home");
         if (savedInstanceState != null) trail.restore(savedInstanceState.getBundle("navigation_trail"));
@@ -221,6 +225,7 @@ public class MainActivity extends Activity {
         long note=getIntent().getLongExtra("pocket_note",0);PlannerStore.Entry linked=note>0?planner.find(note):null;if(savedInstanceState==null&&linked!=null){captureId=note;captureKind="note";captureText=planner.hasDraft("note",note)?planner.draft("note",note):linked.text;screen="note_preview";if(trail.peek()==null)trail.push(new RouteTrail.Route("today",0,"note",null,"home",""));}
         setupTorch();
         render();
+        if (savedInstanceState != null) claude.restore(savedInstanceState.getBundle("claude_sidebar"));
         if (savedInstanceState == null) receiveSharedText(getIntent());
     }
 
@@ -251,6 +256,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        claude.resume();
         if (stoppedDraft != null && "capture".equals(screen) && captureEditor != null && captureId == stoppedDraftId
                 && captureKind.equals(stoppedDraftKind) && stoppedDraft.contentEquals(captureEditor.getText())) {
             PlannerStore.Entry saved = captureId == 0 ? null : planner.find(captureId);
@@ -289,10 +295,11 @@ public class MainActivity extends Activity {
         turnOffOwnedTorch();
         super.onStop();
     }
-    @Override protected void onPause() { dismissNoteWheel(); persistDraft(); motion.settle(); super.onPause(); }
+    @Override protected void onPause() { claude.pause(); dismissNoteWheel(); persistDraft(); motion.settle(); super.onPause(); }
 
     @Override protected void onDestroy() {
         navigation.destroy();
+        claude.destroy();
         motion.destroy();
         destroyed = true; draftUi.removeCallbacksAndMessages(null); appUi.removeCallbacksAndMessages(null); appWorker.shutdownNow();
         if (cameraManager != null) cameraManager.unregisterTorchCallback(torchCallback);
@@ -300,6 +307,7 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
+        Bundle chat = new Bundle(); claude.save(chat); state.putBundle("claude_sidebar", chat);
         state.putBundle("navigation_trail", trail.save());
         Bundle positions = new Bundle(); motion.save(positions::putInt); state.putBundle("page_scrolls", positions);
         state.putString("screen", screen);
@@ -323,6 +331,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        claude.close();
         setIntent(intent);
         if(intent.getLongExtra("pocket_task",0)>0){captureKind="task";openTask(intent.getLongExtra("pocket_task",0));return;}
         if(intent.getLongExtra("pocket_note",0)>0){openNote(intent.getLongExtra("pocket_note",0));return;}
@@ -337,11 +346,15 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
+        if (claude.isOpen()) { claude.close(); return; }
         if (noteWheelShowing()) { dismissNoteWheel(); return; }
         if (trail.peek()!=null) { returnToPrevious(); return; }
         if (workspace() && "today".equals(screen)) { super.onBackPressed(); return; }
         if (!"home".equals(screen)) {persistDraft();if(captureEditor!=null)hideKeyboard(captureEditor);finishPage(backDestination());}
         // A Home app stays on Home when Back is pressed again.
+    }
+    private void openClaude() {
+        persistDraft(); dismissNoteWheel(); motion.settle(); claude.open();
     }
     private String backDestination() {
         if (trail.peek()!=null) return trail.peek().page;
@@ -747,20 +760,21 @@ public class MainActivity extends Activity {
         LinearLayout footer = new LinearLayout(this);
         footer.setTag("home_footer");
         footer.setOrientation(LinearLayout.HORIZONTAL);
-        String[] names = {"notifs", "select", "all"};
+        String[] names = {"notifs", "claude", "select", "all"};
         for (int i = 0; i < names.length; i++) {
             int item = i;
-            TextView link = text(names[i], 21, accent());
-            link.setTypeface(pixelTypeface);
+            TextView link = text(names[i], 14, accent());
+            link.setTag("home_" + names[i]);
             PocketDesign.quiet(link, accent());
             link.setGravity(i == 0 ? Gravity.START | Gravity.CENTER_VERTICAL
-                    : i == 2 ? Gravity.END | Gravity.CENTER_VERTICAL : Gravity.CENTER);
+                    : i == names.length - 1 ? Gravity.END | Gravity.CENTER_VERTICAL : Gravity.CENTER);
             link.setMinHeight(dp(56));
             link.setPadding(dp(8), dp(12), dp(8), dp(12));
             link.setFocusable(true);
             link.setOnClickListener(v -> {
                 if (item == 0) navigate("notifications");
-                else if (item == 1) openShortcut(selectedShortcut);
+                else if (item == 1) openClaude();
+                else if (item == 2) openShortcut(selectedShortcut);
                 else navigate("apps");
             });
             footer.addView(link, new LinearLayout.LayoutParams(0, -2, 1));
@@ -1226,6 +1240,7 @@ public class MainActivity extends Activity {
     private void renderTools() {
         heading("Tools", "home");
         action("Today", 20, accent(), () -> navigate("today"));
+        action("Claude", 20, PRIMARY, this::openClaude);
         action("Alarm", 20, PRIMARY, () -> openPocket(ClockActivity.class));
         action("Calendar", 20, PRIMARY, () -> openPocket(AgendaActivity.class));
         action("Camera", 20, PRIMARY, this::openCamera);
@@ -1420,8 +1435,8 @@ public class MainActivity extends Activity {
         LinearLayout taskResults=new LinearLayout(this);taskResults.setOrientation(LinearLayout.VERTICAL);taskResults.setTag("today_tasks");content.addView(taskResults);
         LinearLayout noteResults=new LinearLayout(this);noteResults.setOrientation(LinearLayout.VERTICAL);noteResults.setTag("today_notes");content.addView(noteResults);renderOrganizerLists(taskResults,noteResults);
         todayActions=new LinearLayout(this);todayActions.setTag("today_actions");
-        String[] footer={"Search","Calendar"};Runnable[] actions={this::searchOrganizer,()->openPocket(AgendaActivity.class)};
-        for(int i=0;i<footer.length;i++){TextView key=actionInto(todayActions,footer[i],14,SECONDARY,actions[i]);PocketDesign.control(key);key.setGravity(Gravity.CENTER);key.setMinHeight(dp(56));key.setTag(i==0?"today_search":"today_calendar");key.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));}
+        String[] footer={"Search","Calendar","Claude"};Runnable[] actions={this::searchOrganizer,()->openPocket(AgendaActivity.class),this::openClaude};
+        for(int i=0;i<footer.length;i++){TextView key=actionInto(todayActions,footer[i],14,SECONDARY,actions[i]);PocketDesign.control(key);key.setGravity(Gravity.CENTER);key.setMinHeight(dp(56));key.setTag(new String[]{"today_search","today_calendar","today_claude"}[i]);key.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));}
         addFeedback();
     }
     private void searchOrganizer(){

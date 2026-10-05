@@ -10,8 +10,8 @@ android {
         applicationId 'org.textphone.launcher'
         minSdk 23
         targetSdk 35
-        versionCode 20
-        versionName '0.5.15'
+        versionCode 21
+        versionName '0.5.16'
     }
 
     buildTypes {
@@ -55,7 +55,7 @@ android {
 dependencies {
     // Only for Drive authorization (cloud sync is opt-in). Drive itself is called over plain HTTPS.
     implementation 'com.google.android.gms:play-services-auth:21.3.0'
-    // Reading journal pages with Claude (opt-in, the user's own API key).
+    // Claude chat and reading journal pages (opt-in, the user's own API key).
     implementation 'com.anthropic:anthropic-java:2.34.0'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
     implementation 'io.noties.markwon:core:4.6.2'

@@ -1,98 +1,47 @@
 {
   "component": "Pocket Phone native Android launcher/apps",
-  "version_name": "0.5.15",
-  "version_code": 20,
+  "version_name": "0.5.16",
+  "version_code": 21,
   "application_id": "org.textphone.launcher",
   "min_sdk": 23,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-05T18:26:00.1446179Z",
-  "build": "assembleRom passed; tests stopped at user request",
+  "checked_at_utc": "2026-10-05T18:57:49.7842514Z",
+  "build": "assembleRom passed; tests and lint not run at user request",
   "commands": [
-    "./gradlew.bat :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom",
-    "Earlier: :app:lintRom and :app:testRomUnitTest completed; the combined test run was then cancelled",
-    "Earlier: node --test tools/coros.test.mjs tools/scores.test.mjs tools/zines.test.mjs"
+    "./gradlew.bat :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
   ],
   "android_checks": {
-    "rom": {
-      "skipped": 0,
-      "failures": 0,
-      "errors": 0,
-      "tests": 460
-    },
-    "debug": {
-      "status": "Run stopped at user request; final result not claimed",
-      "tests": null,
-      "failures": null,
-      "errors": null,
-      "skipped": null
-    },
-    "total_passed": 460
+    "status": "Not run for this version at user request"
   },
   "web_checks": {
-    "failures": 0,
-    "tests": 13
+    "status": "Not run; no web implementation changes"
   },
   "lint": {
-    "warnings": 55,
-    "errors": 0
+    "status": "Not run at user request"
   },
+  "paid_api_requests": 0,
   "apk": {
     "file": "app/build/outputs/apk/rom/app-rom-unsigned.apk",
-    "bytes": 9212036,
-    "sha256": "a032451781f3d79a1a9d462af34725fdb3ffe69fd186ce7980cd26ba45922fd3",
+    "bytes": 9234952,
+    "sha256": "f848a28d96573b83d3ff7beaf668313679511e019d85d273a3ca08cc2d45bbd9",
     "signed": false,
     "installable_update": false,
     "existing_release_key_available": false
   },
   "changes_in_this_build": [
-    "Compact home dashboard with up to two appointments, exact next task, three movement estimates, a returning thought and latest note",
-    "Three editable home tiles; hidden existing shortcuts and groups remain reachable under All apps",
-    "Phone COROS browser login with PKCE, encrypted tokens and persistent pending sign-in",
-    "Private dated movement snapshot refreshes on Home return; tapped scores show inputs",
-    "Explicit Drive sync and first Google connection run immediately; persistent errors and installed signing fingerprint",
-    "Background sync results refresh Home sources and the Cloud sync screen",
-    "Readable native task titles, checkboxes, due dates and visible quick actions",
-    "Direct due/importance edits and checklist additions in task details; fixed editor header with Save",
-    "Drive task sync with portable ids, checklist progress, next selection, source snapshots and deletion markers; local drafts retained and completed/deleted task alarms cancelled"
+    "Native Claude chat sidebar in Home and Today, also accessible from Tools",
+    "Swipe left from the interior right half; Android edge gestures retain control",
+    "Direct Anthropic Java SDK streaming with user-provided API key; no PC dependency",
+    "Encrypted API key shared with Journal; only entered conversation is sent",
+    "Local chat history and drafts excluded from Drive sync and Android backup",
+    "Send, Stop, Retry, Markdown replies, and interrupted-request recovery",
+    "Retry preserves an earlier partial reply until replacement text arrives"
   ],
-  "privacy": {
-    "analytics_added": false,
-    "movement_cache": "Private phone app storage, excluded from Drive sync",
-    "movement_tools": "Read-only activities, HRV, resting heart rate, daily health, age and gender",
-    "movement_tokens": "Android Keystore encryption, phone only",
-    "new_android_permissions": []
-  },
-  "handset_validation": {
-    "launcher_behavior_on_physical_phone_verified": false,
-    "coros_sign_in_on_phone_verified": false,
-    "physical_phone_connected": false,
-    "google_drive_transfer_on_phone_verified": false
-  },
-  "previews": [
-    {
-      "width": 360,
-      "height": 800,
-      "file": "app/build/screenshots/pocket-dashboard.png",
-      "kind": "Native Android layout render with synthetic fixture data"
-    },
-    {
-      "width": 360,
-      "height": 640,
-      "file": "app/build/screenshots/pocket-dashboard-quiet.png",
-      "kind": "Native Android layout render of a quiet day"
-    },
-    {
-      "width": 360,
-      "height": 800,
-      "file": "app/build/screenshots/pocket-today-layout.png",
-      "kind": "Native task layout render with synthetic fixture data"
-    },
-    {
-      "width": 360,
-      "height": 800,
-      "file": "app/build/screenshots/pocket-task-detail.png",
-      "kind": "Native task detail layout render with synthetic fixture data"
-    }
+  "known_limits": [
+    "Live API behavior and handset gestures have not been exercised",
+    "No chat tools, attachments or automatic access to Pocket notes, tasks or photos",
+    "Existing release signing key is unavailable, so no installable incremental update was produced"
   ],
+  "previews": [],
   "full_custom_rom_compiled": false
 }
