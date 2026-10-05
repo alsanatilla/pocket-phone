@@ -127,20 +127,21 @@ function notesView(uid) {
   const editing = uid === "new" || Boolean(open);
   const body = view("notes", [["+ new note", () => go("/notes/new")]]);
   body.classList.toggle("editing", editing);
-  const search = h("input", { placeholder: "find in notes…", "aria-label": "Find in notes", oninput: e => { noteQuery = e.target.value; renderList(); } });
+  const search = h("input", { placeholder: "find in notes…", "aria-label": "Find in notes", oninput: e => { noteQuery = e.target.value; renderList(location.hash.split("/")[2]); } });
   search.value = noteQuery;
   const list = h("div", { class: "note-list" });
-  const renderList = () => {
+  const renderList = (current = uid) => {
     const q = noteQuery.trim().toLowerCase(), all = notes.list().filter(n => !q || n.text.toLowerCase().includes(q));
     list.replaceChildren(...(all.length ? all.map(n => rowButton((n.pinned ? "▲ " : "") + noteTitle(n), new Date(n.updated).toLocaleDateString([], { day: "2-digit", month: "short" }) + " · " + snippet(n),
-      () => go("/notes/" + n.uid), { class: "row-button" + (n.uid === uid ? " selected" : "") }))
+      () => go("/notes/" + n.uid), { class: "row-button" + (n.uid === current ? " selected" : "") }))
       : [h("p", { class: "small muted", text: q ? "No note matches." : "No notes yet. Notes from the phone appear here after a sync." })]));
   };
   renderList();
-  split(body, [search, list], editing ? editor(open) : h("div", { class: "empty" }, h("div", { class: "empty-title", text: "NOTES" }), h("p", { class: "small muted", text: "Pick a note on the left, or start a new one." })));
+  split(body, [search, list], editing ? editor(open, renderList) : h("div", { class: "empty" }, h("div", { class: "empty-title", text: "NOTES" }), h("p", { class: "small muted", text: "Pick a note on the left, or start a new one." })));
 }
 const snippet = n => n.text.split("\n").filter(l => l.trim()).slice(1).join(" ").slice(0, 60) || "—";
-function editor(note) {
+/** onSaved refreshes the list beside the editor, so a new note and changed titles show up while typing. */
+function editor(note, onSaved = () => {}) {
   let uid = note?.uid || null;
   const state = h("span", { class: "meta muted", text: note ? "saved" : "new" });
   const area = h("textarea", { class: "note-editor", maxlength: NOTE_LIMIT, placeholder: "# Title\n\nWrite in Markdown…", "aria-label": "Note text", spellcheck: "true" });
@@ -168,7 +169,7 @@ function editor(note) {
     try {
       if (!uid) { if (!area.value.trim()) return; uid = notes.create(area.value).uid; history.replaceState(null, "", "#/notes/" + uid); }
       else notes.update(uid, area.value);
-      parkFinished(finished);
+      parkFinished(finished); onSaved(uid);
       state.textContent = "saved";
     } catch (error) { say(error.message); }
   };
