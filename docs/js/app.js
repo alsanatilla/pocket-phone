@@ -181,11 +181,14 @@ async function uploadPages(files) {
   if (location.hash.startsWith("#/notes")) notesView(location.hash.split("/")[2]);
   say(done === 1 ? "Page uploaded. Read it here, or your phone reads it on its next sync and it becomes a note." : `${done} pages uploaded. Read them here, or your phone reads them on their next sync.`);
 }
+// Only an active request in this tab blocks retrying. A reload can leave the synced state at "reading".
+const activeReads = new Set();
 /** A page that has no note yet: show the photo, read it with Claude here, or take it back. */
 async function pageDialog(page) {
-  const body = page.state === "reading" || reader.hasKey() ? paperView(page)
+  const reading = activeReads.has(page.uid);
+  const body = reading || reader.hasKey() ? paperView(page)
     : h("div", {}, paperView(page), h("p", { class: "small muted", text: "Reading here uses your own Claude API key, kept in this tab only and sent straight to Anthropic. About 1–2¢ per page." }));
-  const actions = page.state === "reading" ? [["close", null]] : [["read with Claude", "read"], ["remove", "remove"], ["close", null]];
+  const actions = reading ? [["close", null]] : [["read with Claude", "read"], ["remove", "remove"], ["close", null]];
   const choice = await dialog("Journal page", body, actions);
   if (choice === "read") readPage(page);
   else if (choice === "remove" && await confirmBox("Remove this page? Its photo stays in Drive until your phone syncs.", "remove")) { journal.remove(page.uid); refreshNotes(); }
@@ -194,8 +197,11 @@ async function pageDialog(page) {
 function refreshNotes() { if (location.hash.startsWith("#/notes")) notesView(location.hash.split("/")[2]); }
 /** Reads a waiting page here, with the key held for this tab: the same note the phone would store. */
 async function readPage(page) {
+  if (activeReads.has(page.uid)) return;
   if (!reader.hasKey() && (await askKey()) == null) return;
+  if (activeReads.has(page.uid)) return;
   journal.edit(page.uid, p => { p.state = "reading"; p.error = ""; });
+  activeReads.add(page.uid);
   refreshNotes(); say("Reading the page with Claude…");
   let message;
   try {
@@ -206,7 +212,7 @@ async function readPage(page) {
     // A later page keeps waiting, for a retry here and for the phone; a permanent problem ends failed.
     journal.edit(page.uid, p => { p.state = error instanceof reader.Later ? "waiting" : "failed"; p.error = error.message; });
     message = error.message;
-  }
+  } finally { activeReads.delete(page.uid); }
   refreshNotes();
   say(message);
 }
