@@ -1,12 +1,13 @@
-/* Pocket's visual language on a bigger screen: black, white, one accent, VT323 headings, no idle dividers. See DESIGN.md. */
+/* Pocket's visual language on a bigger screen: black, white, one accent, pixel headings, no idle dividers. See DESIGN.md. */
 @font-face { font-family: "VT323"; src: url("../fonts/VT323-Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Jacquard 24"; src: url("../fonts/Jacquard24-Regular.ttf") format("truetype"); font-display: swap; }
 
 :root {
   --black: #000; --white: #fff; --muted: #aaa; --line: #303438; --disabled: #858b91;
   --accent: #f9f594; --warning: #ffbf69;
   --paper: #f2efe6; --ink: #161616; --faded: #6b675e;
   --mono: ui-monospace, "DejaVu Sans Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-  --pixel: "VT323", var(--mono);
+  --pixel: "Jacquard 24", "VT323", var(--mono);
   --control: 52px; --row: 56px; --gutter: clamp(16px, 4vw, 48px);
 }
 * { box-sizing: border-box; }
