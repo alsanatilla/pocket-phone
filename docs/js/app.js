@@ -16,10 +16,10 @@ function h(tag, props = {}, ...children) {
     if (key === "class") node.className = value; else if (key === "text") node.textContent = value;
     else if (key.startsWith("on")) node.addEventListener(key.slice(2), value); else node.setAttribute(key, value === true ? "" : value);
   }
-  for (const child of children.flat()) if (child != null && child !== false) node.append(child);
+  for (const child of children.flat(Infinity)) if (child != null && child !== false) node.append(child);
   return node;
 }
-const add = (node, ...children) => node.append(...children.flat().filter(child => child != null && child !== false));
+const add = (node, ...children) => node.append(...children.flat(Infinity).filter(child => child != null && child !== false));
 const go = path => { location.hash = "#" + path; };
 const say = text => { if (notice) notice.textContent = text || ""; };
 const rowButton = (title, sub, onclick, props = {}) => h("button", { class: "row-button", onclick, ...props }, title, sub ? h("span", { class: "sub" }, sub) : null);
@@ -132,14 +132,24 @@ function notesView(uid) {
   const list = h("div", { class: "note-list" });
   const renderList = (current = uid) => {
     const q = noteQuery.trim().toLowerCase(), all = notes.list().filter(n => !q || n.text.toLowerCase().includes(q));
-    list.replaceChildren(...(all.length ? all.map(n => rowButton((n.pinned ? "▲ " : "") + noteTitle(n), new Date(n.updated).toLocaleDateString([], { day: "2-digit", month: "short" }) + " · " + snippet(n),
+    list.replaceChildren(...(all.length ? all.map(n => rowButton((n.pinned ? "▲ " : "") + noteTitle(n), summary(n),
       () => go("/notes/" + n.uid), { class: "row-button" + (n.uid === current ? " selected" : "") }))
       : [h("p", { class: "small muted", text: q ? "No note matches." : "No notes yet. Notes from the phone appear here after a sync." })]));
   };
   renderList();
   split(body, [search, list], editing ? editor(open, renderList) : h("div", { class: "empty" }, h("div", { class: "empty-title", text: "NOTES" }), h("p", { class: "small muted", text: "Pick a note on the left, or start a new one." })));
 }
-const snippet = n => n.text.split("\n").filter(l => l.trim()).slice(1).join(" ").slice(0, 60) || "—";
+/** Under a note's title: the date and a plain-text snippet, then its thoughts marked like the preview, by state. */
+function summary(n) {
+  const lines = n.text.split("\n").filter(l => l.trim()).slice(1), found = lines.filter(l => thought(l));
+  const text = lines.filter(l => !thought(l)).map(l => l.replace(/^\s*(#+|>|[-*+]\s+(\[[ xX]\]\s*)?|\d+[.)])\s*/, "")).join(" ").slice(0, 60);
+  const chips = found.slice(0, 3).map(line => {
+    const state = thoughtStatus(n.uid, line), done = /cleared|let go|moved to Today/.test(state);
+    return h("span", { class: "chip" + (done ? " done" : state === "back now" ? " back" : ""), title: state }, "» " + thought(line).text);
+  });
+  return [new Date(n.updated).toLocaleDateString([], { day: "2-digit", month: "short" }) + (text ? " · " + text : ""), chips,
+    found.length > 3 ? h("span", { class: "chip more" }, `+${found.length - 3} more`) : null];
+}
 /** onSaved refreshes the list beside the editor, so a new note and changed titles show up while typing. */
 function editor(note, onSaved = () => {}) {
   let uid = note?.uid || null;

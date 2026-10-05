@@ -98,7 +98,8 @@ export function thoughtStatus(uid, text, now = Date.now()) {
 }
 
 /** The phone shows a note's first line as its title. */
-export const noteTitle = note => (note.text.split("\n").find(line => line.trim()) || "Empty note").replace(/^#+\s*/, "").trim();
+export const noteTitle = note => (note.text.split("\n").find(line => line.trim()) || "Empty note")
+  .replace(/^\s*(#+|>>)\s*/, "").replace(/\s+@(1h|tonight|tomorrow|tmrw|nextweek)\s*$/i, "").trim();
 
 // ── Parking Lot ──
 export const parking = {

@@ -129,3 +129,8 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
 }
 .source { font-size: 12px; color: var(--accent); min-height: 36px; padding: 4px 0; text-align: left; }
 .thought-line { margin: 6px 0; }
+/* Thoughts under a note's title in the list, marked like the preview: open, back now, or done. */
+.row-button .chip { display: block; color: var(--accent); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-button .chip.back { color: var(--warning); }
+.row-button .chip.done { color: var(--disabled); text-decoration: line-through; }
+.row-button .chip.more { color: var(--muted); }
