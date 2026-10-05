@@ -67,6 +67,12 @@ Change both implementations together.
 
 The Android app needs no client id in code: Google matches the package name and signing key.
 
+### Account selection returns to Pocket without connecting
+
+A **Web application** OAuth client is sufficient for the browser, but the phone also needs an **Android** OAuth client in the same project. Keep the web client and add the Android client with package `org.textphone.launcher` and the installed APK's signing SHA-1. For the signed 0.5.14 and 0.5.17 releases, it is `57:65:1E:77:42:D1:7A:A1:2A:F0:E1:C8:23:BD:5F:73:75:9E:9D:BF`. A build signed with a different key needs its own matching client. See [Google's Android authorization setup](https://developer.android.com/identity/authorization).
+
+Version 0.5.19 reads Google's returned authorization status even when Android reports a cancelled activity. Code 10 shows the installed certificate fingerprint and identifies an OAuth registration mismatch; code 16 or a missing result means authorization did not finish and does not establish that the user cancelled. Pocket enables sync only after Google returns an access token and grants its Drive app-data scope.
+
 ## Local preview
 
 Serve `docs/` with any static server, for example `npx serve docs -l 8777`, and open `http://localhost:8777/`.

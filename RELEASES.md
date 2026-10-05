@@ -2,6 +2,14 @@
 
 Each release supplies a separately named, signed APK, source snapshot, checksums and actual build/test results. Install the new APK over Pocket; do not uninstall or clear app storage. The package ID and signing certificate stay the same. Old release downloads remain available. These APKs run on the current Nothing OS; they are not flashable ROM images.
 
+## 0.5.19 — Google authorization result handling (local build)
+
+- Reads Google's returned result even when Android reports a cancelled activity, preserving the actual error code and installed-certificate diagnostics.
+- Missing results and code 16 say authorization did not finish; they no longer imply that the user cancelled after choosing an account. Launch failures remain visible on the Cloud sync page.
+- Direct and account-picker results both require an access token and the Drive app-data scope before enabling sync.
+- Cloud setup explains the separate Android and web OAuth clients. The Android client must match the installed package and signing SHA-1.
+- APK packaging passed; tests, lint and live Google authorization were not run. The local APK is unsigned and needs the existing release signing key.
+
 ## 0.5.18 — Home gesture handoff (local build)
 
 - Requires Android 7 or newer for the native chat transport's CompletableFuture APIs.

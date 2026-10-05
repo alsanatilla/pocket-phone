@@ -40,9 +40,9 @@ public final class CloudActivity extends PocketActivity {
         message("Opening Google…");
         Identity.getAuthorizationClient(this).authorize(CloudSync.request()).addOnSuccessListener(result -> {
             if (closed) return;
-            if (!result.hasResolution()) { connected(); return; }
+            if (!result.hasResolution()) { authorized(result); return; }
             try { startIntentSenderForResult(result.getPendingIntent().getIntentSender(), AUTHORIZE, null, 0, 0, 0); }
-            catch (IntentSender.SendIntentException | NullPointerException error) { message("Could not open Google sign-in."); }
+            catch (IntentSender.SendIntentException | NullPointerException error) { failed("Could not open Google sign-in. Try again."); }
         }).addOnFailureListener(error -> { if (!closed) failed(CloudSync.explain(this, error)); });
     }
     /** Keeps the reason on the page, not only in a passing message, so it can be read and acted on. */
@@ -53,11 +53,19 @@ public final class CloudActivity extends PocketActivity {
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request != AUTHORIZE) return;
-        if (result != RESULT_OK || data == null) { failed("Google sign-in was cancelled."); return; }
+        if (data == null) { failed("Google returned without completing sign-in. Try again; if you selected an account, check Pocket's Android OAuth client in Google Cloud."); return; }
         try {
+            // Google can return the actual failure status even when Android reports RESULT_CANCELED.
             AuthorizationResult granted = Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(data);
-            if (granted.getAccessToken() != null) connected(); else failed("Drive access was not granted.");
+            authorized(granted);
         } catch (ApiException error) { failed(CloudSync.explain(this, error)); }
+    }
+    private void authorized(AuthorizationResult granted) {
+        if (granted.getAccessToken() == null || granted.getAccessToken().isEmpty()
+                || !granted.getGrantedScopes().contains(CloudSync.SCOPE)) {
+            failed("Drive access was not granted. Try again and allow Pocket to store its data in Google Drive."); return;
+        }
+        connected();
     }
     private void connected() { CloudSync.enable(this); syncNow(); }
     /** Explicit sync runs now, rather than waiting for Android to admit a background job. */

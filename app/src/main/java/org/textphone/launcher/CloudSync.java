@@ -144,7 +144,7 @@ final class CloudSync {
         switch (code) {
             case CommonStatusCodes.DEVELOPER_ERROR: return "Google doesn't recognise this Pocket build (code 10). Add an Android OAuth client for org.textphone.launcher with SHA-1 " + RELEASE_SHA1 + " to the Google Cloud project, see CLOUD.md step 3.";
             case CommonStatusCodes.NETWORK_ERROR: return "No connection to Google (code 7).";
-            case CommonStatusCodes.CANCELED: return "Google sign-in was cancelled.";
+            case CommonStatusCodes.CANCELED: return "Google sign-in did not finish (code 16). Try again; if you selected an account, check Pocket's Android OAuth client in Google Cloud.";
             case CommonStatusCodes.API_NOT_CONNECTED: return "Google Play services is missing or out of date (code 17).";
             case CommonStatusCodes.SIGN_IN_REQUIRED: return "Sign in again in Settings → Cloud sync.";
             default: return "Google sign-in failed (code " + code + ").";
