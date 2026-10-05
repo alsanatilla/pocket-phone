@@ -24,10 +24,12 @@ export function syncNow() {
   if (running) return running;
   if (!navigator.onLine || !drive.connected()) { emit(); return Promise.resolve(false); }
   running = (async () => {
-    status.state = "syncing"; status.error = ""; emit();
+    status.state = "syncing"; status.error = ""; status.changed = false; emit();
     try {
       for (const name of FILES) {
-        const remote = await drive.read(name), merged = merge[name](load(name), remote, Date.now());
+        const local = load(name), remote = await drive.read(name), merged = merge[name](local, remote, Date.now());
+        // Only a merge that changed the local copy needs a redraw; otherwise focus and scroll stay put.
+        if (JSON.stringify(merged) !== JSON.stringify(local)) status.changed = true;
         save(name, merged); await drive.write(name, merged); clean(name);
       }
       status.state = "idle"; status.last = Date.now(); localStorage.setItem("pocket:last-sync", String(status.last));

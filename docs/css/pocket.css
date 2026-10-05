@@ -91,6 +91,24 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.4; }
 .dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
 .dialog .actions button { color: var(--accent); min-height: 48px; }
 
+/* Desk: wide windows. Home becomes a top bar; each app keeps its phone-width column. Spacing separates, never lines. */
+.phone.desk-mode { max-width: 1440px; padding: 0 32px 32px; }
+.bar { position: sticky; top: 0; z-index: 5; background: var(--black); display: flex; align-items: center; gap: 32px; min-height: 72px; flex-wrap: wrap; }
+.bar-left { display: flex; align-items: baseline; gap: 16px; }
+.bar-brand { font: 28px/1 var(--pixel); color: var(--accent); }
+.bar-clock { font: 44px/1 var(--pixel); }
+.bar .status { margin: 0; flex: 1; }
+.bar-keys { display: flex; gap: 8px; }
+.bar-keys button { font: 21px/1 var(--pixel); color: var(--accent); min-width: 64px; }
+.desk { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 24px 48px; align-items: start; padding-top: 8px; }
+.panel { display: flex; flex-direction: column; min-width: 0; }
+.panel .page { flex: none; animation: none; }
+.panel .header { grid-template-columns: 64px 1fr 64px; }
+.panel .header h1 { color: var(--muted); }
+.panel:focus-within .header h1 { color: var(--white); }
+.stack { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.desk .result { min-height: 120px; }
+
 .notice { color: var(--warning); font-size: 12px; min-height: 32px; padding: 8px 0; }
 .notice:empty { visibility: hidden; }
 
@@ -102,6 +120,7 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.4; }
 }
 
 @media print {
-  body { background: #fff; } .phone > :not(.page), .dialog { display: none !important; }
-  .receipt > :not(.paper) { display: none; } .paper { max-width: 80mm; margin: 0 auto; background: #fff; }
+  /* Only the paper prints, on phone and desk layouts alike. */
+  body { background: #fff; } body * { visibility: hidden; } .dialog { display: none !important; }
+  .paper, .paper * { visibility: visible; } .paper { position: absolute; left: 0; top: 0; width: 80mm; background: #fff; }
 }

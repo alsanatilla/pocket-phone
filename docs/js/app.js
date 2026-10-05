@@ -6,7 +6,10 @@ import { icon, paint, ICON } from "./icons.js";
 
 const phone = document.getElementById("phone"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-let notice = null, tick = 0, parkingDraft = "", selected = 0;
+// Wide windows get the desk: Home becomes a top bar and the apps sit side by side as phone-width columns.
+const deskQuery = matchMedia("(min-width: 760px)"), desk = () => deskQuery.matches;
+const panels = {};
+let notice = null, tick = 0, barTick = 0, parkingDraft = "", selected = 0;
 
 // ── DOM helpers ──
 function h(tag, props = {}, ...children) {
@@ -22,14 +25,16 @@ function h(tag, props = {}, ...children) {
 const go = path => { location.hash = "#" + path; };
 const add = (node, ...children) => node.append(...children.flat().filter(child => child != null && child !== false));
 function page(title, action) {
-  clearInterval(tick); closeDialog();
+  const panel = desk() ? panels[title] : null;
+  if (!panel) { clearInterval(tick); closeDialog(); }
   const body = h("div", { class: "page" });
+  // On the desk there is nowhere to go back to; the title alone heads the column.
   add(body, h("div", { class: "header" },
-    h("button", { onclick: () => go("/"), "aria-label": "Back to home" }, "back"),
+    panel ? h("span") : h("button", { onclick: () => go("/"), "aria-label": "Back to home" }, "back"),
     h("h1", { text: title }),
-    action ? h("button", { class: action.commit ? "commit" : "", onclick: action.run }, action.label) : h("button", { onclick: () => go("/") }, "home")));
+    action ? h("button", { class: action.commit ? "commit" : "", onclick: action.run }, action.label) : panel ? h("span") : h("button", { onclick: () => go("/") }, "home")));
   notice = h("div", { class: "notice", role: "status" });
-  phone.replaceChildren(body, notice);
+  (panel || phone).replaceChildren(body, notice);
   return body;
 }
 const say = text => { if (notice) notice.textContent = text || ""; };
@@ -104,7 +109,7 @@ function select(index) {
     paint(tile.querySelector("canvas"), Number(tile.dataset.kind), on ? "#000" : "#fff", on ? getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() : "#000", tile.dataset.dot === "1");
   });
 }
-const help = () => dialog("Keys", h("p", { class: "small" }, "1–4 open an app · arrows move · enter opens · esc goes home · space rolls the dice"), [["ok", null]]);
+const help = () => dialog("Keys", h("p", { class: "small" }, desk() ? "1–4 jump to a column · esc leaves a field · space rolls the dice" : "1–4 open an app · arrows move · enter opens · esc goes home · space rolls the dice"), [["ok", null]]);
 
 // ── Parking Lot ──
 function parkingPage() {
@@ -134,7 +139,7 @@ function parkingPage() {
     if (i === 0) guard(() => { parking.bringBack(item.id); parkingPage(); })(); else if (i === 1) clear(item); else if (i === 2) letGo(item);
   }));
   add(body, h("p", { class: "meta muted", text: "Move to Today and notifications are on the phone." }));
-  if (!parkingDraft) field.focus({ preventScroll: true });
+  if (!parkingDraft && !desk()) field.focus({ preventScroll: true });
 }
 const clear = item => guard(() => { parking.close(item.id, "cleared"); receipt.log(KIND.CLEAR, item.text); parkingPage(); say("Cleared. Nice."); })();
 const letGo = item => guard(() => { parking.close(item.id, "killed"); receipt.log(KIND.KILL, item.text); parkingPage(); say(item.notches >= HECKLE ? "Let go. That was overdue." : "Let go."); })();
@@ -245,25 +250,66 @@ async function connectFlow(quiet) {
   catch (error) { say(error.message); }
 }
 
+// ── Desk ──
+const DESK = ["parking", "receipt", "dice", "sync"];
+function deskView(receiptDay) {
+  clearInterval(tick); clearInterval(barTick); closeDialog();
+  const time = h("span", { class: "bar-clock" }), day = h("span", { class: "day" }), state = h("span", { class: "status", id: "sync-status" });
+  const update = () => {
+    const now = new Date(); time.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).replace(/\s?[ap]\.?m\.?$/i, "");
+    day.textContent = now.toLocaleDateString([], { weekday: "short", day: "2-digit", month: "short" }).replace(/,/g, "").toUpperCase();
+    state.textContent = describe();
+  };
+  update(); barTick = setInterval(update, 1000);
+  const bar = h("header", { class: "bar" },
+    h("div", { class: "bar-left" }, h("span", { class: "bar-brand", text: "POCKET" }), time, day), state,
+    h("div", { class: "bar-keys" },
+      h("button", { onclick: () => drive.connected() ? syncNow() : connectFlow(true) }, "sync"),
+      h("button", { onclick: help }, "keys")));
+  for (const name of DESK) {
+    const panel = panels[name] = h("section", { class: "panel", "aria-label": name, "data-panel": name });
+    // Notices belong to the column the user is working in.
+    const own = () => { notice = panel.querySelector(".notice") || notice; };
+    panel.addEventListener("pointerdown", own, true); panel.addEventListener("focusin", own, true);
+  }
+  phone.replaceChildren(bar, h("div", { class: "desk" }, panels.parking, panels.receipt, h("div", { class: "stack" }, panels.dice, panels.sync)));
+  parkingPage(); receiptPage(receiptDay); dicePage(); syncPage();
+}
+function focusPanel(name) {
+  const panel = panels[name]; if (!panel) return;
+  panel.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
+  panel.querySelector("input, .primary, .keys button:not(:disabled), .row-button")?.focus({ preventScroll: true });
+}
+
 // ── Routing and keys ──
 function route() {
   const [, name, arg] = (location.hash.replace(/^#/, "") || "/").split("/");
+  phone.classList.toggle("desk-mode", desk());
+  if (desk()) { deskView(name === "receipt" ? arg : undefined); if (name) focusPanel(name); return; }
+  clearInterval(barTick);
   if (name === "parking") parkingPage(); else if (name === "receipt") receiptPage(arg); else if (name === "dice") dicePage(); else if (name === "sync") syncPage(); else home();
 }
 addEventListener("hashchange", route);
+deskQuery.addEventListener("change", route);
 let lastState = status.state;
 onStatus(() => {
   const state = document.getElementById("sync-status"); if (state) state.textContent = describe();
   const finished = lastState === "syncing" && status.state === "idle"; lastState = status.state;
   // Merged phone edits appear without a reload, unless the user is typing or a dialog is open.
-  if (finished && dialogHost.hidden && !(document.activeElement?.matches("input, textarea") && document.activeElement.value)) {
+  if (finished && status.changed && dialogHost.hidden && !(document.activeElement?.matches("input, textarea") && document.activeElement.value)) {
     const name = location.hash.split("/")[1], text = notice?.textContent;
-    if (name === "parking" || name === "receipt" || !name) { route(); say(text); }
+    if (desk() || name === "parking" || name === "receipt" || !name) { route(); say(text); }
   }
 });
 addEventListener("keydown", event => {
   if (!dialogHost.hidden) { if (event.key === "Escape") closeDialog(); return; }
   const typing = document.activeElement?.matches("input, textarea"), name = location.hash.split("/")[1];
+  if (desk()) {
+    if (typing) { if (event.key === "Escape") document.activeElement.blur(); return; }
+    if (event.key >= "1" && event.key <= String(DESK.length)) { event.preventDefault(); focusPanel(DESK[Number(event.key) - 1]); }
+    else if (event.key === " " && (document.activeElement === document.body || panels.dice?.contains(document.activeElement))) { event.preventDefault(); document.getElementById("roll")?.click(); }
+    return;
+  }
   if (event.key === "Escape" || (event.key === "Backspace" && !typing)) { if (name) { event.preventDefault(); go("/"); } return; }
   if (typing) return;
   if (!name) {
