@@ -46,6 +46,8 @@ android {
 }
 
 dependencies {
+    // Only for Drive authorization (cloud sync is opt-in). Drive itself is called over plain HTTPS.
+    implementation 'com.google.android.gms:play-services-auth:21.3.0'
     implementation 'io.noties.markwon:core:4.6.2'
     implementation 'io.noties.markwon:ext-tasklist:4.6.2'
     implementation 'io.noties.markwon:ext-strikethrough:4.6.2'

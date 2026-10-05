@@ -16,7 +16,7 @@ final class ParkingStore {
     static final int HECKLE = 3;
     private static final long HOUR = 3_600_000L, DAY = 24 * HOUR, KEEP_CLOSED = 7 * DAY;
     static final class Item {
-        long id, created, due, closed; int notches; String text = "", state = PARKED;
+        long id, created, due, closed, updated; int notches; String text = "", state = PARKED;
         boolean open() { return PARKED.equals(state); }
         boolean back(long now) { return open() && due <= now; }
     }
@@ -32,7 +32,7 @@ final class ParkingStore {
                     JSONObject o = array.getJSONObject(i); Item item = new Item();
                     item.id = o.getLong("id"); item.text = o.optString("text", ""); item.created = o.optLong("created");
                     item.due = o.optLong("due"); item.closed = o.optLong("closed"); item.notches = o.optInt("notches");
-                    item.state = o.optString("state", PARKED); items.add(item);
+                    item.state = o.optString("state", PARKED); item.updated = o.optLong("updated", Math.max(item.created, item.closed)); items.add(item);
                 }
             } catch (JSONException ignored) { /* A damaged list reads as empty rather than blocking new parking. */ }
         }
@@ -54,40 +54,58 @@ final class ParkingStore {
         if (value.isEmpty()) throw new IllegalArgumentException("Type the thought first.");
         synchronized (LOCK) {
             List<Item> items = items(c); Item item = new Item(); long now = System.currentTimeMillis();
-            item.id = Math.max(now, prefs(c).getLong("last_id", 0) + 1); item.created = now; item.due = due; item.text = value;
+            item.id = Math.max(now, prefs(c).getLong("last_id", 0) + 1); item.created = item.updated = now; item.due = due; item.text = value;
             items.add(item); write(c, items, now); prefs(c).edit().putLong("last_id", item.id).apply(); return item;
         }
     }
     /** Parking again earns a notch; the notch count is what the heckling reads. */
     static Item repark(Context c, long id, long due) {
         synchronized (LOCK) {
-            List<Item> items = items(c); Item item = only(items, id); item.due = due; item.notches++;
+            List<Item> items = items(c); Item item = only(items, id); item.due = due; item.notches++; item.updated = System.currentTimeMillis();
             write(c, items, System.currentTimeMillis()); return item;
         }
     }
     static Item bringBack(Context c, long id) {
-        synchronized (LOCK) { List<Item> items = items(c); Item item = only(items, id); item.due = System.currentTimeMillis(); write(c, items, item.due); return item; }
+        synchronized (LOCK) { List<Item> items = items(c); Item item = only(items, id); item.due = item.updated = System.currentTimeMillis(); write(c, items, item.due); return item; }
     }
     static Item close(Context c, long id, String state) {
         synchronized (LOCK) {
             List<Item> items = items(c); Item item = only(items, id); long now = System.currentTimeMillis();
-            item.state = state; item.closed = now; write(c, items, now); return item;
+            item.state = state; item.closed = item.updated = now; write(c, items, now); return item;
         }
     }
     private static Item only(List<Item> items, long id) {
         for (Item item : items) if (item.id == id && item.open()) return item;
         throw new IllegalStateException("This item was already cleared.");
     }
-    private static void write(Context c, List<Item> items, long now) {
+    private static void write(Context c, List<Item> items, long now) { save(c, encode(items, now)); CloudSync.changed(c); }
+    private static void save(Context c, JSONArray array) {
+        if (!prefs(c).edit().putString("items", array.toString()).commit()) throw new IllegalStateException("Could not save. Try again.");
+    }
+    /** Closed items fall out after a week on every copy, so an old copy cannot bring them back for good. */
+    private static JSONArray encode(List<Item> items, long now) {
         JSONArray array = new JSONArray();
         try {
             for (Item item : items) {
                 if (!item.open() && now - item.closed > KEEP_CLOSED) continue;
                 array.put(new JSONObject().put("id", item.id).put("text", item.text).put("created", item.created).put("due", item.due)
-                        .put("closed", item.closed).put("notches", item.notches).put("state", item.state));
+                        .put("closed", item.closed).put("notches", item.notches).put("state", item.state).put("updated", item.updated));
             }
         } catch (JSONException impossible) { throw new IllegalStateException(impossible); }
-        if (!prefs(c).edit().putString("items", array.toString()).commit()) throw new IllegalStateException("Could not save. Try again.");
+        return array;
+    }
+
+    /** Cloud document: {"v":1,"items":[…]}. Each item keeps whichever copy was edited last. */
+    static JSONObject merge(Context c, JSONObject remote) throws JSONException {
+        synchronized (LOCK) {
+            JSONArray local = new JSONArray(prefs(c).getString("items", "[]"));
+            JSONArray merged = SyncMerge.byId(local, remote == null ? new JSONArray() : remote.optJSONArray("items"), "id", "updated");
+            List<Item> items = new ArrayList<>(); save(c, merged);
+            items.addAll(items(c)); JSONArray pruned = encode(items, System.currentTimeMillis()); save(c, pruned);
+            long last = prefs(c).getLong("last_id", 0); for (Item item : items) last = Math.max(last, item.id);
+            prefs(c).edit().putLong("last_id", last).apply();
+            return new JSONObject().put("v", 1).put("items", pruned);
+        }
     }
 
     static long when(String delay, long now) {

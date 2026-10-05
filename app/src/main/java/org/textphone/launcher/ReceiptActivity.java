@@ -27,6 +27,7 @@ public final class ReceiptActivity extends PocketActivity {
 
     @Override protected void onCreate(Bundle state) { super.onCreate(state); day = start(state == null ? System.currentTimeMillis() : state.getLong("day", System.currentTimeMillis())); render(); }
     @Override protected void onResume() { super.onResume(); render(); }
+    @Override protected void onCloudSynced() { render(); }
     @Override protected void onSaveInstanceState(Bundle out) { out.putLong("day", day); super.onSaveInstanceState(out); }
     static long start(long when) {
         Calendar at = Calendar.getInstance(); at.setTimeInMillis(when);

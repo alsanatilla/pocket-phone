@@ -1154,6 +1154,7 @@ public class MainActivity extends Activity {
         action("All apps", 18, PRIMARY, () -> navigate("apps"));
         action("Phone settings", 18, PRIMARY, () -> openPocket(DeviceSettingsActivity.class));
         action("Permissions", 18, PRIMARY, () -> openPocket(PermissionsActivity.class));
+        if (romProfile) action("Cloud sync", 18, PRIMARY, () -> openPocket(CloudActivity.class));
         flexibleSpace();
         addFeedback();
         TextView version = text("Pocket Phone 0.5.13\nHold a shortcut to change its app or name.", 13, SECONDARY);

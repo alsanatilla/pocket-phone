@@ -44,6 +44,10 @@ Notification access is optional and shows other apps' current notifications, inc
 
 The built-in [camera](CAMERA.md) uses Camera2 preview and YUV capture, native autofocus/auto exposure and available hardware flash. Six independently designed early-digital profiles are applied before one JPEG encode. Photos save to `DCIM/Pocket` and open in Pocket Files. The profiles approximate broad camera-family characteristics; they are not measured manufacturer emulations.
 
+## Cloud sync and web
+
+Optional cloud sync copies Parking Lot, Receipt and Dice lists to a hidden app folder in your own Google Drive and syncs again whenever the phone is back online. It is off until you turn it on in Settings → Cloud sync; for this the APK now declares the `INTERNET` permission. The same data opens on the web in Pocket's terminal style from [`docs/`](docs/) via GitHub Pages. See [CLOUD.md](CLOUD.md) for the merge rule and the one-time Google setup.
+
 ## Downloads
 
 Signed incremental APKs are available in [GitHub Releases](https://github.com/alsanatilla/pocket-phone/releases). This repository is private, so sign in with an account that has access. Install the APK over the existing Pocket Phone app to retain local data. See [USE-POCKET-0.5.13.md](USE-POCKET-0.5.13.md) for installation and setup.

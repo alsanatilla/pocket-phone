@@ -193,7 +193,17 @@ public abstract class PocketActivity extends Activity {
         catch (ActivityNotFoundException error) { message("This Android screen is unavailable."); }
         catch (SecurityException error) { message("Android blocked opening this screen."); }
     }
-    @Override protected void onStop() { motion.discardHistory(); super.onStop(); }
+    /** Called on the UI thread after a cloud sync changed local data while this page is visible. */
+    protected void onCloudSynced() { }
+    private final android.content.BroadcastReceiver synced = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(android.content.Context context, Intent intent) { if (!closed) onCloudSynced(); }
+    };
+    @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag")
+    @Override protected void onStart() { super.onStart();
+        android.content.IntentFilter filter = new android.content.IntentFilter(CloudSync.ACTION_SYNCED);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(synced, filter, android.content.Context.RECEIVER_NOT_EXPORTED); else registerReceiver(synced, filter);
+        CloudSync.soon(this); }
+    @Override protected void onStop() { unregisterReceiver(synced); motion.discardHistory(); super.onStop(); }
     @Override protected void onSaveInstanceState(Bundle state) { Bundle positions = new Bundle(); motion.save(positions::putInt); state.putBundle("page_scrolls", positions); super.onSaveInstanceState(state); }
     @Override protected void onDestroy() { closed = true; permissionGranted = null; navigation.destroy(); motion.destroy(); ui.removeCallbacksAndMessages(null); worker.shutdown(); super.onDestroy(); }
 }

@@ -84,7 +84,7 @@ public final class DiceActivity extends PocketActivity implements SensorEventLis
         list.setMinLines(4); list.setGravity(Gravity.TOP | Gravity.START); list.setHint("One per line: sushi, pizza, tacos…");
         list.setText(prefs().getString("list", ""));
         new AlertDialog.Builder(this).setTitle("Pick from").setView(list).setNegativeButton("Cancel", null)
-                .setPositiveButton("Save", (d, w) -> { if (!closed) { prefs().edit().putString("list", list.getText().toString()).apply(); render(); } }).show();
+                .setPositiveButton("Save", (d, w) -> { if (!closed) { prefs().edit().putString("list", list.getText().toString()).putLong("list_updated", System.currentTimeMillis()).apply(); CloudSync.changed(this); render(); } }).show();
     }
     private void settings() {
         boolean shake = prefs().getBoolean("shake", true);
@@ -145,6 +145,15 @@ public final class DiceActivity extends PocketActivity implements SensorEventLis
         for (int i = 0; i < Math.min(HISTORY - 1, old.size()); i++) next.put(old.get(i));
         prefs().edit().putString("history", next.toString()).apply();
     }
+
+    /** Cloud document: {"v":1,"list":"…","updated":ms}. The later list edit wins. */
+    static org.json.JSONObject merge(android.content.Context c, org.json.JSONObject remote) throws JSONException {
+        SharedPreferences p = c.getSharedPreferences("pocket_dice", 0);
+        if (remote != null && remote.optLong("updated") > p.getLong("list_updated", 0))
+            p.edit().putString("list", remote.optString("list", "")).putLong("list_updated", remote.optLong("updated")).commit();
+        return new org.json.JSONObject().put("v", 1).put("list", p.getString("list", "")).put("updated", p.getLong("list_updated", 0));
+    }
+    @Override protected void onCloudSynced() { if (shuffling <= 0) render(); }
 
     @Override public void onSensorChanged(SensorEvent event) {
         float x = event.values[0], y = event.values[1], z = event.values[2];

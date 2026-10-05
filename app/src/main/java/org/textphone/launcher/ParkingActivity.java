@@ -21,6 +21,7 @@ public final class ParkingActivity extends PocketActivity {
 
     @Override protected void onCreate(Bundle state) { super.onCreate(state); render(state == null ? prefs().getString("draft", "") : state.getString("draft", "")); }
     @Override protected void onResume() { super.onResume(); ParkingReceiver.clearNotice(this); render(field == null ? "" : field.getText().toString()); }
+    @Override protected void onCloudSynced() { ParkingReceiver.arm(this); render(field == null ? "" : field.getText().toString()); }
     @Override protected void onPause() { if (field != null) prefs().edit().putString("draft", field.getText().toString()).apply(); super.onPause(); }
     @Override protected void onSaveInstanceState(Bundle out) { if (field != null) out.putString("draft", field.getText().toString()); super.onSaveInstanceState(out); }
     private android.content.SharedPreferences prefs() { return getSharedPreferences("pocket_parking_ui", 0); }
