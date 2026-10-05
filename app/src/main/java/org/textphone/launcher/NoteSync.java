@@ -69,6 +69,14 @@ final class NoteSync {
         p.edit().putString("note_tombstones", kept.toString()).apply();
         return out;
     }
+    /** The note's sync uid, created on first use so thoughts can point at it before the first sync. */
+    static String uid(PlannerStore store, long id) {
+        SharedPreferences p = store.preferences(); String uid = p.getString("note_uid_" + id, null);
+        if (uid == null) { uid = UUID.randomUUID().toString(); p.edit().putString("note_uid_" + id, uid).apply(); }
+        return uid;
+    }
+    static String existingUid(PlannerStore store, long id) { return store.preferences().getString("note_uid_" + id, null); }
+    static PlannerStore.Entry byUid(PlannerStore store, String uid) { return uid == null || uid.isEmpty() ? null : notesByUid(store).get(uid); }
     private static Map<String, PlannerStore.Entry> notesByUid(PlannerStore store) {
         Map<String, PlannerStore.Entry> map = new HashMap<>();
         for (PlannerStore.Entry e : store.entries()) { String uid = store.preferences().getString("note_uid_" + e.id, null); if ("note".equals(e.kind) && uid != null) map.put(uid, e); }

@@ -212,6 +212,7 @@ public class MainActivity extends Activity {
         if (!workspace() && Intent.ACTION_MAIN.equals(getIntent().getAction()) && getIntent().hasCategory(Intent.CATEGORY_HOME)) { screen = "home"; trail.clear(); }
         if (!validScreen(screen)) screen = "home";
         long task=getIntent().getLongExtra("pocket_task",0);if(savedInstanceState==null&&task>0){captureId=task;captureKind="task";screen="task_detail";if(trail.peek()==null)trail.push(new RouteTrail.Route("today",0,"note",null,"home",""));}
+        long note=getIntent().getLongExtra("pocket_note",0);PlannerStore.Entry linked=note>0?planner.find(note):null;if(savedInstanceState==null&&linked!=null){captureId=note;captureKind="note";captureText=planner.hasDraft("note",note)?planner.draft("note",note):linked.text;screen="note_preview";if(trail.peek()==null)trail.push(new RouteTrail.Route("today",0,"note",null,"home",""));}
         setupTorch();
         render();
         if (savedInstanceState == null) receiveSharedText(getIntent());
@@ -318,6 +319,7 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         if(intent.getLongExtra("pocket_task",0)>0){captureKind="task";openTask(intent.getLongExtra("pocket_task",0));return;}
+        if(intent.getLongExtra("pocket_note",0)>0){openNote(intent.getLongExtra("pocket_note",0));return;}
         if (receiveSharedText(intent)) return;
         if ("today".equals(intent.getStringExtra("pocket_screen"))) { navigate("today"); return; }
         if ("notifications".equals(intent.getStringExtra("pocket_screen"))) { navigate("notifications"); return; }
@@ -1505,12 +1507,23 @@ public class MainActivity extends Activity {
         addFeedback();
     }
 
+    /** Opens a note's preview, for example from a thought in the Parking Lot. */
+    private void openNote(long id) {
+        PlannerStore.Entry note = planner.find(id);
+        if (note == null || !"note".equals(note.kind)) { showFeedback("This note was removed."); return; }
+        persistDraft(); captureKind = "note"; captureId = id;
+        captureText = planner.hasDraft("note", id) ? planner.draft("note", id) : note.text;
+        navigate("note_preview");
+    }
+
     private void saveCapture(EditText editorForPage, boolean task) {
         if (captureEditor != editorForPage || !"capture".equals(screen)) return;
         plannerAction(() -> {
             long saved;
             if (task) {saved = planner.saveTask(captureId, captureEditor.getText().toString(), captureDue, captureImportant, captureStepsEditor.getText().toString());if(captureId!=0)TaskReminders.rename(this,saved,captureEditor.getText().toString().trim());}
-            else saved = planner.save(captureId, captureKind, captureEditor.getText().toString());
+            else { PlannerStore.Entry before = captureId == 0 ? null : planner.find(captureId); String text = captureEditor.getText().toString();
+                saved = planner.save(captureId, captureKind, text);
+                if ("note".equals(captureKind)) { int parked = NoteThoughts.parkNew(this, planner, saved, before == null ? "" : before.text, text); if (parked > 0) showFeedback(parked == 1 ? "1 thought parked." : parked + " thoughts parked."); } }
             planner.clearDraft(captureKind, captureId);
             hideKeyboard(captureEditor); captureEditor = null; captureStepsEditor = null; captureText = "";
             captureId = saved; captureSelectionStart = captureSelectionEnd = -1;
@@ -1585,7 +1598,7 @@ public class MainActivity extends Activity {
                 })
                 .usePlugin(io.noties.markwon.ext.tasklist.TaskListPlugin.create(accent(), accent(), BACKGROUND))
                 .usePlugin(io.noties.markwon.ext.strikethrough.StrikethroughPlugin.create())
-                .build().setMarkdown(preview, captureText);
+                .build().setMarkdown(preview, "note".equals(captureKind) ? NoteThoughts.annotate(this, planner, captureId, captureText) : captureText);
         content.addView(preview, new LinearLayout.LayoutParams(-1, -2, 1)); gap(16);
         LinearLayout tools = new LinearLayout(this); tools.setTag("preview_actions");
         TextView edit = actionInto(tools, "Edit", 14, accent(), () -> navigate("capture"));

@@ -67,6 +67,36 @@ export const notes = {
   pin(uid, pinned) { return this.edit(uid, n => { n.pinned = pinned; }); },
   remove(uid) { return this.edit(uid, n => { n.text = ""; n.pinned = false; n.deleted = true; }); },
 };
+// ── Thoughts inside notes: a line ">> call Sam @tomorrow" parks "call Sam". Mirrors NoteThoughts.java. ──
+const THOUGHT = /^[ \t]*>>[ \t]+(.+?)(?:[ \t]+@(1h|tonight|tomorrow|tmrw|nextweek))?[ \t]*$/i;
+const THOUGHT_DELAY = { tonight: "tonight", tomorrow: "tomorrow", tmrw: "tomorrow", nextweek: "next week" };
+export const thoughtKey = text => text.trim().replace(/[ \t]+/g, " ").toLowerCase();
+export function thought(line) {
+  const m = line.replace(/\r/g, "").match(THOUGHT); if (!m || !m[1].trim()) return null;
+  return { text: m[1].trim(), key: thoughtKey(m[1]), delay: THOUGHT_DELAY[(m[2] || "").toLowerCase()] || "1 hour" };
+}
+/** FNV-1a over "uid\nkey", in a range no timestamp id reaches, so the phone and the web create the same item. */
+export function thoughtId(uid, key) {
+  let hash = 0x811c9dc5;
+  for (const byte of new TextEncoder().encode(uid + "\n" + key)) { hash ^= byte; hash = Math.imul(hash, 0x01000193) >>> 0; }
+  return 9_000_000_000_000_000 + hash;
+}
+export function parkThought(uid, item) {
+  const id = thoughtId(uid, item.key), due = when(item.delay), doc = load("parking.json"), now = Date.now();
+  const existing = doc.items.find(i => String(i.id) === String(id));
+  if (existing?.state === "parked") return null;
+  const parked = Object.assign(existing || { id, created: now, notches: 0 }, { text: item.text, due, closed: 0, state: "parked", note: uid, updated: now });
+  if (!existing) doc.items.push(parked);
+  save("parking.json", doc); changed("parking.json"); receipt.log(KIND.PARK, parked.text); return parked;
+}
+export function thoughtStatus(uid, text, now = Date.now()) {
+  const t = thought(text); if (!t || !uid) return "parks when the line is done";
+  const item = load("parking.json").items.find(i => String(i.id) === String(thoughtId(uid, t.key)));
+  if (!item) return "parks when the line is done";
+  if (item.state === "cleared") return "cleared"; if (item.state === "killed") return "let go"; if (item.state === "task") return "moved to Today";
+  return item.due <= now ? "back now" : "back " + relative(item.due, now);
+}
+
 /** The phone shows a note's first line as its title. */
 export const noteTitle = note => (note.text.split("\n").find(line => line.trim()) || "Empty note").replace(/^#+\s*/, "").trim();
 

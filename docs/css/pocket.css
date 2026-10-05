@@ -127,3 +127,5 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
   body { background: #fff; } body * { visibility: hidden; } .dialog { display: none !important; }
   .paper, .paper * { visibility: visible; } .paper { position: absolute; left: 0; top: 0; width: 80mm; background: #fff; }
 }
+.source { font-size: 12px; color: var(--accent); min-height: 36px; padding: 4px 0; text-align: left; }
+.thought-line { margin: 6px 0; }

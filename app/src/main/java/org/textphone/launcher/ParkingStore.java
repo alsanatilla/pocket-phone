@@ -17,6 +17,8 @@ final class ParkingStore {
     private static final long HOUR = 3_600_000L, DAY = 24 * HOUR, KEEP_CLOSED = 7 * DAY;
     static final class Item {
         long id, created, due, closed, updated; int notches; String text = "", state = PARKED;
+        /** The uid of the note this thought was written in, or empty. */
+        String note = "";
         boolean open() { return PARKED.equals(state); }
         boolean back(long now) { return open() && due <= now; }
     }
@@ -32,7 +34,7 @@ final class ParkingStore {
                     JSONObject o = array.getJSONObject(i); Item item = new Item();
                     item.id = o.getLong("id"); item.text = o.optString("text", ""); item.created = o.optLong("created");
                     item.due = o.optLong("due"); item.closed = o.optLong("closed"); item.notches = o.optInt("notches");
-                    item.state = o.optString("state", PARKED); item.updated = o.optLong("updated", Math.max(item.created, item.closed)); items.add(item);
+                    item.state = o.optString("state", PARKED); item.updated = o.optLong("updated", Math.max(item.created, item.closed)); item.note = o.optString("note", ""); items.add(item);
                 }
             } catch (JSONException ignored) { /* A damaged list reads as empty rather than blocking new parking. */ }
         }
@@ -65,6 +67,22 @@ final class ParkingStore {
             write(c, items, System.currentTimeMillis()); return item;
         }
     }
+    /**
+     * A thought written in a note. Its id comes from the note and the line, so the phone and the web create the same item.
+     * Writing a cleared thought again parks it again; one that is still parked is left alone.
+     */
+    static Item parkFromNote(Context c, long id, String text, long due, String note) {
+        synchronized (LOCK) {
+            List<Item> items = items(c); long now = System.currentTimeMillis();
+            for (Item item : items) if (item.id == id) {
+                if (item.open()) return null;
+                item.state = PARKED; item.due = due; item.closed = 0; item.text = text; item.note = note; item.updated = now;
+                write(c, items, now); return item;
+            }
+            Item item = new Item(); item.id = id; item.created = item.updated = now; item.due = due; item.text = text; item.note = note;
+            items.add(item); write(c, items, now); return item;
+        }
+    }
     static Item bringBack(Context c, long id) {
         synchronized (LOCK) { List<Item> items = items(c); Item item = only(items, id); item.due = item.updated = System.currentTimeMillis(); write(c, items, item.due); return item; }
     }
@@ -89,7 +107,7 @@ final class ParkingStore {
             for (Item item : items) {
                 if (!item.open() && now - item.closed > KEEP_CLOSED) continue;
                 array.put(new JSONObject().put("id", item.id).put("text", item.text).put("created", item.created).put("due", item.due)
-                        .put("closed", item.closed).put("notches", item.notches).put("state", item.state).put("updated", item.updated));
+                        .put("closed", item.closed).put("notches", item.notches).put("state", item.state).put("updated", item.updated).put("note", item.note));
             }
         } catch (JSONException impossible) { throw new IllegalStateException(impossible); }
         return array;

@@ -1,7 +1,7 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
 import * as drive from "./drive.js";
 import { syncNow, describe, onStatus, status } from "./sync.js";
-import { parking, receipt, dice, notes, noteTitle, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
+import { parking, receipt, dice, notes, noteTitle, thought, thoughtStatus, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -95,17 +95,20 @@ function parkingView() {
     left.push(h("div", { class: "thought", text: item.text }),
       h("div", { class: "meta muted", text: `${meter(item.notches)}  parked ${item.notches + 1}× · first ${age === 0 ? "today" : age + "d ago"}` }),
       nag ? h("div", { class: "meta warn", text: nag }) : null,
+      source(item) ? h("button", { class: "source", onclick: () => go("/notes/" + item.note) }, "from note · " + noteTitle(source(item))) : null,
       keys(["clear", () => clear(item)], ["park", () => repark(item)], ["let go", () => letGo(item)]));
   }
   const right = [section(`PARKED [${waiting.length}]`), waiting.length ? null : h("p", { class: "small muted", text: "Nothing waiting." })];
-  for (const item of waiting) right.push(rowButton(item.text, "back " + relative(item.due, now) + (item.notches ? "  " + meter(item.notches) : ""), async () => {
-    const i = await choose(item.text, ["Bring back now", "Clear", "Let go"]);
-    if (i === 0) guard(() => { parking.bringBack(item.id); parkingView(); })(); else if (i === 1) clear(item); else if (i === 2) letGo(item);
+  for (const item of waiting) right.push(rowButton(item.text, "back " + relative(item.due, now) + (item.notches ? "  " + meter(item.notches) : "") + (source(item) ? "  · " + noteTitle(source(item)) : ""), async () => {
+    const i = await choose(item.text, source(item) ? ["Bring back now", "Clear", "Let go", "Open note"] : ["Bring back now", "Clear", "Let go"]);
+    if (i === 0) guard(() => { parking.bringBack(item.id); parkingView(); })(); else if (i === 1) clear(item); else if (i === 2) letGo(item); else if (i === 3) go("/notes/" + item.note);
   }));
   right.push(h("p", { class: "meta muted", text: "Move to Today and the comeback notifications are on the phone." }));
   split(body, left, right);
   if (!parkingDraft) field.focus({ preventScroll: true });
 }
+/** The note a thought was written in, if this browser has it. */
+const source = item => (item.note ? notes.get(item.note) : null);
 const clear = item => guard(() => { parking.close(item.id, "cleared"); receipt.log(KIND.CLEAR, item.text); parkingView(); say("Cleared. Nice."); })();
 const letGo = item => guard(() => { parking.close(item.id, "killed"); receipt.log(KIND.KILL, item.text); parkingView(); say(item.notches >= HECKLE ? "Let go. That was overdue." : "Let go."); })();
 async function repark(item) {
@@ -143,28 +146,46 @@ function editor(note) {
   const area = h("textarea", { class: "note-editor", maxlength: NOTE_LIMIT, placeholder: "# Title\n\nWrite in Markdown…", "aria-label": "Note text", spellcheck: "true" });
   area.value = note?.text || "";
   const preview = h("div", { class: "md", hidden: !previewing });
-  area.hidden = previewing; if (previewing) preview.replaceChildren(markdown(area.value));
-  const save = () => {
+  area.hidden = previewing; if (previewing) preview.replaceChildren(markdown(area.value, uid));
+  // Thought lines already handled in this note, counted per line text. A line parks once the cursor has left it,
+  // so a half-typed ">> cal" never parks; revisiting an old line without changing it never parks it again.
+  let seen = new Map();
+  for (const line of area.value.split("\n")) { const t = thought(line); if (t) seen.set(t.key, (seen.get(t.key) || 0) + 1); }
+  const parkFinished = finished => {
+    const cursor = area.value.slice(0, area.selectionStart).split("\n").length - 1, counts = new Map(), fresh = [];
+    area.value.split("\n").forEach((line, i) => {
+      const t = thought(line); if (!t) return;
+      const n = counts.get(t.key) || 0, known = seen.get(t.key) || 0;
+      if (!finished && i === cursor) { if (n < known) counts.set(t.key, n + 1); return; }
+      counts.set(t.key, n + 1); if (n >= known) fresh.push(t);
+    });
+    seen = counts;
+    let parked = 0; for (const t of fresh) if (parkThought(uid, t)) parked++;
+    if (parked) say(parked === 1 ? "1 thought parked." : parked + " thoughts parked.");
+  };
+  const save = (finished = false) => {
     clearTimeout(saveTimer);
     try {
       if (!uid) { if (!area.value.trim()) return; uid = notes.create(area.value).uid; history.replaceState(null, "", "#/notes/" + uid); }
       else notes.update(uid, area.value);
+      parkFinished(finished);
       state.textContent = "saved";
     } catch (error) { say(error.message); }
   };
   area.addEventListener("input", () => { state.textContent = "…"; clearTimeout(saveTimer); saveTimer = setTimeout(save, 600); });
-  area.addEventListener("blur", save);
-  const toggle = () => { save(); previewing = !previewing; area.hidden = previewing; preview.hidden = !previewing; mode.textContent = previewing ? "edit" : "preview"; if (previewing) preview.replaceChildren(markdown(area.value)); else area.focus(); };
+  area.addEventListener("keyup", event => { if (event.key === "Enter" || event.key.startsWith("Arrow")) { clearTimeout(saveTimer); saveTimer = setTimeout(save, 150); } });
+  area.addEventListener("blur", () => save(true));
+  const toggle = () => { save(true); previewing = !previewing; area.hidden = previewing; preview.hidden = !previewing; mode.textContent = previewing ? "edit" : "preview"; if (previewing) preview.replaceChildren(markdown(area.value, uid)); else area.focus(); };
   const mode = h("button", { onclick: toggle }, previewing ? "edit" : "preview");
   const bar = h("div", { class: "editor-bar" },
-    h("button", { class: "narrow-only", onclick: () => { save(); go("/notes"); } }, "‹ notes"), state, h("span", { class: "spacer" }), mode,
-    h("button", { onclick: () => { save(); if (!uid) return; const n = notes.get(uid); notes.pin(uid, !n.pinned); notesView(uid); } }, note?.pinned ? "unpin" : "pin"),
+    h("button", { class: "narrow-only", onclick: () => { save(true); go("/notes"); } }, "‹ notes"), state, h("span", { class: "spacer" }), mode,
+    h("button", { onclick: () => { save(true); if (!uid) return; const n = notes.get(uid); notes.pin(uid, !n.pinned); notesView(uid); } }, note?.pinned ? "unpin" : "pin"),
     h("button", { onclick: async () => { if (!uid) { go("/notes"); return; } if (await confirmBox("Delete this note on all devices?", "delete")) { notes.remove(uid); go("/notes"); say("Deleted."); } } }, "delete"));
   if (!previewing) setTimeout(() => area.focus({ preventScroll: true }), 0);
-  return [bar, area, preview, h("div", { class: "meta muted", text: "Markdown, the same as the phone's notes." })];
+  return [bar, area, preview, h("div", { class: "meta muted", text: "Markdown, the same as the phone's notes. A line starting with >> parks a thought; add @tonight, @tomorrow or @nextweek." })];
 }
 /** A small Markdown renderer for what the phone's editor writes. Text is escaped before any formatting. */
-function markdown(source) {
+function markdown(source, uid = null) {
   const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const inline = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>").replace(/~~([^~]+)~~/g, "<del>$1</del>")
@@ -174,8 +195,9 @@ function markdown(source) {
   for (const line of source.split("\n")) {
     if (line.startsWith("```")) { if (code === null) { close(); code = []; } else { out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`); code = null; } continue; }
     if (code !== null) { code.push(line); continue; }
-    let m;
-    if ((m = line.match(/^(#{1,3})\s+(.*)/))) { close(); out.push(`<h${m[1].length + 1}>${inline(m[2])}</h${m[1].length + 1}>`); }
+    let m; const t = thought(line);
+    if (t) { close(); out.push(`<p class="thought-line"><span class="accent">»</span> ${inline(t.text)} <span class="meta muted">· ${esc(thoughtStatus(uid, line))}</span></p>`); }
+    else if ((m = line.match(/^(#{1,3})\s+(.*)/))) { close(); out.push(`<h${m[1].length + 1}>${inline(m[2])}</h${m[1].length + 1}>`); }
     else if ((m = line.match(/^\s*[-*]\s+\[( |x|X)\]\s+(.*)/))) { if (list !== "ul") { close(); out.push('<ul class="tasks">'); list = "ul"; } out.push(`<li>${m[1] === " " ? "[ ]" : "[x]"} ${inline(m[2])}</li>`); }
     else if ((m = line.match(/^\s*[-*]\s+(.*)/))) { if (list !== "ul") { close(); out.push("<ul>"); list = "ul"; } out.push(`<li>${inline(m[1])}</li>`); }
     else if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) { if (list !== "ol") { close(); out.push("<ol>"); list = "ol"; } out.push(`<li>${inline(m[1])}</li>`); }

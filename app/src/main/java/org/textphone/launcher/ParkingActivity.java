@@ -2,6 +2,7 @@ package org.textphone.launcher;
 
 import android.Manifest;
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
@@ -48,7 +49,7 @@ public final class ParkingActivity extends PocketActivity {
         }
         if (!waiting.isEmpty()) {
             body.addView(label("PARKED [" + waiting.size() + "]", PocketDesign.META, GRAY));
-            for (ParkingStore.Item item : waiting) action(item.text + "\nback " + relative(item.due, now) + (item.notches > 0 ? "  " + ParkingStore.meter(item.notches) : ""),
+            for (ParkingStore.Item item : waiting) action(item.text + "\nback " + relative(item.due, now) + (item.notches > 0 ? "  " + ParkingStore.meter(item.notches) : "") + from(item),
                     () -> waitingItem(item)).setTag("parked_" + item.id);
         }
     }
@@ -58,12 +59,25 @@ public final class ParkingActivity extends PocketActivity {
         body.addView(label(ParkingStore.meter(item.notches) + "  parked " + (item.notches + 1) + "× · first " + since, PocketDesign.META, GRAY));
         String heckle = ParkingStore.heckle(item, now);
         if (!heckle.isEmpty()) { TextView nag = label(heckle, PocketDesign.META, PocketDesign.WARNING); nag.setTag("heckle_" + item.id); body.addView(nag); }
+        if (note(item) != null) { TextView source = label("from note · " + noteTitle(note(item)), PocketDesign.META, PocketDesign.accent(this)); PocketDesign.quiet(source, PocketDesign.accent(this)); source.setOnClickListener(v -> openNote(item)); source.setTag("note_" + item.id); body.addView(source); }
         keys(new String[]{"clear", "today", "park", "let go"}, () -> clear(item), () -> toToday(item), () -> repark(item), () -> letGo(item));
     }
+    /** The note a thought was written in, if it still exists on this phone. */
+    private PlannerStore.Entry note(ParkingStore.Item item) { return item.note.isEmpty() ? null : NoteSync.byUid(planner(), item.note); }
+    private PlannerStore planner() { return new PlannerStore(getSharedPreferences("pocket_planner", 0)); }
+    static String noteTitle(PlannerStore.Entry note) {
+        for (String line : note.text.split("\n")) if (!line.trim().isEmpty()) return line.replaceFirst("^#+\\s*", "").trim();
+        return "note";
+    }
+    private String from(ParkingStore.Item item) { PlannerStore.Entry note = note(item); return note == null ? "" : "  · " + noteTitle(note); }
+    private void openNote(ParkingStore.Item item) {
+        PlannerStore.Entry note = note(item); if (note == null) { message("The note is not on this phone."); return; }
+        startActivity(new Intent(this, OrganizerActivity.class).putExtra("pocket_note", note.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+    }
     private void waitingItem(ParkingStore.Item item) {
-        new AlertDialog.Builder(this).setTitle(item.text).setItems(new String[]{"Bring back now", "Clear", "Move to Today", "Let go"}, (d, which) -> safely(() -> {
+        new AlertDialog.Builder(this).setTitle(item.text).setItems(note(item) == null ? new String[]{"Bring back now", "Clear", "Move to Today", "Let go"} : new String[]{"Bring back now", "Clear", "Move to Today", "Let go", "Open note"}, (d, which) -> safely(() -> {
             if (which == 0) { ParkingStore.bringBack(this, item.id); ParkingReceiver.arm(this); refresh(""); }
-            else if (which == 1) clear(item); else if (which == 2) toToday(item); else letGo(item);
+            else if (which == 1) clear(item); else if (which == 2) toToday(item); else if (which == 3) letGo(item); else openNote(item);
         })).setNegativeButton("Cancel", null).show();
     }
 

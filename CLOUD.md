@@ -23,6 +23,8 @@ Both sides use the same rule (`SyncMerge.java` and `docs/js/store.js`):
 - Receipt lines never change, so a day is the union of both copies by line id `i`. Days older than 30 days are dropped.
 - Dice list: the later `updated` wins.
 - Notes: per `uid`, the later `updated` wins; a deletion is a note with `deleted: true` and also wins if it is newer. The phone keeps its own small note ids and maps them to the random `uid`.
+- Thoughts in notes: a note line starting with `>>` (optionally ending in `@1h`, `@tonight`, `@tomorrow` or `@nextweek`) parks a Parking item that keeps the note's `uid` in `note`. Its id is `9000000000000000 + FNV-1a("uid
+line")` on both sides, so the phone and the web create the same item. A new line parks when the note is saved on the phone, or once the cursor leaves the line on the web. The note text is never rewritten; the previews show each thought's state.
 - If a file exists twice, both sides use the one created first.
 
 Change both implementations together.
