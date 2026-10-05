@@ -34,7 +34,7 @@ import java.util.Calendar;
 import java.util.Locale;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = {23, 35})
+@Config(sdk = {24, 35})
 public class RomHomeTest {
     private ActivityController<MainActivity> controller;
     private MainActivity activity;

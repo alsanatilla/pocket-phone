@@ -20,7 +20,7 @@ import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowNotificationListenerService;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 public class NotificationAccessTest{
     private Context c;
     @Before public void start(){c=RuntimeEnvironment.getApplication();setAllowed(false);}

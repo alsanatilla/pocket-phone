@@ -17,7 +17,7 @@ import org.robolectric.android.controller.ServiceController;
 import org.robolectric.shadows.ShadowAlarmManager;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 public class TaskReminderFlowTest {
     private Context context;private PlannerStore planner;
     @Before public void clear(){context=RuntimeEnvironment.getApplication();context.getSharedPreferences("pocket_planner",0).edit().clear().commit();context.getSharedPreferences("pocket_agenda",0).edit().clear().commit();ClockStore.prefs(context).edit().clear().commit();ShadowAlarmManager.setCanScheduleExactAlarms(true);planner=new PlannerStore(context.getSharedPreferences("pocket_planner",0));}

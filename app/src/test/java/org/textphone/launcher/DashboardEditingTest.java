@@ -25,7 +25,7 @@ import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowAlertDialog;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 public class DashboardEditingTest {
     private ActivityController<MainActivity> controller;
     private MainActivity activity;

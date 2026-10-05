@@ -9,7 +9,7 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = {23, 35})
+@Config(sdk = {24, 35})
 public class CameraMathTest {
     @Test public void outputRotationTracksSensorAndDeviceForBothLenses() {
         assertEquals(90, CameraMath.orientation(90, 0, false));

@@ -19,7 +19,7 @@ import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23, 35})
+@Config(sdk={24, 35})
 public class CloudAndJournalReleaseTest {
     private Context c;
     private PlannerStore planner;

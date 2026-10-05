@@ -25,7 +25,7 @@ import org.robolectric.shadows.ShadowAlarmManager;
 import org.robolectric.util.ReflectionHelpers;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35},shadows=TaskWorkflowTest.TaskAlarms.class)
+@Config(sdk={24,35},shadows=TaskWorkflowTest.TaskAlarms.class)
 public class TaskWorkflowTest {
     private Context context;private PlannerStore store;private final java.util.List<ActivityController<?>> controllers=new java.util.ArrayList<>();
     @Implements(AlarmManager.class) public static class TaskAlarms extends ShadowAlarmManager {static boolean fail;

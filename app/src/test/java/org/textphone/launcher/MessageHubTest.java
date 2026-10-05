@@ -26,7 +26,7 @@ import org.robolectric.android.controller.ServiceController;
 import org.robolectric.annotation.Config;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 public class MessageHubTest {
     private Context context;private ServiceController<PhoneNotifications> service;
     private final java.util.ArrayList<ActivityController<? extends android.app.Activity>> activities=new java.util.ArrayList<>();

@@ -23,7 +23,7 @@ import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowContentResolver;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 public class FilesAndMmsTest {
     private Context c; private File file;
     @Before public void setup() throws Exception {c=RuntimeEnvironment.getApplication();file=File.createTempFile("pocket-native-data-",".txt");}

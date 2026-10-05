@@ -31,7 +31,7 @@ import org.robolectric.annotation.RealObject;
 import org.robolectric.util.ReflectionHelpers;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = {23, 35}, shadows = AppIndexTest.LabelShadow.class)
+@Config(sdk = {24, 35}, shadows = AppIndexTest.LabelShadow.class)
 public class AppIndexTest {
     private static AppIndexTest active;
     private MainActivity activity; private ActivityController<MainActivity> controller;

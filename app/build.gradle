@@ -8,7 +8,8 @@ android {
 
     defaultConfig {
         applicationId 'org.textphone.launcher'
-        minSdk 23
+        // Native chat cancellation uses CompletableFuture, available from Android 7.
+        minSdk 24
         targetSdk 35
         versionCode 23
         versionName '0.5.18'
@@ -25,7 +26,7 @@ android {
     }
 
     compileOptions {
-        // The Anthropic SDK uses java.time; desugaring keeps Android 6/7 (API 23-25) working.
+        // The Anthropic SDK uses java.time; desugaring supports Android 7 (API 24-25).
         coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17

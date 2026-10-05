@@ -26,7 +26,7 @@ import org.robolectric.annotation.Config;
 import org.robolectric.util.ReflectionHelpers;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = {23, 35})
+@Config(sdk = {24, 35})
 public class NavigationLifecycleTest {
     private final List<ActivityController<? extends Activity>> controllers = new ArrayList<>();
     @Before public void setup() {

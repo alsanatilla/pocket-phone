@@ -21,7 +21,7 @@ import org.robolectric.annotation.Config;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 
-@RunWith(RobolectricTestRunner.class) @Config(sdk={23,35},shadows=CloudSyncFlowTest.FakeSync.class)
+@RunWith(RobolectricTestRunner.class) @Config(sdk={24,35},shadows=CloudSyncFlowTest.FakeSync.class)
 public class CloudSyncFlowTest {
     @Implements(value=CloudSync.class,isInAndroidSdk=false)
     public static class FakeSync {

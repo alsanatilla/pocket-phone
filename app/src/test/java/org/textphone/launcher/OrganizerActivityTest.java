@@ -23,7 +23,7 @@ import org.robolectric.shadows.ShadowAlertDialog;
 import org.robolectric.util.ReflectionHelpers;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 public class OrganizerActivityTest {
     private Context context;
     @Before public void start() { context=RuntimeEnvironment.getApplication(); context.getSharedPreferences("pocket_planner",0).edit().clear().commit(); }

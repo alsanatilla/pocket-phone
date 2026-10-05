@@ -4,6 +4,7 @@ Each release supplies a separately named, signed APK, source snapshot, checksums
 
 ## 0.5.18 — Home gesture handoff (local build)
 
+- Requires Android 7 or newer for the native chat transport's CompletableFuture APIs.
 - Supports Android 11+'s optional AOSP Home gesture contract. Returns an exact matching visible icon's screen bounds for the current Android user; hidden/group/unmapped icons leave the system fallback intact.
 - Keeps an already visible Home intact. Pending dashboard, calendar, label and movement changes wait for Android's correlated finish callback or a bounded 750 ms timeout.
 - Home refresh triggers share one queued frame and one organizer read for next-task counts and the latest note. Task selection retains its existing ordering and explicit next-task choice.

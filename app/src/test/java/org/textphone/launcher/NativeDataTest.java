@@ -21,7 +21,7 @@ import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowContentResolver;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 public class NativeDataTest {
     private Context context; private Provider provider;
     @Before public void start() { context=RuntimeEnvironment.getApplication(); context.getSharedPreferences("pocket_agenda",0).edit().clear().commit(); provider=new Provider();

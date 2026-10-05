@@ -30,7 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = {23, 35})
+@Config(sdk = {24, 35})
 public class MainActivityTest {
     private ActivityController<MainActivity> controller;
     private MainActivity activity;

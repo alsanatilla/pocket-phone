@@ -3,9 +3,9 @@
   "version_name": "0.5.18",
   "version_code": 23,
   "application_id": "org.textphone.launcher",
-  "min_sdk": 23,
+  "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-05T19:58:55.9884327Z",
+  "checked_at_utc": "2026-10-05T20:02:37.8691006Z",
   "build": "assembleRom passed; tests and lint not run at user request",
   "commands": [
     "./gradlew.bat :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
@@ -22,13 +22,14 @@
   "paid_api_requests": 0,
   "apk": {
     "file": "app/build/outputs/apk/rom/app-rom-unsigned.apk",
-    "bytes": 9266028,
-    "sha256": "c4f2b2547cefbfff29777f1b79574c7a3bb0ef92eb5b0814a6ec0c9426d928e0",
+    "bytes": 8872592,
+    "sha256": "b8e8302f927b0dd1b7863240c79744d332b17b6911dabdc04cb525f28a0c242d",
     "signed": false,
     "installable_update": false,
     "existing_release_key_available": false
   },
   "changes_in_this_build": [
+    "Android 7 minimum retained from upstream for native chat transport CompletableFuture APIs",
     "Optional AOSP Home gesture contract on Android 11 and newer; no privileged overview service or root",
     "One response with actual visible matching icon bounds and correlated animation-finished callback",
     "Exact app component and current-user matching; grouped, hidden and unmapped icons keep the system fallback",

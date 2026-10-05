@@ -1,6 +1,6 @@
 # Pocket Phone
 
-Native Android dashboard and compact apps for the Nothing Phone (3a). Version 0.5.18 runs on Android 6 and newer, including the existing Nothing OS installation. It is currently a launcher/app component; no full ROM image has been compiled or verified for daily use.
+Native Android dashboard and compact apps for the Nothing Phone (3a). Version 0.5.18 runs on Android 7 and newer, including the existing Nothing OS installation. Native chat cancellation uses Android 7's CompletableFuture APIs. It is currently a launcher/app component; no full ROM image has been compiled or verified for daily use.
 
 Version 0.5.18 adds the optional [AOSP Home gesture handshake](https://android.googlesource.com/platform/packages/apps/Launcher3/+/refs/heads/main/src/com/android/launcher3/GestureNavContract.java). When the system sends it, Pocket returns the actual visible icon bounds for the matching app and current Android user. Dashboard updates wait for the system's animation-finished callback, with a 750 ms fallback timeout. Missing targets retain Android's default animation. Home refreshes merge into one frame and reuse one organizer snapshot; returning Home closes chat immediately and avoids Pocket's launch animation override. Nothing OS still controls Home/Recents, and support/effectiveness remain unverified on the handset. No new permissions or root access are needed.
 

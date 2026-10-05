@@ -26,7 +26,7 @@ import org.robolectric.annotation.Config;
 import org.robolectric.annotation.GraphicsMode;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = {23, 35})
+@Config(sdk = {24, 35})
 public class PageMotionTest {
     private ActivityController<Activity> controller; private Activity activity; private PageMotion motion;
     @Before public void setup() {

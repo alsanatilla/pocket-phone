@@ -34,7 +34,7 @@ import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.shadows.ShadowContentResolver;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 public class CameraAlbumTest {
     private Context c;private File jpeg,stored;private Library library;
