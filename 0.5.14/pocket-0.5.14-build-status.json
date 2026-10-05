@@ -1,0 +1,114 @@
+{
+  "version_name": "0.5.14",
+  "version_code": 19,
+  "source_commit": "42c17d2c9abd872ba70cdb8cbe9084cf65af909b",
+  "merged_feature_tip": "988dffb88a9d32a631ae6a5d7de12d244b5b8fe5",
+  "component": "Android launcher and native app suite on Nothing OS",
+  "android": {
+    "min_sdk": 23,
+    "target_sdk": 35,
+    "build_jdk": 17
+  },
+  "android_checks": {
+    "rom": {
+      "tests": 430,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "debug": {
+      "tests": 425,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "total_passed": 855
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 46
+  },
+  "apk": {
+    "file": "pocket-phone-0.5.14.apk",
+    "bytes": 9202255,
+    "sha256": "35839044170ec006522c473dcaa6a4928784af837a6463c0e841b11c02d80791",
+    "package": "org.textphone.launcher",
+    "certificate_sha256": "883592cb9d2dbcb5817e28b3bb7df39d81f340d3ae2eca07134181fcf6d3e059",
+    "same_signer_as_0_5_13": true,
+    "signature_schemes": [
+      "v1",
+      "v2",
+      "v3"
+    ],
+    "zip_alignment_16_kib_verified": true
+  },
+  "permissions": {
+    "count": 29,
+    "new_permissions": [
+      "android.permission.INTERNET"
+    ]
+  },
+  "features": [
+    "Editable tile groups up to nine apps",
+    "Dice, Parking Lot, Receipt and Journal",
+    "Linked thoughts inside Markdown notes with delay or clock tags",
+    "Optional Google Drive app-folder sync",
+    "Web workstation for notes, Parking, Receipt, Dice and journal page upload"
+  ],
+  "release_fixes": [
+    "Empty group cells no longer stretch rows",
+    "Journal pages remain queued without a reading key",
+    "Permissions and cloud screens disclose the optional uploads",
+    "New dependencies include license notices"
+  ],
+  "online_defaults": {
+    "drive_sync": "off until Google authorization",
+    "journal_reading": "off until user enters an Anthropic key",
+    "drive_includes": [
+      "notes",
+      "parking",
+      "receipt",
+      "dice lists",
+      "journal pages and photos"
+    ],
+    "drive_excludes": [
+      "tasks",
+      "calls",
+      "SMS",
+      "contacts",
+      "Pocket Camera album"
+    ]
+  },
+  "web_checks": {
+    "source_commit": "258c2b0",
+    "local_web_smoke": "passed",
+    "tools_opened": [
+      "parking",
+      "notes",
+      "receipt",
+      "dice"
+    ],
+    "linked_thought_capture": "passed",
+    "thought_id_android_web_parity": "passed",
+    "note_delete_merge": "passed",
+    "note_persistence_after_reload": "passed",
+    "mobile_horizontal_overflow": false,
+    "google_authorization_tested": false,
+    "external_apis_called": false,
+    "page_errors": []
+  },
+  "physical_handset_tested": false,
+  "unverified": [
+    "Nothing Phone (3a) Home/Recents animation",
+    "Live calls and carrier SMS/MMS",
+    "Hardware camera and journal capture",
+    "Overnight/locked-screen reminders and battery management",
+    "Live Google OAuth/Drive sync",
+    "Live Anthropic transcription"
+  ],
+  "not_implemented": [
+    "Task recurrence",
+    "Unified search across apps",
+    "Complete backup and restore"
+  ]
+}

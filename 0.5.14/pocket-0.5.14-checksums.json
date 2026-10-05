@@ -1,0 +1,30 @@
+{
+  "pocket-phone-0.5.14.apk": {
+    "bytes": 9202255,
+    "sha256": "35839044170ec006522c473dcaa6a4928784af837a6463c0e841b11c02d80791"
+  },
+  "pocket-0.5.14-build-status.json": {
+    "bytes": 3066,
+    "sha256": "834de76fa49987e8551eeedcc800024da050be527da04f978ce9a720d1a78881"
+  },
+  "USE-POCKET-0.5.14.md": {
+    "bytes": 3208,
+    "sha256": "a1cf5f34bf165401fb4e41883d055444de605e09064ed0d66fa623f5a580c0db"
+  },
+  "pocket-0.5.14-app-status.md": {
+    "bytes": 7379,
+    "sha256": "f6d0fdf4878f743adc8ec1f1c6442422bce84465db0e730a2d539fd3991796b4"
+  },
+  "pocket-0.5.14-cloud.md": {
+    "bytes": 6040,
+    "sha256": "22646ac4868fe1c0abd28e2d44cf379096062274fe2d8f20f3e3f622332e602e"
+  },
+  "pocket-0.5.14-web-checks.json": {
+    "bytes": 437,
+    "sha256": "8036be5cca6eb53fb471ae092fbcb3f4e4a14f336ccc7ec966acd5aa33a48ae3"
+  },
+  "pocket-phone-0.5.14-source.zip": {
+    "bytes": 626229,
+    "sha256": "cd05b934163fd933a62203306bfe63d53d6dd86d296f7c4e307e6ca597e11019"
+  }
+}

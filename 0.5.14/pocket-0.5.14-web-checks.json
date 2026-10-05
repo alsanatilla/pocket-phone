@@ -1,0 +1,18 @@
+{
+  "source_commit": "258c2b0",
+  "local_web_smoke": "passed",
+  "tools_opened": [
+    "parking",
+    "notes",
+    "receipt",
+    "dice"
+  ],
+  "linked_thought_capture": "passed",
+  "thought_id_android_web_parity": "passed",
+  "note_delete_merge": "passed",
+  "note_persistence_after_reload": "passed",
+  "mobile_horizontal_overflow": false,
+  "google_authorization_tested": false,
+  "external_apis_called": false,
+  "page_errors": []
+}
