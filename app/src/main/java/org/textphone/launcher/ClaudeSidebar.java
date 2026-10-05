@@ -62,7 +62,7 @@ final class ClaudeSidebar extends FrameLayout {
     private final ScrollView scroll;
     private final EditText composer;
     private final Button back, settings, setup, send, retry;
-    private final TextView error, cacheStatus, loadingLabel;
+    private final TextView error, cacheStatus, loadingLabel, accessStatus;
     private final PixelLoadingView loading;
     private boolean opened, observing, destroyed, applyingDraft, renderQueued, swipeCandidate, capturedSwipe;
     private float startX, startY;
@@ -165,6 +165,15 @@ final class ClaudeSidebar extends FrameLayout {
         cacheStatus.setPadding(dp(16), dp(4), dp(16), dp(4));
         cacheStatus.setVisibility(View.GONE);
         panel.addView(cacheStatus, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+
+        accessStatus = label("", 14, PocketDesign.MUTED);
+        accessStatus.setTag("claude_pocket_access");
+        accessStatus.setPadding(dp(16), 0, dp(16), 0);
+        accessStatus.setMinHeight(dp(44));
+        accessStatus.setGravity(Gravity.CENTER_VERTICAL);
+        accessStatus.setFocusable(true);
+        accessStatus.setOnClickListener(view -> { if (!destroyed) showPocketAccess(); });
+        panel.addView(accessStatus, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
         LinearLayout inputRow = horizontal();
         inputRow.setGravity(Gravity.BOTTOM);
@@ -338,35 +347,46 @@ final class ClaudeSidebar extends FrameLayout {
         if (panel != null) { updatePanelSize(); applyPanelPadding(); }
     }
 
-    @Override public boolean onInterceptTouchEvent(MotionEvent event) {
-        if (destroyed) return false;
+    @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        if (destroyed) return super.dispatchTouchEvent(event);
         int action = event.getActionMasked();
-        if (capturedSwipe) return true;
-        if (opened) return false;
         if (action == MotionEvent.ACTION_DOWN) {
+            capturedSwipe = false;
             startX = event.getX(); startY = event.getY();
-            swipeCandidate = swipeAllowed.getAsBoolean() && event.getPointerCount() == 1
-                    && startX >= getWidth() / 2f && startX < getWidth() - dp(40)
-                    && startY < getHeight() - dp(64) && !hitsEditor(pageHost, (int) event.getRawX(), (int) event.getRawY());
-        } else if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_UP) {
+            swipeCandidate = !opened && swipeAllowed.getAsBoolean() && event.getPointerCount() == 1
+                    && startX >= Math.max(insetLeft, dp(24)) && startX < getWidth() - Math.max(insetRight, dp(24))
+                    && startY >= insetTop && startY < getHeight() - Math.max(insetBottom, dp(24))
+                    && !hitsEditor(pageHost, (int) event.getRawX(), (int) event.getRawY());
+        } else if (action == MotionEvent.ACTION_POINTER_DOWN) {
             swipeCandidate = false;
         } else if (action == MotionEvent.ACTION_MOVE && swipeCandidate) {
             float dx = event.getX() - startX, dy = event.getY() - startY;
-            if (Math.abs(dy) > touchSlop && Math.abs(dy) >= Math.abs(dx)) swipeCandidate = false;
-            else if (dx <= -dp(56) && -dx > Math.abs(dy) * 1.4f) {
+            if (!swipeAllowed.getAsBoolean() || (Math.abs(dy) > touchSlop && Math.abs(dy) >= Math.abs(dx))) swipeCandidate = false;
+            else if (dx <= -Math.max(dp(24), touchSlop * 2) && -dx > Math.abs(dy) * 1.4f) {
                 capturedSwipe = true;
                 swipeCandidate = false;
-                open();
-                return true; // ViewGroup sends ACTION_CANCEL to the original page control.
+                // ScrollView may already have disabled parent interception. Only reclaim a clear
+                // horizontal swipe; the normal dispatch then cancels its original child target.
+                super.requestDisallowInterceptTouchEvent(false);
             }
         }
-        return false;
+        boolean handled = super.dispatchTouchEvent(event);
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            capturedSwipe = false;
+            swipeCandidate = false;
+        }
+        return handled;
+    }
+
+    @Override public boolean onInterceptTouchEvent(MotionEvent event) {
+        if (!destroyed && capturedSwipe) { if (!opened) open(); return true; }
+        return super.onInterceptTouchEvent(event);
     }
 
     @Override public boolean onTouchEvent(MotionEvent event) {
-        if (!capturedSwipe) return super.onTouchEvent(event);
-        if (event.getActionMasked() == MotionEvent.ACTION_UP || event.getActionMasked() == MotionEvent.ACTION_CANCEL) capturedSwipe = false;
-        return true;
+        if (capturedSwipe) { if (!opened) open(); return true; }
+        // Keep the sequence when a swipe starts on blank Home space rather than a control.
+        return swipeCandidate || super.onTouchEvent(event);
     }
 
     private void submit() {
@@ -413,6 +433,15 @@ final class ClaudeSidebar extends FrameLayout {
         boolean follow = log.getChildCount() == 0 || log.getHeight() - scroll.getScrollY() - scroll.getHeight() <= dp(96);
         ChatProvider.Config provider = ChatProvider.get(activity);
         setup.setVisibility(ChatProvider.present(activity, provider) ? View.GONE : View.VISIBLE);
+        StringBuilder access = new StringBuilder();
+        String[] categories = {PocketChatTools.NOTES, PocketChatTools.THOUGHTS, PocketChatTools.COROS};
+        String[] names = {"Notes", "Thoughts", "COROS"};
+        for (int category = 0; category < categories.length; category++) {
+            if (!PocketChatTools.enabled(activity, categories[category])) continue;
+            if (access.length() > 0) access.append(" · ");
+            access.append(names[category]);
+        }
+        accessStatus.setText(access.length() == 0 ? "Pocket access · off" : "Pocket access · " + access);
         loadingRow.setVisibility(snapshot.running ? View.VISIBLE : View.GONE);
         String status = snapshot.status == null || snapshot.status.isEmpty() ? "thinking" : snapshot.status;
         if (!loadingLabel.getText().toString().equals(status)) loadingLabel.setText(status);

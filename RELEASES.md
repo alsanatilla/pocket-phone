@@ -2,6 +2,16 @@
 
 Each release supplies a separately named, signed APK, source snapshot, checksums and actual build/test results. Install the new APK over Pocket; do not uninstall or clear app storage. The package ID and signing certificate stay the same. Old release downloads remain available. These APKs run on the current Nothing OS; they are not flashable ROM images.
 
+## 0.5.20 — Chat tool continuations and Home swipe (local build)
+
+- Left swipes can start across Home, Today and Tools content with a shorter horizontal threshold. System edges, text inputs, vertical scrolling and multiple-finger gestures retain their normal behavior.
+- Gesture observation precedes child dispatch; a clear horizontal swipe can reclaim interception from ScrollView and cancels the original child before it launches a tile or control.
+- Empty-argument Claude tools receive a valid input object before the SDK accumulator completes the block; initial arguments and signed thinking blocks are retained.
+- Claude schemas use direct SDK builders, and SDK tool values convert to Android JSON without reflective Map conversion. A visible Pocket access row shows enabled Notes/Thoughts/COROS categories and opens their controls; access still defaults off.
+- Compatible tool follow-ups retain streamed reasoning text and detail blocks during the current reply. Tool-call names/IDs may arrive in fragments, and usage-only events and terminal finish reasons without a final SSE marker are accepted.
+- Provider request errors distinguish the initial tool request from a rejected follow-up; HTTP, JSON, SDK and Android linkage failures identify their stage without exposing data or keys. Token limits, two retrieval rounds, four local reads, category grants and the 16,000-character local-data budget remain; continuation state is bounded and excluded from stored chat history.
+- Tests, lint, paid APIs and handset gestures were not run. The local APK needs the existing release signing key before installing as an update.
+
 ## 0.5.19 — Google authorization result handling (local build)
 
 - Reads Google's returned result even when Android reports a cancelled activity, preserving the actual error code and installed-certificate diagnostics.

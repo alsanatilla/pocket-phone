@@ -1,11 +1,11 @@
 {
   "component": "Pocket Phone native Android launcher/apps",
-  "version_name": "0.5.19",
-  "version_code": 24,
+  "version_name": "0.5.20",
+  "version_code": 25,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-05T20:34:34.9337054Z",
+  "checked_at_utc": "2026-10-05T20:57:10.2615790Z",
   "build": "assembleRom passed; tests and lint not run at user request",
   "commands": [
     "./gradlew.bat :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
@@ -22,21 +22,26 @@
   "paid_api_requests": 0,
   "apk": {
     "file": "app/build/outputs/apk/rom/app-rom-unsigned.apk",
-    "bytes": 8872944,
-    "sha256": "b57186b5dd29940efd3cfca8bd868951e787a9981e601bcaecd5f41d79824148",
+    "bytes": 8875356,
+    "sha256": "89b3218f816f8e64bbfe91104c098926482aede168f4390d100ccc9379e7ae98",
     "signed": false,
     "installable_update": false,
     "existing_release_key_available": false
   },
   "changes_in_this_build": [
-    "Google authorization parses every non-null returned Intent regardless of Android resultCode, preserving the actual Google error",
-    "Missing results and code 16 use neutral incomplete-authorization wording instead of assuming the user cancelled",
-    "Direct and account-picker authorization results require a nonempty token and granted drive.appdata scope before enabling sync",
-    "Google sign-in launch failures remain visible on the Cloud sync page",
-    "Cloud setup documents the separate Android OAuth client matching Pocket's package and installed signing SHA-1",
-    "No new Android permissions; Android 7 minimum, Home gesture improvements, native chat and existing sync contents retained"
+    "Home, Today and Tools left swipes can start across content with a shorter threshold; system edges and text editors are excluded",
+    "Gesture observation precedes child dispatch, so scroll interception cannot suppress a clear horizontal chat swipe",
+    "Claude schemas use explicit SDK builders and arguments unwrap into Android JSON values without reflective conversion",
+    "Empty-argument Claude tools receive a canonical input object before the SDK accumulator completes their blocks",
+    "Chat shows enabled Notes, Thoughts and COROS grants and opens Pocket access with one tap; grants still default off",
+    "Compatible-provider tool follow-ups retain bounded streamed reasoning fields during the current reply only",
+    "Compatible tool identifiers/names may arrive in fragments; terminal streams without DONE and usage-only events are accepted",
+    "Chat failures identify their stage and HTTP, JSON, SDK or Android linkage type without displaying keys or data",
+    "Token limits, read budgets, access grants and no-automatic-retry behavior remain; no new Android permissions"
   ],
   "known_limits": [
+    "The reported Claude failure has not been reproduced on the phone; live tool execution and swipes remain unverified, and the user's exact error text is pending",
+    "Compatible reasoning continuation is transient within one reply; provider-specific protocols outside supported chat-completions fields may still need adaptation",
     "Live Google authorization has not been run; the Google Cloud project needs an Android OAuth client matching the installed APK's package and certificate alongside its web client",
     "Nothing OS must send the optional AOSP contract for icon-targeted Home animations; support and visual result have not been checked on the handset",
     "Android and Nothing OS still own Recents and full task animations; this APK cannot replace their overview service",
