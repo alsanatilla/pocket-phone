@@ -7,7 +7,8 @@
   --accent: #f9f594; --warning: #ffbf69;
   --paper: #f2efe6; --ink: #161616; --faded: #6b675e;
   --mono: ui-monospace, "DejaVu Sans Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-  --pixel: "Jacquard 24", "VT323", var(--mono);
+  --pixel: "VT323", var(--mono);
+  --display: "Jacquard 24", "VT323", var(--mono);
   --control: 52px; --row: 56px; --gutter: clamp(16px, 4vw, 48px);
 }
 * { box-sizing: border-box; }
@@ -60,7 +61,7 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
 .narrow { max-width: 620px; }
 .narrow-only { display: none; }
 .empty { min-height: 50vh; display: flex; flex-direction: column; justify-content: center; }
-.empty-title { font: 60px/1 var(--pixel); color: var(--line); }
+.empty-title { font: 60px/1 var(--display); color: var(--line); }
 
 /* Parking */
 .thought { font-size: 17px; margin: 14px 0 2px; overflow-wrap: anywhere; }
@@ -80,7 +81,7 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
 .md a { color: var(--accent); }
 
 /* Dice */
-.result { font: 72px/1 var(--pixel); text-align: center; min-height: 160px; display: flex; align-items: center; justify-content: center; overflow-wrap: anywhere; }
+.result { font: 72px/1 var(--display); text-align: center; min-height: 160px; display: flex; align-items: center; justify-content: center; overflow-wrap: anywhere; }
 .result.long { font-size: 40px; }
 
 /* Receipt: the one paper surface. */

@@ -51,6 +51,8 @@ The Android app needs no client id in code: Google matches the package name and 
 
 Serve `docs/` with any static server, for example `npx serve docs -l 8777`, and open `http://localhost:8777/`.
 
+When publishing web changes, bump the shared `?v=` asset version in `docs/index.html` and the imports in `docs/js/` together so browsers fetch the complete new version.
+
 ## Journal pages
 
 Journal (a Pocket app you can put on a tile) keeps photos of paper journal pages. Each page is read once by **Claude Sonnet 5.5** with the user's own Anthropic API key, entered in Journal → Settings and stored only on the phone, encrypted with the Android Keystore. Reading costs about 1–2¢ per page; pages photographed offline wait and are read once the phone is online. A waiting page can also be read from the web page, where the key is typed for that tab alone.

@@ -1,8 +1,8 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
-import * as drive from "./drive.js";
-import * as reader from "./reader.js";
-import { syncNow, describe, onStatus, status } from "./sync.js";
-import { parking, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
+import * as drive from "./drive.js?v=20261005-claude2";
+import * as reader from "./reader.js?v=20261005-claude2";
+import { syncNow, describe, onStatus, status } from "./sync.js?v=20261005-claude2";
+import { parking, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261005-claude2";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -35,7 +35,7 @@ function shell() {
   content = h("main", { class: "content" }); notice = h("div", { class: "notice", role: "status" });
   root.replaceChildren(
     h("header", { class: "bar" },
-      h("span", { class: "brand", text: "POCKET" }),
+      h("span", { class: "brand", text: "pocket" }),
       h("nav", { class: "tabs", "aria-label": "Tools" }, tabs),
       h("button", { class: "status", id: "sync-status", onclick: () => go("/sync"), title: "Sync settings" }, describe())),
     content, notice);
@@ -44,7 +44,7 @@ function shell() {
 function view(tool, actions = []) {
   shell(); closeDialog(); say("");
   document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool; tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
-  document.title = tool === "sync" ? "Pocket · sync" : "Pocket · " + tool;
+  document.title = tool === "sync" ? "pocket · sync" : "pocket · " + tool;
   content.replaceChildren();
   if (actions.length) add(content, h("div", { class: "toolbar" }, actions.map(([label, run, extra]) => h("button", { onclick: run, ...(extra || {}) }, label))));
   const body = h("div", { class: "tool tool-" + tool }); add(content, body);
