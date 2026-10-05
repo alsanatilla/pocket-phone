@@ -2,6 +2,15 @@
 
 Each release supplies a separately named, signed APK, source snapshot, checksums and actual build/test results. Install the new APK over Pocket; do not uninstall or clear app storage. The package ID and signing certificate stay the same. Old release downloads remain available. These APKs run on the current Nothing OS; they are not flashable ROM images.
 
+## 0.5.18 — Home gesture handoff (local build)
+
+- Supports Android 11+'s optional AOSP Home gesture contract. Returns an exact matching visible icon's screen bounds for the current Android user; hidden/group/unmapped icons leave the system fallback intact.
+- Keeps an already visible Home intact. Pending dashboard, calendar, label and movement changes wait for Android's correlated finish callback or a bounded 750 ms timeout.
+- Home refresh triggers share one queued frame and one organizer read for next-task counts and the latest note. Task selection retains its existing ordering and explicit next-task choice.
+- Home dismisses chat immediately and uses Android's own task transition instead of Pocket's scale-up override. Normal chat Back/close animations remain.
+- A fresh Home handoff does not restore an old chat drawer; reopening from Recents retains the saved page and chat state and does not replay an old gesture callback.
+- Android/Nothing OS retains control of Recents and full task animations. No new permissions or root access; handset support and animation quality have not been verified. Tests and lint were not run at the user's request; the APK still needs the existing release signing key.
+
 ## 0.5.17 — Pocket chat access and pixel loading (local build)
 
 - Chat settings separately enable read-only saved Notes, open Thoughts and cached COROS data. Matching passages and dated summaries are returned on demand through native client tools; drafts, tasks, photos and credentials are excluded.

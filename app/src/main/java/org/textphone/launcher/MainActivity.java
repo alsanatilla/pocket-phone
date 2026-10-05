@@ -9,12 +9,15 @@ import android.app.role.RoleManager;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
@@ -27,6 +30,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.UserHandle;
 import android.provider.AlarmClock;
 import android.provider.ContactsContract;
 import android.provider.CallLog;
@@ -135,6 +139,19 @@ public class MainActivity extends Activity {
     private NativeNavigation navigation;
     private PageMotion motion;
     private ClaudeSidebar claude;
+    private HomeGestureContract homeGesture;
+    private final java.util.Map<Integer, ComponentName> homeGestureTargets = new java.util.HashMap<>();
+    private boolean homeRefreshQueued, homeExtraRefresh, homePlanRefresh, homeRebuild, homeResumed;
+    private final Runnable homeRefresh = () -> {
+        homeRefreshQueued = false;
+        if (this.destroyed || !this.appVisible || !homeResumed || !"home".equals(screen)) return;
+        if (homeGesture.pending()) return;
+        boolean extra = homeExtraRefresh, plan = homePlanRefresh, rebuild = homeRebuild;
+        homeExtraRefresh = homePlanRefresh = homeRebuild = false;
+        if (rebuild) motion.instant(this::render); else updateHome();
+        if (extra) { refreshTileLabels(); refreshMovement(); }
+        if (plan && !rebuild && planHost != null) refreshDayPlan();
+    };
     private final Handler draftUi = new Handler(Looper.getMainLooper());
     private Runnable draftSave;
     private View launchOrigin;
@@ -148,9 +165,9 @@ public class MainActivity extends Activity {
 
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
-            if (CloudSync.ACTION_SYNCED.equals(intent.getAction())) { if ("today".equals(screen) || "task_detail".equals(screen)) render(); else if ("home".equals(screen)) { updateHome(); refreshDayPlan(); } return; }
-            if (CorosRepository.ACTION_UPDATED.equals(intent.getAction())) { if ("home".equals(screen)) { if (CorosRepository.get(MainActivity.this).connected() != (movementValues.size() == 3)) render(); else updateMovement(); } return; }
-            if ("home".equals(screen)) updateHome();
+            if (CloudSync.ACTION_SYNCED.equals(intent.getAction())) { if ("today".equals(screen) || "task_detail".equals(screen)) render(); else if ("home".equals(screen)) { homePlanRefresh = true; requestHomeRefresh(false); } return; }
+            if (CorosRepository.ACTION_UPDATED.equals(intent.getAction())) { if ("home".equals(screen)) { homeRebuild |= romProfile && CorosRepository.get(MainActivity.this).connected() != (movementValues.size() == 3); requestHomeRefresh(false); } return; }
+            if ("home".equals(screen)) requestHomeRefresh(false);
             else if ("notifications".equals(screen)
                     && PhoneNotifications.ACTION_UPDATED.equals(intent.getAction())) render();
         }
@@ -189,6 +206,9 @@ public class MainActivity extends Activity {
         claude = new ClaudeSidebar(this, motion.host(), () -> { if (navigation != null) navigation.update(); },
                 () -> !noteWheelShowing() && ("home".equals(screen) || "today".equals(screen) || "tools".equals(screen)));
         setContentView(claude);
+        homeGesture = new HomeGestureContract(this, this::homeGestureBounds, () -> {
+            if (!destroyed && "home".equals(screen)) requestHomeRefresh(false);
+        });
         navigation = new NativeNavigation(this, new NativeNavigation.Page() {
             public boolean internal() { return claude.isOpen() || noteWheelShowing() || trail.peek()!=null || !workspace() || !"today".equals(screen); }
             public void back() { onBackPressed(); }
@@ -219,14 +239,16 @@ public class MainActivity extends Activity {
         if (savedInstanceState == null && "today".equals(getIntent().getStringExtra("pocket_screen"))) screen = "today";
         if (savedInstanceState == null && "notifications".equals(getIntent().getStringExtra("pocket_screen"))) screen = "notifications";
         if (savedInstanceState == null && !workspace() && "settings".equals(getIntent().getStringExtra("pocket_screen"))) screen = "settings";
-        if (!workspace() && Intent.ACTION_MAIN.equals(getIntent().getAction()) && getIntent().hasCategory(Intent.CATEGORY_HOME)) { screen = "home"; trail.clear(); }
+        if (!workspace() && Intent.ACTION_MAIN.equals(getIntent().getAction()) && getIntent().hasCategory(Intent.CATEGORY_HOME)
+                && (getIntent().getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) { screen = "home"; trail.clear(); }
         if (!validScreen(screen)) screen = "home";
         long task=getIntent().getLongExtra("pocket_task",0);if(savedInstanceState==null&&task>0){captureId=task;captureKind="task";screen="task_detail";if(trail.peek()==null)trail.push(new RouteTrail.Route("today",0,"note",null,"home",""));}
         long note=getIntent().getLongExtra("pocket_note",0);PlannerStore.Entry linked=note>0?planner.find(note):null;if(savedInstanceState==null&&linked!=null){captureId=note;captureKind="note";captureText=planner.hasDraft("note",note)?planner.draft("note",note):linked.text;screen="note_preview";if(trail.peek()==null)trail.push(new RouteTrail.Route("today",0,"note",null,"home",""));}
         setupTorch();
         render();
-        if (savedInstanceState != null) claude.restore(savedInstanceState.getBundle("claude_sidebar"));
         if (savedInstanceState == null) receiveSharedText(getIntent());
+        boolean homeHandoff = !workspace() && "home".equals(screen) && homeGesture.accept(getIntent());
+        if (savedInstanceState != null && !homeHandoff) claude.restore(savedInstanceState.getBundle("claude_sidebar"));
     }
 
     // Before Android 13 the two-argument registration is the platform-compatible overload.
@@ -256,6 +278,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        homeResumed = true;
         claude.resume();
         if (stoppedDraft != null && "capture".equals(screen) && captureEditor != null && captureId == stoppedDraftId
                 && captureKind.equals(stoppedDraftKind) && stoppedDraft.contentEquals(captureEditor.getText())) {
@@ -273,15 +296,16 @@ public class MainActivity extends Activity {
             }
         }
         stoppedDraft = null;
-        if("today".equals(screen)||"task_detail".equals(screen))render();else if(planHost!=null)refreshDayPlan();
+        if("today".equals(screen)||"task_detail".equals(screen))render();else if(planHost!=null && !"home".equals(screen))refreshDayPlan();
         NotificationAccess.connect(this);
-        if ("home".equals(screen)) { updateHome(); refreshTileLabels(); refreshMovement(); }
+        if ("home".equals(screen)) requestHomeRefresh(true);
         else if ("settings".equals(screen)) updateHomeStatus();
         else if ("notifications".equals(screen)) render();
         else if ("apps".equals(screen) || "assign".equals(screen)) ensureAppIndex();
     }
 
     @Override protected void onStop() {
+        cancelHomeRefresh();
         persistDraft();
         if (planner.notesRevision() != notesRevision || planner.tasksRevision() != tasksRevision) CloudSync.changed(this);
         if ("capture".equals(screen)) { stoppedDraft = captureText; stoppedDraftKind = captureKind; stoppedDraftId = captureId; stoppedDue = captureDue; stoppedImportant = captureImportant; stoppedSteps = captureSteps; }
@@ -295,11 +319,13 @@ public class MainActivity extends Activity {
         turnOffOwnedTorch();
         super.onStop();
     }
-    @Override protected void onPause() { claude.pause(); dismissNoteWheel(); persistDraft(); motion.settle(); super.onPause(); }
+    @Override protected void onPause() { homeResumed = false; homeGesture.cancel(); claude.pause(); dismissNoteWheel(); persistDraft(); motion.settle(); super.onPause(); }
 
     @Override protected void onDestroy() {
         navigation.destroy();
         claude.destroy();
+        homeGesture.destroy();
+        cancelHomeRefresh();
         motion.destroy();
         destroyed = true; draftUi.removeCallbacksAndMessages(null); appUi.removeCallbacksAndMessages(null); appWorker.shutdownNow();
         if (cameraManager != null) cameraManager.unregisterTorchCallback(torchCallback);
@@ -331,6 +357,18 @@ public class MainActivity extends Activity {
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        homeGesture.cancel();
+        homeGestureTargets.clear();
+        if (!workspace() && Intent.ACTION_MAIN.equals(intent.getAction()) && intent.hasCategory(Intent.CATEGORY_HOME)) {
+            if ((intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) { setIntent(intent); return; }
+            claude.closeImmediately();
+            setIntent(intent);
+            // Keep an already visible Home intact while Android animates its task surface.
+            motion.instant(() -> navigate("home"));
+            trail.clear();
+            homeGesture.accept(intent);
+            return;
+        }
         claude.close();
         setIntent(intent);
         if(intent.getLongExtra("pocket_task",0)>0){captureKind="task";openTask(intent.getLongExtra("pocket_task",0));return;}
@@ -340,9 +378,7 @@ public class MainActivity extends Activity {
         if ("notifications".equals(intent.getStringExtra("pocket_screen"))) { navigate("notifications"); return; }
         if (!workspace() && "settings".equals(intent.getStringExtra("pocket_screen"))) { navigate("settings"); return; }
         if (workspace()) return;
-        // Android is already animating the Home gesture. Present the final Home surface immediately.
-        if (Intent.ACTION_MAIN.equals(intent.getAction()) && intent.hasCategory(Intent.CATEGORY_HOME)) motion.instant(() -> navigate("home"));
-        else navigate("home");
+        navigate("home");
     }
 
     @Override public void onBackPressed() {
@@ -442,8 +478,9 @@ public class MainActivity extends Activity {
 
     private void navigate(String destination) {
         persistDraft();
+        if (!"home".equals(destination)) { homeGesture.cancel(); cancelHomeRefresh(); }
         if (workspace() && "home".equals(destination)) { startActivity(new Intent(this, MainActivity.class).setAction(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return; }
-        if (destination.equals(screen)) { if ("home".equals(screen)) updateHome(); else if ("notifications".equals(screen)) render(); return; }
+        if (destination.equals(screen)) { if ("home".equals(screen)) requestHomeRefresh(false); else if ("notifications".equals(screen)) render(); return; }
         boolean backwards = !"home".equals(screen) && destination.equals(backDestination());
         if("home".equals(destination))trail.clear();
         else {
@@ -834,7 +871,7 @@ public class MainActivity extends Activity {
         PocketDesign.quiet(line, PRIMARY); line.setMinHeight(dp(52)); line.setPadding(0, dp(8), 0, dp(8));
         line.setSingleLine(true); line.setEllipsize(TextUtils.TruncateAt.END); line.setVisibility(View.GONE); return line;
     }
-    private void updateDashboardSources() {
+    private void updateDashboardSources(List<PlannerStore.Entry> entries) {
         if (thoughtText == null) return;
         long now = System.currentTimeMillis(); List<ParkingStore.Item> parked = ParkingStore.open(this);
         ParkingStore.Item due = null; int returning = 0;
@@ -844,7 +881,7 @@ public class MainActivity extends Activity {
         thoughtText.setTextColor(accent());
         if (due != null) thoughtText.setContentDescription("Returning thought: " + due.text + ". " + returning + " thoughts back. Open Parking Lot.");
         PlannerStore.Entry latest = null; long edited = 0;
-        for (PlannerStore.Entry entry : planner.entries()) if ("note".equals(entry.kind) && (latest == null || planner.noteUpdated(entry) > edited)) { latest = entry; edited = planner.noteUpdated(entry); }
+        for (PlannerStore.Entry entry : entries) if ("note".equals(entry.kind) && (latest == null || planner.noteUpdated(entry) > edited)) { latest = entry; edited = planner.noteUpdated(entry); }
         homeNoteId = latest == null ? 0 : latest.id;
         noteText.setVisibility(latest == null ? View.GONE : View.VISIBLE);
         noteText.setText(latest == null ? "" : "› " + ParkingActivity.noteTitle(latest));
@@ -889,7 +926,7 @@ public class MainActivity extends Activity {
         movementLoading = true; CorosRepository repository = CorosRepository.get(this);
         appWorker.execute(() -> {
             try { repository.refresh(false); } catch (IOException ignored) { /* The Movement screen keeps the actionable error. */ }
-            appUi.post(() -> { movementLoading = false; if (!destroyed && "home".equals(screen)) updateMovement(); });
+            appUi.post(() -> { movementLoading = false; if (!destroyed && "home".equals(screen)) requestHomeRefresh(false); });
         });
     }
     private void dashboardEvent(LinearLayout host, DayPlan.Item item, DayPlan.Result plan) {
@@ -1103,7 +1140,7 @@ public class MainActivity extends Activity {
             appUi.post(() -> {
                 tileLabelsLoading = false; if (destroyed) return;
                 for (java.util.Map.Entry<String, String> label : labels.entrySet()) tiles.resolved(label.getKey(), bindings.get(label.getKey()), label.getValue());
-                updateTileNames();
+                if ("home".equals(screen)) requestHomeRefresh(false);
             });
         });
     }
@@ -1118,6 +1155,70 @@ public class MainActivity extends Activity {
         });
         addInstalledApps(true);
         addFeedback();
+    }
+
+    private void requestHomeRefresh(boolean extra) {
+        if (destroyed || !"home".equals(screen)) return;
+        homeExtraRefresh |= extra;
+        homePlanRefresh |= extra;
+        if (homeRefreshQueued) return;
+        homeRefreshQueued = true;
+        claude.postOnAnimation(homeRefresh);
+    }
+
+    private void cancelHomeRefresh() {
+        if (claude != null) claude.removeCallbacks(homeRefresh);
+        homeRefreshQueued = homeExtraRefresh = homePlanRefresh = homeRebuild = false;
+    }
+
+    private RectF homeGestureBounds(ComponentName component, UserHandle user) {
+        if (destroyed || workspace() || !"home".equals(screen) || claude.isOpen()
+                || !android.os.Process.myUserHandle().equals(user)) return null;
+        for (int pass = 0; pass < 2; pass++) for (int i = 0; i < homeSlotIndices.size(); i++) {
+            int slot = homeSlotIndices.get(i);
+            if ((slot == selectedShortcut) != (pass == 0)) continue;
+            PhoneIcon icon = homeIcons.get(i);
+            if (!icon.isAttachedToWindow() || !icon.isLaidOut() || icon.isLayoutRequested()
+                    || !icon.isShown() || icon.getAlpha() <= 0 || icon.getWidth() <= 0 || icon.getHeight() <= 0) continue;
+            Rect visible = new Rect();
+            if (!icon.getGlobalVisibleRect(visible) || visible.width() != icon.getWidth() || visible.height() != icon.getHeight()) continue;
+            if (!homeGestureTargets.containsKey(slot)) homeGestureTargets.put(slot, homeTileComponent(slot));
+            if (!component.equals(homeGestureTargets.get(slot))) continue;
+            int[] location = new int[2];
+            icon.getLocationOnScreen(location);
+            return new RectF(location[0], location[1], location[0] + icon.getWidth(), location[1] + icon.getHeight());
+        }
+        return null;
+    }
+
+    private ComponentName homeTileComponent(int slot) {
+        String key = shortcuts[slot];
+        if (tiles.group(key)) return null;
+        String assigned = tiles.app(key);
+        if (assigned != null) return firstLaunchComponent(assigned);
+        Class<? extends Activity> own = null;
+        if (romProfile) own = PocketApps.activity(tiles.pocket(key));
+        else switch (slot) {
+            case 0: return firstLaunchComponent("org.thoughtcrime.securesms");
+            case 1: return firstLaunchComponent("com.whatsapp", "com.whatsapp.w4b");
+            case 2: own = MessagesActivity.class; break;
+            case 3: own = ContactsActivity.class; break;
+            case 4: own = PhoneActivity.class; break;
+            case 7: own = CompactCameraActivity.class; break;
+            case 8: return firstLaunchComponent("com.ubercab", "ee.mtakso.client", "taxi.android.client");
+            default: break; // Internal settings and implicit Maps launches have no unique app icon target.
+        }
+        return own == null ? null : new ComponentName(this, own);
+    }
+
+    private ComponentName firstLaunchComponent(String... packages) {
+        try {
+            for (String name : packages) {
+                Intent launch = getPackageManager().getLaunchIntentForPackage(name);
+                if (launch != null && launch.getComponent() != null) return launch.getComponent();
+            }
+        } catch (RuntimeException unavailable) { }
+        return null;
     }
 
     private void updateHome() {
@@ -1153,12 +1254,15 @@ public class MainActivity extends Activity {
         battery.setContentDescription(StatusText.battery(level, scale, charging));
         boolean low = level >= 0 && scale > 0 && level * 100f / scale <= 15;
         battery.setTextColor(low ? AMBER : PRIMARY);
+        List<PlannerStore.Entry> entries = null;
+        try { entries = planner.entries(); } catch (IllegalStateException unreadable) { }
         if (nextTaskText != null) {
             try {
-                PlannerStore.Entry next = planner.nextTask();
+                if (entries == null) throw new IllegalStateException("Organizer data unavailable");
+                PlannerStore.Entry next = planner.nextTask(entries);
+                int count = 0, done = 0;
+                for (PlannerStore.Entry entry : entries) if ("task".equals(entry.kind)) { if (entry.done) done++; else count++; }
                 if (romProfile) {
-                    int count = planner.openTasks(), done = 0;
-                    for (PlannerStore.Entry entry : planner.entries()) if ("task".equals(entry.kind) && entry.done) done++;
                     taskCountText.setText(done + " / " + (done + count));
                     taskCountText.setContentDescription(done + " completed, " + count + " open tasks");
                     nextTaskText.setVisibility(next == null ? View.GONE : View.VISIBLE);
@@ -1168,7 +1272,7 @@ public class MainActivity extends Activity {
                             : "Next task: " + next.text + ". Open Today.");
                 } else {
                     nextTaskText.setVisibility(next == null ? View.GONE : View.VISIBLE);
-                    nextTaskText.setText(next == null ? "" : "next [" + planner.openTasks() + "]  " + next.text);
+                    nextTaskText.setText(next == null ? "" : "next [" + count + "]  " + next.text);
                 }
             } catch (IllegalStateException error) {
                 if (taskCountText != null) taskCountText.setText(R.string.dashboard_next);
@@ -1177,13 +1281,13 @@ public class MainActivity extends Activity {
                 nextTaskText.setContentDescription(getString(R.string.organizer_unavailable));
             }
         }
+        String sms = Telephony.Sms.getDefaultSmsPackage(this);
         for (int i = 0; i < homeIcons.size(); i++) {
             boolean hasNotification = false;
             for (StatusBarNotification notice : notices) {
                 String pkg = notice.getPackageName();
                 int slot = homeSlotIndices.get(i);
                 String assigned = preferences.getString("shortcut_" + shortcuts[slot], null);
-                String sms = Telephony.Sms.getDefaultSmsPackage(this);
                 boolean messages = romProfile && !tiles.group(shortcuts[slot]) && "messages".equals(tiles.pocket(shortcuts[slot]));
                 if (pkg.equals(assigned) || (messages && (pkg.equals(sms)||assigned==null&&NoticeFeed.message(notice)))
                         || (!romProfile && ((i == 0 && pkg.equals("org.thoughtcrime.securesms"))
@@ -1192,7 +1296,7 @@ public class MainActivity extends Activity {
             }
             homeIcons.get(i).setNotificationDot(hasNotification);
         }
-        if (romProfile) { updateDashboardSources(); updateMovement(); }
+        if (romProfile) { updateDashboardSources(entries == null ? Collections.emptyList() : entries); updateMovement(); }
         if (homeHint != null) {
             AlarmManager manager = (AlarmManager) getSystemService(ALARM_SERVICE);
             AlarmManager.AlarmClockInfo next = manager == null ? null : manager.getNextAlarmClock();
@@ -1383,9 +1487,9 @@ public class MainActivity extends Activity {
         if(source.kind.equals("message")){NoticeFeed.Item notice=NoticeFeed.find(source.ref);if(NotificationAccess.allowed(this)&&notice!=null&&notice.identity().equals(source.identity)){try{NoticeActions.open(this,notice);return;}catch(android.app.PendingIntent.CanceledException|RuntimeException expired){}}Intent app=getPackageManager().getLaunchIntentForPackage(source.pkg);if(app!=null){startActivity(app);return;}}
         String link=source.kind.equals("shared")?source.link():"";if(!link.isEmpty()){startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse(link)));return;}
         TextView context=text(source.text,16,PRIMARY);context.setTextIsSelectable(true);ScrollView scroll=new ScrollView(this);scroll.setPadding(dp(16),dp(8),dp(16),dp(8));scroll.addView(context);new AlertDialog.Builder(this).setTitle(source.name).setView(scroll).setPositiveButton("Close",null).show();}
-    private void refreshDayPlan(){if(planHost==null||destroyed)return;int request=++planRequest,page=pageGeneration;boolean home=homePlan;LinearLayout target=planHost;long selected=CalendarBridge.selected(this);android.content.Context app=getApplicationContext();
+    private void refreshDayPlan(){if(planHost==null||destroyed)return;if(homePlan&&homeGesture.pending()){homePlanRefresh=true;requestHomeRefresh(false);return;}int request=++planRequest,page=pageGeneration;boolean home=homePlan;LinearLayout target=planHost;long selected=CalendarBridge.selected(this);android.content.Context app=getApplicationContext();
         try{drawDayPlan(target,DayPlan.local(app,System.currentTimeMillis()),home);}catch(IllegalStateException failure){return;}
-        appWorker.submit(()->{DayPlan.Result plan;try{plan=DayPlan.read(app,System.currentTimeMillis());}catch(RuntimeException unavailable){return;}appUi.post(()->{if(destroyed||!appVisible||page!=pageGeneration||request!=planRequest||target!=planHost||selected!=CalendarBridge.selected(this))return;drawDayPlan(target,plan,home);motion.dataReady();});});}
+        appWorker.submit(()->{DayPlan.Result plan;try{plan=DayPlan.read(app,System.currentTimeMillis());}catch(RuntimeException unavailable){return;}appUi.post(()->{if(destroyed||!appVisible||page!=pageGeneration||request!=planRequest||target!=planHost||selected!=CalendarBridge.selected(this))return;if(home&&homeGesture.pending()){homePlanRefresh=true;requestHomeRefresh(false);return;}drawDayPlan(target,plan,home);motion.dataReady();});});}
     private void drawDayPlan(LinearLayout target,DayPlan.Result plan,boolean home){
         target.removeAllViews();target.setVisibility(View.VISIBLE);
         if(home){int shown=0;for(DayPlan.Item item:plan.items){if(item.end<=plan.now||item.when>=plan.end)continue;dashboardEvent(target,item,plan);if(++shown==2)break;}target.setVisibility(shown==0?View.GONE:View.VISIBLE);return;}

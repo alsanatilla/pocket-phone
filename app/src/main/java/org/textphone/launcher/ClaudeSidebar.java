@@ -277,6 +277,30 @@ final class ClaudeSidebar extends FrameLayout {
         navigationChanged.run();
     }
 
+    void closeImmediately() {
+        if (destroyed) return;
+        opened = false;
+        capturedSwipe = false;
+        swipeCandidate = false;
+        loading.setPaused(true);
+        stopAnimations();
+        main.removeCallbacks(renderTask);
+        renderQueued = false;
+        View focus = activity.getCurrentFocus();
+        InputMethodManager keyboard = (InputMethodManager) activity.getSystemService(Context.INPUT_METHOD_SERVICE);
+        android.os.IBinder token = focus == null ? getWindowToken() : focus.getWindowToken();
+        if (keyboard != null && token != null) keyboard.hideSoftInputFromWindow(token, 0);
+        if (focus != null) focus.clearFocus();
+        if (dialog != null) { dialog.dismiss(); dialog = null; }
+        pageHost.setImportantForAccessibility(originalAccessibility);
+        panel.setTranslationX(0);
+        panel.setVisibility(View.GONE);
+        dimmer.setAlpha(0);
+        dimmer.setVisibility(View.GONE);
+        previousFocus = new WeakReference<>(null);
+        navigationChanged.run();
+    }
+
     void resume() {
         if (destroyed) return;
         refreshTheme();

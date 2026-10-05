@@ -237,9 +237,13 @@ final class PlannerStore {
     void pinNote(long id,boolean value){synchronized(WRITE_LOCK){Entry note=find(id);if(note==null||!"note".equals(note.kind))throw new IllegalArgumentException("This note was removed.");if(!prefs.edit().putBoolean("note_pin_"+id,value).commit())throw new IllegalStateException("Could not pin the note.");touchNote(id);}}
 
     Entry nextTask() {
+        return nextTask(entries());
+    }
+
+    Entry nextTask(List<Entry> values) {
         Entry best = null;
         long pinned = prefs.getLong("next_task", 0);
-        for (Entry entry : entries()) if ("task".equals(entry.kind) && !entry.done) {
+        for (Entry entry : values) if ("task".equals(entry.kind) && !entry.done) {
             if (entry.id == pinned) return entry;
             if (best == null || compareTasks(entry, best) < 0) best = entry;
         }

@@ -11,7 +11,8 @@ final class PocketLaunch {
         boolean own = intent.getComponent() != null && activity.getPackageName().equals(intent.getComponent().getPackageName());
         if (own
                 && (intent.getFlags() & Intent.FLAG_ACTIVITY_NEW_TASK) != 0) intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        boolean appLaunch = own || Intent.ACTION_MAIN.equals(intent.getAction()) && intent.hasCategory(Intent.CATEGORY_LAUNCHER);
+        boolean home = Intent.ACTION_MAIN.equals(intent.getAction()) && intent.hasCategory(Intent.CATEGORY_HOME);
+        boolean appLaunch = !home && (own || Intent.ACTION_MAIN.equals(intent.getAction()) && intent.hasCategory(Intent.CATEGORY_LAUNCHER));
         if (appLaunch && source != null && source.isAttachedToWindow() && source.getWidth() > 0 && source.getHeight() > 0 && PageMotion.enabled(activity)) {
             activity.startActivity(intent, ActivityOptions.makeScaleUpAnimation(source, 0, 0, source.getWidth(), source.getHeight()).toBundle());
         } else activity.startActivity(intent, null);
