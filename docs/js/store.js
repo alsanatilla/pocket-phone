@@ -53,7 +53,7 @@ export const merge = {
 
 // ── Journal pages: photographed on the phone, read by Claude; each line knows where it sits on the photo. ──
 export const journal = {
-  /** A page uploaded here waits until the phone reads it: only the phone holds the Claude key. */
+  /** A page uploaded here waits until it is read: by the phone, or on demand with Claude from this browser. */
   addWaiting(uid) {
     const doc = load("journal.json"), now = Date.now();
     doc.pages.push({ uid, created: now, updated: now, state: "waiting", title: "", lines: [], groups: [], source: "web" });
@@ -61,6 +61,12 @@ export const journal = {
   },
   /** Pages without a note yet, newest first: waiting, being read, or failed. */
   unread() { return load("journal.json").pages.filter(p => !p.deleted && p.state !== "done").sort((a, b) => b.created - a.created); },
+  get(uid) { return load("journal.json").pages.find(p => p.uid === uid && !p.deleted) || null; },
+  edit(uid, change) {
+    const doc = load("journal.json"), page = doc.pages.find(p => p.uid === uid && !p.deleted);
+    if (!page) throw new Error("This page was removed.");
+    change(page); page.updated = Date.now(); save("journal.json", doc); changed("journal.json"); return page;
+  },
   remove(uid) {
     const doc = load("journal.json"), page = doc.pages.find(p => p.uid === uid); if (!page) return;
     Object.assign(page, { deleted: true, lines: [], groups: [], updated: Date.now() }); save("journal.json", doc); changed("journal.json");

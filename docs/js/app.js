@@ -1,5 +1,6 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
 import * as drive from "./drive.js";
+import * as reader from "./reader.js";
 import { syncNow, describe, onStatus, status } from "./sync.js";
 import { parking, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
 
@@ -67,11 +68,11 @@ function dialog(title, body, actions) {
   });
 }
 const choose = (title, options) => dialog(title, h("div", {}, options.map((label, i) => rowButton(label, "", () => closeDialog(i)))), [["cancel", null]]);
-function ask(title, { value = "", placeholder = "", multiline = false, ok = "save" } = {}) {
-  const field = multiline ? h("textarea", { placeholder }) : h("input", { placeholder, maxlength: 120 });
+function ask(title, { value = "", placeholder = "", multiline = false, ok = "save", password = false, hint = "" } = {}) {
+  const field = multiline ? h("textarea", { placeholder }) : h("input", { type: password ? "password" : "text", placeholder, ...(password ? {} : { maxlength: 120 }) });
   field.value = value;
   if (!multiline) field.addEventListener("keydown", event => { if (event.key === "Enter") closeDialog(field.value); });
-  return dialog(title, field, [["cancel", null], [ok, () => field.value]]);
+  return dialog(title, hint ? h("div", {}, h("p", { class: "small muted", text: hint }), field) : field, [["cancel", null], [ok, () => field.value]]);
 }
 const confirmBox = (title, ok) => dialog(title, null, [["cancel", false], [ok, true]]);
 
@@ -135,7 +136,7 @@ function notesView(uid) {
   const waiting = journal.unread();
   const pages = waiting.length ? [section(`PAGES [${waiting.length}]`, "accent"), waiting.map(page => rowButton(
     "Journal page · " + new Date(page.created).toLocaleDateString([], { day: "2-digit", month: "short" }),
-    page.state === "failed" ? page.error || "could not be read" : page.state === "reading" ? "your phone is reading it…" : page.error || "waiting for your phone to read it",
+    page.state === "failed" ? page.error || "could not be read" : page.state === "reading" ? "reading it…" : page.error || "waiting to be read",
     () => pageDialog(page)))] : null;
   const search = h("input", { placeholder: "find in notes…", "aria-label": "Find in notes", oninput: e => { noteQuery = e.target.value; renderList(location.hash.split("/")[2]); } });
   search.value = noteQuery;
@@ -148,7 +149,7 @@ function notesView(uid) {
   };
   renderList();
   split(body, [picker, pages, search, list], editing ? editor(open, renderList) : h("div", { class: "empty" }, h("div", { class: "empty-title", text: "NOTES" }),
-    h("p", { class: "small muted", text: "Pick a note on the left, or start a new one. Drop photos of journal pages here: your phone reads them and they become notes." })));
+    h("p", { class: "small muted", text: "Pick a note on the left, or start a new one. Drop photos of journal pages here: Claude reads them into notes, on your phone or on demand from a page." })));
 }
 /** Scales a photo like the phone does (long edge 2000 px, upright, JPEG) so Drive and the phone get the same kind of file. */
 async function pagePhoto(file) {
@@ -162,28 +163,59 @@ async function pagePhoto(file) {
   if (!blob) throw new Error(`${file.name} could not be converted.`);
   return { blob, width: canvas.width, height: canvas.height };
 }
-/** Uploads journal photos to Drive as waiting pages. The phone reads them: only it holds the Claude key. */
+/** Uploads journal photos to Drive as waiting pages: read by the phone, or on demand here with Claude. */
 async function uploadPages(files) {
   const images = files.filter(f => f.type.startsWith("image/"));
   if (!images.length) { say("Drop photos (JPEG or PNG) of journal pages."); return; }
-  if (!drive.connected()) { say("Connect Google Drive first (sync, top right): pages go to your Drive and your phone reads them."); return; }
+  if (!drive.connected()) { say("Connect Google Drive first (sync, top right): pages go to your Drive, where your phone can read them."); return; }
   let done = 0;
   for (const file of images) {
     say(`Uploading page ${done + 1} of ${images.length}…`);
     try {
       const photo = await pagePhoto(file), uid = crypto.randomUUID();
       await drive.writeImage(`page-${uid}.jpg`, photo.blob);
-      photos.set(uid, Promise.resolve({ url: URL.createObjectURL(photo.blob), width: photo.width, height: photo.height }));
+      photos.set(uid, Promise.resolve({ url: URL.createObjectURL(photo.blob), width: photo.width, height: photo.height, blob: photo.blob }));
       journal.addWaiting(uid); done++;
     } catch (error) { say(error.message); return; }
   }
   if (location.hash.startsWith("#/notes")) notesView(location.hash.split("/")[2]);
-  say(done === 1 ? "Page uploaded. Your phone reads it on its next sync and it becomes a note." : `${done} pages uploaded. Your phone reads them on its next sync.`);
+  say(done === 1 ? "Page uploaded. Read it here, or your phone reads it on its next sync and it becomes a note." : `${done} pages uploaded. Read them here, or your phone reads them on their next sync.`);
 }
-/** A page that has no note yet: show the photo, and allow taking it back. */
+/** A page that has no note yet: show the photo, read it with Claude here, or take it back. */
 async function pageDialog(page) {
-  const choice = await dialog("Journal page", paperView(page), [["remove", "remove"], ["close", null]]);
-  if (choice === "remove" && await confirmBox("Remove this page? Its photo stays in Drive until your phone syncs.", "remove")) { journal.remove(page.uid); notesView(location.hash.split("/")[2]); }
+  const body = page.state === "reading" || reader.hasKey() ? paperView(page)
+    : h("div", {}, paperView(page), h("p", { class: "small muted", text: "Reading here uses your own Claude API key, kept in this tab only and sent straight to Anthropic. About 1–2¢ per page." }));
+  const actions = page.state === "reading" ? [["close", null]] : [["read with Claude", "read"], ["remove", "remove"], ["close", null]];
+  const choice = await dialog("Journal page", body, actions);
+  if (choice === "read") readPage(page);
+  else if (choice === "remove" && await confirmBox("Remove this page? Its photo stays in Drive until your phone syncs.", "remove")) { journal.remove(page.uid); refreshNotes(); }
+}
+/** Re-renders the notes tab on the page it is showing, after a page changed. */
+function refreshNotes() { if (location.hash.startsWith("#/notes")) notesView(location.hash.split("/")[2]); }
+/** Reads a waiting page here, with the key held for this tab: the same note the phone would store. */
+async function readPage(page) {
+  if (!reader.hasKey() && (await askKey()) == null) return;
+  journal.edit(page.uid, p => { p.state = "reading"; p.error = ""; });
+  refreshNotes(); say("Reading the page with Claude…");
+  let message;
+  try {
+    const { result, cents } = await reader.read(await pageBlob(page.uid));
+    const note = reader.apply(page, result, cents);
+    message = `Page read into “${noteTitle(note)}”.`;
+  } catch (error) {
+    // A later page keeps waiting, for a retry here and for the phone; a permanent problem ends failed.
+    journal.edit(page.uid, p => { p.state = error instanceof reader.Later ? "waiting" : "failed"; p.error = error.message; });
+    message = error.message;
+  }
+  refreshNotes();
+  say(message);
+}
+/** Asks for the Claude key and keeps it for this tab; returns the key, or null if it was not set. */
+async function askKey() {
+  const value = await ask("Claude API key", { placeholder: "sk-ant-…", ok: "save", password: true,
+    hint: "Kept in this tab only, sent straight to Anthropic. Pages are read with Claude Sonnet 5.5, about 1–2¢ each, billed to your Anthropic account." });
+  if (value == null) return null;
+  try { reader.setKey(value); return value; } catch (error) { say(error.message); return null; }
 }
 /** Under a note's title: the date and a plain-text snippet, then its thoughts marked like the preview, by state. */
 function summary(n) {
@@ -297,9 +329,17 @@ function paperPhoto(pageUid) {
     const blob = await drive.readBlob("page-" + pageUid + ".jpg");
     if (!blob) throw new Error("The photo hasn't synced from the phone yet.");
     const url = URL.createObjectURL(blob), image = new Image(); image.src = url; await image.decode();
-    return { url, width: image.naturalWidth, height: image.naturalHeight };
+    return { url, width: image.naturalWidth, height: image.naturalHeight, blob };
   })().catch(error => { photos.delete(pageUid); throw error; }));
   return photos.get(pageUid);
+}
+/** The page photo bytes, from this visit's upload or from Drive; a missing photo keeps the page waiting. */
+async function pageBlob(uid) {
+  if (photos.has(uid)) { try { const photo = await photos.get(uid); if (photo.blob) return photo.blob; } catch { /* ask Drive below */ } }
+  if (!drive.connected()) throw new reader.Later("Connect Google Drive to fetch this page's photo.");
+  try { const blob = await drive.readBlob("page-" + uid + ".jpg"); if (blob) return blob; }
+  catch { throw new reader.Later("Drive could not be reached; the page keeps waiting."); }
+  throw new reader.Later("The photo isn't on Drive yet; it arrives with your phone's next sync.");
 }
 /** One line of the page, cut from the photo by CSS alone: the photo scaled to the width, shifted to the line. */
 function strip(photo, top, bottom) {
@@ -421,7 +461,20 @@ function syncView() {
       if (await confirmBox("Forget the copy in this browser? Your Drive copy and the phone are not touched.", "forget")) {
         Object.keys(localStorage).filter(k => k.startsWith("pocket:")).forEach(k => localStorage.removeItem(k)); syncView();
       }
-    })));
+    }),
+    section("CLAUDE"),
+    rowButton(reader.hasKey() ? "Claude key · set for this tab (" + reader.hint() + ")" : "set Claude API key",
+      reader.hasKey() ? "used to read journal pages here; kept until this tab closes" : "to read journal pages on the web, without the phone",
+      () => keySettings()),
+    h("p", { class: "small muted", text: "Reading a journal page here uses Claude Sonnet 5.5, about 1–2¢ per page. The key stays in this tab, is sent only to Anthropic, and the phone keeps its own key separately." })));
+}
+/** Sets or forgets the Claude key kept for this tab. */
+async function keySettings() {
+  if (reader.hasKey()) {
+    if (await confirmBox("Forget the Claude key in this tab?", "forget")) { reader.clearKey(); syncView(); say("Key forgotten."); }
+    return;
+  }
+  if (await askKey()) { syncView(); say("Key set for this tab."); }
 }
 async function connectFlow(quiet) {
   try { say("Opening Google…"); await drive.connect(quiet); say("Connected. Syncing…"); await syncNow(); route(); }

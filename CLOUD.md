@@ -53,11 +53,11 @@ Serve `docs/` with any static server, for example `npx serve docs -l 8777`, and 
 
 ## Journal pages
 
-Journal (a Pocket app you can put on a tile) keeps photos of paper journal pages. Each page is read once by **Claude Sonnet 5.5** with the user's own Anthropic API key, entered in Journal → Settings and stored only on the phone, encrypted with the Android Keystore. Reading costs about 1–2¢ per page; pages photographed offline wait and are read once the phone is online.
+Journal (a Pocket app you can put on a tile) keeps photos of paper journal pages. Each page is read once by **Claude Sonnet 5.5** with the user's own Anthropic API key, entered in Journal → Settings and stored only on the phone, encrypted with the Android Keystore. Reading costs about 1–2¢ per page; pages photographed offline wait and are read once the phone is online. A waiting page can also be read from the web page, where the key is typed for that tab alone.
 
 Sonnet 5.5 was chosen in a comparison on real handwriting (German cursive, two inks, bleed-through, a brace): it read about 98–100% of the words and placed every line on the photo, where Claude Haiku 4.5 got about three quarters of the words right. The instructions are in `JournalReader.PROMPT`.
 
-Pages can also be added on the web: "+ page" in the notes tab (or dropping photos onto it) uploads the photo to Drive as a waiting page; the phone fetches and reads it on its next sync, since only the phone holds the Claude key.
+Pages can also be added on the web: "+ page" in the notes tab (or dropping photos onto it) uploads the photo to Drive as a waiting page. Opening the page offers **read with Claude**: the browser calls Anthropic directly (the `anthropic-dangerous-direct-browser-access` header) with the key typed for that tab and kept in `sessionStorage`, so it disappears when the tab closes and is never committed or sent anywhere else. If you don't read the page there, the phone fetches the photo and reads it on its next sync as usual. A read that fails only because the network or Claude is busy leaves the page waiting, so the phone can still pick it up.
 
 Each page becomes a note. One note line per handwritten line, so each line keeps its position on the photo (`note_line`, `top`, `bottom`); a page titled "Todos" becomes `- [ ]` items, and a brace with a time such as "ab 16:30" becomes a thought line `>> … @16:30` that parks itself until then. The photo stays the original: on the phone, tap a line of the page to unfold its strip of handwriting, or switch to "paper"; on the web, notes read from a page get "paper" and a ▸ per line in preview.
 

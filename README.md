@@ -48,7 +48,7 @@ The built-in [camera](CAMERA.md) uses Camera2 preview and YUV capture, native au
 
 ## Cloud sync and web
 
-Optional cloud sync copies Parking Lot, Receipt, Dice lists, notes and journal pages to a hidden app folder in your own Google Drive and syncs again whenever the phone is back online. It is off until you turn it on in Settings → Cloud sync; for this the APK now declares the `INTERNET` permission. The same data opens in a web workstation in Pocket's terminal style from [`docs/`](docs/) via GitHub Pages. Journal turns photos of paper journal pages into notes with Claude (your own API key, about 1–2¢ per page) while keeping the photo behind every line. See [CLOUD.md](CLOUD.md) for the merge rule, the journal and the one-time Google setup.
+Optional cloud sync copies Parking Lot, Receipt, Dice lists, notes and journal pages to a hidden app folder in your own Google Drive and syncs again whenever the phone is back online. It is off until you turn it on in Settings → Cloud sync; for this the APK now declares the `INTERNET` permission. The same data opens in a web workstation in Pocket's terminal style from [`docs/`](docs/) via GitHub Pages. Journal turns photos of paper journal pages into notes with Claude (your own API key, about 1–2¢ per page), on the phone or on demand in the web page, while keeping the photo behind every line. See [CLOUD.md](CLOUD.md) for the merge rule, the journal and the one-time Google setup.
 
 ## Downloads
 
