@@ -48,7 +48,7 @@ The built-in [camera](CAMERA.md) uses Camera2 preview and YUV capture, native au
 
 Signed incremental APKs are available in [GitHub Releases](https://github.com/alsanatilla/pocket-phone/releases). This repository is private, so sign in with an account that has access. Install the APK over the existing Pocket Phone app to retain local data. See [USE-POCKET-0.5.13.md](USE-POCKET-0.5.13.md) for installation and setup.
 
-The APK, original source archive, checksum manifest, build status and reviewed native previews are attached to the 0.5.13 release. Signing keys and local SDK settings are excluded from this repository.
+The APK, original source archive, checksum manifest, build status and reviewed native previews are linked from the 0.5.13 release. Downloads are stored on `release-files`, and each link pins the verified file commit. Signing keys and local SDK settings are excluded from this repository.
 
 ## Build and verify
 
