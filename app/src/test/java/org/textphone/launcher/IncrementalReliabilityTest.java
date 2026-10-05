@@ -40,7 +40,7 @@ import org.robolectric.util.ReflectionHelpers;
 
 /** Failure regressions for the installable 0.5.5 increment, using Android providers and activities. */
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = {23, 35})
+@Config(sdk = {24, 35})
 public class IncrementalReliabilityTest {
     private Context context;
     @Before public void setup() {

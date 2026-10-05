@@ -37,7 +37,7 @@ import org.robolectric.shadows.ShadowDialog;
 import org.robolectric.util.ReflectionHelpers;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 public class DailyPolishTest {
     private Context c;
     @Before public void clear(){c=RuntimeEnvironment.getApplication();for(String name:new String[]{"text_phone","pocket_agenda","pocket_planner","pocket_contact_draft","CalculatorActivity"})c.getSharedPreferences(name,0).edit().clear().commit();ClockStore.prefs(c).edit().clear().commit();ShadowAlarmManager.setCanScheduleExactAlarms(true);Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(Manifest.permission.POST_NOTIFICATIONS,Manifest.permission.READ_CONTACTS,Manifest.permission.WRITE_CONTACTS,Manifest.permission.READ_CALENDAR,Manifest.permission.WRITE_CALENDAR);}

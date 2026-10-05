@@ -13,7 +13,7 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 
-@RunWith(RobolectricTestRunner.class) @Config(sdk={23,35})
+@RunWith(RobolectricTestRunner.class) @Config(sdk={24,35})
 public class CorosAuthTest {
     private static final String ISSUER = "https://mcpeu.coros.com";
     static final class Memory implements CorosAuth.Store {

@@ -29,7 +29,7 @@ import org.robolectric.shadows.ShadowAlarmManager;
 import org.robolectric.shadows.ShadowTelecomManager;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = {23, 35})
+@Config(sdk = {24, 35})
 public class PocketAppsTest {
     private Context context;
     @Before public void start() { context = RuntimeEnvironment.getApplication();

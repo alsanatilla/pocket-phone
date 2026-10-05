@@ -26,7 +26,7 @@ import org.robolectric.shadows.ShadowContentResolver;
 import org.robolectric.shadows.ShadowTelephony;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 public class MessageAccessTest{
     private Context c;private SmsStore provider;
     @Before public void start(){c=RuntimeEnvironment.getApplication();Shadows.shadowOf(RuntimeEnvironment.getApplication()).denyPermissions(Manifest.permission.READ_SMS);

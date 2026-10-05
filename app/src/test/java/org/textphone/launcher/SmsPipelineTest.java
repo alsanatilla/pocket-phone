@@ -23,7 +23,7 @@ import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowContentResolver;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = {23,35})
+@Config(sdk = {24,35})
 public class SmsPipelineTest {
     private Context c; private Provider provider;
     @Before public void setup() { c = RuntimeEnvironment.getApplication(); c.getSharedPreferences("pocket_sms_results",0).edit().clear().commit(); provider = new Provider();

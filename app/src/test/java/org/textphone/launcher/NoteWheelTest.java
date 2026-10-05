@@ -24,7 +24,7 @@ import org.robolectric.shadows.ShadowAlertDialog;
 import org.robolectric.util.ReflectionHelpers;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35},qualifiers="w360dp-h800dp-mdpi")
+@Config(sdk={24,35},qualifiers="w360dp-h800dp-mdpi")
 public class NoteWheelTest {
     private ActivityController<MainActivity> controller;
     private MainActivity activity;

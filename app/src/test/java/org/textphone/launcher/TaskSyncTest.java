@@ -18,7 +18,7 @@ import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowAlarmManager;
 
-@RunWith(RobolectricTestRunner.class) @Config(sdk={23,35})
+@RunWith(RobolectricTestRunner.class) @Config(sdk={24,35})
 public class TaskSyncTest {
     private Context phone, other; private PlannerStore store, second;
     @Before public void setup() {

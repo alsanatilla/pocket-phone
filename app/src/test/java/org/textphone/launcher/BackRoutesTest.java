@@ -19,7 +19,7 @@ import org.robolectric.annotation.Config;
 import org.robolectric.util.ReflectionHelpers;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 public class BackRoutesTest {
     private final java.util.List<ActivityController<? extends android.app.Activity>> controllers=new java.util.ArrayList<>();
     @Before public void clear(){RuntimeEnvironment.getApplication().getSharedPreferences("text_phone",0).edit().clear().commit();RuntimeEnvironment.getApplication().getSharedPreferences("pocket_planner",0).edit().clear().commit();RuntimeEnvironment.getApplication().getSharedPreferences("pocket_agenda",0).edit().clear().commit();}

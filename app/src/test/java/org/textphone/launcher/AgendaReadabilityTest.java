@@ -15,7 +15,7 @@ import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 public class AgendaReadabilityTest {
     private ActivityController<AgendaActivity> controller;private AgendaActivity activity;
     @Before public void setup(){RuntimeEnvironment.getApplication().getSharedPreferences("pocket_agenda",0).edit().clear().commit();RuntimeEnvironment.getApplication().getSharedPreferences("text_phone",0).edit().clear().commit();controller=Robolectric.buildActivity(AgendaActivity.class).setup();activity=controller.get();}

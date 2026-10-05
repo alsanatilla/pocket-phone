@@ -35,7 +35,7 @@ import org.robolectric.util.ReflectionHelpers;
 
 /** Exercise the actual send button/provider handoff while the user keeps navigating. */
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = {23, 35})
+@Config(sdk = {24, 35})
 public class MessageComposerTest {
     private static final String NUMBER = "+49305550100", OTHER = "+491705550200";
     private Context context; private SmsStore store; private ActivityController<MessagesActivity> controller;

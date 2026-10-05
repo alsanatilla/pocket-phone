@@ -17,7 +17,7 @@ import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 public class PermissionsActivityTest {
     @Test public void explainsSensitiveAccessWithoutRequestingPermissionsAndOpensAndroidControls() {
         Shadows.shadowOf(RuntimeEnvironment.getApplication()).denyPermissions(Manifest.permission.READ_CONTACTS,Manifest.permission.READ_SMS);

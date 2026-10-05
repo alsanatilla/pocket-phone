@@ -1,6 +1,6 @@
 # Pocket Phone
 
-Native Android dashboard and compact apps for the Nothing Phone (3a). Version 0.5.17 runs on Android 6 and newer, including the existing Nothing OS installation. It is currently a launcher/app component; no full ROM image has been compiled or verified for daily use.
+Native Android dashboard and compact apps for the Nothing Phone (3a). Version 0.5.17 runs on Android 7 and newer, including the existing Nothing OS installation. Native chat cancellation uses Android 7's CompletableFuture APIs. It is currently a launcher/app component; no full ROM image has been compiled or verified for daily use.
 
 Native chat sits alongside the home dashboard. Swipe left across the right half of Home, Today or Tools, away from the screen edges, or tap Chat in the Home or Today footer. Back closes the sidebar. Replies stream directly from the selected provider on the phone, with Stop/Retry, Markdown and local history. No PC is required. Chat history and drafts stay on the phone and are excluded from Drive sync. An installable update still needs the existing release signing key.
 

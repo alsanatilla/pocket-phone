@@ -30,7 +30,7 @@ import org.robolectric.shadows.util.DataSource;
 import org.robolectric.util.ReflectionHelpers;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = {23, 35})
+@Config(sdk = {24, 35})
 public class AlarmReliabilityTest {
     private Context context; private ServiceController<AlarmService> controller; private AlarmService service; private Uri fallback;
     @Before public void setup() {

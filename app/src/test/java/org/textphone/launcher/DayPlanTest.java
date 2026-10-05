@@ -23,7 +23,7 @@ import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowContentResolver;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk={23,35})
+@Config(sdk={24,35})
 public class DayPlanTest {
     private Context context;private long now;private EventsProvider provider;
     @Before public void setup(){context=RuntimeEnvironment.getApplication();context.getSharedPreferences("pocket_agenda",0).edit().clear().commit();Shadows.shadowOf((Application)context).grantPermissions(Manifest.permission.READ_CALENDAR);Calendar date=Calendar.getInstance();date.set(2026,Calendar.OCTOBER,5,12,0,0);date.set(Calendar.MILLISECOND,0);now=date.getTimeInMillis();provider=Robolectric.buildContentProvider(EventsProvider.class).create().get();ShadowContentResolver.registerProviderInternal("com.android.calendar",provider);}
