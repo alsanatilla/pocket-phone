@@ -89,10 +89,12 @@ export function parkThought(uid, item) {
   if (!existing) doc.items.push(parked);
   save("parking.json", doc); changed("parking.json"); receipt.log(KIND.PARK, parked.text); return parked;
 }
+/** Whether this note line already has a Parking item, in any state. */
+export const thoughtParked = (uid, key) => Boolean(uid) && load("parking.json").items.some(i => String(i.id) === String(thoughtId(uid, key)));
 export function thoughtStatus(uid, text, now = Date.now()) {
-  const t = thought(text); if (!t || !uid) return "parks when the line is done";
+  const t = thought(text); if (!t || !uid) return "not parked yet";
   const item = load("parking.json").items.find(i => String(i.id) === String(thoughtId(uid, t.key)));
-  if (!item) return "parks when the line is done";
+  if (!item) return "not parked yet";
   if (item.state === "cleared") return "cleared"; if (item.state === "killed") return "let go"; if (item.state === "task") return "moved to Today";
   return item.due <= now ? "back now" : "back " + relative(item.due, now);
 }

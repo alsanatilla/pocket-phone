@@ -1,7 +1,7 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
 import * as drive from "./drive.js";
 import { syncNow, describe, onStatus, status } from "./sync.js";
-import { parking, receipt, dice, notes, noteTitle, thought, thoughtStatus, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
+import { parking, receipt, dice, notes, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -161,7 +161,8 @@ function editor(note, onSaved = () => {}) {
   // Thought lines already handled in this note, counted per line text. A line parks once the cursor has left it,
   // so a half-typed ">> cal" never parks; revisiting an old line without changing it never parks it again.
   let seen = new Map();
-  for (const line of area.value.split("\n")) { const t = thought(line); if (t) seen.set(t.key, (seen.get(t.key) || 0) + 1); }
+  // A line counts as handled only if its thought exists in Parking; anything else parks once the line is finished.
+  for (const line of area.value.split("\n")) { const t = thought(line); if (t && thoughtParked(uid, t.key)) seen.set(t.key, (seen.get(t.key) || 0) + 1); }
   const parkFinished = finished => {
     const cursor = area.value.slice(0, area.selectionStart).split("\n").length - 1, counts = new Map(), fresh = [];
     area.value.split("\n").forEach((line, i) => {

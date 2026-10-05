@@ -40,14 +40,23 @@ final class NoteThoughts {
         return ID_BASE + (hash & 0xffffffffL);
     }
 
-    /** After a note is saved: park each thought line that the previous text did not have. */
+    /**
+     * After a note is saved: park each thought line that is new, or that never became a Parking item
+     * (for example a line that arrived by sync before its thought did). Unchanged parked lines are left alone.
+     */
     static int parkNew(Context c, PlannerStore store, long noteId, String before, String after) {
+        List<Thought> current = parse(after);
+        if (current.isEmpty()) return 0;
+        String uid = NoteSync.uid(store, noteId);
         Map<String, Integer> old = new HashMap<>();
-        for (Thought t : parse(before == null ? "" : before)) { Integer n = old.get(t.key); old.put(t.key, n == null ? 1 : n + 1); }
+        for (Thought t : parse(before == null ? "" : before)) {
+            if (ParkingStore.find(c, id(uid, t.key)) == null) continue;
+            Integer n = old.get(t.key); old.put(t.key, n == null ? 1 : n + 1);
+        }
         List<Thought> added = new ArrayList<>();
-        for (Thought t : parse(after)) { Integer n = old.get(t.key); if (n != null && n > 0) old.put(t.key, n - 1); else added.add(t); }
+        for (Thought t : current) { Integer n = old.get(t.key); if (n != null && n > 0) old.put(t.key, n - 1); else added.add(t); }
         if (added.isEmpty()) return 0;
-        String uid = NoteSync.uid(store, noteId); int parked = 0; long now = System.currentTimeMillis();
+        int parked = 0; long now = System.currentTimeMillis();
         for (Thought t : added) {
             ParkingStore.Item item = ParkingStore.parkFromNote(c, id(uid, t.key), t.text, ParkingStore.when(t.delay, now), uid);
             if (item != null) { parked++; ReceiptTape.log(c, ReceiptTape.PARK, item.text); }
@@ -69,7 +78,7 @@ final class NoteThoughts {
         return out.length() > 0 ? out.substring(0, out.length() - 1) : "";
     }
     static String status(ParkingStore.Item item, long now) {
-        if (item == null) return "parks when you save";
+        if (item == null) return "not parked yet";
         if (ParkingStore.CLEARED.equals(item.state)) return "cleared";
         if (ParkingStore.KILLED.equals(item.state)) return "let go";
         if (ParkingStore.TASK.equals(item.state)) return "moved to Today";
