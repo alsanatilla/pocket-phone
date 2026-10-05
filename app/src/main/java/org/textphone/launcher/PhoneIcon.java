@@ -205,6 +205,14 @@ final class PhoneIcon extends View {
                 canvas.drawRect(7, 10, 14, 12, paint);
                 canvas.drawRect(7, 15, 17, 17, paint);
                 break;
+            case 19: // Open notebook with handwriting.
+                fill();
+                polygon(canvas, 1, 4, 11, 6, 11, 22, 1, 20);
+                polygon(canvas, 13, 6, 23, 4, 23, 20, 13, 22);
+                paint.setColor(cutout);
+                canvas.drawRect(3, 9, 9, 10.5f, paint); canvas.drawRect(3, 13, 8, 14.5f, paint);
+                canvas.drawRect(15, 9, 21, 10.5f, paint); canvas.drawRect(15, 13, 20, 14.5f, paint);
+                break;
             case 18: // Any installed app.
                 canvas.drawRoundRect(bounds(3, 3, 21, 21), 4, 4, paint);
                 fill(); canvas.drawRect(9, 9, 15, 15, paint);

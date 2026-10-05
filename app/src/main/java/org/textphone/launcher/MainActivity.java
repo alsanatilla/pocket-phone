@@ -122,6 +122,7 @@ public class MainActivity extends Activity {
     private TextView homeDay;
     private TextView homeHint;
     private boolean receiverRegistered;
+    private long notesRevision;
     private CameraManager cameraManager;
     private String torchCamera;
     private boolean torchOn;
@@ -141,6 +142,7 @@ public class MainActivity extends Activity {
 
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
+            if (CloudSync.ACTION_SYNCED.equals(intent.getAction())) { if ("today".equals(screen)) render(); return; }
             if ("home".equals(screen)) updateHome();
             else if ("notifications".equals(screen)
                     && PhoneNotifications.ACTION_UPDATED.equals(intent.getAction())) render();
@@ -210,6 +212,7 @@ public class MainActivity extends Activity {
         if (!workspace() && Intent.ACTION_MAIN.equals(getIntent().getAction()) && getIntent().hasCategory(Intent.CATEGORY_HOME)) { screen = "home"; trail.clear(); }
         if (!validScreen(screen)) screen = "home";
         long task=getIntent().getLongExtra("pocket_task",0);if(savedInstanceState==null&&task>0){captureId=task;captureKind="task";screen="task_detail";if(trail.peek()==null)trail.push(new RouteTrail.Route("today",0,"note",null,"home",""));}
+        long note=getIntent().getLongExtra("pocket_note",0);PlannerStore.Entry linked=note>0?planner.find(note):null;if(savedInstanceState==null&&linked!=null){captureId=note;captureKind="note";captureText=planner.hasDraft("note",note)?planner.draft("note",note):linked.text;screen="note_preview";if(trail.peek()==null)trail.push(new RouteTrail.Route("today",0,"note",null,"home",""));}
         setupTorch();
         render();
         if (savedInstanceState == null) receiveSharedText(getIntent());
@@ -229,6 +232,8 @@ public class MainActivity extends Activity {
         filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         filter.addAction(AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED);
         filter.addAction(PhoneNotifications.ACTION_UPDATED);
+        filter.addAction(CloudSync.ACTION_SYNCED);
+        notesRevision = planner.notesRevision(); CloudSync.soon(this);
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(statusReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {
@@ -265,6 +270,8 @@ public class MainActivity extends Activity {
 
     @Override protected void onStop() {
         persistDraft();
+        // Notes edited on this visit go to the cloud once the phone is online.
+        if (planner.notesRevision() != notesRevision) CloudSync.changed(this);
         if ("capture".equals(screen)) { stoppedDraft = captureText; stoppedDraftKind = captureKind; stoppedDraftId = captureId; stoppedDue = captureDue; stoppedImportant = captureImportant; stoppedSteps = captureSteps; }
         motion.discardHistory();
         appVisible = false; installedApps = null; indexVersion++; filterGeneration++; if (appFilter != null) appUi.removeCallbacks(appFilter);
@@ -312,6 +319,7 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         if(intent.getLongExtra("pocket_task",0)>0){captureKind="task";openTask(intent.getLongExtra("pocket_task",0));return;}
+        if(intent.getLongExtra("pocket_note",0)>0){openNote(intent.getLongExtra("pocket_note",0));return;}
         if (receiveSharedText(intent)) return;
         if ("today".equals(intent.getStringExtra("pocket_screen"))) { navigate("today"); return; }
         if ("notifications".equals(intent.getStringExtra("pocket_screen"))) { navigate("notifications"); return; }
@@ -859,6 +867,9 @@ public class MainActivity extends Activity {
     private void openPocket(Class<? extends android.app.Activity> activity) {
         turnOffOwnedTorch(); startActivity(new Intent(this, activity).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
     }
+    private void openPocket(Class<? extends android.app.Activity> activity, String page) {
+        turnOffOwnedTorch(); startActivity(new Intent(this, activity).putExtra("page", page).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+    }
     @Override public void startActivity(Intent intent) {
         View source = launchOrigin;
         if (source == null && "home".equals(screen) && selectedShortcut < homeTiles.size()) source = homeTiles.get(selectedShortcut);
@@ -1154,6 +1165,7 @@ public class MainActivity extends Activity {
         action("All apps", 18, PRIMARY, () -> navigate("apps"));
         action("Phone settings", 18, PRIMARY, () -> openPocket(DeviceSettingsActivity.class));
         action("Permissions", 18, PRIMARY, () -> openPocket(PermissionsActivity.class));
+        if (romProfile) action("Cloud sync", 18, PRIMARY, () -> openPocket(CloudActivity.class));
         flexibleSpace();
         addFeedback();
         TextView version = text("Pocket Phone 0.5.13\nHold a shortcut to change its app or name.", 13, SECONDARY);
@@ -1498,12 +1510,23 @@ public class MainActivity extends Activity {
         addFeedback();
     }
 
+    /** Opens a note's preview, for example from a thought in the Parking Lot. */
+    private void openNote(long id) {
+        PlannerStore.Entry note = planner.find(id);
+        if (note == null || !"note".equals(note.kind)) { showFeedback("This note was removed."); return; }
+        persistDraft(); captureKind = "note"; captureId = id;
+        captureText = planner.hasDraft("note", id) ? planner.draft("note", id) : note.text;
+        navigate("note_preview");
+    }
+
     private void saveCapture(EditText editorForPage, boolean task) {
         if (captureEditor != editorForPage || !"capture".equals(screen)) return;
         plannerAction(() -> {
             long saved;
             if (task) {saved = planner.saveTask(captureId, captureEditor.getText().toString(), captureDue, captureImportant, captureStepsEditor.getText().toString());if(captureId!=0)TaskReminders.rename(this,saved,captureEditor.getText().toString().trim());}
-            else saved = planner.save(captureId, captureKind, captureEditor.getText().toString());
+            else { PlannerStore.Entry before = captureId == 0 ? null : planner.find(captureId); String text = captureEditor.getText().toString();
+                saved = planner.save(captureId, captureKind, text);
+                if ("note".equals(captureKind)) { int parked = NoteThoughts.parkNew(this, planner, saved, before == null ? "" : before.text, text); if (parked > 0) showFeedback(parked == 1 ? "1 thought parked." : parked + " thoughts parked."); } }
             planner.clearDraft(captureKind, captureId);
             hideKeyboard(captureEditor); captureEditor = null; captureStepsEditor = null; captureText = "";
             captureId = saved; captureSelectionStart = captureSelectionEnd = -1;
@@ -1578,7 +1601,7 @@ public class MainActivity extends Activity {
                 })
                 .usePlugin(io.noties.markwon.ext.tasklist.TaskListPlugin.create(accent(), accent(), BACKGROUND))
                 .usePlugin(io.noties.markwon.ext.strikethrough.StrikethroughPlugin.create())
-                .build().setMarkdown(preview, captureText);
+                .build().setMarkdown(preview, "note".equals(captureKind) ? NoteThoughts.annotate(this, planner, captureId, captureText) : captureText);
         content.addView(preview, new LinearLayout.LayoutParams(-1, -2, 1)); gap(16);
         LinearLayout tools = new LinearLayout(this); tools.setTag("preview_actions");
         TextView edit = actionInto(tools, "Edit", 14, accent(), () -> navigate("capture"));
@@ -1586,7 +1609,11 @@ public class MainActivity extends Activity {
                 .setType("text/plain").putExtra(Intent.EXTRA_TEXT, captureText), "Share note")));
         TextView make=actionInto(tools,"Task",14,PRIMARY,this::captureNoteTask);
         TextView more=actionInto(tools,"More",14,SECONDARY,()->{if(captureId==0)showFeedback("Save this note to pin it.");else{PlannerStore.Entry note=planner.find(captureId);if(note!=null)entryMenu(note);else showFeedback("This note was removed.");}});
-        for (TextView control : new TextView[]{edit, share,make,more}) {
+        // A note read from a journal page shows the handwriting behind it.
+        String noteUid = captureId == 0 ? null : NoteSync.existingUid(planner, captureId);
+        org.json.JSONObject page = JournalStore.forNote(this, noteUid);
+        if (page != null) { String pageUid = page.optString("uid"); actionInto(tools, "Paper", 14, PRIMARY, () -> openPocket(JournalPageActivity.class, pageUid)).setTag("note_paper"); }
+        for (TextView control : page == null ? new TextView[]{edit, share,make,more} : new TextView[]{edit, share, make, more, tools.findViewWithTag("note_paper")}) {
             PocketDesign.control(control); PocketDesign.quiet(control, control == edit ? accent() : PRIMARY);
             control.setMinHeight(dp(56)); control.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
         }

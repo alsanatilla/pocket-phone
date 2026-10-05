@@ -16,7 +16,7 @@ import org.json.JSONObject;
 
 /** A private day log of things Pocket itself did. It never reads other apps, calls or messages. */
 final class ReceiptTape {
-    static final String ALARM = "ALARM", DONE = "DONE", PHOTO = "PHOTO", ROLL = "ROLL", PARK = "PARK", CLEAR = "CLEAR", KILL = "KILL", TASK = "TASK", MEMO = "MEMO";
+    static final String ALARM = "ALARM", DONE = "DONE", PHOTO = "PHOTO", ROLL = "ROLL", PARK = "PARK", CLEAR = "CLEAR", KILL = "KILL", TASK = "TASK", MEMO = "MEMO", PAGE = "PAGE";
     static final int KEEP_DAYS = 30, DAY_LIMIT = 300;
     static final class Line {
         final long when; final String kind, text;
@@ -37,12 +37,12 @@ final class ReceiptTape {
                 SharedPreferences p = prefs(c); String key = "day_" + day(when);
                 JSONArray lines = new JSONArray(p.getString(key, "[]"));
                 if (lines.length() >= DAY_LIMIT) return;
-                lines.put(new JSONObject().put("t", when).put("k", kind).put("x", value));
+                lines.put(new JSONObject().put("i", Long.toString(when, 36) + "-" + Integer.toString(new java.util.Random().nextInt(1 << 30), 36)).put("t", when).put("k", kind).put("x", value));
                 SharedPreferences.Editor edit = p.edit().putString(key, lines.toString());
                 Calendar oldest = Calendar.getInstance(); oldest.setTimeInMillis(when); oldest.add(Calendar.DAY_OF_MONTH, -KEEP_DAYS);
                 String cutoff = "day_" + day(oldest.getTimeInMillis());
                 for (String existing : p.getAll().keySet()) if (existing.startsWith("day_") && existing.compareTo(cutoff) < 0) edit.remove(existing);
-                edit.apply();
+                edit.apply(); CloudSync.changed(c);
             }
         } catch (JSONException | RuntimeException ignored) { /* The receipt is optional; the original action already happened. */ }
     }
@@ -56,6 +56,35 @@ final class ReceiptTape {
             } catch (JSONException ignored) { /* A damaged day reads as empty. */ }
         }
         java.util.Collections.sort(lines, (a, b) -> Long.compare(a.when, b.when));
+        return lines;
+    }
+    /** Cloud document: {"v":1,"days":{"yyyyMMdd":[{"i","t","k","x"}]}}. Lines never change, so a day is the union of both copies. */
+    static JSONObject merge(Context c, JSONObject remote) throws JSONException {
+        synchronized (LOCK) {
+            SharedPreferences p = prefs(c); JSONObject remoteDays = remote == null ? null : remote.optJSONObject("days");
+            Calendar oldest = Calendar.getInstance(); oldest.add(Calendar.DAY_OF_MONTH, -KEEP_DAYS); String cutoff = day(oldest.getTimeInMillis());
+            java.util.Set<String> days = new java.util.TreeSet<>();
+            for (String key : p.getAll().keySet()) if (key.startsWith("day_")) days.add(key.substring(4));
+            if (remoteDays != null) for (java.util.Iterator<String> it = remoteDays.keys(); it.hasNext(); ) { String day = it.next(); if (day.matches("\\d{8}")) days.add(day); }
+            JSONObject out = new JSONObject(); SharedPreferences.Editor edit = p.edit();
+            for (String day : days) {
+                if (day.compareTo(cutoff) < 0) { edit.remove("day_" + day); continue; }
+                JSONArray merged = SyncMerge.byId(withIds(new JSONArray(p.getString("day_" + day, "[]"))),
+                        remoteDays == null ? null : withIds(remoteDays.optJSONArray(day)), "i", "t");
+                List<JSONObject> sorted = new ArrayList<>(); for (int i = 0; i < merged.length(); i++) sorted.add(merged.getJSONObject(i));
+                java.util.Collections.sort(sorted, (a, b) -> Long.compare(a.optLong("t"), b.optLong("t")));
+                JSONArray lines = new JSONArray(); for (int i = 0; i < Math.min(DAY_LIMIT, sorted.size()); i++) lines.put(sorted.get(i));
+                edit.putString("day_" + day, lines.toString()); out.put(day, lines);
+            }
+            if (!edit.commit()) throw new IllegalStateException("Could not save the receipt.");
+            return new JSONObject().put("v", 1).put("days", out);
+        }
+    }
+    /** Lines from before sync get an id both copies derive the same way. */
+    private static JSONArray withIds(JSONArray lines) throws JSONException {
+        if (lines == null) return new JSONArray();
+        for (int i = 0; i < lines.length(); i++) { JSONObject line = lines.optJSONObject(i);
+            if (line != null && !line.has("i")) line.put("i", "legacy-" + line.optLong("t") + "-" + Integer.toHexString((line.optString("k") + line.optString("x")).hashCode())); }
         return lines;
     }
     static int count(List<Line> lines, String kind) { int total = 0; for (Line line : lines) if (kind.equals(line.kind)) total++; return total; }

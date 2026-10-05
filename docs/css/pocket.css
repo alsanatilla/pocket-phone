@@ -1,0 +1,146 @@
+/* Pocket's visual language on a bigger screen: black, white, one accent, VT323 headings, no idle dividers. See DESIGN.md. */
+@font-face { font-family: "VT323"; src: url("../fonts/VT323-Regular.ttf") format("truetype"); font-display: swap; }
+
+:root {
+  --black: #000; --white: #fff; --muted: #aaa; --line: #303438; --disabled: #858b91;
+  --accent: #f9f594; --warning: #ffbf69;
+  --paper: #f2efe6; --ink: #161616; --faded: #6b675e;
+  --mono: ui-monospace, "DejaVu Sans Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --pixel: "VT323", var(--mono);
+  --control: 52px; --row: 56px; --gutter: clamp(16px, 4vw, 48px);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--black); color: var(--white); }
+body { font: 16px/1.4 var(--mono); -webkit-font-smoothing: antialiased; }
+[hidden] { display: none !important; }
+.muted { color: var(--muted); } .meta { font-size: 12px; } .small { font-size: 14px; }
+.warn { color: var(--warning); } .accent { color: var(--accent); } .center { text-align: center; }
+p { margin: 8px 0; }
+
+/* Controls: black at rest; hover, focus or selection is a single accent rule under the control. */
+button { font: inherit; color: var(--white); background: var(--black); border: 0; border-radius: 2px; min-height: var(--control);
+  padding: 8px; cursor: pointer; text-align: center; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+button:disabled { color: var(--disabled); cursor: default; }
+button:not(:disabled):hover, button:focus-visible, button.selected { color: var(--accent); box-shadow: inset 0 -1px 0 var(--accent); outline: none; }
+button:not(:disabled):active { background: rgba(249, 245, 148, .2); }
+.row-button { display: block; width: 100%; min-height: var(--row); text-align: left; padding: 10px 0; font-size: 16px; white-space: pre-line; overflow-wrap: anywhere; }
+.row-button .sub { display: block; color: var(--muted); font-size: 13px; }
+.primary { color: var(--accent); min-height: var(--row); width: 100%; }
+.keys { display: flex; gap: 4px; margin: 8px 0; }
+.keys > * { flex: 1; min-width: 0; font-size: 14px; }
+input, textarea { font: 18px var(--mono); color: var(--white); background: var(--black); border: 0; border-radius: 0; width: 100%;
+  padding: 12px 0; min-height: var(--control); caret-color: var(--accent); }
+input::placeholder, textarea::placeholder { color: var(--muted); }
+input:focus, textarea:focus { outline: none; box-shadow: inset 0 -1px 0 var(--accent); }
+textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
+.section { font-size: 12px; letter-spacing: .06em; margin: 20px 0 4px; }
+.section:first-child { margin-top: 8px; }
+
+/* Bar: brand, the tools as numbered tabs, sync status. */
+.app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+.bar { position: sticky; top: 0; z-index: 5; background: var(--black); display: flex; align-items: center; gap: 8px 24px; flex-wrap: wrap;
+  padding: 8px max(var(--gutter), calc((100% - 1160px) / 2 + var(--gutter))); }
+.brand { font: 28px/1 var(--pixel); color: var(--accent); letter-spacing: .02em; }
+.tabs { display: flex; gap: 4px; flex: 1; overflow-x: auto; scrollbar-width: none; }
+.tab { font: 22px/1 var(--pixel); color: var(--muted); min-height: 48px; padding: 8px 12px; white-space: nowrap; }
+.tab .key { font-size: 16px; color: var(--disabled); margin-right: 6px; }
+.tab.active { color: var(--white); box-shadow: inset 0 -2px 0 var(--accent); }
+.status { font-size: 11px; letter-spacing: .06em; color: var(--accent); min-height: 48px; padding: 8px 0; text-align: right; }
+
+/* Work area: a tool fills the width; columns separate by space alone. */
+.content { flex: 1; width: 100%; max-width: 1160px; margin: 0 auto; padding: 8px var(--gutter) 24px; }
+.toolbar { display: flex; justify-content: flex-end; gap: 4px; }
+.toolbar button { font-size: 14px; color: var(--muted); min-height: 44px; }
+.tool.enter { animation: enter .12s ease-out; }
+@keyframes enter { from { opacity: 0; transform: translateY(6px); } }
+.split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 0 clamp(32px, 6vw, 96px); align-items: start; }
+.tool-notes .split { grid-template-columns: minmax(240px, 1fr) minmax(0, 2.4fr); }
+.tool-receipt .split { grid-template-columns: minmax(200px, 1fr) minmax(0, 2fr); }
+.narrow { max-width: 620px; }
+.narrow-only { display: none; }
+.empty { min-height: 50vh; display: flex; flex-direction: column; justify-content: center; }
+.empty-title { font: 60px/1 var(--pixel); color: var(--line); }
+
+/* Parking */
+.thought { font-size: 17px; margin: 14px 0 2px; overflow-wrap: anywhere; }
+
+/* Notes */
+.note-list { max-height: calc(100vh - 220px); overflow-y: auto; scrollbar-width: thin; }
+.editor-bar { display: flex; align-items: center; gap: 4px; }
+.editor-bar .spacer { flex: 1; }
+.editor-bar button { font-size: 14px; min-height: 44px; }
+.note-editor { min-height: calc(100vh - 240px); font-size: 17px; resize: none; padding: 12px 0; }
+.md { min-height: calc(100vh - 240px); font-size: 16px; line-height: 1.55; overflow-wrap: anywhere; }
+.md h2, .md h3, .md h4 { font-family: var(--pixel); font-weight: normal; margin: 18px 0 6px; line-height: 1.1; }
+.md h2 { font-size: 34px; } .md h3 { font-size: 28px; } .md h4 { font-size: 24px; }
+.md p { margin: 6px 0; } .md ul, .md ol { padding-left: 24px; margin: 6px 0; } .md ul.tasks { list-style: none; padding-left: 0; }
+.md code { color: var(--accent); } .md pre { background: #0c0c0c; padding: 12px; overflow-x: auto; }
+.md blockquote { margin: 8px 0; padding-left: 12px; color: var(--muted); box-shadow: inset 2px 0 0 var(--line); }
+.md a { color: var(--accent); }
+
+/* Dice */
+.result { font: 72px/1 var(--pixel); text-align: center; min-height: 160px; display: flex; align-items: center; justify-content: center; overflow-wrap: anywhere; }
+.result.long { font-size: 40px; }
+
+/* Receipt: the one paper surface. */
+.roll { max-width: 440px; margin: 0 auto; }
+.tear { height: 8px; background: linear-gradient(135deg, var(--paper) 4px, transparent 0) 0 0 / 12px 8px repeat-x,
+                                 linear-gradient(225deg, var(--paper) 4px, transparent 0) 0 0 / 12px 8px repeat-x; }
+.tear.top { transform: rotate(180deg); }
+.paper { background: var(--paper); color: var(--ink); padding: 14px 16px 18px; font-size: 12px; }
+.paper .title { font: 26px/1 var(--pixel); text-align: center; }
+.paper .c { text-align: center; padding: 2px 0; } .paper .b { font-weight: bold; }
+.paper .rule { color: var(--faded); overflow: hidden; white-space: nowrap; padding: 6px 0; }
+.paper .line { display: grid; grid-template-columns: 9ch 6ch 1fr; padding: 2px 0; }
+.paper .line .t { color: var(--faded); white-space: nowrap; }
+.paper .total { display: flex; justify-content: space-between; font-size: 14px; }
+.paper .bars { font-size: 16px; letter-spacing: -.05em; }
+
+/* Narrow windows and phones: one column; the notes list and the open note take turns. */
+@media (max-width: 899px) {
+  .split, .tool-notes .split, .tool-receipt .split { grid-template-columns: minmax(0, 1fr); }
+  .wide-only { display: none; } .narrow-only { display: block; }
+  .editor-bar .narrow-only { display: inline-block; }
+  .tool-notes.editing .split > .col:first-child { display: none; }
+  .tool-notes:not(.editing) .split > .col:last-child { display: none; }
+  .note-list { max-height: none; }
+  .bar { gap: 0 12px; padding: 4px 16px; }
+  .brand { font-size: 24px; }
+  .tab { font-size: 20px; padding: 8px; }
+  .status { flex-basis: 100%; text-align: left; min-height: 28px; padding: 0 0 4px; }
+}
+
+/* Dialogs follow Pocket's list dialog: title, choices, cancel. */
+.dialog { position: fixed; inset: 0; background: rgba(0, 0, 0, .72); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 10; }
+.dialog .box { background: #111; width: 100%; max-width: 420px; padding: 16px 20px 8px; border: 1px solid var(--line); }
+.dialog h2 { font: 26px/1.1 var(--pixel); margin: 0 0 8px; overflow-wrap: anywhere; }
+.dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
+.dialog .actions button { color: var(--accent); min-height: 48px; }
+
+.notice { position: sticky; bottom: 0; background: var(--black); color: var(--warning); font-size: 12px; min-height: 32px; padding: 8px max(var(--gutter), calc((100% - 1160px) / 2 + var(--gutter))); }
+.notice:empty { visibility: hidden; }
+
+@media (prefers-reduced-motion: reduce) { .tool.enter { animation: none; } }
+
+@media print {
+  /* Only the paper prints. */
+  body { background: #fff; } body * { visibility: hidden; } .dialog { display: none !important; }
+  .paper, .paper * { visibility: visible; } .paper { position: absolute; left: 0; top: 0; width: 80mm; background: #fff; }
+}
+.source { font-size: 12px; color: var(--accent); min-height: 36px; padding: 4px 0; text-align: left; }
+.thought-line { margin: 6px 0; }
+/* Thoughts under a note's title in the list, marked like the preview: open, back now, or done. */
+.row-button .chip { display: block; color: var(--accent); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-button .chip.back { color: var(--warning); }
+.row-button .chip.done { color: var(--disabled); text-decoration: line-through; }
+.row-button .chip.more { color: var(--muted); }
+/* Journal pages: the photo stays the original. A handle unfolds a line's strip; "paper" shows the page with a band per line. */
+.strip-toggle { min-height: 0; padding: 0 8px 0 0; font-size: 12px; color: var(--accent); background: none; }
+.strip { display: block; width: 100%; margin: 6px 0 10px; background-repeat: no-repeat; background-size: 100% auto; border-radius: 2px; }
+.paper-view { min-height: 40vh; }
+.paper-frame { position: relative; line-height: 0; }
+.paper-frame img { width: 100%; height: auto; display: block; }
+.paper-frame .band { position: absolute; left: 0; right: 0; background: rgba(249, 245, 148, .14); box-shadow: inset 0 -1px 0 rgba(249, 245, 148, .5); }
+.paper-frame .band:hover { background: rgba(249, 245, 148, .32); }
+.tool-notes.dropping { box-shadow: inset 0 0 0 2px var(--accent); }
+.dialog .paper-view { min-height: 0; max-height: 60vh; overflow-y: auto; }

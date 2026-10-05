@@ -5,7 +5,7 @@ import android.app.Activity;
 /** Pocket's own apps that a dashboard tile or tile group can open. Ids are stored, so never rename one. */
 final class PocketApps {
     static final String[] IDS = {"phone", "messages", "contacts", "clock", "camera", "calculator",
-            "files", "today", "settings", "dice", "parking", "receipt"};
+            "files", "today", "settings", "dice", "parking", "receipt", "journal"};
     static final int GROUP_ICON = 14, APP_ICON = 18;
 
     static boolean known(String id) { for (String value : IDS) if (value.equals(id)) return true; return false; }
@@ -24,6 +24,7 @@ final class PocketApps {
             case "dice": return 15;
             case "parking": return 16;
             case "receipt": return 17;
+            case "journal": return 19;
             default: return APP_ICON;
         }
     }
@@ -41,6 +42,7 @@ final class PocketApps {
             case "dice": return DiceActivity.class;
             case "parking": return ParkingActivity.class;
             case "receipt": return ReceiptActivity.class;
+            case "journal": return JournalActivity.class;
             default: return null;
         }
     }
