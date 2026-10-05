@@ -16,6 +16,14 @@ Every local change asks Android for a sync job that waits for any network, so ed
 
 The web page in [`docs/`](docs/) is a workstation for Parking Lot, notes, Receipt and Dice in Pocket's terminal style: numbered tool tabs, two-column layouts on wide windows and one column on phones. It keeps its own copy in the browser, works offline, and uploads waiting edits when it is online and connected.
 
+## Photo zines on the web
+
+The **zines** tab makes black-and-white pocket photobooks from selected photos. On your phone, select images from the Pocket Camera album using **+ photos**; on desktop, use the file picker or drop images into an open zine. Each book holds up to 40 photos. The first photo also becomes the cover. Use the arrows beside photos to arrange them, add captions, and choose a full-photo black frame or a cropped page. The default **deep dark · smooth** treatment preserves photographic midtones and gently darkens them; **soft silver** keeps a natural grayscale. **photocopy grain** and **hard ink** are optional graphic print treatments. All treatments are reversible.
+
+Read the book in the browser with page buttons, swipes or arrow keys. **reading PDF** downloads individual A6 pages. **print booklet** arranges A6 pages on A5 landscape sheets, adds any needed blank pages inside the covers, and downloads a PDF ready to print at 100%, double-sided with a short-edge flip. Fold the stack in half and staple.
+
+Books and their photo copies save automatically in this browser's IndexedDB, without an account or API key. They are separate from Drive sync and the Android app. Download a PDF to keep or share a copy; clearing site data removes the editable books. Photos are normalized to JPEG at up to 2000 pixels on the long edge, while print treatments are applied only when rendering the book. Deleting a photo or zine also deletes its stored image data.
+
 ## Merge rule
 
 Both sides use the same rule (`SyncMerge.java` and `docs/js/store.js`):

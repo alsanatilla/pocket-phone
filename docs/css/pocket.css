@@ -130,6 +130,64 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
   .paper, .paper * { visibility: visible; } .paper { position: absolute; left: 0; top: 0; width: 80mm; background: #fff; }
 }
 .source { font-size: 12px; color: var(--accent); min-height: 36px; padding: 4px 0; text-align: left; }
+
+/* Zines: the book is the main surface. All print treatments stay black and white. */
+.tool-zines { --accent: #fff; }
+.tool-zines button:not(:disabled):active { background: #171717; }
+.zine-title { font: 54px/1 var(--display); font-weight: normal; margin: 16px 0; }
+.zine-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.zine-heading > div { min-width: 0; }
+.zine-heading > button { flex-shrink: 0; }
+.zine-empty { padding: 72px 0; }
+.zine-empty > p:first-child { font: 32px var(--pixel); }
+.zine-library { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 24px 40px; margin-top: 32px; }
+.zine-book { display: flex; align-items: center; gap: 16px; text-align: left; padding: 0; min-height: 120px; }
+.zine-book > span { min-width: 0; overflow-wrap: anywhere; }
+.zine-book-title { display: block; font: 28px/1.15 var(--display); }
+.zine-book .sub { display: block; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.zine-thumb { width: 64px; height: 80px; object-fit: contain; background: #000; filter: grayscale(1); flex-shrink: 0; }
+.zine-book .zine-thumb { width: 90px; height: 120px; }
+.zine-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 16px; }
+.zine-actions button { font-size: 14px; min-height: 48px; }
+.zine-actions > button:first-child { margin-right: auto; }
+.zine-workspace { display: grid; grid-template-columns: minmax(240px, 310px) minmax(0, 1fr); gap: clamp(24px, 5vw, 64px); align-items: start; }
+.zine-edit { min-width: 0; }
+.zine-field { display: block; margin-bottom: 12px; }
+.zine-field > span { display: block; }
+.zine-field textarea { min-height: 84px; font-size: 16px; }
+.zine-field select { font: 14px var(--mono); color: var(--white); background: var(--black); border: 0; border-radius: 0; min-height: 48px; width: 100%; padding: 8px 0; }
+.zine-field select:focus-visible { outline: 1px solid #fff; }
+.zine-save { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.zine-photo-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 24px; }
+.zine-photo-heading > span { font-size: 10px; }
+.zine-photo-heading button { flex-shrink: 0; font-size: 14px; }
+.zine-photo-list { max-height: 330px; overflow-y: auto; scrollbar-width: thin; }
+.zine-photo-row { display: flex; align-items: center; gap: 2px; }
+.zine-photo-row > button { min-width: 40px; padding: 8px; }
+.zine-photo-row .zine-photo-select { min-width: 0; display: flex; align-items: center; flex: 1; gap: 8px; text-align: left; font-size: 12px; padding: 8px 0; }
+.zine-photo-select .zine-thumb { width: 44px; height: 56px; }
+.zine-settings { margin-top: 24px; }
+.zine-delete { margin-top: 24px; font-size: 12px; color: var(--muted); }
+.zine-reader { position: sticky; top: 110px; width: 100%; max-width: 540px; margin: 0 auto; min-width: 0; }
+.zine-page { width: 100%; aspect-ratio: 298 / 420; background: #000; touch-action: pan-y; }
+.zine-page:focus-visible { outline: 1px solid #aaa; outline-offset: 4px; }
+.zine-page canvas { display: block; width: 100%; height: 100%; }
+.zine-pagination { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin: 8px 0; }
+.zine-pagination button { font-size: 12px; padding: 8px 4px; }
+.zine-pagination > span { text-align: center; font-size: 11px; }
+.tool-zines.reading .zine-edit { display: none; }
+.tool-zines.reading .zine-workspace { display: block; }
+.tool-zines.dropping { outline: 1px solid #fff; outline-offset: 8px; }
+@media (max-width: 899px) {
+  .zine-workspace { display: flex; flex-direction: column-reverse; gap: 24px; }
+  .zine-edit { width: 100%; }
+  .zine-reader { position: static; max-width: 400px; }
+  .zine-heading { display: block; }
+  .zine-title { font-size: 44px; }
+  .zine-library { grid-template-columns: minmax(0, 1fr); }
+  .zine-page { max-height: calc(100dvh - 220px); width: auto; max-width: 100%; margin: 0 auto; }
+}
+.dialog .actions { flex-wrap: wrap; }
 .thought-line { margin: 6px 0; }
 /* Thoughts under a note's title in the list, marked like the preview: open, back now, or done. */
 .row-button .chip { display: block; color: var(--accent); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
