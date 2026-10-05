@@ -1,18 +1,19 @@
 # Cloud sync and Pocket on the web
 
-Cloud sync is **off by default**. When you turn it on in Settings → Cloud sync, Pocket copies three things to a hidden app folder (`appDataFolder`) in your own Google Drive:
+Cloud sync is **off by default**. When you turn it on in Settings → Cloud sync, Pocket copies four things to a hidden app folder (`appDataFolder`) in your own Google Drive:
 
 | File | Contents |
 |---|---|
 | `parking.json` | Parking Lot items, open and closed in the last 7 days |
 | `receipt.json` | Receipt lines of the last 30 days |
 | `dice.json` | The Dice pick list |
+| `notes.json` | Notes from Today, with pins; deleted notes stay as markers for 30 days |
 
-Tasks, notes, messages, contacts, calls and photos stay on the phone. The hidden folder is only visible to Pocket's own Google Cloud project; it does not show up in Drive.
+Tasks, messages, contacts, calls and photos stay on the phone. The hidden folder is only visible to Pocket's own Google Cloud project; it does not show up in Drive.
 
 Every local change asks Android for a sync job that waits for any network, so edits made offline upload once the phone is online again. A periodic job also picks up web edits every hour, and opening a Pocket app syncs at most every two minutes. This is why the APK now declares the `INTERNET` permission. With sync off, Pocket makes no network requests.
 
-The web page in [`docs/`](docs/) shows Parking Lot, Receipt and Dice in the same terminal style. It keeps its own copy in the browser, works offline, and uploads waiting edits when it is online and connected.
+The web page in [`docs/`](docs/) is a workstation for Parking Lot, notes, Receipt and Dice in Pocket's terminal style: numbered tool tabs, two-column layouts on wide windows and one column on phones. It keeps its own copy in the browser, works offline, and uploads waiting edits when it is online and connected.
 
 ## Merge rule
 
@@ -21,6 +22,7 @@ Both sides use the same rule (`SyncMerge.java` and `docs/js/store.js`):
 - Parking items: per `id`, the copy with the later `updated` wins. Closed items older than 7 days are dropped on every copy.
 - Receipt lines never change, so a day is the union of both copies by line id `i`. Days older than 30 days are dropped.
 - Dice list: the later `updated` wins.
+- Notes: per `uid`, the later `updated` wins; a deletion is a note with `deleted: true` and also wins if it is newer. The phone keeps its own small note ids and maps them to the random `uid`.
 - If a file exists twice, both sides use the one created first.
 
 Change both implementations together.

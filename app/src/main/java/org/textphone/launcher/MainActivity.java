@@ -122,6 +122,7 @@ public class MainActivity extends Activity {
     private TextView homeDay;
     private TextView homeHint;
     private boolean receiverRegistered;
+    private long notesRevision;
     private CameraManager cameraManager;
     private String torchCamera;
     private boolean torchOn;
@@ -141,6 +142,7 @@ public class MainActivity extends Activity {
 
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
+            if (CloudSync.ACTION_SYNCED.equals(intent.getAction())) { if ("today".equals(screen)) render(); return; }
             if ("home".equals(screen)) updateHome();
             else if ("notifications".equals(screen)
                     && PhoneNotifications.ACTION_UPDATED.equals(intent.getAction())) render();
@@ -229,6 +231,8 @@ public class MainActivity extends Activity {
         filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         filter.addAction(AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED);
         filter.addAction(PhoneNotifications.ACTION_UPDATED);
+        filter.addAction(CloudSync.ACTION_SYNCED);
+        notesRevision = planner.notesRevision(); CloudSync.soon(this);
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(statusReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {
@@ -265,6 +269,8 @@ public class MainActivity extends Activity {
 
     @Override protected void onStop() {
         persistDraft();
+        // Notes edited on this visit go to the cloud once the phone is online.
+        if (planner.notesRevision() != notesRevision) CloudSync.changed(this);
         if ("capture".equals(screen)) { stoppedDraft = captureText; stoppedDraftKind = captureKind; stoppedDraftId = captureId; stoppedDue = captureDue; stoppedImportant = captureImportant; stoppedSteps = captureSteps; }
         motion.discardHistory();
         appVisible = false; installedApps = null; indexVersion++; filterGeneration++; if (appFilter != null) appUi.removeCallbacks(appFilter);

@@ -38,7 +38,7 @@ Android provides telephony, native data providers, alarm scheduling, camera capt
 
 Android keeps control of bottom-edge Home and Recents gestures. Pocket app activities use separate tasks; the launcher does not intercept upward swipes or exclude system gesture areas. Newer Android versions also provide predictive Back callbacks for internal pages. Physical smoothness and Nothing OS transitions still require testing on the phone.
 
-Agenda optionally uses a writable Google calendar already synchronized on the phone through Android's Calendar Provider. Choose it explicitly in Agenda → Settings after granting calendar access. Android's account sync handles the transfer; Pocket contains no OAuth credentials, account login or Internet permission. Tasks and notes remain local, and Pocket appointment reminders remain local alarms. This does not connect Google Keep or Google Tasks.
+Agenda optionally uses a writable Google calendar already synchronized on the phone through Android's Calendar Provider. Choose it explicitly in Agenda → Settings after granting calendar access. Android's account sync handles the transfer; the calendar link itself uses no Pocket login. Tasks remain local, notes leave the phone only with the optional cloud sync below, and Pocket appointment reminders remain local alarms. This does not connect Google Keep or Google Tasks.
 
 Notification access is optional and shows other apps' current notifications, including app-provided Open and Reply actions. Received notification text is not automatically archived. An explicit **More → Make task** action saves only the source snapshot the user chose, attached to that task. Only the user's unfinished reply is stored privately, for up to seven days or until submission. Android may block this sensitive setting for a sideloaded APK. Open Messages or Notifications → Settings for setup. The setup screen links to app info; if Android offers **⋮ → Allow restricted settings**, the user must approve it there, then enable Notification access. The app cannot grant or bypass it. Leave it disabled if you do not want that access. Pocket's own SMS and alarm alerts use the separate notification permission. Calendar account sync and SMS/MMS transfers intentionally use Android's services even though this APK has no Internet permission.
 
@@ -46,7 +46,7 @@ The built-in [camera](CAMERA.md) uses Camera2 preview and YUV capture, native au
 
 ## Cloud sync and web
 
-Optional cloud sync copies Parking Lot, Receipt and Dice lists to a hidden app folder in your own Google Drive and syncs again whenever the phone is back online. It is off until you turn it on in Settings → Cloud sync; for this the APK now declares the `INTERNET` permission. The same data opens on the web in Pocket's terminal style from [`docs/`](docs/) via GitHub Pages. See [CLOUD.md](CLOUD.md) for the merge rule and the one-time Google setup.
+Optional cloud sync copies Parking Lot, Receipt, Dice lists and notes to a hidden app folder in your own Google Drive and syncs again whenever the phone is back online. It is off until you turn it on in Settings → Cloud sync; for this the APK now declares the `INTERNET` permission. The same data opens in a web workstation in Pocket's terminal style from [`docs/`](docs/) via GitHub Pages. See [CLOUD.md](CLOUD.md) for the merge rule and the one-time Google setup.
 
 ## Downloads
 

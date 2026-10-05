@@ -127,7 +127,7 @@ final class PlannerStore {
                 if (old.id == id) {
                     if (!old.kind.equals(kind)) throw new IllegalArgumentException("Entry type cannot change.");
                     values.set(i, new Entry(id, old.kind, text, old.done, old.created, due, important, steps,source==null?old.source:source));
-                    write(values); return id;
+                    write(values); if ("note".equals(kind)) touchNote(id); return id;
                 }
             }
             throw new IllegalArgumentException("This entry was removed.");
@@ -137,7 +137,7 @@ final class PlannerStore {
         for (Entry entry : values) next = Math.max(next, entry.id + 1);
         Entry added = new Entry(next, kind, text, false, System.currentTimeMillis(), due, important, steps,source);
         if ("note".equals(kind)) values.add(0, added); else values.add(added);
-        write(values); return next;
+        write(values); if ("note".equals(kind)) touchNote(next); return next;
         }
     }
 
@@ -170,14 +170,30 @@ final class PlannerStore {
     void delete(long id) {
         synchronized (WRITE_LOCK) {
         List<Entry> values = entries();
+        String uid = prefs.getString("note_uid_" + id, null);
         for (int i = values.size() - 1; i >= 0; i--) if (values.get(i).id == id) values.remove(i);
         write(values);
-        prefs.edit().remove("note_pin_"+id).apply();
+        SharedPreferences.Editor edit = prefs.edit().remove("note_pin_"+id).remove("note_updated_" + id).remove("note_uid_" + id);
+        // A synced note leaves a deletion marker so the cloud copy cannot bring it back.
+        if (uid != null) {
+            try { edit.putString("note_tombstones", new JSONObject(prefs.getString("note_tombstones", "{}")).put(uid, System.currentTimeMillis()).toString()); }
+            catch (JSONException damaged) { edit.putString("note_tombstones", "{}"); }
+            edit.putLong("notes_rev", prefs.getLong("notes_rev", 0) + 1);
+        }
+        edit.apply();
         }
     }
 
+    /** Sync metadata: when a note last changed and a counter the dashboard checks before asking for a sync. */
+    private void touchNote(long id) {
+        prefs.edit().putLong("note_updated_" + id, System.currentTimeMillis()).putLong("notes_rev", prefs.getLong("notes_rev", 0) + 1).apply();
+    }
+    long noteUpdated(Entry note) { return prefs.getLong("note_updated_" + note.id, note.created); }
+    long notesRevision() { return prefs.getLong("notes_rev", 0); }
+    SharedPreferences preferences() { return prefs; }
+
     boolean notePinned(long id){return prefs.getBoolean("note_pin_"+id,false);}
-    void pinNote(long id,boolean value){synchronized(WRITE_LOCK){Entry note=find(id);if(note==null||!"note".equals(note.kind))throw new IllegalArgumentException("This note was removed.");if(!prefs.edit().putBoolean("note_pin_"+id,value).commit())throw new IllegalStateException("Could not pin the note.");}}
+    void pinNote(long id,boolean value){synchronized(WRITE_LOCK){Entry note=find(id);if(note==null||!"note".equals(note.kind))throw new IllegalArgumentException("This note was removed.");if(!prefs.edit().putBoolean("note_pin_"+id,value).commit())throw new IllegalStateException("Could not pin the note.");touchNote(id);}}
 
     Entry nextTask() {
         Entry best = null;

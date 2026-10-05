@@ -30,14 +30,14 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * Opt-in sync of Parking Lot, Receipt and Dice lists to the hidden Drive app folder of the user's own Google account.
+ * Opt-in sync of Parking Lot, Receipt, Dice lists and notes to the hidden Drive app folder of the user's own Google account.
  * Every local write asks for a sync; Android runs it once any network is available. The web page reads the same files.
  */
 final class CloudSync {
     static final String SCOPE = "https://www.googleapis.com/auth/drive.appdata";
     static final String WEB = "https://alsanatilla.github.io/pocket-phone/";
     static final String ACTION_SYNCED = "org.textphone.launcher.SYNCED";
-    static final String[] FILES = {"parking.json", "receipt.json", "dice.json"};
+    static final String[] FILES = {"parking.json", "receipt.json", "dice.json", "notes.json"};
     static final int JOB_SOON = 7301, JOB_PERIODIC = 7302;
     private static final String DRIVE = "https://www.googleapis.com/drive/v3/files", UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
     private static final Object RUN = new Object();
@@ -93,6 +93,7 @@ final class CloudSync {
                     JSONObject remote = download(c, token, name), merged;
                     if ("parking.json".equals(name)) { merged = ParkingStore.merge(c, remote); ParkingReceiver.arm(c); }
                     else if ("receipt.json".equals(name)) merged = ReceiptTape.merge(c, remote);
+                    else if ("notes.json".equals(name)) merged = NoteSync.merge(c, remote);
                     else merged = DiceActivity.merge(c, remote);
                     upload(c, token, name, merged.toString());
                 }

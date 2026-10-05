@@ -1,13 +1,14 @@
 // Local copies of the synced documents and the merge rules. These mirror the phone exactly:
-// SyncMerge.java, ParkingStore.java, ReceiptTape.java and DiceActivity.merge. Change both sides together.
+// SyncMerge.java, ParkingStore.java, ReceiptTape.java, NoteSync.java and DiceActivity.merge. Change both sides together.
 
-const HOUR = 3_600_000, DAY = 24 * HOUR, KEEP_CLOSED = 7 * DAY, KEEP_DAYS = 30, DAY_LIMIT = 300;
-export const FILES = ["parking.json", "receipt.json", "dice.json"];
+const HOUR = 3_600_000, DAY = 24 * HOUR, KEEP_CLOSED = 7 * DAY, KEEP_DAYS = 30, DAY_LIMIT = 300, KEEP_DELETED = 30 * DAY;
+export const NOTE_LIMIT = 8000;
+export const FILES = ["parking.json", "receipt.json", "dice.json", "notes.json"];
 export const DELAYS = ["1 hour", "tonight", "tomorrow", "next week"];
 export const HECKLE = 3;
 export const KIND = { ROLL: "ROLL", PARK: "PARK", CLEAR: "CLEAR", KILL: "KILL", MEMO: "MEMO", DONE: "DONE", PHOTO: "PHOTO", ALARM: "ALARM", TASK: "TASK" };
 
-const EMPTY = { "parking.json": () => ({ v: 1, items: [] }), "receipt.json": () => ({ v: 1, days: {} }), "dice.json": () => ({ v: 1, list: "", updated: 0 }) };
+const EMPTY = { "parking.json": () => ({ v: 1, items: [] }), "receipt.json": () => ({ v: 1, days: {} }), "dice.json": () => ({ v: 1, list: "", updated: 0 }), "notes.json": () => ({ v: 1, notes: [] }) };
 const listeners = new Set();
 export const onChange = fn => listeners.add(fn);
 const changed = name => { markDirty(name); listeners.forEach(fn => fn(name)); };
@@ -44,7 +45,30 @@ export const merge = {
     return { v: 1, days };
   },
   "dice.json": (local, remote) => (remote && (remote.updated || 0) > (local.updated || 0) ? { v: 1, list: remote.list || "", updated: remote.updated } : { v: 1, list: local.list || "", updated: local.updated || 0 }),
+  // Deleted notes stay as markers for 30 days so an older copy cannot bring them back.
+  "notes.json": (local, remote, now) => ({ v: 1, notes: mergeById(local.notes, remote?.notes, "uid", "updated").filter(n => !n.deleted || now - (n.updated || 0) <= KEEP_DELETED) }),
 };
+
+// ── Notes ──
+export const notes = {
+  list() { return load("notes.json").notes.filter(n => !n.deleted).sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updated - a.updated); },
+  get(uid) { return load("notes.json").notes.find(n => n.uid === uid && !n.deleted) || null; },
+  create(text) {
+    const value = String(text || "").slice(0, NOTE_LIMIT); if (!value.trim()) throw new Error("Write something first.");
+    const doc = load("notes.json"), now = Date.now(), note = { uid: crypto.randomUUID(), text: value, pinned: false, created: now, updated: now, deleted: false };
+    doc.notes.push(note); save("notes.json", doc); changed("notes.json"); return note;
+  },
+  edit(uid, change) {
+    const doc = load("notes.json"), note = doc.notes.find(n => n.uid === uid && !n.deleted);
+    if (!note) throw new Error("This note was deleted.");
+    change(note); note.updated = Date.now(); save("notes.json", doc); changed("notes.json"); return note;
+  },
+  update(uid, text) { return this.edit(uid, n => { n.text = String(text).slice(0, NOTE_LIMIT); }); },
+  pin(uid, pinned) { return this.edit(uid, n => { n.pinned = pinned; }); },
+  remove(uid) { return this.edit(uid, n => { n.text = ""; n.pinned = false; n.deleted = true; }); },
+};
+/** The phone shows a note's first line as its title. */
+export const noteTitle = note => (note.text.split("\n").find(line => line.trim()) || "Empty note").replace(/^#+\s*/, "").trim();
 
 // ── Parking Lot ──
 export const parking = {

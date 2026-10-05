@@ -1,4 +1,4 @@
-/* Pocket's visual language on the web: black, white, one accent, VT323 headings, no idle dividers. See DESIGN.md. */
+/* Pocket's visual language on a bigger screen: black, white, one accent, VT323 headings, no idle dividers. See DESIGN.md. */
 @font-face { font-family: "VT323"; src: url("../fonts/VT323-Regular.ttf") format("truetype"); font-display: swap; }
 
 :root {
@@ -7,111 +7,123 @@
   --paper: #f2efe6; --ink: #161616; --faded: #6b675e;
   --mono: ui-monospace, "DejaVu Sans Mono", "Cascadia Mono", Menlo, Consolas, monospace;
   --pixel: "VT323", var(--mono);
-  --inset: 16px; --control: 52px; --row: 56px;
+  --control: 52px; --row: 56px; --gutter: clamp(16px, 4vw, 48px);
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--black); color: var(--white); }
-body { font: 16px/1.35 var(--mono); -webkit-font-smoothing: antialiased; }
-.phone { max-width: 420px; min-height: 100vh; min-height: 100dvh; margin: 0 auto; padding: 4px var(--inset) 4px; display: flex; flex-direction: column; }
-.page { flex: 1; display: flex; flex-direction: column; }
-.spacer { flex: 1; }
-.muted { color: var(--muted); }
-.meta { font-size: 12px; } .small { font-size: 14px; }
-.warn { color: var(--warning); } .accent { color: var(--accent); }
-.pixel { font-family: var(--pixel); }
-.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+body { font: 16px/1.4 var(--mono); -webkit-font-smoothing: antialiased; }
+[hidden] { display: none !important; }
+.muted { color: var(--muted); } .meta { font-size: 12px; } .small { font-size: 14px; }
+.warn { color: var(--warning); } .accent { color: var(--accent); } .center { text-align: center; }
 p { margin: 8px 0; }
 
-/* Controls: black at rest; focus or selection is a single accent rule under the control. */
-button, .control { font: inherit; color: var(--white); background: var(--black); border: 0; border-radius: 2px; min-height: var(--control);
+/* Controls: black at rest; hover, focus or selection is a single accent rule under the control. */
+button { font: inherit; color: var(--white); background: var(--black); border: 0; border-radius: 2px; min-height: var(--control);
   padding: 8px; cursor: pointer; text-align: center; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 button:disabled { color: var(--disabled); cursor: default; }
 button:not(:disabled):hover, button:focus-visible, button.selected { color: var(--accent); box-shadow: inset 0 -1px 0 var(--accent); outline: none; }
 button:not(:disabled):active { background: rgba(249, 245, 148, .2); }
-.row-button { display: block; width: 100%; min-height: var(--row); text-align: left; padding: 12px 0; font-size: 16px; white-space: pre-line; }
-.row-button .sub { display: block; color: var(--muted); font-size: 14px; }
+.row-button { display: block; width: 100%; min-height: var(--row); text-align: left; padding: 10px 0; font-size: 16px; white-space: pre-line; overflow-wrap: anywhere; }
+.row-button .sub { display: block; color: var(--muted); font-size: 13px; }
 .primary { color: var(--accent); min-height: var(--row); width: 100%; }
 .keys { display: flex; gap: 4px; margin: 8px 0; }
 .keys > * { flex: 1; min-width: 0; font-size: 14px; }
-
-/* Header: back · title · action, all 48px tall. */
-.header { display: grid; grid-template-columns: minmax(64px, auto) 1fr minmax(64px, auto); align-items: center; min-height: 48px; }
-.header button { min-height: 48px; font-size: 14px; color: var(--muted); padding: 4px 8px; }
-.header button.commit { color: var(--accent); }
-.header h1 { margin: 0; font: 24px/1 var(--pixel); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-/* Home */
-.clock { font: 60px/1 var(--pixel); margin-top: 8px; }
-.day { font-size: 11px; letter-spacing: .08em; color: var(--muted); }
-.status { font-size: 11px; letter-spacing: .06em; color: var(--accent); margin: 12px 0 4px; min-height: 16px; }
-.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0; }
-.tile { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 72px; padding: 8px; gap: 6px; font-size: 12px; }
-.tile.selected, .tile:focus-visible { background: var(--accent); color: var(--black); box-shadow: none; }
-.tile.empty { visibility: hidden; }
-canvas.icon { width: 26px; height: 26px; image-rendering: pixelated; image-rendering: crisp-edges; }
-.softkeys { display: grid; grid-template-columns: 1fr 1fr 1fr; }
-.softkeys button { font: 21px/1 var(--pixel); color: var(--accent); min-height: 56px; }
-.softkeys button:first-child { text-align: left; } .softkeys button:last-child { text-align: right; }
-
-/* Fields */
 input, textarea { font: 18px var(--mono); color: var(--white); background: var(--black); border: 0; border-radius: 0; width: 100%;
   padding: 12px 0; min-height: var(--control); caret-color: var(--accent); }
 input::placeholder, textarea::placeholder { color: var(--muted); }
 input:focus, textarea:focus { outline: none; box-shadow: inset 0 -1px 0 var(--accent); }
-textarea { resize: vertical; min-height: 120px; line-height: 1.4; }
+textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
+.section { font-size: 12px; letter-spacing: .06em; margin: 20px 0 4px; }
+.section:first-child { margin-top: 8px; }
+
+/* Bar: brand, the tools as numbered tabs, sync status. */
+.app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+.bar { position: sticky; top: 0; z-index: 5; background: var(--black); display: flex; align-items: center; gap: 8px 24px; flex-wrap: wrap;
+  padding: 8px max(var(--gutter), calc((100% - 1160px) / 2 + var(--gutter))); }
+.brand { font: 28px/1 var(--pixel); color: var(--accent); letter-spacing: .02em; }
+.tabs { display: flex; gap: 4px; flex: 1; overflow-x: auto; scrollbar-width: none; }
+.tab { font: 22px/1 var(--pixel); color: var(--muted); min-height: 48px; padding: 8px 12px; white-space: nowrap; }
+.tab .key { font-size: 16px; color: var(--disabled); margin-right: 6px; }
+.tab.active { color: var(--white); box-shadow: inset 0 -2px 0 var(--accent); }
+.status { font-size: 11px; letter-spacing: .06em; color: var(--accent); min-height: 48px; padding: 8px 0; text-align: right; }
+
+/* Work area: a tool fills the width; columns separate by space alone. */
+.content { flex: 1; width: 100%; max-width: 1160px; margin: 0 auto; padding: 8px var(--gutter) 24px; }
+.toolbar { display: flex; justify-content: flex-end; gap: 4px; }
+.toolbar button { font-size: 14px; color: var(--muted); min-height: 44px; }
+.tool.enter { animation: enter .12s ease-out; }
+@keyframes enter { from { opacity: 0; transform: translateY(6px); } }
+.split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 0 clamp(32px, 6vw, 96px); align-items: start; }
+.tool-notes .split { grid-template-columns: minmax(240px, 1fr) minmax(0, 2.4fr); }
+.tool-receipt .split { grid-template-columns: minmax(200px, 1fr) minmax(0, 2fr); }
+.narrow { max-width: 620px; }
+.narrow-only { display: none; }
+.empty { min-height: 50vh; display: flex; flex-direction: column; justify-content: center; }
+.empty-title { font: 60px/1 var(--pixel); color: var(--line); }
 
 /* Parking */
-.section { font-size: 12px; letter-spacing: .04em; margin: 16px 0 0; }
-.thought { font-size: 16px; margin: 12px 0 2px; word-wrap: break-word; }
+.thought { font-size: 17px; margin: 14px 0 2px; overflow-wrap: anywhere; }
+
+/* Notes */
+.note-list { max-height: calc(100vh - 220px); overflow-y: auto; scrollbar-width: thin; }
+.editor-bar { display: flex; align-items: center; gap: 4px; }
+.editor-bar .spacer { flex: 1; }
+.editor-bar button { font-size: 14px; min-height: 44px; }
+.note-editor { min-height: calc(100vh - 240px); font-size: 17px; resize: none; padding: 12px 0; }
+.md { min-height: calc(100vh - 240px); font-size: 16px; line-height: 1.55; overflow-wrap: anywhere; }
+.md h2, .md h3, .md h4 { font-family: var(--pixel); font-weight: normal; margin: 18px 0 6px; line-height: 1.1; }
+.md h2 { font-size: 34px; } .md h3 { font-size: 28px; } .md h4 { font-size: 24px; }
+.md p { margin: 6px 0; } .md ul, .md ol { padding-left: 24px; margin: 6px 0; } .md ul.tasks { list-style: none; padding-left: 0; }
+.md code { color: var(--accent); } .md pre { background: #0c0c0c; padding: 12px; overflow-x: auto; }
+.md blockquote { margin: 8px 0; padding-left: 12px; color: var(--muted); box-shadow: inset 2px 0 0 var(--line); }
+.md a { color: var(--accent); }
 
 /* Dice */
-.result { font: 60px/1 var(--pixel); text-align: center; min-height: 140px; display: flex; align-items: center; justify-content: center; word-break: break-word; }
-.result.long { font-size: 32px; }
-.center { text-align: center; }
+.result { font: 72px/1 var(--pixel); text-align: center; min-height: 160px; display: flex; align-items: center; justify-content: center; overflow-wrap: anywhere; }
+.result.long { font-size: 40px; }
 
 /* Receipt: the one paper surface. */
+.roll { max-width: 440px; margin: 0 auto; }
 .tear { height: 8px; background: linear-gradient(135deg, var(--paper) 4px, transparent 0) 0 0 / 12px 8px repeat-x,
                                  linear-gradient(225deg, var(--paper) 4px, transparent 0) 0 0 / 12px 8px repeat-x; }
 .tear.top { transform: rotate(180deg); }
-.paper { background: var(--paper); color: var(--ink); padding: 14px 14px 18px; font-size: 12px; }
-.paper .title { font: 24px/1 var(--pixel); text-align: center; }
-.paper .c { text-align: center; padding: 2px 0; }
-.paper .b { font-weight: bold; }
+.paper { background: var(--paper); color: var(--ink); padding: 14px 16px 18px; font-size: 12px; }
+.paper .title { font: 26px/1 var(--pixel); text-align: center; }
+.paper .c { text-align: center; padding: 2px 0; } .paper .b { font-weight: bold; }
 .paper .rule { color: var(--faded); overflow: hidden; white-space: nowrap; padding: 6px 0; }
 .paper .line { display: grid; grid-template-columns: 9ch 6ch 1fr; padding: 2px 0; }
 .paper .line .t { color: var(--faded); white-space: nowrap; }
 .paper .total { display: flex; justify-content: space-between; font-size: 14px; }
 .paper .bars { font-size: 16px; letter-spacing: -.05em; }
 
-/* Dialogs follow Android's list dialog: title, choices, cancel. */
+/* Narrow windows and phones: one column; the notes list and the open note take turns. */
+@media (max-width: 899px) {
+  .split, .tool-notes .split, .tool-receipt .split { grid-template-columns: minmax(0, 1fr); }
+  .wide-only { display: none; } .narrow-only { display: block; }
+  .editor-bar .narrow-only { display: inline-block; }
+  .tool-notes.editing .split > .col:first-child { display: none; }
+  .tool-notes:not(.editing) .split > .col:last-child { display: none; }
+  .note-list { max-height: none; }
+  .bar { gap: 0 12px; padding: 4px 16px; }
+  .brand { font-size: 24px; }
+  .tab { font-size: 20px; padding: 8px; }
+  .status { flex-basis: 100%; text-align: left; min-height: 28px; padding: 0 0 4px; }
+}
+
+/* Dialogs follow Pocket's list dialog: title, choices, cancel. */
 .dialog { position: fixed; inset: 0; background: rgba(0, 0, 0, .72); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 10; }
-.dialog[hidden] { display: none; }
-.dialog .box { background: #111; width: 100%; max-width: 360px; padding: 16px 20px 8px; border: 1px solid var(--line); }
-.dialog h2 { font: 24px/1.1 var(--pixel); margin: 0 0 8px; word-wrap: break-word; }
+.dialog .box { background: #111; width: 100%; max-width: 420px; padding: 16px 20px 8px; border: 1px solid var(--line); }
+.dialog h2 { font: 26px/1.1 var(--pixel); margin: 0 0 8px; overflow-wrap: anywhere; }
 .dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
 .dialog .actions button { color: var(--accent); min-height: 48px; }
 
-
-/* Wide windows: the phone's Home stays on the left as a rail; one app opens beside it at phone width. Space separates, never lines. */
-.phone.desk-mode { max-width: 1000px; display: grid; grid-template-columns: 340px minmax(0, 1fr); column-gap: 72px; padding: 0 32px; align-items: start; }
-.rail { position: sticky; top: 0; height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow-y: auto; }
-.rail .page { flex: 1; animation: none; }
-.main { width: 100%; max-width: 460px; justify-self: center; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; padding-bottom: 32px; }
-.main .empty { justify-content: center; }
-.empty-title { font: 60px/1 var(--pixel); color: var(--line); }
-
-.notice { color: var(--warning); font-size: 12px; min-height: 32px; padding: 8px 0; }
+.notice { position: sticky; bottom: 0; background: var(--black); color: var(--warning); font-size: 12px; min-height: 32px; padding: 8px max(var(--gutter), calc((100% - 1160px) / 2 + var(--gutter))); }
 .notice:empty { visibility: hidden; }
 
-@media (prefers-reduced-motion: no-preference) {
-  .page { animation: enter .14s ease-out; }
-  @keyframes enter { from { opacity: 0; transform: translateX(12px); } }
-  .caret::after { content: "_"; animation: blink 1s steps(1) infinite; color: var(--accent); }
-  @keyframes blink { 50% { opacity: 0; } }
-}
+@media (prefers-reduced-motion: reduce) { .tool.enter { animation: none; } }
 
 @media print {
-  /* Only the paper prints, on phone and desk layouts alike. */
+  /* Only the paper prints. */
   body { background: #fff; } body * { visibility: hidden; } .dialog { display: none !important; }
   .paper, .paper * { visibility: visible; } .paper { position: absolute; left: 0; top: 0; width: 80mm; background: #fff; }
 }
