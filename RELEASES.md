@@ -2,6 +2,14 @@
 
 Each release supplies a separately named, signed APK, source snapshot, checksums and actual build/test results. Install the new APK over Pocket; do not uninstall or clear app storage. The package ID and signing certificate stay the same. Old release downloads remain available. These APKs run on the current Nothing OS; they are not flashable ROM images.
 
+## 0.5.17 — Pocket chat access and pixel loading (local build)
+
+- Chat settings separately enable read-only saved Notes, open Thoughts and cached COROS data. Matching passages and dated summaries are returned on demand through native client tools; drafts, tasks, photos and credentials are excluded.
+- Grants belong to the selected provider and exact normalized API endpoint. Changing the recipient resets access, and turning a category off stops the active reply.
+- Anthropic and compatible tool-capable chat models support two lookup rounds and four local reads per reply, with bounded results and a shared reply-token budget. Visible answers remain local history; tool results are transient. No automatic paid retries or background COROS refreshes.
+- The sidebar shows a 12 fps pixel wireframe cube with plain thinking/reading status. Motion follows Pocket and Android settings and stops when hidden, detached or paused.
+- Source and unsigned APK only: the existing release signing key remains unavailable. Tests, lint, handset checks and paid API requests were not run at the user's request.
+
 ## 0.5.15 — home dashboard and COROS (local build)
 
 - Home shows up to two appointments, the exact next task, three movement scores, one returning thought and the latest note. Empty sources disappear. Phone, Messages and Camera remain editable tiles; existing hidden shortcuts and groups remain under All apps.

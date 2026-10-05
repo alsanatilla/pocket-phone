@@ -87,6 +87,7 @@ final class ChatProvider {
     /** A blank key keeps only a key already assigned to this exact API endpoint. */
     static void save(Context context, Config config, String newKey) {
         config.validate();
+        Config previous = get(context);
         String value = newKey == null ? "" : newKey.trim();
         SharedPreferences.Editor edit = prefs(context).edit();
         if ("anthropic".equals(config.provider)) {
@@ -113,6 +114,8 @@ final class ChatProvider {
         edit.putString("provider", config.provider).putString("model", config.model)
                 .putString("base_url", config.baseUrl).putInt("max_tokens", config.maxTokens)
                 .putBoolean("prompt_caching", config.promptCaching);
+        if (!previous.provider.equals(config.provider) || !previous.baseUrl.equals(config.baseUrl))
+            PocketChatTools.reset(context);
         if (!edit.commit()) throw new IllegalStateException("Could not save the chat settings.");
     }
 

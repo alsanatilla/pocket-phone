@@ -1,11 +1,11 @@
 {
   "component": "Pocket Phone native Android launcher/apps",
-  "version_name": "0.5.16",
-  "version_code": 21,
+  "version_name": "0.5.17",
+  "version_code": 22,
   "application_id": "org.textphone.launcher",
   "min_sdk": 23,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-05T19:12:42.9940879Z",
+  "checked_at_utc": "2026-10-05T19:37:18.2897464Z",
   "build": "assembleRom passed; tests and lint not run at user request",
   "commands": [
     "./gradlew.bat :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
@@ -22,27 +22,30 @@
   "paid_api_requests": 0,
   "apk": {
     "file": "app/build/outputs/apk/rom/app-rom-unsigned.apk",
-    "bytes": 9248676,
-    "sha256": "0188aa0feed7be0ccccbd97066a4aea547161d007885b43cac8f1107b8083b8b",
+    "bytes": 9260164,
+    "sha256": "72eb0b23a9c7af7acd8226aee8ba3d5a69c6d53ae0fb1175e388e2579ddc59b6",
     "signed": false,
     "installable_update": false,
     "existing_release_key_available": false
   },
   "changes_in_this_build": [
-    "Native chat sidebar in Home and Today with swipe opening and normal Android edge gestures",
-    "Anthropic Java SDK and configurable OpenAI-compatible HTTPS chat-completions providers",
-    "Anthropic automatic five-minute prompt caching; actual reported cache-read token counts",
-    "Configurable model and reply-token limit, default 2048; no automatic paid retries or cache prewarming",
-    "Separate encrypted endpoint-bound keys; Journal key used only for direct Anthropic chat",
-    "Explicit new-chat confirmation before changing provider, model or API endpoint",
-    "Local chat history and drafts excluded from Drive sync and Android backup",
-    "Streamed Markdown responses with Stop/Retry and partial-reply preservation"
+    "Separate opt-in, read-only chat access to saved Notes, open Thoughts and cached COROS readings",
+    "Native tool-call loops for Anthropic and tool-capable OpenAI-compatible providers",
+    "Two lookup rounds, four local reads and 16000 characters of tool results per reply",
+    "Lookup requests and final answer share the selected reply-token budget; reported usage totals cover all completed rounds",
+    "Provider and exact endpoint-bound access grants; recipient changes reset access and revocation stops active replies",
+    "Dated and bounded COROS summaries with freshness indicators; no background refresh or credentials sent",
+    "Stepped 12 fps pixel cube loader with thinking and reading status; reduced-motion and lifecycle support",
+    "Transient tool protocol/results; visible chat history stays local and outside Drive sync",
+    "Existing prompt caching, encrypted keys, streaming Markdown and Stop/Retry preserved"
   ],
   "known_limits": [
-    "Live provider APIs and handset gestures have not been exercised; no tests or paid API calls were run",
-    "Compatible adapter requires HTTPS, Bearer-key authentication and streamed chat-completions responses",
-    "Cache discounts depend on provider, model, minimum prompt size and prefix reuse; output remains billed",
-    "No chat tools, attachments or automatic access to Pocket notes, tasks or photos",
+    "Live provider APIs and handset gestures have not been exercised; no tests, lint or paid API calls were run",
+    "Compatible providers require streamed chat completions and function tool support when Pocket access is enabled",
+    "COROS uses only the current local cache; Movement must refresh missing or stale readings",
+    "Cache discounts depend on provider, model, minimum prompt size and prefix reuse; each lookup round bills input and output remains billed",
+    "Tool results are transient; subsequent questions may retrieve relevant records again, and prior answers remain until New chat clears the conversation",
+    "No chat attachments, write tools, tasks, draft notes, photos or COROS credentials",
     "Existing release signing key is unavailable, so no installable incremental update was produced"
   ],
   "previews": [],

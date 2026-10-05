@@ -36,16 +36,17 @@ final class ClaudeChatRepository {
     static final class Snapshot {
         final List<Turn> turns;
         final boolean running;
-        final String error, model;
+        final String error, model, status;
         final String provider;
         final long inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens;
         Snapshot(List<Turn> turns, boolean running, String error, String model,
-                String provider, ClaudeChatClient.Usage usage) {
+                String provider, ClaudeChatClient.Usage usage, String status) {
             this.turns = Collections.unmodifiableList(new ArrayList<>(turns));
             this.running = running;
             this.error = error;
             this.model = model;
             this.provider = provider;
+            this.status = status;
             inputTokens = usage.inputTokens;
             outputTokens = usage.outputTokens;
             cacheReadTokens = usage.cacheReadTokens;
@@ -63,7 +64,7 @@ final class ClaudeChatRepository {
         return thread;
     });
     private final ClaudeChatStore store;
-    private String conversation, draft = "", error = "", model = MODEL;
+    private String conversation, draft = "", error = "", model = MODEL, status = "";
     private ChatProvider.Config provider;
     private ClaudeChatClient.Usage usage = ClaudeChatClient.Usage.EMPTY;
     private boolean running, notificationQueued, replaceOnDelta;
@@ -100,7 +101,7 @@ final class ClaudeChatRepository {
     synchronized Snapshot snapshot() {
         ChatProvider.Config configured = provider == null ? ChatProvider.get(context) : provider;
         return new Snapshot(turns, running, error, turns.isEmpty() ? configured.model : model,
-                configured.provider, usage);
+                configured.provider, usage, status);
     }
     synchronized String draft() { return draft; }
 
@@ -156,6 +157,7 @@ final class ClaudeChatRepository {
         generation++;
         cancel();
         running = false;
+        status = "";
         Turn reply = turns.get(turns.size() - 1);
         turns.set(turns.size() - 1, new Turn(reply.id, reply.role, reply.text, "stopped"));
         error = "";
@@ -168,6 +170,7 @@ final class ClaudeChatRepository {
         generation++;
         cancel();
         running = false;
+        status = "";
         turns.clear();
         conversation = UUID.randomUUID().toString();
         error = "";
@@ -188,6 +191,7 @@ final class ClaudeChatRepository {
         }
         final long composerRevision = draftRevision;
         running = true;
+        status = "thinking";
         error = "";
         usage = ClaudeChatClient.Usage.EMPTY;
         List<ClaudeChatClient.Message> messages = new ArrayList<>();
@@ -204,6 +208,8 @@ final class ClaudeChatRepository {
         int replyLimit = Math.min(MAX_OUTPUT_CHARS, MAX_HISTORY_CHARS - characters() + oldReplyLength);
         ClaudeChatClient.Listener listener = new ClaudeChatClient.Listener() {
             public boolean text(String delta) { return append(request, replyId, delta); }
+            public void status(String value) { progress(request, replyId, value, null); }
+            public void usage(ClaudeChatClient.Usage tokens) { progress(request, replyId, null, tokens); }
             public void done(String actualModel, ClaudeChatClient.Usage tokens) {
                 finish(request, replyId, original, composerRevision, actualModel, "", tokens);
             }
@@ -230,6 +236,13 @@ final class ClaudeChatRepository {
         });
     }
 
+    private synchronized void progress(long request, String replyId, String value, ClaudeChatClient.Usage tokens) {
+        if (!current(request, replyId)) return;
+        if (value != null) status = value;
+        if (tokens != null) usage = tokens;
+        changed();
+    }
+
     private synchronized boolean append(long request, String replyId, String delta) {
         if (!current(request, replyId)) return false;
         Turn reply = turns.get(turns.size() - 1);
@@ -252,6 +265,7 @@ final class ClaudeChatRepository {
         boolean failed = !reason.isEmpty();
         turns.set(turns.size() - 1, new Turn(reply.id, reply.role, reply.text, failed ? "failed" : "complete"));
         running = false;
+        status = "";
         active = null;
         activeTask = null;
         error = reason;

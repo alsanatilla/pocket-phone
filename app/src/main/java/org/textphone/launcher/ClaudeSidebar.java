@@ -27,6 +27,7 @@ import android.view.WindowInsets;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.ArrayAdapter;
 import android.widget.AdapterView;
 import android.widget.EditText;
@@ -57,11 +58,12 @@ final class ClaudeSidebar extends FrameLayout {
     private final BooleanSupplier swipeAllowed;
     private final ClaudeChatRepository repository;
     private final Handler main = new Handler(Looper.getMainLooper());
-    private final LinearLayout panel, log, errorRow;
+    private final LinearLayout panel, log, errorRow, loadingRow;
     private final ScrollView scroll;
     private final EditText composer;
     private final Button back, settings, setup, send, retry;
-    private final TextView error, cacheStatus;
+    private final TextView error, cacheStatus, loadingLabel;
+    private final PixelLoadingView loading;
     private boolean opened, observing, destroyed, applyingDraft, renderQueued, swipeCandidate, capturedSwipe;
     private float startX, startY;
     private long lastSubmitAt;
@@ -134,6 +136,18 @@ final class ClaudeSidebar extends FrameLayout {
         log.setPadding(dp(16), dp(8), dp(16), dp(12));
         scroll.addView(log, new ScrollView.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         panel.addView(scroll, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1));
+
+        loadingRow = horizontal();
+        loadingRow.setGravity(Gravity.CENTER_VERTICAL);
+        loadingRow.setPadding(dp(12), 0, dp(16), 0);
+        loading = new PixelLoadingView(activity);
+        loadingRow.addView(loading, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        loadingLabel = label("thinking", 14, PocketDesign.MUTED);
+        loadingLabel.setPadding(dp(8), 0, 0, 0);
+        loadingLabel.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        loadingRow.addView(loadingLabel, new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
+        loadingRow.setVisibility(View.GONE);
+        panel.addView(loadingRow, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
         errorRow = horizontal();
         errorRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -230,8 +244,9 @@ final class ClaudeSidebar extends FrameLayout {
         panel.setTranslationX(panelWidth());
         panel.setVisibility(View.VISIBLE);
         render();
-        panel.animate().translationX(0).setDuration(MOTION_MS).start();
-        dimmer.animate().alpha(1).setDuration(MOTION_MS).start();
+        long duration = PageMotion.enabled(activity) ? MOTION_MS : 0;
+        panel.animate().translationX(0).setDuration(duration).start();
+        dimmer.animate().alpha(1).setDuration(duration).start();
         back.requestFocus();
         requestApplyInsets();
         navigationChanged.run();
@@ -240,12 +255,14 @@ final class ClaudeSidebar extends FrameLayout {
     void close() {
         if (destroyed || !opened) return;
         opened = false;
+        loading.setPaused(true);
         capturedSwipe = false;
         swipeCandidate = false;
         hideKeyboard();
         pageHost.setImportantForAccessibility(originalAccessibility);
         stopAnimations();
-        panel.animate().translationX(panelWidth()).setDuration(MOTION_MS).setListener(new AnimatorListenerAdapter() {
+        long duration = PageMotion.enabled(activity) ? MOTION_MS : 0;
+        panel.animate().translationX(panelWidth()).setDuration(duration).setListener(new AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(Animator animation) {
                 if (!opened && !destroyed) {
                     panel.setVisibility(View.GONE);
@@ -254,7 +271,7 @@ final class ClaudeSidebar extends FrameLayout {
                 }
             }
         }).start();
-        dimmer.animate().alpha(0).setDuration(MOTION_MS).setListener(new AnimatorListenerAdapter() {
+        dimmer.animate().alpha(0).setDuration(duration).setListener(new AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(Animator animation) { if (!opened && !destroyed) dimmer.setVisibility(View.GONE); }
         }).start();
         navigationChanged.run();
@@ -263,11 +280,13 @@ final class ClaudeSidebar extends FrameLayout {
     void resume() {
         if (destroyed) return;
         refreshTheme();
+        loading.refresh();
         if (!observing) { observing = true; repository.observe(observer); }
         if (opened) render();
     }
 
     void pause() {
+        loading.setPaused(true);
         if (observing) { repository.removeObserver(observer); observing = false; }
         main.removeCallbacks(renderTask);
         renderQueued = false;
@@ -277,6 +296,7 @@ final class ClaudeSidebar extends FrameLayout {
         if (destroyed) return;
         destroyed = true;
         pause();
+        loading.destroy();
         stopAnimations();
         if (dialog != null) { dialog.dismiss(); dialog = null; }
         if (getViewTreeObserver().isAlive()) getViewTreeObserver().removeOnGlobalLayoutListener(legacyKeyboard);
@@ -369,6 +389,11 @@ final class ClaudeSidebar extends FrameLayout {
         boolean follow = log.getChildCount() == 0 || log.getHeight() - scroll.getScrollY() - scroll.getHeight() <= dp(96);
         ChatProvider.Config provider = ChatProvider.get(activity);
         setup.setVisibility(ChatProvider.present(activity, provider) ? View.GONE : View.VISIBLE);
+        loadingRow.setVisibility(snapshot.running ? View.VISIBLE : View.GONE);
+        String status = snapshot.status == null || snapshot.status.isEmpty() ? "thinking" : snapshot.status;
+        if (!loadingLabel.getText().toString().equals(status)) loadingLabel.setText(status);
+        loading.setRunning(snapshot.running);
+        loading.setPaused(!opened || !observing);
         Set<String> retained = new HashSet<>();
         int index = 0;
         for (ClaudeChatRepository.Turn turn : snapshot.turns) {
@@ -420,9 +445,9 @@ final class ClaudeSidebar extends FrameLayout {
         boolean anthropic = "anthropic".equals(provider.provider);
         String[] options = anthropic ? new String[]{"Provider & model", keyLabel,
                 "Reply limit · " + NumberFormat.getIntegerInstance().format(provider.maxTokens) + " tokens",
-                "Prompt caching · " + (provider.promptCaching ? "on" : "off"), "New chat"}
+                "Prompt caching · " + (provider.promptCaching ? "on" : "off"), "Pocket access", "New chat"}
                 : new String[]{"Provider & model", keyLabel,
-                "Reply limit · " + NumberFormat.getIntegerInstance().format(provider.maxTokens) + " tokens", "New chat"};
+                "Reply limit · " + NumberFormat.getIntegerInstance().format(provider.maxTokens) + " tokens", "Pocket access", "New chat"};
         showDialog(new AlertDialog.Builder(activity, AlertDialog.THEME_DEVICE_DEFAULT_DARK).setTitle("Chat settings")
                 .setItems(options, (choice, index) -> {
                     if (destroyed) return;
@@ -430,8 +455,48 @@ final class ClaudeSidebar extends FrameLayout {
                     else if (index == 1) showKey();
                     else if (index == 2) showReplyLimit();
                     else if (anthropic && index == 3) showCaching();
+                    else if (index == (anthropic ? 4 : 3)) showPocketAccess();
                     else confirmNewChat();
                 }).setNegativeButton("Close", null).create());
+    }
+
+    private void showPocketAccess() {
+        if (destroyed) return;
+        ChatProvider.Config provider = ChatProvider.get(activity);
+        String recipient = "anthropic".equals(provider.provider) ? "Claude" : android.net.Uri.parse(provider.baseUrl).getHost();
+        if (recipient == null || recipient.isEmpty()) recipient = provider.name();
+        LinearLayout fields = new LinearLayout(activity);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(dp(20), dp(8), dp(20), dp(8));
+        TextView description = label("Selected passages and summaries are sent to " + recipient
+                + " when requested in chat. Read only.", 14, PocketDesign.MUTED);
+        description.setPadding(0, 0, 0, dp(8));
+        fields.addView(description, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        String[] categories = {"thoughts", "notes", "coros"}, names = {"Thoughts", "Notes", "COROS"};
+        CheckBox[] choices = new CheckBox[categories.length];
+        for (int index = 0; index < categories.length; index++) {
+            CheckBox choice = new CheckBox(activity);
+            PocketDesign.text(choice, 16, PocketDesign.WHITE);
+            choice.setText(names[index]);
+            choice.setMinHeight(dp(52));
+            choice.setButtonTintList(PocketDesign.colors(activity, PocketDesign.accent(activity)));
+            choice.setChecked(PocketChatTools.enabled(activity, categories[index]));
+            choices[index] = choice;
+            fields.addView(choice, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        }
+        ScrollView form = new ScrollView(activity);
+        form.addView(fields);
+        showDialog(new AlertDialog.Builder(activity, AlertDialog.THEME_DEVICE_DEFAULT_DARK).setTitle("Pocket access")
+                .setView(form).setNegativeButton("Cancel", null).setPositiveButton("Save", (dialog, which) -> {
+                    if (destroyed) return;
+                    for (int index = 0; index < categories.length; index++)
+                        if (PocketChatTools.enabled(activity, categories[index]) && !choices[index].isChecked()) { repository.stop(); break; }
+                    try {
+                        for (int index = 0; index < categories.length; index++)
+                            PocketChatTools.enabled(activity, categories[index], choices[index].isChecked());
+                        render();
+                    } catch (IllegalStateException failure) { showSettingsError(failure.getMessage()); }
+                }).create());
     }
 
     private void showProvider() {
@@ -706,7 +771,7 @@ final class ClaudeSidebar extends FrameLayout {
             root.setTag("claude_turn_" + turn.id);
             if (!turn.text.equals(lastText) || !turn.state.equals(lastState)) {
                 if (assistant && "complete".equals(turn.state) && !turn.text.isEmpty()) markdown.setMarkdown(body, turn.text);
-                else body.setText(turn.text.isEmpty() && "pending".equals(turn.state) ? "…" : turn.text);
+                else body.setText(turn.text);
                 lastText = turn.text; lastState = turn.state;
             }
             body.setVisibility(body.length() == 0 ? View.GONE : View.VISIBLE);
