@@ -1,0 +1,85 @@
+{
+  "version_name": "0.5.17",
+  "version_code": 22,
+  "component": "Android launcher and native apps on the existing Nothing OS",
+  "built_at_utc": "2026-10-05T19:57:46.590581+00:00",
+  "source_commit": "cce596423904ce2f5ce9e8ee4e8b46fd94f3ca3d",
+  "commits_since_0_5_14": [
+    "cce5964 Require Android 7 for native chat transport APIs",
+    "9938e34 Add Pocket chat tools and retro pixel loading",
+    "6d34bd7 Add chat provider settings and prompt caching cost controls",
+    "1cad476 Add native Claude API chat sidebar",
+    "53aa1c9 Improve phone tasks and Drive sync with COROS dashboard",
+    "db33daf Web: add sample Movement preview tab",
+    "6e5b2a2 Web: remove zine filler copy",
+    "24884b5 Web: add photo zines with smooth monochrome and booklet PDFs",
+    "f3de0f8 Web: use readable navigation and lowercase pocket branding",
+    "681bffd Web: allow retrying interrupted journal reads",
+    "96e6103 Web: try Jacquard 24 for pixel headings",
+    "db1c33c Web: read journal pages with Claude on demand"
+  ],
+  "source_worktree_clean": true,
+  "android": {
+    "min_sdk": 24,
+    "target_sdk": 35,
+    "build_jdk": 17
+  },
+  "android_checks": {
+    "rom": {
+      "tests": 460,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "debug": {
+      "tests": 455,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "total_passed": 915
+  },
+  "web_checks": {
+    "passed": 13,
+    "failed": 0,
+    "suites": [
+      "COROS parsing",
+      "movement scores",
+      "zine rendering"
+    ]
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 79
+  },
+  "apk": {
+    "file": "pocket-phone-0.5.17.apk",
+    "bytes": 8886863,
+    "sha256": "280b7bc02f46ca641b4545c5b25e18c7595f6b58076cde2d4516bd9a717764e1",
+    "package": "org.textphone.launcher",
+    "certificate_sha256": "883592cb9d2dbcb5817e28b3bb7df39d81f340d3ae2eca07134181fcf6d3e059",
+    "same_signer_as_0_5_14": true,
+    "signature_schemes": [
+      "v1",
+      "v2",
+      "v3"
+    ],
+    "zip_alignment_16_kib_verified": true,
+    "installable_update": true
+  },
+  "permissions": {
+    "count": 29,
+    "added_since_0_5_14": [],
+    "removed_since_0_5_14": []
+  },
+  "paid_api_requests": 0,
+  "physical_handset_tested": false,
+  "unverified": [
+    "Live chat provider requests and costs",
+    "Live COROS browser sign-in",
+    "Live Google OAuth and Drive transfer",
+    "Nothing Phone Home/Recents animation",
+    "Physical camera, calls, SMS and overnight alarms"
+  ],
+  "signing_key_in_downloads": false
+}
