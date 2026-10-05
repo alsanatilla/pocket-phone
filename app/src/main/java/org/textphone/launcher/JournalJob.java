@@ -15,6 +15,8 @@ public final class JournalJob extends JobService {
     private static final long STALE_READING = 10 * 60_000L;
 
     static void schedule(Context c) {
+        // Keep captured pages waiting locally until the user explicitly sets a reading key.
+        if (!ClaudeKey.present(c)) return;
         JobScheduler jobs = c.getSystemService(JobScheduler.class); if (jobs == null) return;
         jobs.schedule(new JobInfo.Builder(JOB, new ComponentName(c, JournalJob.class))
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setPersisted(true).build());

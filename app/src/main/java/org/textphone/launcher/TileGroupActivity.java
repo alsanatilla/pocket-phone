@@ -34,7 +34,11 @@ public final class TileGroupActivity extends PocketActivity {
                 LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(0, -2, 1); cell.setMargins(dp(4), dp(4), dp(4), dp(4));
                 if (index < members.size()) row.addView(tile(members.get(index), index), cell);
                 else if (index == members.size() && members.size() < DashboardTiles.GROUP_LIMIT) row.addView(addTile(), cell);
-                else row.addView(new View(this), cell);
+                else {
+                    // Keep the weighted column without letting an empty View fill the ScrollView's height.
+                    cell.height = 0;
+                    row.addView(new View(this), cell);
+                }
             }
             body.addView(row, new LinearLayout.LayoutParams(-1, -2));
         }

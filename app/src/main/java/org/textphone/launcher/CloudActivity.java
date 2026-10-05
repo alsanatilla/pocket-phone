@@ -10,7 +10,7 @@ import com.google.android.gms.common.api.ApiException;
 import java.text.DateFormat;
 import java.util.Date;
 
-/** Opt-in cloud sync. Only Parking Lot, Receipt, Dice lists and notes leave the phone, into the user's own Drive. */
+/** Opt-in cloud sync of Pocket documents and journal pages into the user's own Drive. */
 public final class CloudActivity extends PocketActivity {
     private static final int AUTHORIZE = 731;
 
@@ -25,7 +25,7 @@ public final class CloudActivity extends PocketActivity {
         String status = !on ? "Off" : ok == 0 ? "On · waiting for the first sync" : "On · last synced " + DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(new Date(ok));
         body.addView(label(status, PocketDesign.BODY, on ? PocketDesign.accent(this) : WHITE));
         if (on && !error.isEmpty()) body.addView(label(error, PocketDesign.SMALL, PocketDesign.WARNING));
-        body.addView(label("Parking Lot, Receipt, Dice lists and notes are copied to a hidden Pocket folder in your Google Drive. "
+        body.addView(label("Parking Lot, Receipt, Dice lists, notes and journal page photos are copied to a hidden Pocket folder in your Google Drive. "
                 + "Changes sync once the phone is online, also from the web page. Tasks, messages and contacts stay on the phone.", PocketDesign.SMALL, GRAY));
         if (!on) action("Turn on with Google", this::authorize).setTag("cloud_on");
         else {

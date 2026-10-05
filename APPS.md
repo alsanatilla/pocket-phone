@@ -1,4 +1,6 @@
-# Pocket apps — 0.5.13
+# Pocket apps — 0.5.14
+
+The 0.5.14 increment adds editable tile groups (up to nine Pocket or installed apps), Dice, Parking Lot, Receipt and Journal. Notes can park linked thoughts with `>>` and optional return tags. Optional Google Drive sync covers notes, Parking, Receipt, Dice lists and journal pages; account setup is documented in CLOUD.md. Journal reading separately needs a user-entered Anthropic key. Captured pages wait locally while no key is set. Internet/network-state permissions support these optional features. Existing companion flows below remain available.
 
 All nine default dashboard tiles open implemented Pocket interfaces. Hold any tile to change its app, rename it, use the actual app name or reset it. Choosing a new app clears a previous custom name. Existing app bindings and saved data are retained. See PRODUCTIVITY.md for daily-use gaps and the Home-gesture investigation. They use the Android services and providers underneath; platform permission/role dialogs remain Android screens. Apps share black, white and pale yellow, pixel headings/icons, compact text menus and native touch controls. No dashboard tile is a nonfunctional placeholder.
 

@@ -43,8 +43,8 @@ public final class DeviceSettingsActivity extends PocketActivity {
         action("Open source licenses", this::licenses);
     }
     private void licenses() {
-        String[] names = {"Pocket · MIT", "VT323 · Open Font License", "Markwon · Apache 2.0", "commonmark-java · BSD", "AndroidX annotations · Apache 2.0"};
-        String[] files = {"Pocket-MIT.txt", "VT323-OFL.txt", "Markwon-APACHE-2.0.txt", "CommonMark-BSD.txt", "Markwon-APACHE-2.0.txt"};
+        String[] names = {"Pocket · MIT", "VT323 · Open Font License", "Markwon · Apache 2.0", "commonmark-java · BSD", "AndroidX annotations · Apache 2.0", "Anthropic SDK · MIT", "Network dependency notices"};
+        String[] files = {"Pocket-MIT.txt", "VT323-OFL.txt", "Markwon-APACHE-2.0.txt", "CommonMark-BSD.txt", "Markwon-APACHE-2.0.txt", "Anthropic-MIT.txt", "Network-NOTICES.txt"};
         new android.app.AlertDialog.Builder(this).setTitle("Open source licenses").setItems(names, (dialog, item) -> {
             try (java.io.InputStream input = getAssets().open("licenses/" + files[item])) {
                 java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream(); byte[] buffer = new byte[4096]; int read;

@@ -44,7 +44,7 @@ public final class PermissionsActivity extends PocketActivity {
         section("Other apps' notifications", NotificationAccess.allowed(this) ? "Sensitive access enabled in Android" : "Off · optional",
                 "This separate access can read banking notices and verification codes. Leave it off unless you want those notices in Pocket. Pocket's own alerts do not need it.");
         action("Manage notification access", () -> startActivity(new Intent(this, NotificationSetupActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
-        section("Data", "No analytics or upload code", "Pocket has no Internet permission. Carrier messages, a calendar account or a file provider you select can transfer data through Android's services.");
+        section("Data", "Online features are optional", "Drive sync starts off; enabling it copies notes, Parking, Receipt, Dice lists and Journal page photos to your own Google Drive. Journal reading separately sends selected paper pages to Anthropic after you add your own API key. Tasks, calls, SMS, contacts and the Pocket Camera album are excluded from Drive sync. Carrier messages and calendar account sync use Android's services.");
         body.addView(label("Using Pocket every day", 18, WHITE));
         body.addView(label("Use Pocket as Home. Keep your current Phone and Messages as defaults while testing calls, texts and alarms. Hold their Home tiles to choose those installed apps.", 13, GRAY));
         action("Android default apps", () -> startActivity(new Intent(Build.VERSION.SDK_INT >= 24 ? Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS : Settings.ACTION_SETTINGS)));

@@ -58,7 +58,11 @@ final class JournalReader {
     /** Reads the page and stores the result. Permanent problems end in FAILED with a reason the user can act on. */
     static void read(Context c, String uid) throws Later {
         String key = ClaudeKey.read(c);
-        if (key == null) { fail(c, uid, "Add your Claude API key in Journal → Settings to read this page."); return; }
+        if (key == null) {
+            JournalStore.update(c, uid, p -> p.put("state", JournalStore.WAITING)
+                    .put("error", "Add your Claude API key in Journal → Settings to read this page."));
+            return;
+        }
         // A page uploaded on the web has its photo only in Drive until this phone fetches it.
         if (!JournalStore.image(c, uid).isFile()) {
             try { if (!CloudSync.downloadPageImage(c, uid)) { fail(c, uid, "The photo isn't on this phone. Turn on Settings → Cloud sync to read pages added on the web."); return; } }

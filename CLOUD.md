@@ -10,9 +10,9 @@ Cloud sync is **off by default**. When you turn it on in Settings → Cloud sync
 | `notes.json` | Notes from Today, with pins; deleted notes stay as markers for 30 days |
 | `journal.json` + `page-<uid>.jpg` | Journal pages: the photo, its transcript lines with their position on the photo, and the linked note |
 
-Tasks, messages, contacts, calls and photos stay on the phone. The hidden folder is only visible to Pocket's own Google Cloud project; it does not show up in Drive.
+Tasks, messages, contacts, calls and Pocket Camera album photos stay on the phone. Journal page photos are included when cloud sync is enabled. The hidden folder is only visible to Pocket's own Google Cloud project; it does not show up in Drive.
 
-Every local change asks Android for a sync job that waits for any network, so edits made offline upload once the phone is online again. A periodic job also picks up web edits every hour, and opening a Pocket app syncs at most every two minutes. This is why the APK now declares the `INTERNET` permission. With sync off, Pocket makes no network requests.
+Every local change asks Android for a sync job that waits for any network, so edits made offline upload once the phone is online again. A periodic job also picks up web edits every hour, and opening a Pocket app syncs at most every two minutes. This is why the APK now declares `INTERNET` and `ACCESS_NETWORK_STATE`. With cloud sync off, no Drive sync is scheduled. Journal transcription is a separate optional network feature, enabled by entering an Anthropic key in Journal settings.
 
 The web page in [`docs/`](docs/) is a workstation for Parking Lot, notes, Receipt and Dice in Pocket's terminal style: numbered tool tabs, two-column layouts on wide windows and one column on phones. It keeps its own copy in the browser, works offline, and uploads waiting edits when it is online and connected.
 
@@ -38,7 +38,7 @@ Change both implementations together.
    ```sh
    keytool -list -v -keystore your-release.keystore -alias your-alias
    ```
-   Debug and release keys have different fingerprints; add a client for each key you install.
+   Debug and release keys have different fingerprints; add a client for each key you install. The signed 0.5.14 APK retains the existing release certificate, SHA-1 `57651e7742d17aa12af0e1c823bd5f73759e9dbf`.
 4. Create a **Web application** OAuth client in the same project. Add these authorized JavaScript origins:
    - `https://alsanatilla.github.io`
    - `http://localhost:8777` (optional, for local testing)

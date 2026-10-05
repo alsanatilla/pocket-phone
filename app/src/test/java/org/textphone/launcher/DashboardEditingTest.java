@@ -50,12 +50,15 @@ public class DashboardEditingTest {
     }
     private View root() { return activity.findViewById(android.R.id.content); }
     private TextView name() { return root().findViewWithTag("tile_label_"+slot); }
-    private void menu(int option) {
+    private void menu(String option) {
         assertTrue(root().findViewWithTag("tile_"+slot).performLongClick());AlertDialog menu=ShadowAlertDialog.getLatestAlertDialog();
-        assertTrue(menu.isShowing());Shadows.shadowOf(menu).clickOnItem(option);
+        assertTrue(menu.isShowing());
+        for(int i=0;i<menu.getListView().getAdapter().getCount();i++)
+            if(option.equals(menu.getListView().getAdapter().getItem(i).toString())) { Shadows.shadowOf(menu).clickOnItem(i);return; }
+        fail("Missing tile action: "+option);
     }
     private void assign(String label) throws Exception {
-        menu(0);AppIndexTest.settle(activity);TextView choice=PocketAppsTest.find(root(),label);assertNotNull(label,choice);choice.performClick();
+        menu(activity.getResources().getBoolean(R.bool.pocket_rom)?"Installed app":"Change app");AppIndexTest.settle(activity);TextView choice=PocketAppsTest.find(root(),label);assertNotNull(label,choice);choice.performClick();
     }
     @Test public void choosingAnAppNamesTheTileAndLaunchesThatApp() throws Exception {
         assign("ChatGPT");assertEquals("ChatGPT",name().getText().toString());assertEquals("fixture.chatgpt",prefs.getString("shortcut_"+slot,null));
@@ -64,7 +67,7 @@ public class DashboardEditingTest {
         root().findViewWithTag("tile_"+slot).performClick();assertEquals("fixture.chatgpt",Shadows.shadowOf(activity).getNextStartedActivity().getComponent().getPackageName());
     }
     @Test public void renamePersistsAndChangingAppsClearsTheOldCustomName() throws Exception {
-        assign("ChatGPT");menu(1);AlertDialog rename=ShadowAlertDialog.getLatestAlertDialog();EditText input=rename.findViewById(android.R.id.content).findViewWithTag("tile_name_editor");
+        assign("ChatGPT");menu("Rename");AlertDialog rename=ShadowAlertDialog.getLatestAlertDialog();EditText input=rename.findViewById(android.R.id.content).findViewWithTag("tile_name_editor");
         input.setText("  Ask  ");rename.getButton(AlertDialog.BUTTON_POSITIVE).performClick();Shadows.shadowOf(Looper.getMainLooper()).idle();assertEquals("Ask",name().getText().toString());
         controller.recreate();activity=controller.get();assertEquals("Ask",name().getText().toString());
         assign("Calendar");assertEquals("Calendar",name().getText().toString());assertFalse(prefs.contains("shortcut_name_"+slot));
@@ -72,7 +75,7 @@ public class DashboardEditingTest {
     @Test public void useAppNameAndResetAffectOnlyThisTileAndKeepOrganizerData() throws Exception {
         PlannerStore planner=new PlannerStore(activity.getSharedPreferences("pocket_planner",0));long note=planner.save(0,"note","Keep my note");
         assign("ChatGPT");new DashboardTiles(prefs).rename(slot,"Ask");controller.newIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));assertEquals("Ask",name().getText().toString());
-        menu(2);assertEquals("ChatGPT",name().getText().toString());menu(3);assertEquals(slot,name().getText().toString());assertFalse(prefs.contains("shortcut_"+slot));
+        menu("Use app name");assertEquals("ChatGPT",name().getText().toString());menu(activity.getResources().getBoolean(R.bool.pocket_rom)?"Reset tile":"Reset shortcut");assertEquals(slot,name().getText().toString());assertFalse(prefs.contains("shortcut_"+slot));
         assertEquals("Keep my note",planner.find(note).text);assertNotNull(root().findViewWithTag("tile_settings"));
     }
     @Test public void oldPackageOnlyBindingsResolveActualNamesWithoutRebuildingHome() throws Exception {

@@ -1,10 +1,10 @@
-# Stand der Apps — Pocket 0.5.13
+# Stand der Apps — Pocket 0.5.14
 
 Alle neun Standardkacheln öffnen implementierte Pocket-Oberflächen. Pocket ist weiterhin ein Launcher mit eigenen Android-Apps auf Nothing OS. Eine vollständige System-ROM wurde nicht gebaut. Die Angaben unten beruhen auf Code, automatisierten Android-Tests und nativen Layout-Vorschauen; ein Nothing Phone (3a) ist hier nicht angeschlossen.
 
 | App | Damit kannst du bereits arbeiten | Grenze im Alltag |
 | --- | --- | --- |
-| Notizen | Markdown schreiben, Vorschau, Formatierungsrad, Entwürfe, Teilen/Export, Aufgabe aus einer Notiz, gespeicherte Notizen anheften. | Lokal; keine Google-Keep-Synchronisierung. Maximal 8.000 Zeichen pro Notiz. |
+| Notizen | Markdown, Formatierungsrad, Entwürfe, Teilen/Export, Aufgabe aus einer Notiz, Anheften; `>>`-Zeilen parken verknüpfte Gedanken. | Optionaler Drive-Sync; keine Google-Keep-Synchronisierung. Maximal 8.000 Zeichen pro Notiz. |
 | Kalender / Agenda | Termine anlegen/bearbeiten, Start und Dauer bestimmen, Endzeit sehen, Entwurf fortsetzen, lokale Erinnerung. Optional in einen ausgewählten Android-Google-Kalender schreiben. | Keine eigenen Wiederholungsregeln oder vollständige Konflikt-/Löschabstimmung mit Google. Echte Kontosynchronisierung ist noch am Handy zu prüfen. |
 | Uhr | Wecker, tägliche Wiederholung, bestehende Wecker bearbeiten, benannte Timer, Pause/Fortsetzen, Stoppuhr/Runden, Snooze. | Android muss genaue Alarme und Benachrichtigungen zulassen. Sperrbildschirm, Neustart und Nachtbetrieb sind am Handy zu prüfen. |
 | Kontakte | Android-Adressbuch durchsuchen, Details, mehrere Nummern ansehen, primären Namen/Nummer/E-Mail bearbeiten, neue Kontakte, Anruf-/SMS-Übergabe, wiederaufnehmbarer Entwurf. | Androids Kontaktberechtigung erforderlich. Neue Kontakte sind lokal; bestehende Konto-Kontakte folgen Androids Sync. |
@@ -14,6 +14,11 @@ Alle neun Standardkacheln öffnen implementierte Pocket-Oberflächen. Pocket ist
 | Nachrichten | Aktive Messenger-Benachrichtigungen öffnen, gegebenenfalls antworten, daraus eine Aufgabe machen. Separates SMS-Postfach, Entwürfe und empfangene MMS-Anhänge. | Keine vollständige WhatsApp-/Signal-Historie. SMS braucht die Standard-SMS-Rolle; kein RCS oder Versand von MMS-Anhängen. Eine Übergabe bestätigt keine Zustellung. |
 | Telefon | Nummernfeld, Tastenfeld, Verlauf, SIM-Auswahl, eingehende/aktive Anrufsteuerung. | Standard-Telefon-Rolle und native Berechtigungen; echte SIM-Anrufe/Audiowege sind noch zu prüfen. Notruf geht zum System-Dialer. |
 | Einstellungen | Launcher/Kacheln, Helligkeit, Lautstärke, DND und Übergabe an geschützte Android-Einstellungen. | Geschützte Android-Einstellungen bleiben unter Androids Kontrolle. App-Setup bleibt im jeweiligen Settings-Button. |
+| Kachelgruppen | Eine Home-Kachel enthält bis zu neun Pocket- oder installierte Apps; Umbenennen, Verschieben, Entfernen. | Fehlende installierte Apps müssen ersetzt oder aus der Gruppe entfernt werden. |
+| Dice | Würfel, d20, Münze und Auswahl aus einer eigenen Liste; Schütteln und Verlauf. | Nur die Auswahlliste wird optional synchronisiert. |
+| Parking Lot | Gedanken zeitversetzt zurückholen, erneut parken, abhaken oder nach Today übernehmen; Verknüpfung zur Quellnotiz. | Android steuert Hintergrund-Erinnerungen. Echte Zustellung am Handy ist noch zu prüfen. |
+| Receipt | Tagesprotokoll bewusster Pocket-Aktionen, eigene Textzeilen und Teilen. | Kein Geräteprotokoll; keine Überwachung anderer Apps. Begrenzte Aufbewahrung. |
+| Journal | Papierseiten fotografieren/importieren, Original behalten, Transkript als verknüpfte Notiz anzeigen. | Lesen sendet die ausgewählte Seite an Anthropic mit eigenem API-Key und verursacht Kosten. Ohne Key bleiben Seiten lokal wartend. Live-API und Kameraübergabe sind nicht am Handy geprüft. |
 
 ## Neue Bedienung
 
@@ -28,7 +33,7 @@ Alle neun Standardkacheln öffnen implementierte Pocket-Oberflächen. Pocket ist
 
 ## Berechtigungen und Daten
 
-Dieses Update fügt keine Berechtigungen hinzu. Es enthält keine Internetberechtigung, Analytics oder Kontoanmeldung. Kontaktentwürfe sind ausschließlich eingegebener Text plus der lokale Bezug zum ausdrücklich gespeicherten Kontakt, privat in der App. Ein verspätet akzeptierter Speichervorgang darf seinen bereits gespeicherten Text nicht als neuen Entwurf wiederherstellen; neuere Änderungen bleiben getrennt erhalten.
+Dieses Update fügt Internet- und Netzwerkstatus-Berechtigungen für die optionalen Online-Funktionen hinzu. Drive-Sync ist zunächst aus und braucht explizite Google-Freigabe sowie die OAuth-Einrichtung aus CLOUD.md. Er umfasst Notizen, Parking, Receipt, Dice-Listen und Journal-Seitenfotos. Journal-Lesen ist davon getrennt: erst ein selbst eingetragener, im Android Keystore verschlüsselter Anthropic-Key aktiviert die Übertragung ausgewählter Papierseiten. Kontaktentwürfe bleiben privater eingegebener Text plus der Bezug zum ausdrücklich gespeicherten Kontakt. Pocket-Kameraalbum, Aufgaben, Anrufe, SMS und Kontakte werden durch diesen Drive-Sync nicht hochgeladen.
 
 Androids Warnung für Benachrichtigungszugriff ist reale Android-Einwilligung. Wenn Android für diese APK „Restricted setting“ anzeigt und es anbietet: App info → ⋮ → Allow restricted settings, dann zurück zur Listener-Freigabe. Pocket kann das nicht selbst freischalten. Benachrichtigungszugriff, normale Benachrichtigungen, Kontakte, Kalender und die Telefon-/SMS-Rollen sind unterschiedliche Freigaben.
 
