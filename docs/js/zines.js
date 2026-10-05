@@ -1,6 +1,6 @@
-import * as store from "./zine-store.js?v=20261005-zines2";
-import { preparePhoto, renderer, pageCount } from "./zine-render.js?v=20261005-zines2";
-import { makePDF } from "./zine-pdf.js?v=20261005-zines2";
+import * as store from "./zine-store.js?v=20261005-zines3";
+import { preparePhoto, renderer, pageCount } from "./zine-render.js?v=20261005-zines3";
+import { makePDF } from "./zine-pdf.js?v=20261005-zines3";
 
 const LIMIT = 40;
 let current;
@@ -19,7 +19,7 @@ function el(tag, attrs = {}, ...children) {
 const button = (text, onclick, attrs = {}) => el("button", { text, onclick, ...attrs });
 const hint = text => el("p", { class: "small muted", text });
 const label = (text, field) => el("label", { class: "zine-field" }, el("span", { class: "meta muted", text }), field);
-const fresh = () => ({ id: crypto.randomUUID(), title: "after dark", byline: "", tone: "deep", photos: [], created: Date.now(), updated: Date.now() });
+const fresh = () => ({ id: crypto.randomUUID(), title: "", byline: "", tone: "deep", photos: [], created: Date.now(), updated: Date.now() });
 const alive = state => current === state && state.host.isConnected;
 function report(state, error) {
   if (alive(state)) state.api.say(error.name === "QuotaExceededError" ? "This browser is out of space. Download a PDF, then delete an old zine or add fewer photos." : error.message || "Couldn't open this zine.");
@@ -115,9 +115,8 @@ async function library(state) {
   if (!alive(state)) return;
   const list = el("div", { class: "zine-library" });
   state.host.replaceChildren(
-    el("div", { class: "zine-heading" }, el("div", {}, el("h1", { class: "zine-title", text: "little books. deep dark." }), hint("Your camera photos, kept as a pocket photobook.")), button("+ new zine", () => state.api.go("/zines/new"))),
-    hint("Saved in this browser. Download a PDF to keep or share a copy. Photos stay here and don't use Claude or Drive."),
-    books.length ? list : el("div", { class: "zine-empty" }, el("p", { text: "a few photos. a small world." }), hint("Start a zine, then select pictures from your camera album."), button("make your first zine", () => state.api.go("/zines/new")))
+    el("div", { class: "zine-heading" }, el("div", {}, el("h1", { class: "zine-title", text: "zines" })), button("+ new zine", () => state.api.go("/zines/new"))),
+    books.length ? list : el("div", { class: "zine-empty" }, hint("No zines yet."), button("new zine", () => state.api.go("/zines/new")))
   );
   for (const book of books) {
     const image = el("img", { alt: "", loading: "lazy", class: "zine-thumb" });
@@ -187,8 +186,7 @@ function editor(state) {
       button("+ photos", () => picker.click(), { "data-edit": true, "aria-label": "Add photos to zine" }), read,
       button("reading PDF", () => download(state, false), { "data-export": true, disabled: !book.photos.length }),
       button("print booklet", () => download(state, true), { "data-export": true, disabled: !book.photos.length })),
-    el("div", { class: "zine-workspace" }, edit, reader),
-    hint("Choose your Pocket Camera photos from your phone's photo picker. Swipe the book or use ← / → to turn pages."));
+    el("div", { class: "zine-workspace" }, edit, reader));
   const signal = state.abort.signal;
   state.host.addEventListener("dragover", event => { event.preventDefault(); if (!state.busy) state.host.classList.add("dropping"); }, { signal });
   state.host.addEventListener("dragleave", event => { if (!state.host.contains(event.relatedTarget)) state.host.classList.remove("dropping"); }, { signal });
@@ -237,7 +235,7 @@ async function photoList(state) {
     if (!alive(state) || generation !== state.listId) return;
     if (photo) { const url = URL.createObjectURL(photo.thumbnail); state.urls.push(url); image.src = url; }
   }
-  if (!state.book.photos.length) state.list.append(hint("Pick photos or drop them here. The first photo becomes your cover."));
+  if (!state.book.photos.length) state.list.append(hint("No photos yet."));
   selectPhoto(state);
   if (state.busy) lock(state, true);
 }
@@ -280,7 +278,7 @@ async function paint(state) {
 }
 async function download(state, booklet) {
   if (state.busy || !state.book.photos.length) return;
-  if (booklet && !await state.api.dialog("Print a pocket booklet", hint("A5 landscape paper · actual size / 100% · print on both sides, flip on the short edge. Keep the sheets in order, fold the stack in half, then staple. The folded book is A6. Blank pages are added inside the covers when needed."), [["cancel", false], ["download PDF", true]])) return;
+  if (booklet && !await state.api.dialog("Print booklet", hint("A5 landscape · 100% · double-sided · flip short edge · fold and staple."), [["cancel", false], ["download PDF", true]])) return;
   if (!alive(state)) return;
   lock(state, true);
   try {

@@ -1,9 +1,9 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
-import * as drive from "./drive.js?v=20261005-zines2";
-import * as reader from "./reader.js?v=20261005-zines2";
-import * as zines from "./zines.js?v=20261005-zines2";
-import { syncNow, describe, onStatus, status } from "./sync.js?v=20261005-zines2";
-import { parking, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261005-zines2";
+import * as drive from "./drive.js?v=20261005-zines3";
+import * as reader from "./reader.js?v=20261005-zines3";
+import * as zines from "./zines.js?v=20261005-zines3";
+import { syncNow, describe, onStatus, status } from "./sync.js?v=20261005-zines3";
+import { parking, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261005-zines3";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;

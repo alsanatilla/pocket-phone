@@ -1,4 +1,4 @@
-import { getPhoto } from "./zine-store.js?v=20261005-zines2";
+import { getPhoto } from "./zine-store.js?v=20261005-zines3";
 
 export const PAGE_WIDTH = 298, PAGE_HEIGHT = 420;
 export const pageCount = book => book.photos.length + 2;
@@ -106,7 +106,6 @@ export function renderer() {
         ctx.drawImage(image, x + (width - w) / 2, y + (height - h) / 2, w, h); ctx.restore();
       };
       if (index === 0) {
-        text("pocket / photo zine", 18, 24);
         if (book.photos.length) draw(await photo(book.photos[0].id, book.tone), 18, 44, 262, 245);
         const title = book.title.trim() || "untitled";
         ctx.font = '34px "Jacquard 24"';
@@ -119,7 +118,6 @@ export function renderer() {
         text("pocket", 18, 322, 48, '"Jacquard 24"');
         text(book.title.trim() || "untitled", 18, 344);
         text(`${book.photos.length} photograph${book.photos.length === 1 ? "" : "s"} / ${new Date(book.created).getFullYear()}`, 18, 393);
-        text("made from the things you kept.", 18, 406);
       } else {
         const entry = book.photos[index - 1], image = await photo(entry.id, book.tone);
         const bleed = entry.layout === "bleed";
