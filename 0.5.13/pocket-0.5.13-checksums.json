@@ -1,0 +1,42 @@
+{
+  "pocket-phone-0.5.13.apk": {
+    "bytes": 488792,
+    "sha256": "85a695cbdaf534a29cbcf38e3c7132a6e30765a96e1f84e18dfca6347bf1f126"
+  },
+  "pocket-phone-0.5.13-source.zip": {
+    "bytes": 472596,
+    "sha256": "8683ca4be363ac901c0887420d53a3dcefbcac79b52680ebeece71fc6b2d1829"
+  },
+  "USE-POCKET-0.5.13.md": {
+    "bytes": 5553,
+    "sha256": "ed70408f864d8de4aae6da5b54984c8e682f8019df49f9faf3dcad4f7ce3d419"
+  },
+  "pocket-0.5.13-build-status.json": {
+    "bytes": 12184,
+    "sha256": "2a0ec0a7bd768520825347ac219d3b062546166d516e1545123b5584d23bcf70"
+  },
+  "pocket-0.5.13-app-status.md": {
+    "bytes": 6004,
+    "sha256": "3eb76c5a58aa83fce30c669f4967cee67b824364971973db859904c5ab598d67"
+  },
+  "pocket-0.5.13-design.md": {
+    "bytes": 13252,
+    "sha256": "39856dc391dd67434f4695579f467d78582cf760e03fb986569d6831862e06a9"
+  },
+  "pocket-0.5.13-productivity.md": {
+    "bytes": 8087,
+    "sha256": "115b7c98c6b2380151c05f7df75a3ac2910106f1c3ff7e12122769f30bba63ee"
+  },
+  "pocket-0.5.13-messages.png": {
+    "bytes": 16666,
+    "sha256": "0605da00c966d69f51ed485d0d73db494121bf312651912b780c718bba48c123"
+  },
+  "pocket-0.5.13-notes.png": {
+    "bytes": 19388,
+    "sha256": "d147865e84dab9a92dc3a848186793d00185b2eca12e25f33ce4f8eeb3dceaad"
+  },
+  "pocket-0.5.13-timer.png": {
+    "bytes": 12650,
+    "sha256": "4f67c2791a49bc62b0ddfee72283821b09585a4249e57f279ca2929c611aa11c"
+  }
+}

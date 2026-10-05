@@ -1,0 +1,288 @@
+{
+  "component": "Pocket Phone native Android launcher/apps",
+  "version_name": "0.5.13",
+  "version_code": 18,
+  "application_id": "org.textphone.launcher",
+  "min_sdk": 23,
+  "compile_and_target_sdk": 35,
+  "build": "assembleRom passed",
+  "android_checks": {
+    "rom": {
+      "tests": 410,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "debug": {
+      "tests": 405,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "total_passed": 815,
+    "api_levels_in_suite": [
+      23,
+      24,
+      28,
+      29,
+      35
+    ]
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 42
+  },
+  "apk": {
+    "file": "pocket-phone-0.5.13.apk",
+    "bytes": 488792,
+    "sha256": "85a695cbdaf534a29cbcf38e3c7132a6e30765a96e1f84e18dfca6347bf1f126",
+    "signature_schemes_verified": [
+      "v1",
+      "v2",
+      "v3"
+    ],
+    "zip_alignment_verified": true,
+    "signer_certificate_sha256": "883592cb9d2dbcb5817e28b3bb7df39d81f340d3ae2eca07134181fcf6d3e059",
+    "same_signer_as_0_5_2": true,
+    "same_signer_as_0_5_3": true,
+    "same_signer_as_0_5_4": true,
+    "same_signer_as_0_5_5": true,
+    "same_signer_as_0_5_6": true,
+    "same_signer_as_0_5_7": true,
+    "same_signer_as_0_5_8": true,
+    "same_signer_as_0_5_9": true,
+    "same_signer_as_0_5_10": true,
+    "same_signer_as_0_5_11": true,
+    "same_signer_as_0_5_12": true
+  },
+  "changes_in_this_release": [
+    "Editable existing alarms retain IDs, disabled state and scheduling; timer presets/labels retain drafts",
+    "Appointments have validated 1\u20131440 minute duration, readable end times, draft restoration and matching CalendarProvider ends",
+    "Legacy appointments/drafts default to 60 minutes; duration-only remote changes display once and all-day dates use local days",
+    "Contacts retain details/edit context and refresh after permission return; one recoverable user-authored draft, confirmed discard and safe delayed accepted saves",
+    "Pinned Markdown notes move first without modifying document text or other drafts; hold menu and Preview More expose pinning",
+    "Calculator starts new numbers after equals, chains operators, explicitly copies/reuses history and retains invalid input",
+    "Camera-only Files uses fixed Previous/Share/Next and validates ownership on every selected photo",
+    "Messages leads with the active feed; SMS and installed messaging apps are bottom commands",
+    "Phone has larger number entry and cursor-aware plus insertion without automatic calls",
+    "Existing black/white/accent terminal style, compact headers, hidden individual settings and native Android gestures retained",
+    "Same package/signature/permissions; no Internet permission; real handset behaviour remains unverified"
+  ],
+  "retained_features": [
+    "Nine implemented native default-dashboard interfaces",
+    "Pocket Camera-only Files album without modern photo-library permission",
+    "Actual notification-reader consent/status and 56 dp Open/Dismiss/footer controls",
+    "Task due dates, Important, subtasks, progress, search and Open/Today/Later/Done filters",
+    "Local Markdown notes with Markwon previews and hold-to-open native formatting wheel",
+    "Android bottom-edge Home/Recents gestures and native predictive internal Back",
+    "Optional existing phone-side Google Calendar integration through Android CalendarProvider"
+  ],
+  "android_consent": {
+    "sms": "Default SMS role plus SMS access; sending needs explicit tap and Android permissions",
+    "notifications": "Android notification-reader consent, separate from POST_NOTIFICATIONS",
+    "restricted_settings": "Manual app-info approval if Android offers it; no bypass"
+  },
+  "privacy": {
+    "internet_permission": false,
+    "analytics_or_upload_code": false,
+    "all_files_or_modern_photo_library_permission": false,
+    "notes_and_tasks": "Local",
+    "google_account_accessed_from_workspace": false,
+    "reply_drafts": "Only unfinished user-authored compositions, privately, bounded and expiring",
+    "automatic_received_notification_history_saved": false,
+    "explicit_source_capture": "Only a user-selected note/message/share source snapshot/reference is stored with its task, locally",
+    "new_permissions": [],
+    "contact_drafts": "One user-authored contact edit plus a bounded local accepted-save reference; no automatic address-book archive"
+  },
+  "handset_validation": {
+    "physical_nothing_phone_connected": false,
+    "live_calls_and_carrier_sms_mms_verified": false,
+    "camera_hardware_verified": false,
+    "overnight_alarms_verified": false,
+    "google_sync_verified": false,
+    "nothing_os_gesture_smoothness_verified": false,
+    "whatsapp_transport_and_reply_verified": false
+  },
+  "full_custom_rom_compiled": false,
+  "sms_limits": [
+    "Outgoing MMS/attachment sending and RCS not implemented",
+    "Carrier sent state is not recipient delivery/read confirmation"
+  ],
+  "package": "Android app source, without private signing keys, caches or local SDK configuration",
+  "navigation": {
+    "home_recents": "Android/Nothing OS system gestures and transitions",
+    "native_launch_options": true,
+    "own_task_reuse": "Component-specific native task flags; source capture/reminder stay in the caller task; Organizer opens exact records in its Today task",
+    "organizer_task_affinity": "org.textphone.launcher.today",
+    "ordinary_page_duration_ms_at_system_scale_1": {
+      "forward": 180,
+      "back": 160,
+      "cancel": 140
+    },
+    "predictive_back": "Gesture callback on API 34+; readonly cached parent when available; opaque foreground",
+    "view_preview_cache_limit": 3,
+    "saved_scroll_page_limit": 32,
+    "gesture_touch_interception_or_exclusions": false,
+    "motion_setting": "Follow Android, or Pocket Off",
+    "privileged_overview_service": false,
+    "forced_display_refresh_mode": false,
+    "hardware_frame_rate_measured": false,
+    "back_route_history_limit": 24,
+    "header_and_system_back_share_route": true,
+    "message_hub_children": "SMS inbox and notification reply stay in the caller task",
+    "default_messages_activity": "org.textphone.launcher.ChatsActivity",
+    "source_capture_and_reminder_children": "Private source capture/reminder editors stay in the calling task; public native share has a separate task affinity"
+  },
+  "release_kind": "Signed incremental update; same Android package and signer; install over existing app",
+  "release_checklist": "RELEASES.md inside source snapshot",
+  "no_force_stop_photo_recovery_guarantee": true,
+  "daily_phone_hardware_validation_complete": false,
+  "design_system_reference": "DESIGN.md inside source snapshot",
+  "previews": [
+    {
+      "file": "pocket-0.5.13-messages.png",
+      "kind": "Reviewed native Android API 28 layout render with local fixture data, not handset recording",
+      "sha256": "0605da00c966d69f51ed485d0d73db494121bf312651912b780c718bba48c123"
+    },
+    {
+      "file": "pocket-0.5.13-notes.png",
+      "kind": "Reviewed native Android API 28 layout render with local fixture data, not handset recording",
+      "sha256": "d147865e84dab9a92dc3a848186793d00185b2eca12e25f33ce4f8eeb3dceaad"
+    },
+    {
+      "file": "pocket-0.5.13-timer.png",
+      "kind": "Reviewed native Android API 28 layout render with local fixture data, not handset recording",
+      "sha256": "4f67c2791a49bc62b0ddfee72283821b09585a4249e57f279ca2929c611aa11c"
+    }
+  ],
+  "design_research_reference": "RESEARCH.md inside source snapshot",
+  "productivity_audit_reference": "PRODUCTIVITY.md inside source snapshot",
+  "nothing_home_flash_confirmed_fixed_on_handset": false,
+  "message_hub": {
+    "received_content": "Currently active Android notifications; no automatic received-history archive. Make task explicitly stores a selected source snapshot.",
+    "transport": "Installed WhatsApp/Signal/Telegram/etc. apps handle their own receiving and delivery",
+    "open": "Explicit native notification PendingIntent or installed app launch",
+    "reply": "Explicit freeform RemoteInput when provided by the app; accepted handoff is not delivery confirmation",
+    "reply_guards": [
+      "unlocked device",
+      "listener consent and connection",
+      "active notice",
+      "same conversation",
+      "one submission"
+    ],
+    "user_composition_drafts": "Private local user-authored text only; up to seven days; cleared after handoff",
+    "full_proprietary_chat_history": false,
+    "physical_whatsapp_delivery_verified": false,
+    "feed_before_navigation": true,
+    "fixed_bottom_sms_and_apps_commands": true
+  },
+  "agenda": {
+    "grouped_days": true,
+    "separate_time_and_title": true,
+    "upcoming_and_past": true,
+    "recoverable_appointment_drafts": 1,
+    "external_calendar_changes_displayed_once": true,
+    "full_two_way_record_reconciliation": false,
+    "editable_duration": true,
+    "duration_min_minutes": 1,
+    "duration_max_minutes": 1440,
+    "legacy_duration_minutes": 60,
+    "duration_in_drafts": true,
+    "provider_end_matches_duration": true,
+    "all_day_local_dates": true
+  },
+  "compact_workspace": {
+    "page_title_sp": 24,
+    "header_min_dp": 48,
+    "font_aware_header_size": true,
+    "individual_app_setup_behind_settings": true,
+    "dashboard_settings_tile_retained": true,
+    "camera_profile_flash_exposure_in_settings": true,
+    "today_and_agenda_title_sp": 14,
+    "today_and_agenda_font": "Monospace",
+    "today_task_title_sp": 17,
+    "today_metadata_sp": 12,
+    "section_label_sp": 12,
+    "calendar_and_search_bottom_navigation": true
+  },
+  "productivity": {
+    "today_local_and_selected_native_calendar": true,
+    "ongoing_events_included": true,
+    "exact_next_task_from_home": true,
+    "source_capture_kinds": [
+      "note",
+      "message",
+      "shared"
+    ],
+    "source_capture_draft_limit": 20,
+    "capture_drafts_expire_or_evict": false,
+    "source_in_markdown_export": true,
+    "task_reminder": "One-shot exact alarm with stable task ID; reschedule/snooze preserve link; completion/deletion cancels; reopen requires explicit schedule",
+    "task_recurrence": false,
+    "editable_appointment_duration": true,
+    "unified_search": false,
+    "full_backup_restore": false,
+    "current_next_appointment_hero": true,
+    "ongoing_timed_event_priority": true,
+    "command_bar_under_current_item": true,
+    "single_group_no_duplicate_heading": true,
+    "focus_follows_shown_appointment": true,
+    "focus_and_visited_page_survive_recreation": true,
+    "search_on_request_with_cancel_clear": true,
+    "pinned_notes": true
+  },
+  "retained_productivity": {
+    "today_local_and_selected_native_calendar": true,
+    "ongoing_events_included": true,
+    "exact_next_task_from_home": true,
+    "source_capture_kinds": [
+      "note",
+      "message",
+      "shared"
+    ],
+    "source_capture_draft_limit": 20,
+    "capture_drafts_expire_or_evict": false,
+    "source_in_markdown_export": true,
+    "task_reminder": "One-shot exact alarm with stable task ID; reschedule/snooze preserve link; completion/deletion cancels; reopen requires explicit schedule",
+    "task_recurrence": false,
+    "editable_appointment_duration": true,
+    "unified_search": false,
+    "full_backup_restore": false
+  },
+  "app_status_reference": "APP-STATUS.md inside source snapshot",
+  "contacts": {
+    "permission_return_refresh": true,
+    "detail_recreation": true,
+    "recoverable_edit_drafts": 1,
+    "confirmed_discard": true,
+    "accepted_save_cannot_revive_old_draft": true,
+    "newer_edits_retain_native_record_reference": true
+  },
+  "clock": {
+    "existing_alarm_edit": true,
+    "alarm_id_retained": true,
+    "off_state_retained": true,
+    "timer_presets_minutes": [
+      5,
+      25,
+      50
+    ],
+    "optional_timer_label": true,
+    "timer_editor_state_retained": true
+  },
+  "calculator": {
+    "decimal_parser": true,
+    "result_aware_keypad": true,
+    "explicit_copy": true,
+    "reusable_history": true,
+    "invalid_expression_retained": true
+  },
+  "files": {
+    "camera_only": true,
+    "read_only": true,
+    "photo_previous_next": true,
+    "fixed_viewer_commands": true,
+    "selected_photo_revalidated": true
+  },
+  "permissions_count": 28
+}
