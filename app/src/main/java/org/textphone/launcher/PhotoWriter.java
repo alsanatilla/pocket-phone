@@ -47,6 +47,7 @@ final class PhotoWriter {
                         + "_" + UUID.randomUUID().toString().substring(0, 4) + ".JPG";
                 Uri uri = PhotoStore.save(application, temporary, name, photo.getWidth(), photo.getHeight(), taken);
                 published = uri;
+                ReceiptTape.log(application, ReceiptTape.PHOTO, profile.label, taken);
                 application.getSharedPreferences("pocket_camera", Context.MODE_PRIVATE).edit()
                         .putString("last_photo", uri.toString()).apply();
                 float scale = Math.min(1f, 160f / Math.max(photo.getWidth(), photo.getHeight()));

@@ -60,6 +60,7 @@ public final class AlarmService extends Service {
             if (active && alarmId == nextId && occurrence == nextOccurrence) return START_STICKY;
             alarmId = nextId; occurrence = nextOccurrence; title = intent.getStringExtra("title"); if (title == null || title.isEmpty()) title = "Alarm";
             ClockStore.Entry record=ClockStore.find(this,alarmId);taskId=record==null?0:record.task;
+            ReceiptTape.log(this, ReceiptTape.ALARM, title);
             started = SystemClock.elapsedRealtime();
         }
         release(); active = true; fallback = false;

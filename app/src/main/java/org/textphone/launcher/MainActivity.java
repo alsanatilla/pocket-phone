@@ -83,7 +83,6 @@ public class MainActivity extends Activity {
             "call history", "settings", "maps", "camera", "rides"};
     private static final String[] ROM_SHORTCUTS = {"phone", "messages", "contacts", "clock",
             "camera", "calculator", "files", "today", "settings"};
-    private static final int[] ROM_ICONS = {9, 2, 3, 10, 7, 11, 12, 13, 5};
     private String[] shortcuts = SHORTCUTS;
     private boolean romProfile;
     private LinearLayout planHost,todayFilters,todayActions;private TextView todayDate;private String todayFocusTitle="",focusTitle="";private boolean homePlan;private int planRequest;
@@ -207,6 +206,7 @@ public class MainActivity extends Activity {
         if ("assign".equals(screen) && assigningShortcut == null) screen = "home";
         if (savedInstanceState == null && "today".equals(getIntent().getStringExtra("pocket_screen"))) screen = "today";
         if (savedInstanceState == null && "notifications".equals(getIntent().getStringExtra("pocket_screen"))) screen = "notifications";
+        if (savedInstanceState == null && !workspace() && "settings".equals(getIntent().getStringExtra("pocket_screen"))) screen = "settings";
         if (!workspace() && Intent.ACTION_MAIN.equals(getIntent().getAction()) && getIntent().hasCategory(Intent.CATEGORY_HOME)) { screen = "home"; trail.clear(); }
         if (!validScreen(screen)) screen = "home";
         long task=getIntent().getLongExtra("pocket_task",0);if(savedInstanceState==null&&task>0){captureId=task;captureKind="task";screen="task_detail";if(trail.peek()==null)trail.push(new RouteTrail.Route("today",0,"note",null,"home",""));}
@@ -315,6 +315,7 @@ public class MainActivity extends Activity {
         if (receiveSharedText(intent)) return;
         if ("today".equals(intent.getStringExtra("pocket_screen"))) { navigate("today"); return; }
         if ("notifications".equals(intent.getStringExtra("pocket_screen"))) { navigate("notifications"); return; }
+        if (!workspace() && "settings".equals(intent.getStringExtra("pocket_screen"))) { navigate("settings"); return; }
         if (workspace()) return;
         // Android is already animating the Home gesture. Present the final Home surface immediately.
         if (Intent.ACTION_MAIN.equals(intent.getAction()) && intent.hasCategory(Intent.CATEGORY_HOME)) motion.instant(() -> navigate("home"));
@@ -674,7 +675,7 @@ public class MainActivity extends Activity {
                 tile.setClickable(true);
                 tile.setTag("tile_" + shortcuts[index]);
                 tile.setContentDescription(tiles.label(shortcuts[index]) + ". Hold to edit shortcut.");
-                PhoneIcon icon = new PhoneIcon(this, romProfile ? ROM_ICONS[index] : index);
+                PhoneIcon icon = new PhoneIcon(this, romProfile ? tiles.icon(shortcuts[index]) : index);
                 icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
                 int iconSize = romProfile ? 26 : 34;
                 tile.addView(icon, new LinearLayout.LayoutParams(dp(iconSize), dp(iconSize)));
@@ -803,14 +804,17 @@ public class MainActivity extends Activity {
     private void openShortcut(int index) {
         if (index < 0 || index >= shortcuts.length) return;
         String shortcut = shortcuts[index];
-        String assigned = preferences.getString("shortcut_" + shortcut, null);
+        if (romProfile && tiles.group(shortcut)) {
+            turnOffOwnedTorch(); startActivity(new Intent(this, TileGroupActivity.class).putExtra("slot", shortcut).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return;
+        }
+        String assigned = tiles.app(shortcut);
         if (assigned != null) {
             Intent app = getPackageManager().getLaunchIntentForPackage(assigned);
             if (app != null) { launch(shortcut, app); return; }
             showFeedback("Your chosen app was removed. Hold the shortcut to choose another.");
             return;
         }
-        if (romProfile) { openRomShortcut(index); return; }
+        if (romProfile) { openPocketApp(tiles.pocket(shortcut)); return; }
         switch (index) {
             case 0:
                 if (!launchPackageIfInstalled("org.thoughtcrime.securesms")) assignShortcut(shortcut);
@@ -834,19 +838,10 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void openRomShortcut(int index) {
-        switch (index) {
-            case 0: openPocket(PhoneActivity.class); break;
-            case 1: openPocket(ChatsActivity.class); break;
-            case 2: openPocket(ContactsActivity.class); break;
-            case 3: openPocket(ClockActivity.class); break;
-            case 4: openCamera(); break;
-            case 5: openPocket(CalculatorActivity.class); break;
-            case 6: openPocket(FilesActivity.class); break;
-            case 7: openPocket(OrganizerActivity.class); break;
-            case 8: navigate("settings"); break;
-            default: break;
-        }
+    private void openPocketApp(String id) {
+        if ("settings".equals(id)) navigate("settings");
+        else if ("camera".equals(id)) openCamera();
+        else if (PocketApps.activity(id) != null) openPocket(PocketApps.activity(id));
     }
 
     private boolean launchPackageIfInstalled(String packageName) {
@@ -875,7 +870,72 @@ public class MainActivity extends Activity {
         navigate("assign");
     }
 
+    /** Each choice is a label and what it does; the list only shows choices that apply to this tile. */
+    private void choose(String title, List<String> labels, List<Runnable> actions) {
+        new AlertDialog.Builder(this).setTitle(title).setItems(labels.toArray(new String[0]), (dialog, item) -> {
+            if ("home".equals(screen) && !destroyed) actions.get(item).run();
+        }).show();
+    }
+    private void editRomTile(String slot) {
+        List<String> labels = new ArrayList<>(); List<Runnable> actions = new ArrayList<>();
+        if (tiles.group(slot)) {
+            labels.add("Open group"); actions.add(() -> openShortcut(java.util.Arrays.asList(shortcuts).indexOf(slot)));
+            labels.add("Rename group"); actions.add(() -> renameShortcut(slot));
+            labels.add("Move to…"); actions.add(() -> moveTile(slot));
+            labels.add("Ungroup"); actions.add(() -> ungroup(slot));
+        } else {
+            labels.add("Installed app"); actions.add(() -> assignShortcut(slot));
+            labels.add("Pocket app"); actions.add(() -> choosePocketApp(slot));
+            labels.add("Make a group"); actions.add(() -> makeGroup(slot));
+            labels.add("Move to…"); actions.add(() -> moveTile(slot));
+            labels.add("Rename"); actions.add(() -> renameShortcut(slot));
+            if (tiles.app(slot) != null) { labels.add("Use app name"); actions.add(() -> { tiles.useAppName(slot); updateTileNames(); }); }
+            labels.add("Reset tile"); actions.add(() -> { tiles.reset(slot); refreshTiles(); });
+        }
+        choose(tiles.label(slot), labels, actions);
+    }
+    private void refreshTiles() { if ("home".equals(screen)) { render(); refreshTileLabels(); } }
+    private void choosePocketApp(String slot) {
+        List<String> labels = new ArrayList<>(); List<Runnable> actions = new ArrayList<>();
+        for (String id : PocketApps.IDS) { labels.add(id); actions.add(() -> { tiles.usePocket(slot, id); refreshTiles(); }); }
+        choose("Pocket app", labels, actions);
+    }
+    private void moveTile(String slot) {
+        List<String> labels = new ArrayList<>(); List<Runnable> actions = new ArrayList<>();
+        for (int i = 0; i < shortcuts.length; i++) {
+            int target = i; String other = shortcuts[i]; if (other.equals(slot)) continue;
+            labels.add((i + 1) + " · swap with " + tiles.label(other));
+            actions.add(() -> { tiles.swap(slot, other); selectedShortcut = target; refreshTiles(); });
+        }
+        choose("Move " + tiles.label(slot), labels, actions);
+    }
+    private void makeGroup(String slot) {
+        EditText name = new EditText(this); name.setTag("group_name_editor"); name.setSingleLine(true); name.setHint("tools");
+        name.setFilters(new InputFilter[]{new InputFilter.LengthFilter(40)}); PocketDesign.input(name);
+        new AlertDialog.Builder(this).setTitle("Group name").setView(name).setNegativeButton("Cancel", null)
+                .setPositiveButton("Make group", (dialog, button) -> {
+                    if (!"home".equals(screen) || destroyed) return;
+                    tiles.makeGroup(slot, name.getText().toString()); refreshTiles();
+                    showFeedback("Group made. Tap it to add up to nine apps.");
+                }).show();
+    }
+    /** The group's first app goes back on the tile; the rest leave Home but stay installed. */
+    private void ungroup(String slot) {
+        List<DashboardTiles.Member> members = tiles.members(slot);
+        new AlertDialog.Builder(this).setTitle("Ungroup " + tiles.label(slot) + "?")
+                .setMessage(members.isEmpty() ? "The tile goes back to its default app." : "The tile keeps " + members.get(0).label + "."
+                        + (members.size() > 1 ? " The other " + (members.size() - 1) + " leave Home." : ""))
+                .setNegativeButton("Cancel", null).setPositiveButton("Ungroup", (dialog, button) -> {
+                    if (!"home".equals(screen) || destroyed) return;
+                    if (members.isEmpty()) tiles.reset(slot);
+                    else if (members.get(0).pocket != null) tiles.usePocket(slot, members.get(0).pocket);
+                    else { tiles.reset(slot); tiles.assign(slot, members.get(0).app, members.get(0).label); }
+                    refreshTiles();
+                }).show();
+    }
+
     private void editShortcut(String slot) {
+        if (romProfile) { editRomTile(slot); return; }
         String[] options = {"Change app", "Rename", "Use app name", "Reset shortcut"};
         new AlertDialog.Builder(this).setTitle(tiles.label(slot)).setItems(options, (dialog, item) -> {
             if (!"home".equals(screen)) return;
@@ -999,7 +1059,8 @@ public class MainActivity extends Activity {
                 String pkg = notice.getPackageName();
                 String assigned = preferences.getString("shortcut_" + shortcuts[i], null);
                 String sms = Telephony.Sms.getDefaultSmsPackage(this);
-                if (pkg.equals(assigned) || (romProfile && i == 1 && (pkg.equals(sms)||assigned==null&&NoticeFeed.message(notice)))
+                boolean messages = romProfile && !tiles.group(shortcuts[i]) && "messages".equals(tiles.pocket(shortcuts[i]));
+                if (pkg.equals(assigned) || (messages && (pkg.equals(sms)||assigned==null&&NoticeFeed.message(notice)))
                         || (!romProfile && ((i == 0 && pkg.equals("org.thoughtcrime.securesms"))
                         || (i == 1 && pkg.startsWith("com.whatsapp"))
                         || (i == 2 && pkg.equals(sms))))) hasNotification = true;
