@@ -16,7 +16,7 @@ import org.json.JSONObject;
 
 /** A private day log of things Pocket itself did. It never reads other apps, calls or messages. */
 final class ReceiptTape {
-    static final String ALARM = "ALARM", DONE = "DONE", PHOTO = "PHOTO", ROLL = "ROLL", PARK = "PARK", CLEAR = "CLEAR", KILL = "KILL", TASK = "TASK", MEMO = "MEMO";
+    static final String ALARM = "ALARM", DONE = "DONE", PHOTO = "PHOTO", ROLL = "ROLL", PARK = "PARK", CLEAR = "CLEAR", KILL = "KILL", TASK = "TASK", MEMO = "MEMO", PAGE = "PAGE";
     static final int KEEP_DAYS = 30, DAY_LIMIT = 300;
     static final class Line {
         final long when; final String kind, text;

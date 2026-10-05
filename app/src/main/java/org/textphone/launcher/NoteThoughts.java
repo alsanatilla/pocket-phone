@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
  * The note text is never rewritten; the Parking item keeps the link. Mirrors docs/js/store.js.
  */
 final class NoteThoughts {
-    static final Pattern LINE = Pattern.compile("^[ \\t]*>>[ \\t]+(.+?)(?:[ \\t]+@(1h|tonight|tomorrow|tmrw|nextweek))?[ \\t]*$", Pattern.CASE_INSENSITIVE);
+    static final Pattern LINE = Pattern.compile("^[ \\t]*>>[ \\t]+(.+?)(?:[ \\t]+@(1h|tonight|tomorrow|tmrw|nextweek|\\d{1,2}[:.]\\d{2}))?[ \\t]*$", Pattern.CASE_INSENSITIVE);
     private static final long ID_BASE = 9_000_000_000_000_000L;
 
     static final class Thought { final String text, key, delay; Thought(String text, String delay) { this.text = text; this.key = key(text); this.delay = delay; } }
@@ -31,7 +31,7 @@ final class NoteThoughts {
     static String key(String text) { return text.trim().replaceAll("[ \\t]+", " ").toLowerCase(Locale.ROOT); }
     private static String delay(String tag) {
         if (tag == null) return "1 hour";
-        switch (tag.toLowerCase(Locale.ROOT)) { case "tonight": return "tonight"; case "tomorrow": case "tmrw": return "tomorrow"; case "nextweek": return "next week"; default: return "1 hour"; }
+        switch (tag.toLowerCase(Locale.ROOT)) { case "tonight": return "tonight"; case "tomorrow": case "tmrw": return "tomorrow"; case "nextweek": return "next week"; default: return tag.matches("\\d{1,2}[:.]\\d{2}") ? tag : "1 hour"; }
     }
     /** FNV-1a over "uid\nkey", in a range no timestamp id reaches. Same on the web. */
     static long id(String noteUid, String key) {

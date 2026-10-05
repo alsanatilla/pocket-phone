@@ -867,6 +867,9 @@ public class MainActivity extends Activity {
     private void openPocket(Class<? extends android.app.Activity> activity) {
         turnOffOwnedTorch(); startActivity(new Intent(this, activity).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
     }
+    private void openPocket(Class<? extends android.app.Activity> activity, String page) {
+        turnOffOwnedTorch(); startActivity(new Intent(this, activity).putExtra("page", page).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+    }
     @Override public void startActivity(Intent intent) {
         View source = launchOrigin;
         if (source == null && "home".equals(screen) && selectedShortcut < homeTiles.size()) source = homeTiles.get(selectedShortcut);
@@ -1606,7 +1609,11 @@ public class MainActivity extends Activity {
                 .setType("text/plain").putExtra(Intent.EXTRA_TEXT, captureText), "Share note")));
         TextView make=actionInto(tools,"Task",14,PRIMARY,this::captureNoteTask);
         TextView more=actionInto(tools,"More",14,SECONDARY,()->{if(captureId==0)showFeedback("Save this note to pin it.");else{PlannerStore.Entry note=planner.find(captureId);if(note!=null)entryMenu(note);else showFeedback("This note was removed.");}});
-        for (TextView control : new TextView[]{edit, share,make,more}) {
+        // A note read from a journal page shows the handwriting behind it.
+        String noteUid = captureId == 0 ? null : NoteSync.existingUid(planner, captureId);
+        org.json.JSONObject page = JournalStore.forNote(this, noteUid);
+        if (page != null) { String pageUid = page.optString("uid"); actionInto(tools, "Paper", 14, PRIMARY, () -> openPocket(JournalPageActivity.class, pageUid)).setTag("note_paper"); }
+        for (TextView control : page == null ? new TextView[]{edit, share,make,more} : new TextView[]{edit, share, make, more, tools.findViewWithTag("note_paper")}) {
             PocketDesign.control(control); PocketDesign.quiet(control, control == edit ? accent() : PRIMARY);
             control.setMinHeight(dp(56)); control.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
         }

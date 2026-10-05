@@ -1,7 +1,7 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
 import * as drive from "./drive.js";
 import { syncNow, describe, onStatus, status } from "./sync.js";
-import { parking, receipt, dice, notes, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
+import { parking, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -187,14 +187,21 @@ function editor(note, onSaved = () => {}) {
   area.addEventListener("input", () => { state.textContent = "…"; clearTimeout(saveTimer); saveTimer = setTimeout(save, 600); });
   area.addEventListener("keyup", event => { if (event.key === "Enter" || event.key.startsWith("Arrow")) { clearTimeout(saveTimer); saveTimer = setTimeout(save, 150); } });
   area.addEventListener("blur", () => save(true));
-  const toggle = () => { save(true); previewing = !previewing; area.hidden = previewing; preview.hidden = !previewing; mode.textContent = previewing ? "edit" : "preview"; if (previewing) preview.replaceChildren(markdown(area.value, uid)); else area.focus(); };
+  // A note read from a journal page can show the page itself; leaving "paper" returns to the text.
+  const page = journal.forNote(uid);
+  const paperPane = h("div", { hidden: true });
+  const showPaper = on => { paperPane.hidden = !on; paperButton.textContent = on ? "text" : "paper"; if (on) { area.hidden = preview.hidden = true; paperPane.replaceChildren(paperView(page)); } else { area.hidden = previewing; preview.hidden = !previewing; } };
+  const paperButton = h("button", { onclick: () => { save(true); showPaper(paperPane.hidden); } }, "paper");
+  const toggle = () => { save(true); showPaper(false); previewing = !previewing; area.hidden = previewing; preview.hidden = !previewing; mode.textContent = previewing ? "edit" : "preview"; if (previewing) preview.replaceChildren(markdown(area.value, uid)); else area.focus(); };
   const mode = h("button", { onclick: toggle }, previewing ? "edit" : "preview");
   const bar = h("div", { class: "editor-bar" },
-    h("button", { class: "narrow-only", onclick: () => { save(true); go("/notes"); } }, "‹ notes"), state, h("span", { class: "spacer" }), mode,
+    h("button", { class: "narrow-only", onclick: () => { save(true); go("/notes"); } }, "‹ notes"), state, h("span", { class: "spacer" }), page ? paperButton : null, mode,
     h("button", { onclick: () => { save(true); if (!uid) return; const n = notes.get(uid); notes.pin(uid, !n.pinned); notesView(uid); } }, note?.pinned ? "unpin" : "pin"),
     h("button", { onclick: async () => { if (!uid) { go("/notes"); return; } if (await confirmBox("Delete this note on all devices?", "delete")) { notes.remove(uid); go("/notes"); say("Deleted."); } } }, "delete"));
   if (!previewing) setTimeout(() => area.focus({ preventScroll: true }), 0);
-  return [bar, area, preview, h("div", { class: "meta muted", text: "Markdown, the same as the phone's notes. A line starting with >> parks a thought; add @tonight, @tomorrow or @nextweek." })];
+  return [bar, area, preview, paperPane, h("div", { class: "meta muted", text: page
+    ? "Read from a journal page. In preview, ▸ unfolds the handwriting of a line; paper shows the whole page."
+    : "Markdown, the same as the phone's notes. A line starting with >> parks a thought; add @tonight, @tomorrow, @nextweek or a time like @16:30." })];
 }
 /** A small Markdown renderer for what the phone's editor writes. Text is escaped before any formatting. */
 function markdown(source, uid = null) {
@@ -204,22 +211,68 @@ function markdown(source, uid = null) {
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
   const out = []; let list = null, code = null;
   const close = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  // Lines read from a journal page remember where they sit on the photo.
+  const page = journal.forNote(uid);
+  const at = line => { const l = journal.lineFor(page, line); return l ? ` data-top="${+l.top}" data-bottom="${+l.bottom}"` : ""; };
   for (const line of source.split("\n")) {
     if (line.startsWith("```")) { if (code === null) { close(); code = []; } else { out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`); code = null; } continue; }
     if (code !== null) { code.push(line); continue; }
     let m; const t = thought(line);
-    if (t) { close(); out.push(`<p class="thought-line"><span class="accent">»</span> ${inline(t.text)} <span class="meta muted">· ${esc(thoughtStatus(uid, line))}</span></p>`); }
-    else if ((m = line.match(/^(#{1,3})\s+(.*)/))) { close(); out.push(`<h${m[1].length + 1}>${inline(m[2])}</h${m[1].length + 1}>`); }
-    else if ((m = line.match(/^\s*[-*]\s+\[( |x|X)\]\s+(.*)/))) { if (list !== "ul") { close(); out.push('<ul class="tasks">'); list = "ul"; } out.push(`<li>${m[1] === " " ? "[ ]" : "[x]"} ${inline(m[2])}</li>`); }
-    else if ((m = line.match(/^\s*[-*]\s+(.*)/))) { if (list !== "ul") { close(); out.push("<ul>"); list = "ul"; } out.push(`<li>${inline(m[1])}</li>`); }
-    else if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) { if (list !== "ol") { close(); out.push("<ol>"); list = "ol"; } out.push(`<li>${inline(m[1])}</li>`); }
-    else if ((m = line.match(/^>\s?(.*)/))) { close(); out.push(`<blockquote>${inline(m[1])}</blockquote>`); }
+    if (t) { close(); out.push(`<p class="thought-line"${at(line)}><span class="accent">»</span> ${inline(t.text)} <span class="meta muted">· ${esc(thoughtStatus(uid, line))}</span></p>`); }
+    else if ((m = line.match(/^(#{1,3})\s+(.*)/))) { close(); out.push(`<h${m[1].length + 1}${at(line)}>${inline(m[2])}</h${m[1].length + 1}>`); }
+    else if ((m = line.match(/^\s*[-*]\s+\[( |x|X)\]\s+(.*)/))) { if (list !== "ul") { close(); out.push('<ul class="tasks">'); list = "ul"; } out.push(`<li${at(line)}>${m[1] === " " ? "[ ]" : "[x]"} ${inline(m[2])}</li>`); }
+    else if ((m = line.match(/^\s*[-*]\s+(.*)/))) { if (list !== "ul") { close(); out.push("<ul>"); list = "ul"; } out.push(`<li${at(line)}>${inline(m[1])}</li>`); }
+    else if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) { if (list !== "ol") { close(); out.push("<ol>"); list = "ol"; } out.push(`<li${at(line)}>${inline(m[1])}</li>`); }
+    else if ((m = line.match(/^>\s?(.*)/))) { close(); out.push(`<blockquote${at(line)}>${inline(m[1])}</blockquote>`); }
     else if (!line.trim()) close();
-    else { close(); out.push(`<p>${inline(line)}</p>`); }
+    else { close(); out.push(`<p${at(line)}>${inline(line)}</p>`); }
   }
   if (code !== null) out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`);
   close();
-  const node = document.createElement("div"); node.innerHTML = out.join(""); return node;
+  const node = document.createElement("div"); node.innerHTML = out.join("");
+  // Each such line gets a small handle that unfolds its strip of handwriting underneath.
+  if (page) for (const el of node.querySelectorAll("[data-top]")) {
+    const toggle = h("button", { class: "strip-toggle", title: "Show the handwriting", "aria-label": "Show the handwriting of this line" }, "▸");
+    toggle.onclick = async () => {
+      const open = el.querySelector(".strip"); if (open) { open.remove(); toggle.textContent = "▸"; return; }
+      try { const photo = await paperPhoto(page.uid); el.append(strip(photo, +el.dataset.top, +el.dataset.bottom)); toggle.textContent = "▾"; }
+      catch (error) { say(error.message); }
+    };
+    el.prepend(toggle);
+  }
+  return node;
+}
+
+// ── Journal photos: loaded from Drive once per page and kept for this visit. ──
+const photos = new Map();
+function paperPhoto(pageUid) {
+  if (!photos.has(pageUid)) photos.set(pageUid, (async () => {
+    if (!drive.connected()) throw new Error("Connect Google Drive to see the handwriting.");
+    const blob = await drive.readBlob("page-" + pageUid + ".jpg");
+    if (!blob) throw new Error("The photo hasn't synced from the phone yet.");
+    const url = URL.createObjectURL(blob), image = new Image(); image.src = url; await image.decode();
+    return { url, width: image.naturalWidth, height: image.naturalHeight };
+  })().catch(error => { photos.delete(pageUid); throw error; }));
+  return photos.get(pageUid);
+}
+/** One line of the page, cut from the photo by CSS alone: the photo scaled to the width, shifted to the line. */
+function strip(photo, top, bottom) {
+  const pad = 0.012, t = Math.max(0, top - pad), b = Math.min(1, bottom + pad), span = b - t;
+  const el = h("div", { class: "strip", role: "img", "aria-label": "Handwriting of this line" });
+  Object.assign(el.style, { backgroundImage: `url(${photo.url})`, aspectRatio: `${photo.width} / ${photo.height * span}`,
+    backgroundPosition: `0 ${span >= 1 ? 0 : (t / (1 - span)) * 100}%` });
+  return el;
+}
+/** The whole page with a band over each line it was read from; hovering a band shows its text. */
+function paperView(page) {
+  const view = h("div", { class: "paper-view" }, h("p", { class: "small muted", text: "Loading the photo…" }));
+  paperPhoto(page.uid).then(photo => {
+    const frame = h("div", { class: "paper-frame" }, h("img", { src: photo.url, alt: "Journal page photo" }),
+      (page.lines || []).filter(l => l.bottom > l.top).map(l => h("div", { class: "band", title: l.text,
+        style: `top:${l.top * 100}%;height:${(l.bottom - l.top) * 100}%` })));
+    view.replaceChildren(frame);
+  }).catch(error => view.replaceChildren(h("p", { class: "small warn", text: error.message })));
+  return view;
 }
 
 // ── Receipt: days on the left, the printed day on the right. ──

@@ -67,7 +67,7 @@ public final class ParkingActivity extends PocketActivity {
     private PlannerStore planner() { return new PlannerStore(getSharedPreferences("pocket_planner", 0)); }
     static String noteTitle(PlannerStore.Entry note) {
         for (String line : note.text.split("\n")) if (!line.trim().isEmpty())
-            return line.replaceFirst("^\\s*(#+|>>)\\s*", "").replaceFirst("(?i)\\s+@(1h|tonight|tomorrow|tmrw|nextweek)\\s*$", "").trim();
+            return line.replaceFirst("^\\s*(#+|>>)\\s*", "").replaceFirst("(?i)\\s+@(1h|tonight|tomorrow|tmrw|nextweek|\\d{1,2}[:.]\\d{2})\\s*$", "").trim();
         return "note";
     }
     private String from(ParkingStore.Item item) { PlannerStore.Entry note = note(item); return note == null ? "" : "  · " + noteTitle(note); }

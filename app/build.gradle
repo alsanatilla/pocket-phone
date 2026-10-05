@@ -25,8 +25,15 @@ android {
     }
 
     compileOptions {
+        // The Anthropic SDK uses java.time; desugaring keeps Android 6/7 (API 23-25) working.
+        coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    packaging {
+        // Server-side libraries pulled in by the Anthropic SDK ship the same metadata files.
+        resources.excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE*', 'META-INF/NOTICE*', 'META-INF/*.kotlin_module', 'META-INF/versions/9/OSGI-INF/MANIFEST.MF']
     }
 
     testOptions {
@@ -48,6 +55,9 @@ android {
 dependencies {
     // Only for Drive authorization (cloud sync is opt-in). Drive itself is called over plain HTTPS.
     implementation 'com.google.android.gms:play-services-auth:21.3.0'
+    // Reading journal pages with Claude (opt-in, the user's own API key).
+    implementation 'com.anthropic:anthropic-java:2.34.0'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
     implementation 'io.noties.markwon:core:4.6.2'
     implementation 'io.noties.markwon:ext-tasklist:4.6.2'
     implementation 'io.noties.markwon:ext-strikethrough:4.6.2'

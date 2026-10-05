@@ -37,7 +37,7 @@ final class CloudSync {
     static final String SCOPE = "https://www.googleapis.com/auth/drive.appdata";
     static final String WEB = "https://alsanatilla.github.io/pocket-phone/";
     static final String ACTION_SYNCED = "org.textphone.launcher.SYNCED";
-    static final String[] FILES = {"parking.json", "receipt.json", "dice.json", "notes.json"};
+    static final String[] FILES = {"parking.json", "receipt.json", "dice.json", "notes.json", "journal.json"};
     static final int JOB_SOON = 7301, JOB_PERIODIC = 7302;
     private static final String DRIVE = "https://www.googleapis.com/drive/v3/files", UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
     private static final Object RUN = new Object();
@@ -94,9 +94,11 @@ final class CloudSync {
                     if ("parking.json".equals(name)) { merged = ParkingStore.merge(c, remote); ParkingReceiver.arm(c); }
                     else if ("receipt.json".equals(name)) merged = ReceiptTape.merge(c, remote);
                     else if ("notes.json".equals(name)) merged = NoteSync.merge(c, remote);
+                    else if ("journal.json".equals(name)) merged = JournalStore.merge(c, remote);
                     else merged = DiceActivity.merge(c, remote);
                     upload(c, token, name, merged.toString());
                 }
+                pageImages(c, token);
             } catch (JSONException error) { throw new IOException("A synced file is damaged.", error); }
             catch (Unauthorized expired) { throw new SignInNeeded(); }
             prefs(c).edit().putLong("last_ok", System.currentTimeMillis()).remove("last_error").apply();
@@ -116,12 +118,12 @@ final class CloudSync {
     private static String fileId(Context c, String token, String name) throws IOException, JSONException {
         // Always look up and use the oldest copy: if the phone and the web both created one, they agree on the same file.
         String query = URLEncoder.encode("name='" + name + "'", "UTF-8");
-        JSONArray files = new JSONObject(http("GET", DRIVE + "?spaces=appDataFolder&orderBy=createdTime&fields=files(id)&q=" + query, token, null, null)).optJSONArray("files");
+        JSONArray files = new JSONObject(http("GET", DRIVE + "?spaces=appDataFolder&orderBy=createdTime&fields=files(id)&q=" + query, token, null, (byte[]) null)).optJSONArray("files");
         return files == null || files.length() == 0 ? null : files.getJSONObject(0).getString("id");
     }
     private static JSONObject download(Context c, String token, String name) throws IOException, JSONException {
         String id = fileId(c, token, name); if (id == null) return null;
-        try { String body = http("GET", DRIVE + "/" + id + "?alt=media", token, null, null); return body.trim().isEmpty() ? null : new JSONObject(body); }
+        try { String body = http("GET", DRIVE + "/" + id + "?alt=media", token, null, (byte[]) null); return body.trim().isEmpty() ? null : new JSONObject(body); }
         catch (NotFound gone) { return null; }
     }
     private static void upload(Context c, String token, String name, String json) throws IOException, JSONException {
@@ -137,17 +139,49 @@ final class CloudSync {
         http("POST", UPLOAD + "?uploadType=multipart&fields=id", token, "multipart/related; boundary=" + boundary, body);
     }
 
+    /** Journal photos upload once as "page-<uid>.jpg"; a deleted page's photo is removed from Drive too. */
+    private static void pageImages(Context c, String token) throws IOException, JSONException {
+        for (JSONObject page : JournalStore.pages(c)) {
+            String uid = page.optString("uid"), name = "page-" + uid + ".jpg";
+            if (page.optBoolean("deleted")) {
+                if (!JournalStore.uploaded(c, uid)) continue;
+                String id = fileId(c, token, name);
+                if (id != null) { try { http("DELETE", DRIVE + "/" + id, token, null, (byte[]) null); } catch (NotFound gone) { /* Already removed. */ } }
+                JournalStore.prefs(c).edit().remove("uploaded_" + uid).apply();
+                continue;
+            }
+            java.io.File image = JournalStore.image(c, uid);
+            if (JournalStore.uploaded(c, uid) || !image.isFile()) continue;
+            if (fileId(c, token, name) == null) {
+                String boundary = "pocket" + System.nanoTime();
+                byte[] head = ("--" + boundary + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"
+                        + new JSONObject().put("name", name).put("parents", new JSONArray().put("appDataFolder"))
+                        + "\r\n--" + boundary + "\r\nContent-Type: image/jpeg\r\n\r\n").getBytes(StandardCharsets.UTF_8);
+                byte[] tail = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
+                byte[] photo; try (InputStream in = new java.io.FileInputStream(image)) {
+                    ByteArrayOutputStream read = new ByteArrayOutputStream(); byte[] buffer = new byte[16384];
+                    for (int n; (n = in.read(buffer)) > 0; ) read.write(buffer, 0, n); photo = read.toByteArray(); }
+                ByteArrayOutputStream body = new ByteArrayOutputStream(head.length + photo.length + tail.length);
+                body.write(head); body.write(photo); body.write(tail);
+                http("POST", UPLOAD + "?uploadType=multipart&fields=id", token, "multipart/related; boundary=" + boundary, body.toByteArray());
+            }
+            JournalStore.markUploaded(c, uid);
+        }
+    }
+
     private static final class NotFound extends IOException { NotFound() { super("Not found."); } }
     /** HttpURLConnection has no PATCH; Google APIs accept POST with a method override. */
     private static String http(String method, String address, String token, String type, String body) throws IOException {
+        return http(method, address, token, type, body == null ? null : body.getBytes(StandardCharsets.UTF_8));
+    }
+    private static String http(String method, String address, String token, String type, byte[] bytes) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection();
         try {
-            connection.setConnectTimeout(15_000); connection.setReadTimeout(30_000);
+            connection.setConnectTimeout(15_000); connection.setReadTimeout(60_000);
             connection.setRequestMethod("PATCH".equals(method) ? "POST" : method);
             if ("PATCH".equals(method)) connection.setRequestProperty("X-HTTP-Method-Override", "PATCH");
             connection.setRequestProperty("Authorization", "Bearer " + token);
-            if (body != null) {
-                byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            if (bytes != null) {
                 connection.setDoOutput(true); connection.setRequestProperty("Content-Type", type); connection.setFixedLengthStreamingMode(bytes.length);
                 try (OutputStream out = connection.getOutputStream()) { out.write(bytes); }
             }

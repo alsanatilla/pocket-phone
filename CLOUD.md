@@ -1,6 +1,6 @@
 # Cloud sync and Pocket on the web
 
-Cloud sync is **off by default**. When you turn it on in Settings → Cloud sync, Pocket copies four things to a hidden app folder (`appDataFolder`) in your own Google Drive:
+Cloud sync is **off by default**. When you turn it on in Settings → Cloud sync, Pocket copies these to a hidden app folder (`appDataFolder`) in your own Google Drive:
 
 | File | Contents |
 |---|---|
@@ -8,6 +8,7 @@ Cloud sync is **off by default**. When you turn it on in Settings → Cloud sync
 | `receipt.json` | Receipt lines of the last 30 days |
 | `dice.json` | The Dice pick list |
 | `notes.json` | Notes from Today, with pins; deleted notes stay as markers for 30 days |
+| `journal.json` + `page-<uid>.jpg` | Journal pages: the photo, its transcript lines with their position on the photo, and the linked note |
 
 Tasks, messages, contacts, calls and photos stay on the phone. The hidden folder is only visible to Pocket's own Google Cloud project; it does not show up in Drive.
 
@@ -49,3 +50,13 @@ The Android app needs no client id in code: Google matches the package name and 
 ## Local preview
 
 Serve `docs/` with any static server, for example `npx serve docs -l 8777`, and open `http://localhost:8777/`.
+
+## Journal pages
+
+Journal (a Pocket app you can put on a tile) keeps photos of paper journal pages. Each page is read once by **Claude Sonnet 5.5** with the user's own Anthropic API key, entered in Journal → Settings and stored only on the phone, encrypted with the Android Keystore. Reading costs about 1–2¢ per page; pages photographed offline wait and are read once the phone is online.
+
+Sonnet 5.5 was chosen in a comparison on real handwriting (German cursive, two inks, bleed-through, a brace): it read about 98–100% of the words and placed every line on the photo, where Claude Haiku 4.5 got about three quarters of the words right. The instructions are in `JournalReader.PROMPT`.
+
+Each page becomes a note. One note line per handwritten line, so each line keeps its position on the photo (`note_line`, `top`, `bottom`); a page titled "Todos" becomes `- [ ]` items, and a brace with a time such as "ab 16:30" becomes a thought line `>> … @16:30` that parks itself until then. The photo stays the original: on the phone, tap a line of the page to unfold its strip of handwriting, or switch to "paper"; on the web, notes read from a page get "paper" and a ▸ per line in preview.
+
+Thought lines also accept a clock time: `@16:30` comes back at the next 16:30.

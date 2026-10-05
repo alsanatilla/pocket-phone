@@ -3,12 +3,12 @@
 
 const HOUR = 3_600_000, DAY = 24 * HOUR, KEEP_CLOSED = 7 * DAY, KEEP_DAYS = 30, DAY_LIMIT = 300, KEEP_DELETED = 30 * DAY;
 export const NOTE_LIMIT = 8000;
-export const FILES = ["parking.json", "receipt.json", "dice.json", "notes.json"];
+export const FILES = ["parking.json", "receipt.json", "dice.json", "notes.json", "journal.json"];
 export const DELAYS = ["1 hour", "tonight", "tomorrow", "next week"];
 export const HECKLE = 3;
 export const KIND = { ROLL: "ROLL", PARK: "PARK", CLEAR: "CLEAR", KILL: "KILL", MEMO: "MEMO", DONE: "DONE", PHOTO: "PHOTO", ALARM: "ALARM", TASK: "TASK" };
 
-const EMPTY = { "parking.json": () => ({ v: 1, items: [] }), "receipt.json": () => ({ v: 1, days: {} }), "dice.json": () => ({ v: 1, list: "", updated: 0 }), "notes.json": () => ({ v: 1, notes: [] }) };
+const EMPTY = { "parking.json": () => ({ v: 1, items: [] }), "receipt.json": () => ({ v: 1, days: {} }), "dice.json": () => ({ v: 1, list: "", updated: 0 }), "notes.json": () => ({ v: 1, notes: [] }), "journal.json": () => ({ v: 1, pages: [] }) };
 const listeners = new Set();
 export const onChange = fn => listeners.add(fn);
 const changed = name => { markDirty(name); listeners.forEach(fn => fn(name)); };
@@ -47,6 +47,15 @@ export const merge = {
   "dice.json": (local, remote) => (remote && (remote.updated || 0) > (local.updated || 0) ? { v: 1, list: remote.list || "", updated: remote.updated } : { v: 1, list: local.list || "", updated: local.updated || 0 }),
   // Deleted notes stay as markers for 30 days so an older copy cannot bring them back.
   "notes.json": (local, remote, now) => ({ v: 1, notes: mergeById(local.notes, remote?.notes, "uid", "updated").filter(n => !n.deleted || now - (n.updated || 0) <= KEEP_DELETED) }),
+  // Journal pages are written by the phone; same rule as JournalStore.merge.
+  "journal.json": (local, remote, now) => ({ v: 1, pages: mergeById(local.pages, remote?.pages, "uid", "updated").filter(p => !p.deleted || now - (p.updated || 0) <= KEEP_DELETED) }),
+};
+
+// ── Journal pages: photographed on the phone, read by Claude; each line knows where it sits on the photo. ──
+export const journal = {
+  forNote(noteUid) { return noteUid ? load("journal.json").pages.find(p => p.note === noteUid && !p.deleted) || null : null; },
+  /** The page line a note line came from, matched by its exact text, so edited lines simply lose their strip. */
+  lineFor(page, noteLine) { const key = noteLine.trim(); return key && page ? (page.lines || []).find(l => (l.note_line || "").trim() === key && l.bottom > l.top) || null : null; },
 };
 
 // ── Notes ──
@@ -68,12 +77,13 @@ export const notes = {
   remove(uid) { return this.edit(uid, n => { n.text = ""; n.pinned = false; n.deleted = true; }); },
 };
 // ── Thoughts inside notes: a line ">> call Sam @tomorrow" parks "call Sam". Mirrors NoteThoughts.java. ──
-const THOUGHT = /^[ \t]*>>[ \t]+(.+?)(?:[ \t]+@(1h|tonight|tomorrow|tmrw|nextweek))?[ \t]*$/i;
+const THOUGHT = /^[ \t]*>>[ \t]+(.+?)(?:[ \t]+@(1h|tonight|tomorrow|tmrw|nextweek|\d{1,2}[:.]\d{2}))?[ \t]*$/i;
 const THOUGHT_DELAY = { tonight: "tonight", tomorrow: "tomorrow", tmrw: "tomorrow", nextweek: "next week" };
 export const thoughtKey = text => text.trim().replace(/[ \t]+/g, " ").toLowerCase();
 export function thought(line) {
   const m = line.replace(/\r/g, "").match(THOUGHT); if (!m || !m[1].trim()) return null;
-  return { text: m[1].trim(), key: thoughtKey(m[1]), delay: THOUGHT_DELAY[(m[2] || "").toLowerCase()] || "1 hour" };
+  const tag = (m[2] || "").toLowerCase();
+  return { text: m[1].trim(), key: thoughtKey(m[1]), delay: THOUGHT_DELAY[tag] || (/^\d{1,2}[:.]\d{2}$/.test(tag) ? tag : "1 hour") };
 }
 /** FNV-1a over "uid\nkey", in a range no timestamp id reaches, so the phone and the web create the same item. */
 export function thoughtId(uid, key) {
@@ -101,7 +111,7 @@ export function thoughtStatus(uid, text, now = Date.now()) {
 
 /** The phone shows a note's first line as its title. */
 export const noteTitle = note => (note.text.split("\n").find(line => line.trim()) || "Empty note")
-  .replace(/^\s*(#+|>>)\s*/, "").replace(/\s+@(1h|tonight|tomorrow|tmrw|nextweek)\s*$/i, "").trim();
+  .replace(/^\s*(#+|>>)\s*/, "").replace(/\s+@(1h|tonight|tomorrow|tmrw|nextweek|\d{1,2}[:.]\d{2})\s*$/i, "").trim();
 
 // ── Parking Lot ──
 export const parking = {
@@ -123,6 +133,9 @@ export const parking = {
 };
 export function when(delay, now = Date.now()) {
   const at = new Date(now); at.setSeconds(0, 0);
+  // A clock time ("16:30") means the next time the clock shows it: today, or tomorrow once it has passed. Same as ParkingStore.when.
+  const time = /^(\d{1,2})[:.](\d{2})$/.exec(delay);
+  if (time && +time[1] < 24 && +time[2] < 60) { at.setHours(+time[1], +time[2]); if (+at <= now) at.setDate(at.getDate() + 1); return +at; }
   if (delay === "tonight") { at.setHours(20, 0); if (at - now < HOUR / 2) at.setDate(at.getDate() + 1); return +at; }
   if (delay === "tomorrow") { at.setDate(at.getDate() + 1); at.setHours(9, 0); return +at; }
   if (delay === "next week") { at.setHours(9, 0); do at.setDate(at.getDate() + 1); while (at.getDay() !== 1); return +at; }

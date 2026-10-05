@@ -128,6 +128,13 @@ final class ParkingStore {
 
     static long when(String delay, long now) {
         Calendar at = Calendar.getInstance(); at.setTimeInMillis(now); at.set(Calendar.SECOND, 0); at.set(Calendar.MILLISECOND, 0);
+        // A clock time ("16:30") means the next time the clock shows it: today, or tomorrow once it has passed.
+        java.util.regex.Matcher clock = java.util.regex.Pattern.compile("(\\d{1,2})[:.](\\d{2})").matcher(delay);
+        if (clock.matches() && Integer.parseInt(clock.group(1)) < 24 && Integer.parseInt(clock.group(2)) < 60) {
+            at.set(Calendar.HOUR_OF_DAY, Integer.parseInt(clock.group(1))); at.set(Calendar.MINUTE, Integer.parseInt(clock.group(2)));
+            if (at.getTimeInMillis() <= now) at.add(Calendar.DAY_OF_MONTH, 1);
+            return at.getTimeInMillis();
+        }
         switch (delay) {
             case "tonight":
                 at.set(Calendar.HOUR_OF_DAY, 20); at.set(Calendar.MINUTE, 0);

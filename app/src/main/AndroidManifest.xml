@@ -81,6 +81,13 @@
             <action android:name="android.media.action.STILL_IMAGE_CAMERA" />
         </intent>
         <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT" />
+            <data android:mimeType="image/*" />
+        </intent>
+        <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.APP_CALCULATOR" />
         </intent>
@@ -128,6 +135,10 @@
         <activity android:name=".ReceiptActivity" android:label="Pocket Receipt" android:taskAffinity="org.textphone.launcher.receipt" android:exported="false" />
         <activity android:name=".CloudActivity" android:label="Pocket Cloud Sync" android:taskAffinity="org.textphone.launcher.settings" android:exported="false" />
         <service android:name=".SyncJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />
+        <activity android:name=".JournalActivity" android:label="Pocket Journal" android:taskAffinity="org.textphone.launcher.journal" android:exported="false" />
+        <activity android:name=".JournalPageActivity" android:label="Pocket Journal Page" android:taskAffinity="org.textphone.launcher.journal" android:exported="false" />
+        <service android:name=".JournalJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />
+        <provider android:name=".JournalFiles" android:authorities="org.textphone.launcher.journal" android:exported="false" android:grantUriPermissions="true" />
         <activity android:name=".DeviceSettingsActivity" android:label="Pocket Settings" android:taskAffinity="org.textphone.launcher.settings" android:exported="false" />
         <activity android:name=".PermissionsActivity" android:label="Pocket Permissions" android:taskAffinity="org.textphone.launcher.permissions" android:exported="false" />
         <activity android:name=".NotificationSetupActivity" android:label="Pocket Notification Setup" android:taskAffinity="org.textphone.launcher.notification_setup" android:exported="false" />

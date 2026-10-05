@@ -59,6 +59,15 @@ export async function read(name) {
   const body = await http("GET", `${DRIVE}/${id}?alt=media`);
   return body && body.trim() ? JSON.parse(body) : null;
 }
+/** A binary file from the app folder, such as a journal photo; null if it isn't there (yet). */
+export async function readBlob(name) {
+  const id = await fileId(name); if (!id) return null;
+  if (!connected()) throw new Expired();
+  const response = await fetch(`${DRIVE}/${id}?alt=media`, { headers: { Authorization: "Bearer " + token } });
+  if (response.status === 401 || response.status === 403) { token = null; sessionStorage.removeItem("pocket:token"); throw new Expired(); }
+  if (!response.ok) return null;
+  return response.blob();
+}
 export async function write(name, doc) {
   const json = JSON.stringify(doc), id = await fileId(name);
   if (id && (await http("PATCH", `${UPLOAD}/${id}?uploadType=media`, json, "application/json; charset=UTF-8")) !== null) return;
