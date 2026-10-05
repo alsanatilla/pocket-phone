@@ -6,10 +6,10 @@ import { icon, paint, ICON } from "./icons.js";
 
 const phone = document.getElementById("phone"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-// Wide windows get the desk: Home becomes a top bar and the apps sit side by side as phone-width columns.
+// Wide windows: Home stays on the left as a rail and one app at a time opens beside it.
 const deskQuery = matchMedia("(min-width: 760px)"), desk = () => deskQuery.matches;
 const panels = {};
-let notice = null, tick = 0, barTick = 0, parkingDraft = "", selected = 0;
+let notice = null, tick = 0, parkingDraft = "", selected = 0;
 
 // ── DOM helpers ──
 function h(tag, props = {}, ...children) {
@@ -25,16 +25,18 @@ function h(tag, props = {}, ...children) {
 const go = path => { location.hash = "#" + path; };
 const add = (node, ...children) => node.append(...children.flat().filter(child => child != null && child !== false));
 function page(title, action) {
-  const panel = desk() ? panels[title] : null;
-  if (!panel) { clearInterval(tick); closeDialog(); }
+  const wide = desk();
+  // The rail's clock keeps ticking while an app is open beside it.
+  if (!wide) clearInterval(tick);
+  closeDialog();
   const body = h("div", { class: "page" });
-  // On the desk there is nowhere to go back to; the title alone heads the column.
+  // Home is always visible on the rail, so the wide header closes the app instead of offering "home".
   add(body, h("div", { class: "header" },
-    panel ? h("span") : h("button", { onclick: () => go("/"), "aria-label": "Back to home" }, "back"),
+    h("button", { onclick: () => go("/"), "aria-label": wide ? "Close app" : "Back to home" }, wide ? "close" : "back"),
     h("h1", { text: title }),
-    action ? h("button", { class: action.commit ? "commit" : "", onclick: action.run }, action.label) : panel ? h("span") : h("button", { onclick: () => go("/") }, "home")));
+    action ? h("button", { class: action.commit ? "commit" : "", onclick: action.run }, action.label) : wide ? h("span") : h("button", { onclick: () => go("/") }, "home")));
   notice = h("div", { class: "notice", role: "status" });
-  (panel || phone).replaceChildren(body, notice);
+  (wide ? panels.main : phone).replaceChildren(body, notice);
   return body;
 }
 const say = text => { if (notice) notice.textContent = text || ""; };
@@ -99,8 +101,14 @@ function home() {
       h("button", { onclick: () => go(APPS[selected].path) }, "select"),
       h("button", { onclick: help }, "keys")));
   notice = h("div", { class: "notice", role: "status" });
-  phone.replaceChildren(body, notice);
+  (desk() ? panels.rail : phone).replaceChildren(body, notice);
   select(selected);
+}
+/** The wide layout's right side before an app is chosen. */
+function nothingOpen() {
+  notice = null;
+  panels.main.replaceChildren(h("div", { class: "page empty" },
+    h("div", { class: "empty-title", text: "POCKET" }), h("p", { class: "small muted", text: "Choose an app on the left, or press 1–4." })));
 }
 function select(index) {
   selected = Math.max(0, Math.min(APPS.length - 1, index));
@@ -109,7 +117,7 @@ function select(index) {
     paint(tile.querySelector("canvas"), Number(tile.dataset.kind), on ? "#000" : "#fff", on ? getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() : "#000", tile.dataset.dot === "1");
   });
 }
-const help = () => dialog("Keys", h("p", { class: "small" }, desk() ? "1–4 jump to a column · esc leaves a field · space rolls the dice" : "1–4 open an app · arrows move · enter opens · esc goes home · space rolls the dice"), [["ok", null]]);
+const help = () => dialog("Keys", h("p", { class: "small" }, desk() ? "1–4 open an app · esc closes it · space rolls the dice" : "1–4 open an app · arrows move · enter opens · esc goes home · space rolls the dice"), [["ok", null]]);
 
 // ── Parking Lot ──
 function parkingPage() {
@@ -139,7 +147,7 @@ function parkingPage() {
     if (i === 0) guard(() => { parking.bringBack(item.id); parkingPage(); })(); else if (i === 1) clear(item); else if (i === 2) letGo(item);
   }));
   add(body, h("p", { class: "meta muted", text: "Move to Today and notifications are on the phone." }));
-  if (!parkingDraft && !desk()) field.focus({ preventScroll: true });
+  if (!parkingDraft) field.focus({ preventScroll: true });
 }
 const clear = item => guard(() => { parking.close(item.id, "cleared"); receipt.log(KIND.CLEAR, item.text); parkingPage(); say("Cleared. Nice."); })();
 const letGo = item => guard(() => { parking.close(item.id, "killed"); receipt.log(KIND.KILL, item.text); parkingPage(); say(item.notches >= HECKLE ? "Let go. That was overdue." : "Let go."); })();
@@ -250,44 +258,20 @@ async function connectFlow(quiet) {
   catch (error) { say(error.message); }
 }
 
-// ── Desk ──
-const DESK = ["parking", "receipt", "dice", "sync"];
-function deskView(receiptDay) {
-  clearInterval(tick); clearInterval(barTick); closeDialog();
-  const time = h("span", { class: "bar-clock" }), day = h("span", { class: "day" }), state = h("span", { class: "status", id: "sync-status" });
-  const update = () => {
-    const now = new Date(); time.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).replace(/\s?[ap]\.?m\.?$/i, "");
-    day.textContent = now.toLocaleDateString([], { weekday: "short", day: "2-digit", month: "short" }).replace(/,/g, "").toUpperCase();
-    state.textContent = describe();
-  };
-  update(); barTick = setInterval(update, 1000);
-  const bar = h("header", { class: "bar" },
-    h("div", { class: "bar-left" }, h("span", { class: "bar-brand", text: "POCKET" }), time, day), state,
-    h("div", { class: "bar-keys" },
-      h("button", { onclick: () => drive.connected() ? syncNow() : connectFlow(true) }, "sync"),
-      h("button", { onclick: help }, "keys")));
-  for (const name of DESK) {
-    const panel = panels[name] = h("section", { class: "panel", "aria-label": name, "data-panel": name });
-    // Notices belong to the column the user is working in.
-    const own = () => { notice = panel.querySelector(".notice") || notice; };
-    panel.addEventListener("pointerdown", own, true); panel.addEventListener("focusin", own, true);
-  }
-  phone.replaceChildren(bar, h("div", { class: "desk" }, panels.parking, panels.receipt, h("div", { class: "stack" }, panels.dice, panels.sync)));
-  parkingPage(); receiptPage(receiptDay); dicePage(); syncPage();
-}
-function focusPanel(name) {
-  const panel = panels[name]; if (!panel) return;
-  panel.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
-  panel.querySelector("input, .primary, .keys button:not(:disabled), .row-button")?.focus({ preventScroll: true });
-}
-
 // ── Routing and keys ──
 function route() {
   const [, name, arg] = (location.hash.replace(/^#/, "") || "/").split("/");
   phone.classList.toggle("desk-mode", desk());
-  if (desk()) { deskView(name === "receipt" ? arg : undefined); if (name) focusPanel(name); return; }
-  clearInterval(barTick);
-  if (name === "parking") parkingPage(); else if (name === "receipt") receiptPage(arg); else if (name === "dice") dicePage(); else if (name === "sync") syncPage(); else home();
+  if (desk()) {
+    if (!panels.rail?.isConnected) {
+      panels.rail = h("aside", { class: "rail", "aria-label": "Home" }); panels.main = h("section", { class: "main", "aria-label": "App" });
+      phone.replaceChildren(panels.rail, panels.main);
+    }
+    const open = APPS.findIndex(app => app.name === name); if (open >= 0) selected = open;
+    home();
+    if (open < 0) nothingOpen();
+  }
+  if (name === "parking") parkingPage(); else if (name === "receipt") receiptPage(arg); else if (name === "dice") dicePage(); else if (name === "sync") syncPage(); else if (!desk()) home();
 }
 addEventListener("hashchange", route);
 deskQuery.addEventListener("change", route);
@@ -304,18 +288,14 @@ onStatus(() => {
 addEventListener("keydown", event => {
   if (!dialogHost.hidden) { if (event.key === "Escape") closeDialog(); return; }
   const typing = document.activeElement?.matches("input, textarea"), name = location.hash.split("/")[1];
-  if (desk()) {
-    if (typing) { if (event.key === "Escape") document.activeElement.blur(); return; }
-    if (event.key >= "1" && event.key <= String(DESK.length)) { event.preventDefault(); focusPanel(DESK[Number(event.key) - 1]); }
-    else if (event.key === " " && (document.activeElement === document.body || panels.dice?.contains(document.activeElement))) { event.preventDefault(); document.getElementById("roll")?.click(); }
-    return;
-  }
+  if (typing && event.key === "Escape" && desk()) { document.activeElement.blur(); return; }
   if (event.key === "Escape" || (event.key === "Backspace" && !typing)) { if (name) { event.preventDefault(); go("/"); } return; }
   if (typing) return;
+  // On the wide layout the tiles stay visible, so 1–4 switch apps from anywhere.
+  if (event.key >= "1" && event.key <= String(APPS.length) && (!name || desk())) { go(APPS[Number(event.key) - 1].path); return; }
   if (!name) {
     const columns = 3, moves = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -columns, ArrowDown: columns };
-    if (event.key >= "1" && event.key <= String(APPS.length)) go(APPS[Number(event.key) - 1].path);
-    else if (moves[event.key] != null) { event.preventDefault(); select(selected + moves[event.key]); }
+    if (moves[event.key] != null) { event.preventDefault(); select(selected + moves[event.key]); }
     else if (event.key === "Enter") go(APPS[selected].path);
   } else if (name === "dice" && (event.key === " " || event.key === "Enter") && document.getElementById("roll")) { event.preventDefault(); document.getElementById("roll").click(); }
 });
