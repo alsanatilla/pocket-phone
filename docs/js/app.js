@@ -1,13 +1,14 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
-import * as drive from "./drive.js?v=20261005-zines3";
-import * as reader from "./reader.js?v=20261005-zines3";
-import * as zines from "./zines.js?v=20261005-zines3";
-import { syncNow, describe, onStatus, status } from "./sync.js?v=20261005-zines3";
-import { parking, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261005-zines3";
+import * as drive from "./drive.js?v=20261005-movement1";
+import * as reader from "./reader.js?v=20261005-movement1";
+import * as zines from "./zines.js?v=20261005-movement1";
+import * as movement from "./movement.js?v=20261005-movement1";
+import { syncNow, describe, onStatus, status } from "./sync.js?v=20261005-movement1";
+import { parking, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261005-movement1";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-const TOOLS = ["parking", "notes", "receipt", "dice", "zines"];
+const TOOLS = ["parking", "notes", "receipt", "dice", "zines", "movement"];
 let content = null, notice = null, parkingDraft = "";
 
 // ── DOM helpers ──
@@ -45,6 +46,8 @@ function shell() {
 function view(tool, actions = []) {
   zines.leave(); shell(); closeDialog(); say("");
   document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool; tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
+  const activeTab = document.querySelector(".tab.active"), tabs = activeTab?.parentElement;
+  if (tabs) tabs.scrollLeft = activeTab.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - activeTab.clientWidth) / 2;
   document.title = tool === "sync" ? "pocket · sync" : "pocket · " + tool;
   content.replaceChildren();
   if (actions.length) add(content, h("div", { class: "toolbar" }, actions.map(([label, run, extra]) => h("button", { onclick: run, ...(extra || {}) }, label))));
@@ -493,6 +496,7 @@ function route() {
   const [, name, arg] = (location.hash.replace(/^#/, "") || "/").split("/");
   if (name === "notes") notesView(arg); else if (name === "receipt") receiptView(arg); else if (name === "dice") diceView(); else if (name === "sync") syncView();
   else if (name === "zines") zines.mount(view("zines"), arg, { go, say, dialog, confirm: confirmBox });
+  else if (name === "movement") movement.mount(view("movement"));
   else if (name === "parking") parkingView(); else { history.replaceState(null, "", "#/parking"); parkingView(); }
 }
 addEventListener("hashchange", route);
@@ -501,7 +505,7 @@ onStatus(() => {
   const state = document.getElementById("sync-status"); if (state) state.textContent = describe();
   const finished = lastState === "syncing" && status.state === "idle"; lastState = status.state;
   // Merged edits from the phone appear without a reload, unless the user is typing or a dialog is open.
-  if (finished && status.changed && !location.hash.startsWith("#/zines") && dialogHost.hidden && !document.activeElement?.matches("input, textarea")) { const text = notice?.textContent; route(); say(text); }
+  if (finished && status.changed && !["#/zines", "#/movement"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea")) { const text = notice?.textContent; route(); say(text); }
 });
 addEventListener("keydown", event => {
   if (!dialogHost.hidden) { if (event.key === "Escape") closeDialog(); return; }
