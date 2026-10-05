@@ -1,0 +1,109 @@
+# Incremental releases
+
+Each release supplies a separately named, signed APK, source snapshot, checksums and actual build/test results. Install the new APK over Pocket; do not uninstall or clear app storage. The package ID and signing certificate stay the same. Old release downloads remain available. These APKs run on the current Nothing OS; they are not flashable ROM images.
+
+## 0.5.13 — companion apps for everyday work
+
+- Clock edits existing alarms (time, name, daily) with the same ID and on/off state. Named 5/25/50-minute timer presets retain input through tabs/recreation.
+- Agenda supports 1–1440-minute appointments, shows end times and writes the chosen end to the selected Android calendar. Legacy records/drafts default to 60 minutes. Duration-only remote changes display once; all-day dates use local calendar days.
+- Contacts preserves detail/editor context after recreation, refreshes after permission return and keeps one user-authored draft. Discard is explicit and confirmed; accepted delayed saves retain their native record reference rather than creating another contact on retry.
+- Notes supports pin/unpin from its hold menu and Preview → More. Markdown, independent drafts and the formatting wheel are retained.
+- Calculator distinguishes a new number from an operator chained onto a result, supports copy and history reuse, and retains invalid expressions without writing history.
+- Files keeps Previous/Share/Next reachable and revalidates each selected photo against the owned Camera album.
+- Messages leads with active message content; SMS and installed messaging apps are bottom navigation. Phone number entry is larger and plus inserts at the caret.
+- Same package, signer, native Android permissions/gestures and dark terminal visual language. No new network/API access. APP-STATUS.md records the actual daily-use limits; physical Nothing Phone checks remain outstanding.
+
+## 0.5.12 — deliberate terminal hierarchy
+
+- Today follows the supplied hierarchy: centered date → current/next appointment → + Task / Note / Focus → TASKS/tabs/list → NOTES. The appointment has no Calendar heading or border. Time, title and metadata are distinct; Today and Agenda use one monospace typeface.
+- Task titles use 17 sp and metadata 12 sp; section labels are 12 sp bold uppercase. Single-group lists omit redundant group headings. Checkbox actions remain 56 dp targets.
+- Calendar and Search are separate bottom actions. Search opens a real command-style field; Find applies it, Cancel keeps the previous query and Clear restores the full view. Search state survives recreation and the unrelated appointment is hidden while searching.
+- Focus uses the appointment shown in the focus block; its topic survives activity recreation. Without a shown appointment, the next task remains the default focus topic.
+- Agenda places Upcoming/Past directly above its timeline and keeps creation/draft continuation reachable at the bottom. Permission/setup options remain behind Settings.
+- Same package, signer and permissions; no data migration or new network permission. Existing sources, drafts, reminders, notes, messaging and Camera-only Files are retained. Native screenshots are layout renders, not handset recordings.
+
+Layout checks cover content order, single-group headings, long-list scrolling, smaller windows, search cancel/find/clear/recreation and appointment-specific focus after recreation. BUILD-STATUS.json records the final full regression, lint and signature results.
+
+## 0.5.11 — compact apps, Today and source-linked tasks
+
+- Page titles are 24 sp in a 48 dp header that grows with font scaling. Reduced vertical padding gives lists and editors more space; camera setup rows move into Settings. Everyday actions and native Android gestures remain accessible.
+- Individual app setup/options open from a Settings button. The dashboard’s Settings tile remains. Phone, SMS, Contacts, message/notification views, Clock and Agenda no longer repeat setup controls on their first page.
+- Today combines ongoing/upcoming appointments, due/overdue work, capture and search. Home shows the next appointment and opens the exact next task. Selected native Google calendar events are merged without duplicating a synced local event; pending local edits win.
+- Notes → Task, notice More → Make task and Android Share → Pocket Task capture the selected source into a separate draft. Source text/reference survives edits, completion and Markdown export; another note/task draft stays intact. Twenty unfinished captures can be resumed/discarded from Today Settings, with no automatic eviction.
+- Task reminders are one-shot exact alarms linked by task ID. Reschedule and five-minute snooze keep the link; completion/deletion cancels them. A linked appointment stays, with its reminder cleared. Reopen does not rearm old alarms. A failed schedule leaves the saved task and shows the error.
+- Same package, certificate and permissions, with no Internet permission. No flashable system ROM is included. Native previews use fixture data; handset calls, message delivery, camera, overnight alarms and Nothing’s Home transition remain unverified.
+
+Validation includes source-capture durability/idempotency/failure checks on API 23/35, linked reminder reschedule/snooze/cancellation and stale delivery, calendar deduplication/ongoing/all-day/permission failure, native compact headers and Settings menus, plus the existing suite. BUILD-STATUS.json records the actual final counts and signature.
+
+## 0.5.10 — Back routes, readable planning and native message hub
+
+- Header and system Back follow actual Home/Today routes, including recreation, Preview, task editing and Save. Clock returns through visited tabs; existing-contact edits return to their detail. Native Home/Recents and keyboard behavior remain available.
+- Today separates 18 sp titles from 14 sp due dates, priorities and step counts, and gives notes a readable excerpt. Agenda groups days, aligns times separately, labels local/calendar status and supplies Upcoming/Past views.
+- Back keeps one unfinished appointment draft without changing its saved event or alarm. Continue draft restores it; unchanged edits create no draft. A linked appointment opens the exact task.
+- The default Messages tile opens a native hub for active WhatsApp and other messaging notifications, with group-summary deduplication, installed-app links, SMS inbox and 56 dp Open/Reply/Dismiss controls. The installed apps continue receiving messages. Earlier history opens in the original app.
+- Reply uses the app's native freeform RemoteInput action after an explicit Send tap. It checks access, lock state, expiry and conversation identity, prevents duplicate taps and keeps only the user's unfinished composition locally for up to seven days. Received notification text is not stored. App-provided actions and real transport need handset checks.
+- Native Calendar Provider changes appear once in the timeline, preserving pending local edits; full local/remote reconciliation and editable duration remain future work.
+- Same package/signer and permission set; no Internet permission. Regression checks and native fixture previews cover these paths. Nothing's Home flash still requires physical-device verification.
+
+## 0.5.9 — Notes wheel, editable shortcuts and Home
+
+- Hold in the actual Notes editor for a radial formatting wheel. Move/release or release/tap chooses a format. Format opens the same wheel, More opens the complete native menu, and Select exposes Android selection/clipboard actions. Undo preserves later typing; Clear draft still needs confirmation. Short windows use the menu without reducing target sizes.
+- Every dashboard tile offers Change app, Rename, Use app name and Reset shortcut. Choosing ChatGPT shows ChatGPT; changing apps clears an old custom name. Earlier package-only assignments resolve labels off the UI thread. Names and accessibility descriptions update in place.
+- Native Home intents show the final dashboard without an extra Pocket page animation, including saved-activity restoration. The black window explicitly excludes transparency/wallpaper. Settings reads Android's real Home role and refreshes after returning.
+- The wheel closes on Back, Home, cancellation and pause, restores accessibility, and adds no system overlay/gesture exclusions or permissions.
+- PRODUCTIVITY.md prioritizes backup/restore, linked task reminders, calendar reconciliation, unified search and note organization. It documents the corrected swipe-up report and the boundary between Pocket's surface and Nothing's system gesture animation. The physical launcher flash is not confirmed resolved.
+- New native activity regressions cover editor holding, both wheel selection modes, cancellation, draft preservation, short windows, label migration/rename/reset, default Home role and immediate Home presentation. Native previews include the wheel.
+
+## 0.5.8 — researched hierarchy and Notes layout
+
+- RESEARCH.md records public NN/G, Carbon, Android accessibility, archived Material divider and Nokia S60 sources, with decisions tailored to this app and the supplied Notes screenshots.
+- Shared headers, data rows, primary actions and idle inputs no longer draw default dividers. Focus/selection cues remain; freeform Notes has no field underline.
+- Notes puts save in the header, keeps a full-height writing area and has one bottom group containing Format and Preview. Bold, Undo, Gesture help and confirmed Clear draft are available in Format. Swipe formatting stays inside that control.
+- Preview reserves the page for the selectable document and has compact Edit/Share soft keys. Native Markwon headings use restrained size steps and no automatic H1/H2 underline; source Markdown and authored content rules remain intact.
+- Preserve black, original pixel icons/headings, the selected dashboard tile, generous touch targets, draft autosave, Android navigation and same-signer update installation.
+- Existing editor-growth, short-window and formatting checks follow the new control locations. A confirmation regression protects saved notes when clearing through the menu. Native previews include an empty editor and the one-heading reading case.
+
+## 0.5.7 — minimal dark refinement
+
+- Black backgrounds throughout Pocket, including input fields and keypad controls. Text, spacing and thin baselines provide structure.
+- Dashboard next task/alarm is a plain text group; quick capture has text controls and unselected app tiles have no outlines. The original nine icons and one selected accent tile remain.
+- Call, Send, Save, equals, Stop and Shoot use accent text instead of large filled bars. Form fields use a baseline and show accent focus; rows align with page content.
+- Pixel headings, native ripple feedback, visible keyboard/D-pad selection and disabled states remain. Controls keep their existing 52/56 dp touch targets and editors keep their full available height.
+- All previous functionality, Android Home/Recents navigation, permissions, draft storage and update-install signing are retained. This increment changes presentation.
+
+## 0.5.6 — design refinement
+
+- Shared PocketDesign primitives define palette, type roles, 4 dp spacing, 16 dp insets, surfaces, headers, controls, list rows, inputs and native feedback states.
+- Dashboard groups next task/alarm, refines the nine-icon grid and retains pixel soft keys and D-pad selection.
+- Primary Call, Send, Save, equals, Stop and Shoot actions have an accent fill; ordinary navigation and data rows stay quiet. Keypad digits are centered and easier to read.
+- Forms use padded fields with visible focus boundaries. Contact/message/photo rows separate the main label from muted metadata.
+- Settings accent and Large text apply to shared app controls. Native system font scaling, gestures and short-window scrolling remain available.
+- Native render fixtures settle page transitions before screenshots. Existing navigation, touch-target, editor and reliability checks are retained. DESIGN.md is the implementation reference.
+
+## 0.5.5 — reliability increment
+
+- Clock migrates its own records to device-protected storage and restores schedules after locked boot. No other private app data moves there. Old overdue one-shot alarms are reported as missed rather than silently shifted to tomorrow. Scheduling failures roll back the new/edited record.
+- Ringing has a bundled fallback tone, preparation timeout, optional vibration, a ten-minute limit, bounded wake lock and sticky recovery on the same boot. Stop/Snooze belong to one occurrence. Denied snooze leaves the alarm ringing. Clock → Alarm setup / test shows exact-alarm, alert/channel, alarm volume and full-screen status and schedules a real ten-second test.
+- Camera opening and session setup time out with a retry message. An accepted photo write runs off the UI thread and uses a foreground service while Home is visible. A thumbnail failure after publishing the JPEG still reports the saved photo. Files remains limited to Pocket Camera photos.
+- Phone disables repeated call taps during handoff, cancels abandoned permission/SIM preparation and returns to an existing call. Supported earpiece proximity locking ends when the route changes, the call ends or the call screen stops. Withheld numbers remain private.
+- Provider reads and permission results belong to their requesting page. Save controls disable during an accepted write; ordered writes finish across activity destruction. Native contact editor tokens and calendar event markers make retries idempotent.
+- Notes/tasks autosave drafts after 400 ms and on pause. An intentionally empty draft stays empty. Clearing a draft requires confirmation; sharing into an already open note updates its editor. Concurrent organizer stores serialize entry mutations.
+- Appointments save locally before optional Calendar Provider work. Revision-aware sync results merge the native event link without overwriting newer local edits. Failed provider work stays pending for explicit retry. This is not a new Google account or full two-way reconciliation.
+- Image/PDF attachment results release their bitmaps if their viewer has closed. Device settings reports revoked brightness access without crashing.
+
+Automated regressions cover the changed paths with Android activities/services, permission callbacks and native provider fixtures. The release's BUILD-STATUS.json has the exact counts. A fixture cannot validate cellular delivery, Camera2 hardware, overnight OEM battery behavior or physical gesture smoothness.
+
+## Next increment — handset findings first
+
+Prioritize issues observed while using the current release, then improve call audio-route selection, incoming/ongoing call notification controls, alarm entry editing and Settings state refresh. Check Camera memory/storage behavior over longer sessions and interrupted saves. Extend contact/appointment loading and deletion recovery where device behavior requires it. Each future APK must pass its relevant regressions and update-install signature checks before delivery.
+
+## Checks on the Nothing Phone (3a)
+
+1. Install over the existing app, open Clock once, and verify saved notes/tasks/alarms/photos.
+2. Run the ten-second alarm test with the screen locked. Check Stop/Snooze, a real reboot and an overnight alarm. Keep the stock Clock for essential alarms until these pass.
+3. Capture a photo and immediately go Home; reopen Files and check the saved JPEG. Test front camera, flash, permission denial and low storage.
+4. Before changing everyday Phone/SMS defaults, check incoming/outgoing calls, screen locking at the ear, speaker/headset/mute/hold and both SIMs if present; then real sent/received SMS and carrier MMS. Sending MMS attachments and RCS are not implemented.
+5. Type a draft, switch through Home/Recents and reopen it. Save/edit contacts and a local appointment. Optional Google-calendar writes need an already synced phone calendar and explicit calendar access/selection.
+6. Android notification-listener restricted settings still need the user's manual consent. Normal Pocket alert permission, SMS access and listener access are separate. Check actual notifications and native bottom-edge navigation.
+
+The build environment has no attached handset. 0.5.10 is a usable test increment, not certification that every phone service works on this carrier/device. The release checklist records the remaining work so the next session can continue from this version.

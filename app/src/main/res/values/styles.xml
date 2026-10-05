@@ -1,0 +1,20 @@
+<resources>
+    <style name="TextPhoneBase" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#AAAAAA</item>
+        <item name="android:colorControlNormal">#AAAAAA</item>
+        <item name="android:colorControlActivated">#F9F594</item>
+        <item name="android:colorButtonNormal">#000000</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">#000000</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowShowWallpaper">false</item>
+        <item name="android:colorAccent">#F9F594</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+    <style name="TextPhoneTheme" parent="TextPhoneBase" />
+</resources>

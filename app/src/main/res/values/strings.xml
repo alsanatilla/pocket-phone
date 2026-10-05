@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Pocket Phone</string>
+    <string name="dashboard_task_count">NEXT [%1$d]</string>
+    <string name="dashboard_next">NEXT</string>
+    <string name="organizer_unavailable">Organizer data unavailable</string>
+    <string name="camera_name">Pocket Camera</string>
+    <string name="camera_permission_needed">Allow camera to use the viewfinder and take photos. Saved photos stay in DCIM/Pocket.</string>
+    <string name="camera_allow">Allow camera</string>
+    <string name="camera_opening">Opening camera</string>
+    <string name="camera_profile_label">%1$s  v</string>
+    <string name="camera_no_viewer">No photo viewer available</string>
+    <string name="camera_storage_needed">Photo storage permission needed</string>
+    <string name="camera_ready">Ready</string>
+    <string name="camera_saved">Saved</string>
+    <string name="camera_retry">Retry camera</string>
+</resources>

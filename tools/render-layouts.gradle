@@ -1,0 +1,20 @@
+gradle.projectsEvaluated {
+    def p = gradle.rootProject.project(':app')
+    def original = p.tasks.getByName('testRomUnitTest')
+    p.tasks.register('renderRomLayouts', org.gradle.api.tasks.testing.Test) {
+        dependsOn 'compileRomUnitTestJavaWithJavac'
+        testClassesDirs = original.testClassesDirs
+        classpath = original.classpath
+        systemProperties = original.systemProperties
+        workingDir = original.workingDir
+        maxHeapSize = '2g'
+        filter {
+            def selected = gradle.startParameter.projectProperties['renderCase']
+            if (selected) includeTestsMatching selected
+            else {
+                includeTestsMatching 'org.textphone.launcher.PlanningLayoutTest'
+                includeTestsMatching 'org.textphone.launcher.DailyPolishPreviewTest'
+            }
+        }
+    }
+}

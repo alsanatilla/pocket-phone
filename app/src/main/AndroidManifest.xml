@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.WRITE_CONTACTS" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_MMS" />
+    <uses-permission android:name="android.permission.RECEIVE_WAP_PUSH" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.OPEN_DOCUMENT" />
+            <data android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SET_TIMER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_MESSAGING" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="smsto" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="content" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_CONTACTS" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SHOW_ALARMS" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_CALENDAR" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.STILL_IMAGE_CAMERA" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_CALCULATOR" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/TextPhoneTheme"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="false"
+        android:enableOnBackInvokedCallback="true">
+        <activity android:name=".PhoneActivity" android:label="Pocket Phone" android:taskAffinity="org.textphone.launcher.phone" android:exported="true" android:launchMode="singleTop">
+            <intent-filter><action android:name="android.intent.action.DIAL" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
+            <intent-filter><action android:name="android.intent.action.DIAL" /><category android:name="android.intent.category.DEFAULT" /><data android:scheme="tel" /></intent-filter>
+        </activity>
+        <activity android:name=".MessagesActivity" android:label="Pocket Messages" android:taskAffinity="org.textphone.launcher.messages" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.SEND" /><category android:name="android.intent.category.DEFAULT" /><data android:mimeType="text/plain" /></intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SENDTO" /><category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="sms" /><data android:scheme="smsto" /><data android:scheme="mms" /><data android:scheme="mmsto" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".ChatsActivity" android:label="Pocket Chats" android:taskAffinity="org.textphone.launcher.chats" android:exported="false" android:launchMode="singleTop" />
+        <activity android:name=".NotificationReplyActivity" android:label="Pocket Reply" android:exported="false" />
+        <activity android:name=".ContactsActivity" android:label="Pocket Contacts" android:taskAffinity="org.textphone.launcher.contacts" android:exported="false" />
+        <activity android:name=".ClockActivity" android:label="Pocket Clock" android:taskAffinity="org.textphone.launcher.clock" android:exported="false" />
+        <activity android:name=".CalculatorActivity" android:label="Pocket Calculator" android:taskAffinity="org.textphone.launcher.calculator" android:exported="false" />
+        <activity android:name=".OrganizerActivity" android:label="Pocket Today" android:taskAffinity="org.textphone.launcher.today" android:exported="false" android:launchMode="singleTop" />
+        <activity android:name=".TaskCaptureActivity" android:label="Pocket Task" android:exported="false" />
+        <activity android:name=".TaskReminderActivity" android:label="Pocket Reminder" android:exported="false" />
+        <activity android:name=".TaskShareActivity" android:label="Pocket Task" android:exported="true" android:taskAffinity="org.textphone.launcher.capture">
+            <intent-filter><action android:name="android.intent.action.SEND" /><category android:name="android.intent.category.DEFAULT" /><data android:mimeType="text/plain" /></intent-filter>
+        </activity>
+        <activity android:name=".FilesActivity" android:label="Pocket Files" android:taskAffinity="org.textphone.launcher.files" android:exported="false" />
+        <activity android:name=".AgendaActivity" android:label="Pocket Agenda" android:taskAffinity="org.textphone.launcher.agenda" android:exported="false" />
+        <activity android:name=".DeviceSettingsActivity" android:label="Pocket Settings" android:taskAffinity="org.textphone.launcher.settings" android:exported="false" />
+        <activity android:name=".PermissionsActivity" android:label="Pocket Permissions" android:taskAffinity="org.textphone.launcher.permissions" android:exported="false" />
+        <activity android:name=".NotificationSetupActivity" android:label="Pocket Notification Setup" android:taskAffinity="org.textphone.launcher.notification_setup" android:exported="false" />
+        <activity android:name=".MessageAttachmentActivity" android:label="Pocket Attachment" android:taskAffinity="org.textphone.launcher.messages" android:exported="false" />
+        <activity android:name=".InCallActivity" android:label="Pocket Call" android:taskAffinity="org.textphone.launcher.phone" android:exported="false" android:launchMode="singleTop" android:excludeFromRecents="true" />
+        <activity android:name=".RingingActivity" android:label="Pocket Alarm" android:taskAffinity="org.textphone.launcher.clock" android:exported="false" android:directBootAware="true" android:launchMode="singleTop" android:excludeFromRecents="true" />
+        <service android:name=".PocketCalls" android:exported="true" android:permission="android.permission.BIND_INCALL_SERVICE">
+            <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="true" />
+            <meta-data android:name="android.telecom.IN_CALL_SERVICE_RINGING" android:value="false" />
+            <intent-filter><action android:name="android.telecom.InCallService" /></intent-filter>
+        </service>
+        <service android:name=".QuickReplyService" android:exported="true" android:permission="android.permission.SEND_RESPOND_VIA_MESSAGE">
+            <intent-filter><action android:name="android.intent.action.RESPOND_VIA_MESSAGE" /><category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="sms" /><data android:scheme="smsto" /><data android:scheme="mms" /><data android:scheme="mmsto" />
+            </intent-filter>
+        </service>
+        <service android:name=".AlarmService" android:exported="false" android:directBootAware="true" android:foregroundServiceType="mediaPlayback" />
+        <service android:name=".PhotoSaveService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <receiver android:name=".SmsReceiver" android:exported="true" android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter><action android:name="android.provider.Telephony.SMS_DELIVER" /></intent-filter>
+        </receiver>
+        <receiver android:name=".MmsReceiver" android:exported="true" android:permission="android.permission.BROADCAST_WAP_PUSH">
+            <intent-filter><action android:name="android.provider.Telephony.WAP_PUSH_DELIVER" /><data android:mimeType="application/vnd.wap.mms" /></intent-filter>
+        </receiver>
+        <receiver android:name=".SmsResultReceiver" android:exported="false" />
+        <receiver android:name=".MmsDownloadReceiver" android:exported="false" />
+        <receiver android:name=".AlarmReceiver" android:exported="false" android:directBootAware="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" /><action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" /><action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+        <provider android:name=".MmsFiles" android:authorities="org.textphone.launcher.mms" android:exported="false" android:grantUriPermissions="true" />
+        <activity
+            android:name=".CompactCameraActivity" android:taskAffinity="org.textphone.launcher.camera"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:label="@string/camera_name" />
+        <service
+            android:name=".PhoneNotifications"
+            android:label="@string/app_name"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

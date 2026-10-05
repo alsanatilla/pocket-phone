@@ -1,0 +1,28 @@
+# Machine-local Android / Gradle files
+.gradle/
+**/build/
+local.properties
+.idea/
+*.iml
+.cxx/
+.externalNativeBuild/
+.DS_Store
+
+# Private signing material and credentials
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+key.properties
+signing.properties
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Installers belong in GitHub Releases, not source history
+*.apk
+*.apks
+*.aab

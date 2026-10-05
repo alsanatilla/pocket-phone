@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'org.textphone.launcher'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'org.textphone.launcher'
+        minSdk 23
+        targetSdk 35
+        versionCode 18
+        versionName '0.5.13'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+        rom {
+            initWith release
+            matchingFallbacks = ['release']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests.includeAndroidResources = true
+        unitTests.all {
+            maxHeapSize = '2g'
+            // The ROM edition has its own essential-app grid and intent tests.
+            if (name == 'testRomUnitTest') exclude '**/MainActivityTest.class'
+            systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+            // Honor the build machine's existing proxy and trust settings for Robolectric's SDK downloads.
+            ['http.proxyHost', 'http.proxyPort', 'https.proxyHost', 'https.proxyPort',
+             'http.nonProxyHosts', 'javax.net.ssl.trustStore'].each { key ->
+                if (System.getProperty(key) != null) systemProperty key, System.getProperty(key)
+            }
+        }
+    }
+}
+
+dependencies {
+    implementation 'io.noties.markwon:core:4.6.2'
+    implementation 'io.noties.markwon:ext-tasklist:4.6.2'
+    implementation 'io.noties.markwon:ext-strikethrough:4.6.2'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+}
