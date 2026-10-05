@@ -30,10 +30,13 @@ public class OrganizerPreviewTest {
     @Before public void clear() {RuntimeEnvironment.getApplication().getSharedPreferences("pocket_planner",0).edit().clear().commit();}
     @Test public void renderRealTaskAndMarkwonNoteLayouts() throws Exception {
         PlannerStore store=new PlannerStore(RuntimeEnvironment.getApplication().getSharedPreferences("pocket_planner",0));
-        store.saveTask(0,"Prepare weekend trip",PlannerDates.today(),true,"- [x] Book train\nPack camera\nDownload tickets");
+        long task=store.saveTask(0,"Prepare weekend trip",PlannerDates.today(),true,"- [x] Book train\nPack camera\nDownload tickets");
         store.save(0,"task","Send invoice");store.save(0,"note","# Weekend\nPlatform 4 · bring the camera");
         ActivityController<MainActivity> controller=Robolectric.buildActivity(MainActivity.class,new Intent().putExtra("pocket_screen","today")).setup();
         try {MainActivity activity=controller.get();save(activity,"pocket-todo.png");
+            activity.findViewById(android.R.id.content).findViewWithTag("task_open_"+task).performClick();save(activity,"pocket-task-detail.png");
+            activity.findViewById(android.R.id.content).findViewWithTag("task_edit").performClick();save(activity,"pocket-task-editor.png");
+            activity.onBackPressed();activity.onBackPressed();
             PocketAppsTest.find(activity.findViewById(android.R.id.content),"Note").performClick();
             save(activity,"pocket-notes-empty.png");
             ((EditText)activity.findViewById(android.R.id.content).findViewWithTag("capture_editor")).setText("# Weekend plan\n\n## Before leaving\n- [x] Book train\n- [ ] Charge camera\n- [ ] Pack light\n\n**Meet at 09:30**\n\n> Keep the afternoon free.");

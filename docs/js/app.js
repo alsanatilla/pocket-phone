@@ -1,10 +1,11 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
-import * as drive from "./drive.js?v=20261005-movement1";
-import * as reader from "./reader.js?v=20261005-movement1";
-import * as zines from "./zines.js?v=20261005-movement1";
-import * as movement from "./movement.js?v=20261005-movement1";
-import { syncNow, describe, onStatus, status } from "./sync.js?v=20261005-movement1";
-import { parking, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261005-movement1";
+import * as drive from "./drive.js?v=20261005-tasks1";
+import * as reader from "./reader.js?v=20261005-tasks1";
+import * as zines from "./zines.js?v=20261005-tasks1";
+import * as movement from "./movement.js?v=20261005-tasks1";
+import * as coros from "./coros.js?v=20261005-tasks1";
+import { syncNow, describe, onStatus, status } from "./sync.js?v=20261005-tasks1";
+import { parking, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261005-tasks1";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -496,7 +497,7 @@ function route() {
   const [, name, arg] = (location.hash.replace(/^#/, "") || "/").split("/");
   if (name === "notes") notesView(arg); else if (name === "receipt") receiptView(arg); else if (name === "dice") diceView(); else if (name === "sync") syncView();
   else if (name === "zines") zines.mount(view("zines"), arg, { go, say, dialog, confirm: confirmBox });
-  else if (name === "movement") movement.mount(view("movement"));
+  else if (name === "movement") movement.mount(view("movement"), { say });
   else if (name === "parking") parkingView(); else { history.replaceState(null, "", "#/parking"); parkingView(); }
 }
 addEventListener("hashchange", route);
@@ -516,7 +517,9 @@ addEventListener("keydown", event => {
   if (name === "dice" && event.key === " ") { event.preventDefault(); document.getElementById("roll")?.click(); }
 });
 
-route();
+// A COROS sign-in comes back to this page with ?code=…; finish it before drawing the Movement tab.
+if (coros.returning()) coros.finish().then(() => { route(); say("COROS connected."); }, error => { route(); say(error.message); });
+else route();
 syncNow();
 addEventListener("pagehide", () => zines.leave());
 addEventListener("pageshow", event => { if (event.persisted) route(); });

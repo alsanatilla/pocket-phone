@@ -76,7 +76,9 @@ public class DashboardEditingTest {
         PlannerStore planner=new PlannerStore(activity.getSharedPreferences("pocket_planner",0));long note=planner.save(0,"note","Keep my note");
         assign("ChatGPT");new DashboardTiles(prefs).rename(slot,"Ask");controller.newIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));assertEquals("Ask",name().getText().toString());
         menu("Use app name");assertEquals("ChatGPT",name().getText().toString());menu(activity.getResources().getBoolean(R.bool.pocket_rom)?"Reset tile":"Reset shortcut");assertEquals(slot,name().getText().toString());assertFalse(prefs.contains("shortcut_"+slot));
-        assertEquals("Keep my note",planner.find(note).text);assertNotNull(root().findViewWithTag("tile_settings"));
+        assertEquals("Keep my note",planner.find(note).text);
+        if(activity.getResources().getBoolean(R.bool.pocket_rom)) { PocketAppsTest.find(root(),"all").performClick(); assertNotNull(root().findViewWithTag("all_shortcut_settings")); }
+        else assertNotNull(root().findViewWithTag("tile_settings"));
     }
     @Test public void oldPackageOnlyBindingsResolveActualNamesWithoutRebuildingHome() throws Exception {
         prefs.edit().putString("shortcut_"+slot,"fixture.chatgpt").commit();View home=root().getRootView();

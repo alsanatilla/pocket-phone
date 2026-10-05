@@ -67,10 +67,10 @@ public class ProductivityTest {
     @Test public void taskCaptureUpdatesStandbyAndCompletion() {
         today(); label("+ Task").performClick(); editor().setText("Send invoice"); label("save").performClick();
         assertEquals(1, store.openTasks()); label("Complete task"); long id = store.entries().get(0).id;
-        home(); label("NEXT [1]"); label("Send invoice").performClick();
+        home(); label("0 / 1"); label("Send invoice").performClick();
         label("Complete task");
         assertEquals(1, store.openTasks()); label("Complete task").performClick(); home();
-        label("No open tasks"); assertEquals(0, store.openTasks());
+        assertEquals(View.GONE,activity.findViewById(android.R.id.content).findViewWithTag("dashboard_next").getVisibility()); assertEquals(0, store.openTasks());
     }
     @Test public void sharedTextAndUnfinishedNotesSurviveLeavingTheScreen() {
         activity.onNewIntent(new Intent(Intent.ACTION_SEND).setType("text/plain")
@@ -107,7 +107,9 @@ public class ProductivityTest {
         assertEquals("Focus: Write proposal", timer.getStringExtra("title"));
         activity.onBackPressed(); activity.findViewById(android.R.id.content).findViewWithTag("task_open_" + id).performLongClick();
         AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
-        dialog.getListView().performItemClick(null, 1, 1);
+        android.widget.ListAdapter choices=dialog.getListView().getAdapter();int schedule=-1;
+        for(int i=0;i<choices.getCount();i++)if("Schedule reminder".equals(choices.getItem(i).toString()))schedule=i;
+        assertTrue("Task menu offers a reminder",schedule>=0);dialog.getListView().performItemClick(null,schedule,schedule);
         Intent calendar = Shadows.shadowOf(activity).getNextStartedActivity();
         assertEquals(TaskReminderActivity.class.getName(), calendar.getComponent().getClassName());
         assertEquals(id,calendar.getLongExtra("task",0));

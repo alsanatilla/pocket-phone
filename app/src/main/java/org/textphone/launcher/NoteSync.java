@@ -13,14 +13,14 @@ import org.json.JSONObject;
 /**
  * Notes in the cloud document {"v":1,"notes":[{"uid","text","pinned","created","updated","deleted"}]}.
  * Local ids are small counters shared with tasks, so synced notes are matched by a random uid instead.
- * Tasks stay on the phone.
+ * Tasks have their own portable document in TaskSync.
  */
 final class NoteSync {
     private static final long KEEP_DELETED = 30L * 24 * 3_600_000L;
     private static final Object LOCK = new Object();
 
     static JSONObject merge(Context c, JSONObject remote) throws JSONException {
-        synchronized (LOCK) {
+        synchronized (LOCK) { synchronized (PlannerStore.WRITE_LOCK) {
             PlannerStore store = new PlannerStore(c.getSharedPreferences("pocket_planner", 0));
             SharedPreferences p = store.preferences();
             JSONArray merged = SyncMerge.byId(local(store), remote == null ? null : remote.optJSONArray("notes"), "uid", "updated");
@@ -43,7 +43,7 @@ final class NoteSync {
                 } catch (IllegalArgumentException full) { /* Organizer full or note removed meanwhile: the next sync tries again. */ }
             }
             return new JSONObject().put("v", 1).put("notes", local(store));
-        }
+        } }
     }
     private static void apply(PlannerStore store, SharedPreferences p, long id, JSONObject note, long updated) {
         if (store.notePinned(id) != note.optBoolean("pinned")) store.pinNote(id, note.optBoolean("pinned"));

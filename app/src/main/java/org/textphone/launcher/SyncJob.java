@@ -13,6 +13,7 @@ public final class SyncJob extends JobService {
             catch (CloudSync.SignInNeeded error) { CloudSync.prefs(this).edit().putString("last_error", error.getMessage()).apply(); }
             catch (IOException error) { retry = params.getJobId() == CloudSync.JOB_SOON; CloudSync.prefs(this).edit().putString("last_error", error.getMessage()).apply(); }
             catch (RuntimeException error) { CloudSync.prefs(this).edit().putString("last_error", "Sync failed. Try Sync now in Settings → Cloud sync.").apply(); }
+            sendBroadcast(new android.content.Intent(CloudSync.ACTION_SYNCED).setPackage(getPackageName()));
             jobFinished(params, retry);
         }, "Pocket sync").start();
         return true;

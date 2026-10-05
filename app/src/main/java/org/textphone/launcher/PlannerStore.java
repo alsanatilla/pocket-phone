@@ -8,14 +8,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Collections;
 
-/** Small local organizer. No accounts, network, or background polling. */
+/** Local organizer; optional cloud sync uses separate portable ids and edit timestamps. */
 final class PlannerStore {
     static final int TASK_LIMIT = 500;
     static final int NOTE_LIMIT = 8000;
     static final int STEPS_TEXT_LIMIT = 6000;
     private static final int ENTRY_LIMIT = 250;
     private final SharedPreferences prefs;
-    private static final Object WRITE_LOCK = new Object();
+    static final Object WRITE_LOCK = new Object();
 
     static final class Entry {
         final long id, created;
@@ -127,7 +127,7 @@ final class PlannerStore {
                 if (old.id == id) {
                     if (!old.kind.equals(kind)) throw new IllegalArgumentException("Entry type cannot change.");
                     values.set(i, new Entry(id, old.kind, text, old.done, old.created, due, important, steps,source==null?old.source:source));
-                    write(values); if ("note".equals(kind)) touchNote(id); return id;
+                    write(values); if ("note".equals(kind)) touchNote(id); else touchTask(id); return id;
                 }
             }
             throw new IllegalArgumentException("This entry was removed.");
@@ -137,7 +137,7 @@ final class PlannerStore {
         for (Entry entry : values) next = Math.max(next, entry.id + 1);
         Entry added = new Entry(next, kind, text, false, System.currentTimeMillis(), due, important, steps,source);
         if ("note".equals(kind)) values.add(0, added); else values.add(added);
-        write(values); if ("note".equals(kind)) touchNote(next); return next;
+        write(values); if ("note".equals(kind)) touchNote(next); else touchTask(next); return next;
         }
     }
 
@@ -146,16 +146,20 @@ final class PlannerStore {
         List<Entry> values = entries();
         for (int i = 0; i < values.size(); i++) {
             Entry entry = values.get(i);
-            if (entry.id == id && "task".equals(entry.kind))
-                values.set(i, entry.withDone(!entry.done));
+            if (entry.id == id && "task".equals(entry.kind)) {
+                values.set(i, entry.withDone(!entry.done)); write(values); touchTask(id); return;
+            }
         }
-        write(values);
+        throw new IllegalArgumentException("This task was removed.");
         }
     }
 
     void makeNext(long id) {
         synchronized (WRITE_LOCK) {
         List<Entry> values = entries();
+        Entry selected = id == 0 ? null : find(id);
+        if (id != 0 && (selected == null || !"task".equals(selected.kind) || selected.done))
+            throw new IllegalArgumentException("This task is completed or removed.");
         for (int i = 0; i < values.size(); i++) {
             Entry entry = values.get(i);
             if (entry.id == id && "task".equals(entry.kind) && !entry.done) {
@@ -163,13 +167,15 @@ final class PlannerStore {
             }
         }
         write(values);
-        if (!prefs.edit().putLong("next_task", id).commit()) throw new IllegalStateException("Task order could not be saved.");
+        if (!prefs.edit().putLong("next_task", id).putLong("task_next_updated", Math.max(System.currentTimeMillis(), prefs.getLong("task_next_updated", 0) + 1))
+                .putLong("tasks_rev", tasksRevision() + 1).commit()) throw new IllegalStateException("Task order could not be saved.");
         }
     }
 
     void delete(long id) {
         synchronized (WRITE_LOCK) {
         List<Entry> values = entries();
+        Entry removed = find(id);
         String uid = prefs.getString("note_uid_" + id, null);
         for (int i = values.size() - 1; i >= 0; i--) if (values.get(i).id == id) values.remove(i);
         write(values);
@@ -179,6 +185,13 @@ final class PlannerStore {
             try { edit.putString("note_tombstones", new JSONObject(prefs.getString("note_tombstones", "{}")).put(uid, System.currentTimeMillis()).toString()); }
             catch (JSONException damaged) { edit.putString("note_tombstones", "{}"); }
             edit.putLong("notes_rev", prefs.getLong("notes_rev", 0) + 1);
+        }
+        if (removed != null && "task".equals(removed.kind)) {
+            String taskUid = TaskSync.uid(this, id);
+            long deleted = Math.max(System.currentTimeMillis(), taskUpdated(removed) + 1);
+            try { edit.putString("task_tombstones", new JSONObject(prefs.getString("task_tombstones", "{}")).put(taskUid, deleted).toString()); }
+            catch (JSONException damaged) { throw new IllegalStateException("Task deletion markers could not be saved.", damaged); }
+            edit.remove("task_uid_" + id).remove("task_updated_" + id).putLong("tasks_rev", tasksRevision() + 1);
         }
         edit.apply();
         }
@@ -190,6 +203,34 @@ final class PlannerStore {
     }
     long noteUpdated(Entry note) { return prefs.getLong("note_updated_" + note.id, note.created); }
     long notesRevision() { return prefs.getLong("notes_rev", 0); }
+    private void touchTask(long id) {
+        TaskSync.uid(this, id);
+        prefs.edit().putLong("task_updated_" + id, Math.max(System.currentTimeMillis(), prefs.getLong("task_updated_" + id, 0) + 1))
+                .putLong("tasks_rev", tasksRevision() + 1).apply();
+    }
+    long taskUpdated(Entry task) { return prefs.getLong("task_updated_" + task.id, task.created); }
+    long tasksRevision() { return prefs.getLong("tasks_rev", 0); }
+
+    /** Called under WRITE_LOCK by TaskSync, retaining local source links and draft keys. */
+    long applySyncedTask(Entry old, String uid, String text, boolean done, long created, String due,
+                         boolean important, List<Step> steps, TaskSource source, long updated) {
+        synchronized (WRITE_LOCK) {
+            List<Entry> values = entries();
+            long id = old == null ? prefs.getLong("next_id", 1) : old.id;
+            if (old == null) {
+                if (values.size() >= ENTRY_LIMIT) throw new IllegalStateException("Organizer is full. Remove an old entry, then sync again.");
+                for (Entry value : values) id = Math.max(id, value.id + 1);
+            }
+            Entry task = new Entry(id, "task", text, done, old == null ? created : old.created, due, important, steps,
+                    old != null && old.source != null ? old.source : source);
+            if (old == null) values.add(task);
+            else for (int i = 0; i < values.size(); i++) if (values.get(i).id == id) values.set(i, task);
+            write(values);
+            prefs.edit().putString("task_uid_" + id, uid).putLong("task_updated_" + id, updated)
+                    .putLong("tasks_rev", tasksRevision() + 1).apply();
+            return id;
+        }
+    }
     SharedPreferences preferences() { return prefs; }
 
     boolean notePinned(long id){return prefs.getBoolean("note_pin_"+id,false);}
@@ -214,6 +255,30 @@ final class PlannerStore {
 
     Entry find(long id) { for (Entry entry : entries()) if (entry.id == id) return entry; return null; }
 
+    void setDue(long id, String due) {
+        synchronized (WRITE_LOCK) {
+            PlannerDates.validate(due);Entry task = requireTask(id); saveEntry(id, "task", task.text, due, task.important, task.steps);
+        }
+    }
+    void toggleImportant(long id) {
+        synchronized (WRITE_LOCK) {
+            Entry task = requireTask(id); saveEntry(id, "task", task.text, task.due, !task.important, task.steps);
+        }
+    }
+    void addStep(long id, String text) {
+        synchronized (WRITE_LOCK) {
+            Entry task = requireTask(id);
+            String value = text.trim();
+            if (value.isEmpty() || value.contains("\n") || value.length() > 160) throw new IllegalArgumentException("Enter one step, up to 160 characters.");
+            if (task.steps.size() >= 32) throw new IllegalArgumentException("Use up to 32 steps.");
+            List<Step> steps = new ArrayList<>(task.steps); steps.add(new Step(value, false));
+            saveEntry(id, "task", task.text, task.due, task.important, steps);
+        }
+    }
+    private Entry requireTask(long id) {
+        Entry task = find(id); if (task == null || !"task".equals(task.kind)) throw new IllegalArgumentException("This task was removed."); return task;
+    }
+
     void toggleStep(long id, int index) {
         synchronized (WRITE_LOCK) {
         List<Entry> values = entries();
@@ -224,7 +289,7 @@ final class PlannerStore {
             List<Step> steps = new ArrayList<>(old.steps);
             Step step = steps.get(index); steps.set(index, new Step(step.text, !step.done));
             values.set(i, new Entry(old.id, old.kind, old.text, old.done, old.created, old.due, old.important, steps,old.source));
-            write(values); return;
+            write(values); touchTask(id); return;
         }
         throw new IllegalArgumentException("Task was removed.");
         }

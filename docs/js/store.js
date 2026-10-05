@@ -3,12 +3,12 @@
 
 const HOUR = 3_600_000, DAY = 24 * HOUR, KEEP_CLOSED = 7 * DAY, KEEP_DAYS = 30, DAY_LIMIT = 300, KEEP_DELETED = 30 * DAY;
 export const NOTE_LIMIT = 8000;
-export const FILES = ["parking.json", "receipt.json", "dice.json", "notes.json", "journal.json"];
+export const FILES = ["parking.json", "receipt.json", "dice.json", "notes.json", "tasks.json", "journal.json"];
 export const DELAYS = ["1 hour", "tonight", "tomorrow", "next week"];
 export const HECKLE = 3;
 export const KIND = { ROLL: "ROLL", PARK: "PARK", CLEAR: "CLEAR", KILL: "KILL", MEMO: "MEMO", DONE: "DONE", PHOTO: "PHOTO", ALARM: "ALARM", TASK: "TASK" };
 
-const EMPTY = { "parking.json": () => ({ v: 1, items: [] }), "receipt.json": () => ({ v: 1, days: {} }), "dice.json": () => ({ v: 1, list: "", updated: 0 }), "notes.json": () => ({ v: 1, notes: [] }), "journal.json": () => ({ v: 1, pages: [] }) };
+const EMPTY = { "parking.json": () => ({ v: 1, items: [] }), "receipt.json": () => ({ v: 1, days: {} }), "dice.json": () => ({ v: 1, list: "", updated: 0 }), "notes.json": () => ({ v: 1, notes: [] }), "tasks.json": () => ({ v: 1, tasks: [], next: { uid: "", updated: 0 } }), "journal.json": () => ({ v: 1, pages: [] }) };
 const listeners = new Set();
 export const onChange = fn => listeners.add(fn);
 const changed = name => { markDirty(name); listeners.forEach(fn => fn(name)); };
@@ -47,6 +47,11 @@ export const merge = {
   "dice.json": (local, remote) => (remote && (remote.updated || 0) > (local.updated || 0) ? { v: 1, list: remote.list || "", updated: remote.updated } : { v: 1, list: local.list || "", updated: local.updated || 0 }),
   // Deleted notes stay as markers for 30 days so an older copy cannot bring them back.
   "notes.json": (local, remote, now) => ({ v: 1, notes: mergeById(local.notes, remote?.notes, "uid", "updated").filter(n => !n.deleted || now - (n.updated || 0) <= KEEP_DELETED) }),
+  // Native phone tasks share the Drive folder; the web preserves them without adding another task screen.
+  "tasks.json": (local, remote, now) => ({ v: 1,
+    tasks: mergeById(local.tasks, remote?.tasks, "uid", "updated").filter(t => !t.deleted || now - (t.updated || 0) <= KEEP_DELETED),
+    next: (remote?.next?.updated || 0) > (local.next?.updated || 0) ? remote.next : (local.next || { uid: "", updated: 0 }),
+  }),
   // Journal pages are written by the phone; same rule as JournalStore.merge.
   "journal.json": (local, remote, now) => ({ v: 1, pages: mergeById(local.pages, remote?.pages, "uid", "updated").filter(p => !p.deleted || now - (p.updated || 0) <= KEEP_DELETED) }),
 };

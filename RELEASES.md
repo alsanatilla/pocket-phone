@@ -2,6 +2,15 @@
 
 Each release supplies a separately named, signed APK, source snapshot, checksums and actual build/test results. Install the new APK over Pocket; do not uninstall or clear app storage. The package ID and signing certificate stay the same. Old release downloads remain available. These APKs run on the current Nothing OS; they are not flashable ROM images.
 
+## 0.5.15 — home dashboard and COROS (local build)
+
+- Home shows up to two appointments, the exact next task, three movement scores, one returning thought and the latest note. Empty sources disappear. Phone, Messages and Camera remain editable tiles; existing hidden shortcuts and groups remain under All apps.
+- Movement signs in independently on the phone through COROS's browser login and PKCE. Tokens use Android Keystore encryption. Score inputs and cached readings stay on the phone; dated snapshots refresh on Home return. Tapping a score opens its inputs.
+- Sync now and the first Google connection sync immediately while the screen is open. Failures remain visible, background errors update the page, and OAuth configuration failures show this build's actual signing fingerprint.
+- Native tasks use 20 sp readable titles, 14 sp supporting dates/progress, actual checkboxes and visible quick actions. Details expose due dates, importance and checklist additions; the editor keeps Save in its header.
+- Optional Drive sync includes portable task ids, checklist progress, selected source snapshots and the chosen next task. Local drafts and reminder ids stay on the phone; remote completion/deletion cancels local reminders. Deletion markers prevent older copies from restoring removed tasks for 30 days.
+- No new Android permissions. The update requires the existing release signing key. Physical phone sign-in, Drive transfer and launcher behavior remain to be checked on the handset.
+
 ## 0.5.13 — companion apps for everyday work
 
 - Clock edits existing alarms (time, name, daily) with the same ID and on/off state. Named 5/25/50-minute timer presets retain input through tabs/recreation.

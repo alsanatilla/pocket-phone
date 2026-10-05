@@ -1,6 +1,10 @@
 # Pocket Phone
 
-Native Android dashboard and compact apps for the Nothing Phone (3a). Version 0.5.14 runs on Android 6 and newer, including the existing Nothing OS installation. It is currently a launcher/app component; no full ROM image has been compiled or verified for daily use.
+Native Android dashboard and compact apps for the Nothing Phone (3a). Version 0.5.15 runs on Android 6 and newer, including the existing Nothing OS installation. It is currently a launcher/app component; no full ROM image has been compiled or verified for daily use.
+
+Version 0.5.15 brings a compact home dashboard: today's next two appointments, next task, movement scores, a returning thought and the latest note, followed by three editable tiles. Other shortcuts and groups remain under All apps. Movement has its own COROS browser sign-in and keeps its tokens encrypted on the phone. Cloud sync's explicit Sync now action runs immediately and keeps errors visible. These changes are implemented locally; an update APK still needs the existing release signing key.
+
+The phone's task list now uses larger readable titles, native checkboxes, clearer due dates and a visible action menu. Task details edit dates and importance directly and support adding/checking steps. Save stays in the editor header. Optional Drive sync now includes tasks, checklist progress and the chosen next task; reminders and drafts remain on the phone.
 
 Version 0.5.14 merges the latest tile groups and Pocket apps: Dice, Parking Lot, Receipt and Journal, plus optional Drive sync and the web workstation. Groups hold up to nine apps; incomplete rows keep their compact height. Notes can park linked thoughts with `>> Call Sam @tomorrow` or `@16:30`. Journal photos wait locally until a reading key is set. Cloud sync and journal transcription are separately opt-in; the APK now includes Internet and network-state permissions. See [USE-POCKET-0.5.14.md](USE-POCKET-0.5.14.md) for the update and [CLOUD.md](CLOUD.md) for account setup.
 
@@ -40,7 +44,7 @@ Android provides telephony, native data providers, alarm scheduling, camera capt
 
 Android keeps control of bottom-edge Home and Recents gestures. Pocket app activities use separate tasks; the launcher does not intercept upward swipes or exclude system gesture areas. Newer Android versions also provide predictive Back callbacks for internal pages. Physical smoothness and Nothing OS transitions still require testing on the phone.
 
-Agenda optionally uses a writable Google calendar already synchronized on the phone through Android's Calendar Provider. Choose it explicitly in Agenda → Settings after granting calendar access. Android's account sync handles the transfer; the calendar link itself uses no Pocket login. Tasks remain local, notes leave the phone only with the optional cloud sync below, and Pocket appointment reminders remain local alarms. This does not connect Google Keep or Google Tasks.
+Agenda optionally uses a writable Google calendar already synchronized on the phone through Android's Calendar Provider. Choose it explicitly in Agenda → Settings after granting calendar access. Android's account sync handles the transfer; the calendar link itself uses no Pocket login. Tasks and notes leave the phone only with the optional cloud sync below, and Pocket appointment reminders remain local alarms. This does not connect Google Keep or Google Tasks.
 
 Notification access is optional and shows other apps' current notifications, including app-provided Open and Reply actions. Received notification text is not automatically archived. An explicit **More → Make task** action saves only the source snapshot the user chose, attached to that task. Only the user's unfinished reply is stored privately, for up to seven days or until submission. Android may block this sensitive setting for a sideloaded APK. Open Messages or Notifications → Settings for setup. The setup screen links to app info; if Android offers **⋮ → Allow restricted settings**, the user must approve it there, then enable Notification access. The app cannot grant or bypass it. Leave it disabled if you do not want that access. Pocket's own SMS and alarm alerts use the separate notification permission. Calendar account sync and SMS/MMS transfers use Android's services separately from Pocket's optional cloud sync.
 
@@ -48,7 +52,7 @@ The built-in [camera](CAMERA.md) uses Camera2 preview and YUV capture, native au
 
 ## Cloud sync and web
 
-Optional cloud sync copies Parking Lot, Receipt, Dice lists, notes and journal pages to a hidden app folder in your own Google Drive and syncs again whenever the phone is back online. It is off until you turn it on in Settings → Cloud sync; for this the APK now declares the `INTERNET` permission. The same data opens in a web workstation in Pocket's terminal style from [`docs/`](docs/) via GitHub Pages. Journal turns photos of paper journal pages into notes with Claude (your own API key, about 1–2¢ per page), on the phone or on demand in the web page, while keeping the photo behind every line. See [CLOUD.md](CLOUD.md) for the merge rule, the journal and the one-time Google setup.
+Optional cloud sync copies tasks, Parking Lot, Receipt, Dice lists, notes and journal pages to a hidden app folder in your own Google Drive and syncs again whenever the phone is back online. It is off until you turn it on in Settings → Cloud sync; for this the APK now declares the `INTERNET` permission. The web workstation reads the shared Pocket documents from [`docs/`](docs/) via GitHub Pages; task controls are native on the phone. Journal turns photos of paper journal pages into notes with Claude (your own API key, about 1–2¢ per page), on the phone or on demand in the web page, while keeping the photo behind every line. See [CLOUD.md](CLOUD.md) for the merge rule, the journal and the one-time Google setup.
 
 ## Downloads
 

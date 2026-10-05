@@ -1,4 +1,4 @@
-import { PAGE_WIDTH, PAGE_HEIGHT, pageCount, renderer } from "./zine-render.js?v=20261005-movement1";
+import { PAGE_WIDTH, PAGE_HEIGHT, pageCount, renderer } from "./zine-render.js?v=20261005-tasks1";
 
 // Four-page signatures, with padding inside the covers. The final PDF side is
 // A5 landscape; each half folds down to an A6 pocket book.

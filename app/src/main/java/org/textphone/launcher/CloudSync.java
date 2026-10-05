@@ -11,6 +11,8 @@ import android.os.UserManager;
 import com.google.android.gms.auth.api.identity.AuthorizationRequest;
 import com.google.android.gms.auth.api.identity.AuthorizationResult;
 import com.google.android.gms.auth.api.identity.Identity;
+import com.google.android.gms.common.api.ApiException;
+import com.google.android.gms.common.api.CommonStatusCodes;
 import com.google.android.gms.common.api.Scope;
 import com.google.android.gms.tasks.Tasks;
 import java.io.ByteArrayOutputStream;
@@ -30,20 +32,23 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * Opt-in sync of Parking Lot, Receipt, Dice lists and notes to the hidden Drive app folder of the user's own Google account.
+ * Opt-in sync of tasks, notes and Pocket documents to the hidden Drive app folder of the user's own Google account.
  * Every local write asks for a sync; Android runs it once any network is available. The web page reads the same files.
  */
 final class CloudSync {
     static final String SCOPE = "https://www.googleapis.com/auth/drive.appdata";
     static final String WEB = "https://alsanatilla.github.io/pocket-phone/";
     static final String ACTION_SYNCED = "org.textphone.launcher.SYNCED";
-    static final String[] FILES = {"parking.json", "receipt.json", "dice.json", "notes.json", "journal.json"};
+    static final String[] FILES = {"parking.json", "receipt.json", "dice.json", "notes.json", "tasks.json", "journal.json"};
     static final int JOB_SOON = 7301, JOB_PERIODIC = 7302;
     private static final String DRIVE = "https://www.googleapis.com/drive/v3/files", UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
     private static final Object RUN = new Object();
 
     /** Google needs the user to choose an account or grant access on screen. */
-    static final class SignInNeeded extends Exception { SignInNeeded() { super("Sign in again in Settings → Cloud sync."); } }
+    static final class SignInNeeded extends Exception {
+        SignInNeeded() { this("Sign in again in Settings → Cloud sync."); }
+        SignInNeeded(String message) { super(message); }
+    }
 
     static SharedPreferences prefs(Context c) { return c.getSharedPreferences("pocket_cloud", 0); }
     static boolean enabled(Context c) {
@@ -86,14 +91,17 @@ final class CloudSync {
     /** Download, merge into local storage, upload the merged copy. Runs on a job thread, never on the UI thread. */
     static void run(Context c) throws IOException, SignInNeeded {
         synchronized (RUN) {
+            if (!enabled(c)) return;
             prefs(c).edit().putLong("last_try", System.currentTimeMillis()).apply();
             String token = token(c);
             try {
                 for (String name : FILES) {
+                    if (!enabled(c)) return;
                     JSONObject remote = download(c, token, name), merged;
                     if ("parking.json".equals(name)) { merged = ParkingStore.merge(c, remote); ParkingReceiver.arm(c); }
                     else if ("receipt.json".equals(name)) merged = ReceiptTape.merge(c, remote);
                     else if ("notes.json".equals(name)) merged = NoteSync.merge(c, remote);
+                    else if ("tasks.json".equals(name)) merged = TaskSync.merge(c, remote);
                     else if ("journal.json".equals(name)) merged = JournalStore.merge(c, remote);
                     else merged = DiceActivity.merge(c, remote);
                     upload(c, token, name, merged.toString());
@@ -112,8 +120,57 @@ final class CloudSync {
             AuthorizationResult result = Tasks.await(Identity.getAuthorizationClient(c).authorize(request()), 30, TimeUnit.SECONDS);
             if (result.hasResolution() || result.getAccessToken() == null) throw new SignInNeeded();
             return result.getAccessToken();
-        } catch (ExecutionException | TimeoutException error) { throw new IOException("Google sign-in is unavailable.", error); }
+        } catch (ExecutionException error) {
+            if (error.getCause() instanceof ApiException) {
+                int code = ((ApiException) error.getCause()).getStatusCode();
+                if (code == CommonStatusCodes.SIGN_IN_REQUIRED) throw new SignInNeeded();
+                if (code == CommonStatusCodes.DEVELOPER_ERROR) throw new SignInNeeded(explain(c, error));
+            }
+            throw new IOException(explain(c, error), error);
+        }
+        catch (TimeoutException error) { throw new IOException("Google did not answer in time.", error); }
         catch (InterruptedException error) { Thread.currentThread().interrupt(); throw new IOException("Sync was interrupted.", error); }
+    }
+
+    static final String RELEASE_SHA1 = "57:65:1E:77:42:D1:7A:A1:2A:F0:E1:C8:23:BD:5F:73:75:9E:9D:BF";
+    /**
+     * Turns a Google sign-in failure into the step that fixes it. The usual one on a fresh setup is
+     * DEVELOPER_ERROR: the Cloud project has a web client but no Android client for this package and signing key.
+     */
+    static String explain(Throwable failure) {
+        Throwable cause = failure instanceof ExecutionException && failure.getCause() != null ? failure.getCause() : failure;
+        if (!(cause instanceof ApiException)) return "Google sign-in is unavailable on this phone.";
+        int code = ((ApiException) cause).getStatusCode();
+        switch (code) {
+            case CommonStatusCodes.DEVELOPER_ERROR: return "Google doesn't recognise this Pocket build (code 10). Add an Android OAuth client for org.textphone.launcher with SHA-1 " + RELEASE_SHA1 + " to the Google Cloud project, see CLOUD.md step 3.";
+            case CommonStatusCodes.NETWORK_ERROR: return "No connection to Google (code 7).";
+            case CommonStatusCodes.CANCELED: return "Google sign-in was cancelled.";
+            case CommonStatusCodes.API_NOT_CONNECTED: return "Google Play services is missing or out of date (code 17).";
+            case CommonStatusCodes.SIGN_IN_REQUIRED: return "Sign in again in Settings → Cloud sync.";
+            default: return "Google sign-in failed (code " + code + ").";
+        }
+    }
+    static String explain(Context context, Throwable failure) {
+        String text = explain(failure);
+        if (!text.contains("code 10")) return text;
+        String fingerprint = signingSha1(context);
+        return fingerprint == null ? text : text.replace(RELEASE_SHA1, fingerprint);
+    }
+    @SuppressWarnings("deprecation")
+    private static String signingSha1(Context context) {
+        try {
+            android.content.pm.PackageManager manager = context.getPackageManager();
+            android.content.pm.Signature[] signatures;
+            if (Build.VERSION.SDK_INT >= 28) {
+                android.content.pm.PackageInfo info = manager.getPackageInfo(context.getPackageName(), android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES);
+                signatures = info.signingInfo == null ? null : info.signingInfo.getApkContentsSigners();
+            } else signatures = manager.getPackageInfo(context.getPackageName(), android.content.pm.PackageManager.GET_SIGNATURES).signatures;
+            if (signatures == null || signatures.length == 0) return null;
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-1").digest(signatures[0].toByteArray());
+            StringBuilder value = new StringBuilder();
+            for (byte b : digest) { if (value.length() > 0) value.append(':'); value.append(String.format(java.util.Locale.ROOT, "%02X", b & 255)); }
+            return value.toString();
+        } catch (android.content.pm.PackageManager.NameNotFoundException | java.security.NoSuchAlgorithmException error) { return null; }
     }
 
     private static final class Unauthorized extends IOException { Unauthorized() { super("Access expired."); } }
@@ -210,7 +267,14 @@ final class CloudSync {
                 try (OutputStream out = connection.getOutputStream()) { out.write(bytes); }
             }
             int status = connection.getResponseCode();
-            if (status == 401 || status == 403) throw new Unauthorized();
+            if (status == 401) throw new Unauthorized();
+            if (status == 403) {
+                // 403 also covers a switched-off Drive API and rate limits; asking to sign in again would not fix those.
+                String reason = errorBody(connection);
+                if (reason.contains("accessNotConfigured") || reason.contains("SERVICE_DISABLED")) throw new IOException("The Google Drive API is off in the Google Cloud project. Enable it there, see CLOUD.md step 1.");
+                if (reason.contains("rateLimitExceeded") || reason.contains("userRateLimitExceeded")) throw new IOException("Drive is busy. Pocket tries again shortly.");
+                throw new Unauthorized();
+            }
             if (status == 404) throw new NotFound();
             if (status < 200 || status >= 300) throw new IOException("Drive answered " + status + ".");
             try (InputStream in = connection.getInputStream()) {
@@ -219,6 +283,14 @@ final class CloudSync {
                 return out.toByteArray();
             }
         } finally { connection.disconnect(); }
+    }
+    private static String errorBody(HttpURLConnection connection) {
+        try (InputStream in = connection.getErrorStream()) {
+            if (in == null) return "";
+            ByteArrayOutputStream out = new ByteArrayOutputStream(); byte[] buffer = new byte[4096];
+            for (int read; (read = in.read(buffer)) > 0 && out.size() < 64_000; ) out.write(buffer, 0, read);
+            return out.toString("UTF-8");
+        } catch (IOException unreadable) { return ""; }
     }
     private CloudSync() { }
 }

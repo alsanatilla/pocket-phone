@@ -8,11 +8,22 @@ Cloud sync is **off by default**. When you turn it on in Settings → Cloud sync
 | `receipt.json` | Receipt lines of the last 30 days |
 | `dice.json` | The Dice pick list |
 | `notes.json` | Notes from Today, with pins; deleted notes stay as markers for 30 days |
+| `tasks.json` | Task titles, completion, due dates, importance, checklist progress, chosen next task and selected source text; deletion markers last 30 days |
 | `journal.json` + `page-<uid>.jpg` | Journal pages: the photo, its transcript lines with their position on the photo, and the linked note |
 
-Tasks, messages, contacts, calls and Pocket Camera album photos stay on the phone. Journal page photos are included when cloud sync is enabled. The hidden folder is only visible to Pocket's own Google Cloud project; it does not show up in Drive.
+Task reminders, editor drafts, notification handles, messages, contacts, calls and Pocket Camera album photos stay on the phone. Only the source text explicitly selected when creating a task is included with it. Journal page photos are included when cloud sync is enabled. The hidden folder is only visible to Pocket's own Google Cloud project; it does not show up in Drive.
 
 Every local change asks Android for a sync job that waits for any network, so edits made offline upload once the phone is online again. A periodic job also picks up web edits every hour, and opening a Pocket app syncs at most every two minutes. This is why the APK now declares `INTERNET` and `ACCESS_NETWORK_STATE`. With cloud sync off, no Drive sync is scheduled. Journal transcription is a separate optional network feature, enabled by entering an Anthropic key in Journal settings.
+
+In 0.5.15, **Sync now** runs directly while Cloud sync is open, without waiting for Android's background scheduler. It shows **Syncing…**, then a last-sync time or a persistent error. Google sign-in also starts the first sync immediately. Code 10 identifies a Google OAuth setup mismatch and shows the installed build's signing fingerprint; code 7 identifies a network failure. Background failures update the open Cloud sync page as well.
+
+## Movement on the phone
+
+Open **Settings → Movement · COROS** or tap the movement line on Home, then **Connect COROS**. Sign in on the COROS page in your browser and return to Pocket. Pending sign-in survives closing and recreating the activity; **Check sign-in** resumes it.
+
+The phone uses COROS's public-client PKCE and browser login-session flow, as shipped by its `coros-mcp` CLI. Tokens and pending login are encrypted with an Android Keystore key. The phone reads 90 days of activities and recent resting heart rate, nightly HRV and daily health data. Home uses a private cached snapshot and refreshes it in the background on return, at most every 15 minutes. Older snapshots keep their date. No movement data or tokens are sent to Google Drive or placed in the public repository. Phone and browser have separate connections.
+
+Recovery, Strain and Conditioning are Pocket estimates, based on the formulas in `Scores.java` and `docs/js/scores.js`. They are not Bevel or COROS scores. Tap a score to see its inputs and calculation note. Disconnect removes the phone's tokens, pending login and cached readings.
 
 The web page in [`docs/`](docs/) is a workstation for Parking Lot, notes, Receipt and Dice in Pocket's terminal style: numbered tool tabs, two-column layouts on wide windows and one column on phones. It keeps its own copy in the browser, works offline, and uploads waiting edits when it is online and connected.
 
@@ -32,6 +43,7 @@ Both sides use the same rule (`SyncMerge.java` and `docs/js/store.js`):
 - Receipt lines never change, so a day is the union of both copies by line id `i`. Days older than 30 days are dropped.
 - Dice list: the later `updated` wins.
 - Notes: per `uid`, the later `updated` wins; a deletion is a note with `deleted: true` and also wins if it is newer. The phone keeps its own small note ids and maps them to the random `uid`.
+- Tasks: the same `uid`/`updated` rule, including completion and checklist steps. Titles, due dates, importance and source snapshots travel together. The chosen next task has a separate timestamp and portable task `uid`. Local drafts and live source handles are retained. Downloading a completed/deleted task cancels its local reminders; importing or reopening a task never creates an alarm. The browser preserves the task document; the task interface is native on the phone.
 - Thoughts in notes: a note line starting with `>>` (optionally ending in `@1h`, `@tonight`, `@tomorrow` or `@nextweek`) parks a Parking item that keeps the note's `uid` in `note`. Its id is `9000000000000000 + FNV-1a("uid
 line")` on both sides, so the phone and the web create the same item. A new line parks when the note is saved on the phone, or once the cursor leaves the line on the web. The note text is never rewritten; the previews show each thought's state.
 - If a file exists twice, both sides use the one created first.
