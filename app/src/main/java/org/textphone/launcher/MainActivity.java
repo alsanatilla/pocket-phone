@@ -353,7 +353,7 @@ public class MainActivity extends Activity {
         if (!"home".equals(screen)) {persistDraft();if(captureEditor!=null)hideKeyboard(captureEditor);finishPage(backDestination());}
         // A Home app stays on Home when Back is pressed again.
     }
-    private void openClaude() {
+    private void openChat() {
         persistDraft(); dismissNoteWheel(); motion.settle(); claude.open();
     }
     private String backDestination() {
@@ -760,7 +760,7 @@ public class MainActivity extends Activity {
         LinearLayout footer = new LinearLayout(this);
         footer.setTag("home_footer");
         footer.setOrientation(LinearLayout.HORIZONTAL);
-        String[] names = {"notifs", "claude", "select", "all"};
+        String[] names = {"notifs", "chat", "select", "all"};
         for (int i = 0; i < names.length; i++) {
             int item = i;
             TextView link = text(names[i], 14, accent());
@@ -773,7 +773,7 @@ public class MainActivity extends Activity {
             link.setFocusable(true);
             link.setOnClickListener(v -> {
                 if (item == 0) navigate("notifications");
-                else if (item == 1) openClaude();
+                else if (item == 1) openChat();
                 else if (item == 2) openShortcut(selectedShortcut);
                 else navigate("apps");
             });
@@ -1240,7 +1240,7 @@ public class MainActivity extends Activity {
     private void renderTools() {
         heading("Tools", "home");
         action("Today", 20, accent(), () -> navigate("today"));
-        action("Claude", 20, PRIMARY, this::openClaude);
+        action("Chat", 20, PRIMARY, this::openChat);
         action("Alarm", 20, PRIMARY, () -> openPocket(ClockActivity.class));
         action("Calendar", 20, PRIMARY, () -> openPocket(AgendaActivity.class));
         action("Camera", 20, PRIMARY, this::openCamera);
@@ -1435,8 +1435,8 @@ public class MainActivity extends Activity {
         LinearLayout taskResults=new LinearLayout(this);taskResults.setOrientation(LinearLayout.VERTICAL);taskResults.setTag("today_tasks");content.addView(taskResults);
         LinearLayout noteResults=new LinearLayout(this);noteResults.setOrientation(LinearLayout.VERTICAL);noteResults.setTag("today_notes");content.addView(noteResults);renderOrganizerLists(taskResults,noteResults);
         todayActions=new LinearLayout(this);todayActions.setTag("today_actions");
-        String[] footer={"Search","Calendar","Claude"};Runnable[] actions={this::searchOrganizer,()->openPocket(AgendaActivity.class),this::openClaude};
-        for(int i=0;i<footer.length;i++){TextView key=actionInto(todayActions,footer[i],14,SECONDARY,actions[i]);PocketDesign.control(key);key.setGravity(Gravity.CENTER);key.setMinHeight(dp(56));key.setTag(new String[]{"today_search","today_calendar","today_claude"}[i]);key.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));}
+        String[] footer={"Search","Calendar","Chat"};Runnable[] actions={this::searchOrganizer,()->openPocket(AgendaActivity.class),this::openChat};
+        for(int i=0;i<footer.length;i++){TextView key=actionInto(todayActions,footer[i],14,SECONDARY,actions[i]);PocketDesign.control(key);key.setGravity(Gravity.CENTER);key.setMinHeight(dp(56));key.setTag(new String[]{"today_search","today_calendar","today_chat"}[i]);key.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));}
         addFeedback();
     }
     private void searchOrganizer(){

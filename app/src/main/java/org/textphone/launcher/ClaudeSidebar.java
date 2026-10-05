@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
@@ -26,15 +27,19 @@ import android.view.WindowInsets;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.ArrayAdapter;
+import android.widget.AdapterView;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 
 import java.lang.ref.WeakReference;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.text.NumberFormat;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 
@@ -56,9 +61,11 @@ final class ClaudeSidebar extends FrameLayout {
     private final ScrollView scroll;
     private final EditText composer;
     private final Button back, settings, setup, send, retry;
-    private final TextView error;
+    private final TextView error, cacheStatus;
     private boolean opened, observing, destroyed, applyingDraft, renderQueued, swipeCandidate, capturedSwipe;
     private float startX, startY;
+    private long lastSubmitAt;
+    private String assistantLabel = "assistant";
     private int originalAccessibility, insetLeft, insetTop, insetRight, insetBottom, keyboardBottom, themedAccent;
     private final LinkedHashMap<String, TurnView> rows = new LinkedHashMap<>();
     private final ClaudeChatRepository.Observer observer = this::scheduleRender;
@@ -100,17 +107,17 @@ final class ClaudeSidebar extends FrameLayout {
         LinearLayout header = horizontal();
         header.setPadding(dp(8), dp(4), dp(8), dp(4));
         back = control("Back", () -> close());
-        back.setContentDescription("Close Claude chat");
+        back.setContentDescription("Close chat");
         back.setFocusableInTouchMode(true);
         header.addView(back, new LinearLayout.LayoutParams(dp(64), LayoutParams.WRAP_CONTENT));
-        TextView title = label("claude", 24, PocketDesign.WHITE);
+        TextView title = label("chat", 24, PocketDesign.WHITE);
         title.setTypeface(PocketFonts.pixel(activity));
         title.setGravity(Gravity.CENTER_VERTICAL | Gravity.CENTER_HORIZONTAL);
         if (Build.VERSION.SDK_INT >= 28) title.setAccessibilityHeading(true);
         header.addView(title, new LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1));
         settings = control("⋮", this::showSettings);
         settings.setTextSize(PocketDesign.typeSize(activity, 24));
-        settings.setContentDescription("Claude settings");
+        settings.setContentDescription("Chat settings");
         header.addView(settings, new LinearLayout.LayoutParams(dp(52), LayoutParams.WRAP_CONTENT));
         panel.addView(header, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
@@ -140,6 +147,11 @@ final class ClaudeSidebar extends FrameLayout {
         errorRow.setVisibility(View.GONE);
         panel.addView(errorRow, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
+        cacheStatus = label("", 12, PocketDesign.MUTED);
+        cacheStatus.setPadding(dp(16), dp(4), dp(16), dp(4));
+        cacheStatus.setVisibility(View.GONE);
+        panel.addView(cacheStatus, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+
         LinearLayout inputRow = horizontal();
         inputRow.setGravity(Gravity.BOTTOM);
         inputRow.setPadding(dp(16), dp(4), dp(8), dp(8));
@@ -154,7 +166,7 @@ final class ClaudeSidebar extends FrameLayout {
         composer.setMaxLines(5);
         composer.setFilters(new InputFilter[]{new InputFilter.LengthFilter(ClaudeChatRepository.MAX_INPUT_CHARS)});
         composer.setHint("Message");
-        composer.setContentDescription("Message Claude");
+        composer.setContentDescription("Chat message");
         composer.setText(repository.draft());
         composer.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
@@ -316,10 +328,15 @@ final class ClaudeSidebar extends FrameLayout {
     private void submit() {
         if (destroyed) return;
         ClaudeChatRepository.Snapshot snapshot = repository.snapshot();
-        if (snapshot.running) { repository.stop(); return; }
+        if (snapshot.running) {
+            if (SystemClock.elapsedRealtime() - lastSubmitAt >= 350) repository.stop();
+            return;
+        }
         String value = composer.getText().toString();
         if (value.trim().isEmpty()) return;
-        if (!ClaudeKey.present(activity) || ClaudeKey.read(activity) == null) { showKey(); return; }
+        ChatProvider.Config provider = ChatProvider.get(activity);
+        if (!ChatProvider.present(activity, provider) || ChatProvider.key(activity, provider) == null) { showKey(); return; }
+        lastSubmitAt = SystemClock.elapsedRealtime();
         if (canRetry(snapshot) && snapshot.turns.size() >= 2
                 && value.equals(snapshot.turns.get(snapshot.turns.size() - 2).text)) repository.retry();
         else repository.send(value);
@@ -328,7 +345,9 @@ final class ClaudeSidebar extends FrameLayout {
 
     private void retry() {
         if (destroyed) return;
-        if (!ClaudeKey.present(activity) || ClaudeKey.read(activity) == null) { showKey(); return; }
+        ChatProvider.Config provider = ChatProvider.get(activity);
+        if (!ChatProvider.present(activity, provider) || ChatProvider.key(activity, provider) == null) { showKey(); return; }
+        lastSubmitAt = SystemClock.elapsedRealtime();
         repository.retry();
         render();
     }
@@ -346,8 +365,10 @@ final class ClaudeSidebar extends FrameLayout {
     private void render() {
         if (destroyed) return;
         ClaudeChatRepository.Snapshot snapshot = repository.snapshot();
+        assistantLabel = "anthropic".equals(snapshot.provider) ? "claude" : "assistant";
         boolean follow = log.getChildCount() == 0 || log.getHeight() - scroll.getScrollY() - scroll.getHeight() <= dp(96);
-        setup.setVisibility(ClaudeKey.present(activity) ? View.GONE : View.VISIBLE);
+        ChatProvider.Config provider = ChatProvider.get(activity);
+        setup.setVisibility(ChatProvider.present(activity, provider) ? View.GONE : View.VISIBLE);
         Set<String> retained = new HashSet<>();
         int index = 0;
         for (ClaudeChatRepository.Turn turn : snapshot.turns) {
@@ -371,6 +392,9 @@ final class ClaudeSidebar extends FrameLayout {
         boolean retryAvailable = canRetry(snapshot);
         errorRow.setVisibility(failure.isEmpty() && !retryAvailable ? View.GONE : View.VISIBLE);
         retry.setVisibility(retryAvailable ? View.VISIBLE : View.GONE);
+        boolean hit = !snapshot.running && snapshot.cacheReadTokens > 0;
+        cacheStatus.setText(hit ? "Cached · " + NumberFormat.getIntegerInstance().format(snapshot.cacheReadTokens) + " input tokens" : "");
+        cacheStatus.setVisibility(hit ? View.VISIBLE : View.GONE);
         String draft = repository.draft();
         if (!composer.getText().toString().equals(draft)) {
             applyingDraft = true;
@@ -385,18 +409,193 @@ final class ClaudeSidebar extends FrameLayout {
     private void updateSend(boolean running) {
         if (send == null) return;
         send.setText(running ? "Stop" : "Send");
-        send.setContentDescription(running ? "Stop Claude response" : "Send message to Claude");
+        send.setContentDescription(running ? "Stop response" : "Send message");
         send.setEnabled(running || !composer.getText().toString().trim().isEmpty());
     }
 
     private void showSettings() {
         if (destroyed) return;
-        String keyLabel = ClaudeKey.present(activity) ? "API key · " + ClaudeKey.hint(activity) : "Add API key";
-        showDialog(new AlertDialog.Builder(activity, AlertDialog.THEME_DEVICE_DEFAULT_DARK).setTitle("claude")
-                .setItems(new String[]{keyLabel, "New chat"}, (choice, index) -> {
+        ChatProvider.Config provider = ChatProvider.get(activity);
+        String keyLabel = ChatProvider.present(activity, provider) ? "API key · " + ChatProvider.hint(activity, provider) : "Add API key";
+        boolean anthropic = "anthropic".equals(provider.provider);
+        String[] options = anthropic ? new String[]{"Provider & model", keyLabel,
+                "Reply limit · " + NumberFormat.getIntegerInstance().format(provider.maxTokens) + " tokens",
+                "Prompt caching · " + (provider.promptCaching ? "on" : "off"), "New chat"}
+                : new String[]{"Provider & model", keyLabel,
+                "Reply limit · " + NumberFormat.getIntegerInstance().format(provider.maxTokens) + " tokens", "New chat"};
+        showDialog(new AlertDialog.Builder(activity, AlertDialog.THEME_DEVICE_DEFAULT_DARK).setTitle("Chat settings")
+                .setItems(options, (choice, index) -> {
                     if (destroyed) return;
-                    if (index == 0) showKey(); else confirmNewChat();
+                    if (index == 0) showProvider();
+                    else if (index == 1) showKey();
+                    else if (index == 2) showReplyLimit();
+                    else if (anthropic && index == 3) showCaching();
+                    else confirmNewChat();
                 }).setNegativeButton("Close", null).create());
+    }
+
+    private void showProvider() {
+        if (destroyed) return;
+        ChatProvider.Config current = ChatProvider.get(activity);
+        LinearLayout fields = new LinearLayout(activity);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(dp(20), dp(8), dp(20), dp(8));
+        fields.addView(label("Provider", 12, PocketDesign.MUTED));
+        Spinner picker = new Spinner(activity);
+        ArrayAdapter<String> choices = new ArrayAdapter<>(activity, android.R.layout.simple_spinner_item,
+                new String[]{"Anthropic", "OpenAI-compatible"});
+        choices.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        picker.setAdapter(choices);
+        picker.setMinimumHeight(dp(52));
+        picker.setContentDescription("Chat provider");
+        fields.addView(picker, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        EditText model = settingsField(fields, "Model", current.model, "Model ID", false);
+        TextView urlLabel = label("API base URL", 12, PocketDesign.MUTED);
+        urlLabel.setPadding(0, dp(16), 0, 0);
+        fields.addView(urlLabel);
+        EditText url = new EditText(activity);
+        PocketDesign.input(url);
+        url.setSingleLine(true);
+        url.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        url.setHint("https://api.example.com/v1");
+        url.setText(current.baseUrl);
+        url.setContentDescription("HTTPS API base URL");
+        fields.addView(url, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        EditText key = settingsField(fields, "API key", "", "Leave blank to keep this endpoint’s key", true);
+        TextView validation = label("", 14, PocketDesign.WARNING);
+        validation.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        fields.addView(validation);
+        int initial = "anthropic".equals(current.provider) ? 0 : 1;
+        int[] selected = {initial};
+        picker.setSelection(initial);
+        boolean initialCustom = initial == 1;
+        urlLabel.setVisibility(initialCustom ? View.VISIBLE : View.GONE);
+        url.setVisibility(initialCustom ? View.VISIBLE : View.GONE);
+        picker.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (position != selected[0]) {
+                    String kind = position == 0 ? "anthropic" : "compatible";
+                    ChatProvider.Config candidate = current.provider.equals(kind) ? current : ChatProvider.defaults(kind);
+                    model.setText(candidate.model);
+                    url.setText(candidate.baseUrl);
+                    key.setText("");
+                    selected[0] = position;
+                }
+                boolean custom = position == 1;
+                urlLabel.setVisibility(custom ? View.VISIBLE : View.GONE);
+                url.setVisibility(custom ? View.VISIBLE : View.GONE);
+                key.setHint(custom ? "New endpoint needs its own key" : "sk-ant-… or leave blank to keep");
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) { }
+        });
+        ScrollView form = new ScrollView(activity);
+        form.addView(fields);
+        AlertDialog providerDialog = new AlertDialog.Builder(activity, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+                .setTitle("Provider & model").setView(form).setNegativeButton("Cancel", null).setPositiveButton("Save", null).create();
+        providerDialog.setOnShowListener(ignored -> providerDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            if (destroyed) return;
+            String kind = picker.getSelectedItemPosition() == 0 ? "anthropic" : "compatible";
+            String modelId = model.getText().toString().trim(), endpoint = url.getText().toString().trim();
+            if (modelId.isEmpty()) { validation.setText("Enter a model ID."); return; }
+            if ("compatible".equals(kind) && !endpoint.startsWith("https://")) { validation.setText("Use an HTTPS API base URL."); return; }
+            try {
+                ChatProvider.Config next = new ChatProvider.Config(kind, modelId,
+                        "anthropic".equals(kind) ? ChatProvider.defaults(kind).baseUrl : endpoint,
+                        current.maxTokens, "anthropic".equals(kind) && ("anthropic".equals(current.provider) ? current.promptCaching : true));
+                next.validate();
+                String replacement = key.getText().toString().trim();
+                validateReplacementKey(next, replacement);
+                if ("compatible".equals(kind) && replacement.isEmpty() && !ChatProvider.present(activity, next)) {
+                    validation.setText("Add an API key for this endpoint.");
+                    return;
+                }
+                Runnable apply = () -> {
+                    if (destroyed) return;
+                    try {
+                        boolean changed = !ChatProvider.get(activity).identity.equals(next.identity);
+                        if (changed || !replacement.isEmpty()) repository.stop();
+                        ChatProvider.save(activity, next, replacement);
+                        if (changed) repository.clear();
+                        key.setText("");
+                        providerDialog.dismiss();
+                        render();
+                    } catch (IllegalArgumentException | IllegalStateException failure) {
+                        validation.setText(failure.getMessage());
+                        if (!providerDialog.isShowing()) showDialog(providerDialog);
+                    }
+                };
+                if (!current.identity.equals(next.identity) && !repository.snapshot().turns.isEmpty()) {
+                    AlertDialog confirm = new AlertDialog.Builder(activity, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+                            .setTitle("Start a new chat with " + next.name() + "?").setMessage("The current chat will be cleared.")
+                            .setNegativeButton("Keep", (choice, which) -> showDialog(providerDialog))
+                            .setPositiveButton("Start new chat", (choice, which) -> apply.run()).create();
+                    confirm.setOnCancelListener(choice -> { if (!destroyed) showDialog(providerDialog); });
+                    showDialog(confirm);
+                } else apply.run();
+            } catch (IllegalArgumentException | IllegalStateException failure) { validation.setText(failure.getMessage()); }
+        }));
+        showDialog(providerDialog);
+    }
+
+    private void showReplyLimit() {
+        ChatProvider.Config current = ChatProvider.get(activity);
+        int[] limits = {512, 1024, 2048, 4096};
+        String[] names = {"512 tokens", "1,024 tokens", "2,048 tokens", "4,096 tokens"};
+        int selected = -1;
+        for (int index = 0; index < limits.length; index++) if (limits[index] == current.maxTokens) selected = index;
+        showDialog(new AlertDialog.Builder(activity, AlertDialog.THEME_DEVICE_DEFAULT_DARK).setTitle("Reply limit")
+                .setSingleChoiceItems(names, selected, (choice, index) -> {
+                    if (destroyed) return;
+                    try {
+                        ChatProvider.save(activity, new ChatProvider.Config(current.provider, current.model, current.baseUrl,
+                                limits[index], current.promptCaching), "");
+                        choice.dismiss();
+                    } catch (IllegalArgumentException | IllegalStateException failure) { showSettingsError(failure.getMessage()); }
+                }).setNegativeButton("Cancel", null).create());
+    }
+
+    private void showCaching() {
+        ChatProvider.Config current = ChatProvider.get(activity);
+        showDialog(new AlertDialog.Builder(activity, AlertDialog.THEME_DEVICE_DEFAULT_DARK).setTitle("Prompt caching")
+                .setMessage("Reuses recent prompt prefixes. Cache writes cost extra; repeated reads cost less.")
+                .setNegativeButton("Cancel", null).setPositiveButton(current.promptCaching ? "Turn off" : "Turn on", (choice, which) -> {
+                    if (destroyed) return;
+                    try {
+                        ChatProvider.save(activity, new ChatProvider.Config(current.provider, current.model, current.baseUrl,
+                                current.maxTokens, !current.promptCaching), "");
+                    } catch (IllegalArgumentException | IllegalStateException failure) { showSettingsError(failure.getMessage()); }
+                }).create());
+    }
+
+    private EditText settingsField(LinearLayout fields, String name, String value, String hint, boolean secret) {
+        TextView heading = label(name, 12, PocketDesign.MUTED);
+        heading.setPadding(0, dp(16), 0, 0);
+        fields.addView(heading);
+        EditText field = new EditText(activity);
+        PocketDesign.input(field);
+        field.setSingleLine(true);
+        field.setInputType(InputType.TYPE_CLASS_TEXT | (secret ? InputType.TYPE_TEXT_VARIATION_PASSWORD : InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS));
+        field.setHint(hint);
+        field.setText(value);
+        field.setContentDescription(name);
+        if (secret) field.setFilters(new InputFilter[]{new InputFilter.LengthFilter(512)});
+        fields.addView(field, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        return field;
+    }
+
+    private void validateReplacementKey(ChatProvider.Config provider, String value) {
+        if (value.isEmpty()) return;
+        if ("anthropic".equals(provider.provider)) {
+            if (!value.startsWith("sk-ant-") || value.length() < 30)
+                throw new IllegalArgumentException("Enter a Claude API key beginning with sk-ant-.");
+        } else if (!value.matches("[\\x21-\\x7E]{8,512}")) {
+            throw new IllegalArgumentException("Enter a valid provider API key.");
+        }
+    }
+
+    private void showSettingsError(String message) {
+        showDialog(new AlertDialog.Builder(activity, AlertDialog.THEME_DEVICE_DEFAULT_DARK).setTitle("Chat settings")
+                .setMessage(message == null ? "Could not save the settings." : message).setPositiveButton("Close", null).create());
     }
 
     private void confirmNewChat() {
@@ -408,13 +607,16 @@ final class ClaudeSidebar extends FrameLayout {
 
     private void showKey() {
         if (destroyed) return;
+        ChatProvider.Config provider = ChatProvider.get(activity);
         LinearLayout fields = new LinearLayout(activity);
         fields.setOrientation(LinearLayout.VERTICAL);
         fields.setPadding(dp(20), dp(8), dp(20), dp(8));
-        TextView billing = label("Used for chat and Journal. API usage is billed separately.", 14, PocketDesign.MUTED);
+        TextView billing = label("anthropic".equals(provider.provider)
+                ? "Used for chat and Journal. API usage is billed separately."
+                : "API usage is billed by your provider.", 14, PocketDesign.MUTED);
         fields.addView(billing, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-        if (ClaudeKey.present(activity)) {
-            TextView hint = label("Saved key " + ClaudeKey.hint(activity), 14, PocketDesign.MUTED);
+        if (ChatProvider.present(activity, provider)) {
+            TextView hint = label("Saved key " + ChatProvider.hint(activity, provider), 14, PocketDesign.MUTED);
             hint.setPadding(0, dp(12), 0, 0);
             fields.addView(hint, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         }
@@ -424,21 +626,28 @@ final class ClaudeSidebar extends FrameLayout {
         field.setSingleLine(true);
         field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         field.setFilters(new InputFilter[]{new InputFilter.LengthFilter(512)});
-        field.setHint("sk-ant-…");
+        field.setHint("anthropic".equals(provider.provider) ? "sk-ant-…" : "API key");
         fields.addView(field, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         TextView validation = label("", 14, PocketDesign.WARNING);
         validation.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         fields.addView(validation, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         AlertDialog.Builder builder = new AlertDialog.Builder(activity, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
-                .setTitle("Claude API key").setView(fields).setNegativeButton("Cancel", null).setPositiveButton("Save", null);
-        if (ClaudeKey.present(activity)) builder.setNeutralButton("Remove key", (choice, which) -> {
-            if (!destroyed) { repository.stop(); ClaudeKey.clear(activity); render(); }
+                .setTitle(provider.name() + " API key").setView(fields).setNegativeButton("Cancel", null).setPositiveButton("Save", null);
+        if (ChatProvider.present(activity, provider)) builder.setNeutralButton("Remove key", (choice, which) -> {
+            if (!destroyed) {
+                try { repository.stop(); ChatProvider.clearKey(activity, provider); render(); }
+                catch (IllegalStateException failure) { showSettingsError(failure.getMessage()); }
+            }
         });
         AlertDialog keyDialog = builder.create();
         keyDialog.setOnShowListener(ignored -> keyDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
             if (destroyed) return;
             try {
-                ClaudeKey.save(activity, field.getText().toString());
+                String replacement = field.getText().toString().trim();
+                if (replacement.isEmpty()) { validation.setText("Enter an API key."); return; }
+                validateReplacementKey(provider, replacement);
+                repository.stop();
+                ChatProvider.save(activity, provider, replacement);
                 field.setText("");
                 keyDialog.dismiss();
                 render();
@@ -492,7 +701,7 @@ final class ClaudeSidebar extends FrameLayout {
         }
         void update(ClaudeChatRepository.Turn turn) {
             boolean assistant = "assistant".equals(turn.role);
-            role.setText(assistant ? "claude" : "you");
+            role.setText(assistant ? assistantLabel : "you");
             role.setTextColor(assistant ? PocketDesign.MUTED : themedAccent);
             root.setTag("claude_turn_" + turn.id);
             if (!turn.text.equals(lastText) || !turn.state.equals(lastState)) {

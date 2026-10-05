@@ -37,11 +37,19 @@ final class ClaudeChatRepository {
         final List<Turn> turns;
         final boolean running;
         final String error, model;
-        Snapshot(List<Turn> turns, boolean running, String error, String model) {
+        final String provider;
+        final long inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens;
+        Snapshot(List<Turn> turns, boolean running, String error, String model,
+                String provider, ClaudeChatClient.Usage usage) {
             this.turns = Collections.unmodifiableList(new ArrayList<>(turns));
             this.running = running;
             this.error = error;
             this.model = model;
+            this.provider = provider;
+            inputTokens = usage.inputTokens;
+            outputTokens = usage.outputTokens;
+            cacheReadTokens = usage.cacheReadTokens;
+            cacheWriteTokens = usage.cacheWriteTokens;
         }
     }
 
@@ -56,6 +64,8 @@ final class ClaudeChatRepository {
     });
     private final ClaudeChatStore store;
     private String conversation, draft = "", error = "", model = MODEL;
+    private ChatProvider.Config provider;
+    private ClaudeChatClient.Usage usage = ClaudeChatClient.Usage.EMPTY;
     private boolean running, notificationQueued, replaceOnDelta;
     private long generation, draftRevision, writeRevision, lastStreamSave;
     private ClaudeChatClient.Call active;
@@ -74,6 +84,8 @@ final class ClaudeChatRepository {
         draft = saved.draft;
         error = saved.error;
         model = saved.model;
+        provider = saved.provider;
+        usage = saved.usage;
         turns.addAll(saved.turns);
         if (saved.interrupted) persist();
     }
@@ -85,7 +97,11 @@ final class ClaudeChatRepository {
     }
 
     synchronized void removeObserver(Observer observer) { observers.remove(observer); }
-    synchronized Snapshot snapshot() { return new Snapshot(turns, running, error, model); }
+    synchronized Snapshot snapshot() {
+        ChatProvider.Config configured = provider == null ? ChatProvider.get(context) : provider;
+        return new Snapshot(turns, running, error, turns.isEmpty() ? configured.model : model,
+                configured.provider, usage);
+    }
     synchronized String draft() { return draft; }
 
     synchronized void draft(String text) {
@@ -111,9 +127,14 @@ final class ClaudeChatRepository {
             reject("This chat is full. Clear the conversation to start a new chat.", value);
             return;
         }
+        ChatProvider.Config selected = ChatProvider.get(context);
+        if (!validProvider(selected, value)) return;
+        if (!matchesProvider(selected, value)) return;
+        if (provider == null) provider = selected;
+        model = selected.model;
         turns.add(new Turn(UUID.randomUUID().toString(), "user", value, "complete"));
         turns.add(new Turn(UUID.randomUUID().toString(), "assistant", "", "pending"));
-        start(value, false);
+        start(value, false, selected);
     }
 
     synchronized void retry() {
@@ -121,10 +142,13 @@ final class ClaudeChatRepository {
         if (turns.size() < 2) { reject("There is no reply to retry.", ""); return; }
         Turn reply = turns.get(turns.size() - 1);
         if (!("failed".equals(reply.state) || "stopped".equals(reply.state))) return;
+        ChatProvider.Config selected = ChatProvider.get(context);
+        if (!validProvider(selected, "")) return;
+        if (!matchesProvider(selected, "")) return;
         Turn user = turns.get(turns.size() - 2);
         // Keep an earlier partial until the retried request actually produces replacement text.
         turns.set(turns.size() - 1, new Turn(reply.id, "assistant", reply.text, "pending"));
-        start(user.text, true);
+        start(user.text, true, selected);
     }
 
     synchronized void stop() {
@@ -148,11 +172,13 @@ final class ClaudeChatRepository {
         conversation = UUID.randomUUID().toString();
         error = "";
         model = MODEL;
+        provider = null;
+        usage = ClaudeChatClient.Usage.EMPTY;
         persist();
         changed();
     }
 
-    private void start(String original, boolean replacing) {
+    private void start(String original, boolean replacing, ChatProvider.Config selected) {
         final long request = ++generation;
         final String replyId = turns.get(turns.size() - 1).id;
         replaceOnDelta = replacing;
@@ -163,6 +189,7 @@ final class ClaudeChatRepository {
         final long composerRevision = draftRevision;
         running = true;
         error = "";
+        usage = ClaudeChatClient.Usage.EMPTY;
         List<ClaudeChatClient.Message> messages = new ArrayList<>();
         // Only completed exchanges are context; unfinished answers and their questions stay local.
         for (int index = 0; index + 1 < turns.size() - 1; index += 2) {
@@ -177,10 +204,15 @@ final class ClaudeChatRepository {
         int replyLimit = Math.min(MAX_OUTPUT_CHARS, MAX_HISTORY_CHARS - characters() + oldReplyLength);
         ClaudeChatClient.Listener listener = new ClaudeChatClient.Listener() {
             public boolean text(String delta) { return append(request, replyId, delta); }
-            public void done(String actualModel) { finish(request, replyId, original, composerRevision, actualModel, ""); }
-            public void failed(String reason) { finish(request, replyId, original, composerRevision, "", reason); }
+            public void done(String actualModel, ClaudeChatClient.Usage tokens) {
+                finish(request, replyId, original, composerRevision, actualModel, "", tokens);
+            }
+            public void failed(String reason) {
+                finish(request, replyId, original, composerRevision, "", reason, null);
+            }
         };
-        ClaudeChatClient.Call call = new ClaudeChatClient.Call(context, messages, replyLimit, listener);
+        ClaudeChatClient.Call call = new ClaudeChatClient.Call(context, selected, conversation,
+                messages, replyLimit, listener);
         active = call;
         long revision = persist();
         lastStreamSave = SystemClock.elapsedRealtime();
@@ -214,7 +246,7 @@ final class ClaudeChatRepository {
     }
 
     private synchronized void finish(long request, String replyId, String original, long composerRevision,
-            String actualModel, String reason) {
+            String actualModel, String reason, ClaudeChatClient.Usage tokens) {
         if (!current(request, replyId)) return;
         Turn reply = turns.get(turns.size() - 1);
         boolean failed = !reason.isEmpty();
@@ -224,6 +256,7 @@ final class ClaudeChatRepository {
         activeTask = null;
         error = reason;
         if (!actualModel.isEmpty()) model = actualModel;
+        if (tokens != null) usage = tokens;
         if (failed && draft.isEmpty() && draftRevision == composerRevision) {
             draft = original;
             draftRevision++;
@@ -250,6 +283,20 @@ final class ClaudeChatRepository {
         return count;
     }
 
+    private boolean matchesProvider(ChatProvider.Config selected, String original) {
+        if (provider == null || provider.identity.equals(selected.identity)) return true;
+        reject("Provider settings changed. Start a new chat to use them.", original);
+        return false;
+    }
+
+    private boolean validProvider(ChatProvider.Config selected, String original) {
+        try { selected.validate(); return true; }
+        catch (IllegalArgumentException invalid) {
+            reject(invalid.getMessage(), original);
+            return false;
+        }
+    }
+
     private void reject(String reason, String original) {
         error = reason;
         if (draft.isEmpty() && !original.isEmpty() && original.length() <= MAX_INPUT_CHARS) {
@@ -262,7 +309,8 @@ final class ClaudeChatRepository {
 
     private long persist() {
         long revision = ++writeRevision;
-        store.save(new ClaudeChatStore.State(conversation, draft, error, model, turns, revision, false));
+        store.save(new ClaudeChatStore.State(conversation, draft, error, model, turns, revision, false,
+                provider, usage));
         return revision;
     }
 

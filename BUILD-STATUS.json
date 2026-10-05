@@ -5,7 +5,7 @@
   "application_id": "org.textphone.launcher",
   "min_sdk": 23,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-05T18:57:49.7842514Z",
+  "checked_at_utc": "2026-10-05T19:12:42.9940879Z",
   "build": "assembleRom passed; tests and lint not run at user request",
   "commands": [
     "./gradlew.bat :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
@@ -22,23 +22,26 @@
   "paid_api_requests": 0,
   "apk": {
     "file": "app/build/outputs/apk/rom/app-rom-unsigned.apk",
-    "bytes": 9234952,
-    "sha256": "f848a28d96573b83d3ff7beaf668313679511e019d85d273a3ca08cc2d45bbd9",
+    "bytes": 9248676,
+    "sha256": "0188aa0feed7be0ccccbd97066a4aea547161d007885b43cac8f1107b8083b8b",
     "signed": false,
     "installable_update": false,
     "existing_release_key_available": false
   },
   "changes_in_this_build": [
-    "Native Claude chat sidebar in Home and Today, also accessible from Tools",
-    "Swipe left from the interior right half; Android edge gestures retain control",
-    "Direct Anthropic Java SDK streaming with user-provided API key; no PC dependency",
-    "Encrypted API key shared with Journal; only entered conversation is sent",
+    "Native chat sidebar in Home and Today with swipe opening and normal Android edge gestures",
+    "Anthropic Java SDK and configurable OpenAI-compatible HTTPS chat-completions providers",
+    "Anthropic automatic five-minute prompt caching; actual reported cache-read token counts",
+    "Configurable model and reply-token limit, default 2048; no automatic paid retries or cache prewarming",
+    "Separate encrypted endpoint-bound keys; Journal key used only for direct Anthropic chat",
+    "Explicit new-chat confirmation before changing provider, model or API endpoint",
     "Local chat history and drafts excluded from Drive sync and Android backup",
-    "Send, Stop, Retry, Markdown replies, and interrupted-request recovery",
-    "Retry preserves an earlier partial reply until replacement text arrives"
+    "Streamed Markdown responses with Stop/Retry and partial-reply preservation"
   ],
   "known_limits": [
-    "Live API behavior and handset gestures have not been exercised",
+    "Live provider APIs and handset gestures have not been exercised; no tests or paid API calls were run",
+    "Compatible adapter requires HTTPS, Bearer-key authentication and streamed chat-completions responses",
+    "Cache discounts depend on provider, model, minimum prompt size and prefix reuse; output remains billed",
     "No chat tools, attachments or automatic access to Pocket notes, tasks or photos",
     "Existing release signing key is unavailable, so no installable incremental update was produced"
   ],
