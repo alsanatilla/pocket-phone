@@ -63,8 +63,12 @@ public class RomHomeTest {
         assertNotNull("Missing label: " + text, match);
         return match;
     }
-    private void shortcut(String text) {
+    private void home() {
         activity.onNewIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));
+        Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(32));
+    }
+    private void shortcut(String text) {
+        home();
         View tile=activity.findViewById(android.R.id.content).findViewWithTag("tile_"+text);
         if(tile!=null) tile.performClick();
         else { label("all").performClick(); activity.findViewById(android.R.id.content).findViewWithTag("all_shortcut_"+text).performClick(); }
@@ -110,7 +114,7 @@ public class RomHomeTest {
         assertTrue(((View) label("messages").getParent()).isSelected());
         shortcut("settings");
         label("Use as home screen");
-        activity.onNewIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));
+        home();
         label("phone");
         activity.onBackPressed();
         assertFalse(activity.isFinishing());
@@ -125,17 +129,17 @@ public class RomHomeTest {
         label("+ task").performClick();
         EditText editor = activity.findViewById(android.R.id.content).findViewWithTag("capture_editor");
         editor.setText("Write proposal");
-        activity.onNewIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));
+        home();
         label("+ note").performClick();
         editor = activity.findViewById(android.R.id.content).findViewWithTag("capture_editor");
         assertEquals("", editor.getText().toString());
         editor.setText("Meeting notes");
-        activity.onNewIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));
+        home();
         label("+ task").performClick();
         editor = activity.findViewById(android.R.id.content).findViewWithTag("capture_editor");
         assertEquals("Write proposal", editor.getText().toString());
         label("save").performClick();
-        activity.onNewIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));
+        home();
         label("0 / 1"); label("Write proposal");
         label("focus").performClick(); label("Focus · 25 min").performClick();
         Intent timer = Shadows.shadowOf(activity).getNextStartedActivity();
@@ -161,11 +165,11 @@ public class RomHomeTest {
         PendingIntent fire = PendingIntent.getBroadcast(activity, 1, new Intent("pocket.test.ALARM"),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         alarms.setAlarmClock(new AlarmManager.AlarmClockInfo(tomorrow.getTimeInMillis(), show), fire);
-        activity.onNewIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));
+        home();
         label("0 / 2"); label("Finish draft");
         shortcut("clock");
         assertEquals(ClockActivity.class.getName(), Shadows.shadowOf(activity).getNextStartedActivity().getComponent().getClassName());
-        activity.onNewIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));
+        home();
         View root = activity.findViewById(android.R.id.content);
         root.measure(View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(720, View.MeasureSpec.EXACTLY));
@@ -185,7 +189,7 @@ public class RomHomeTest {
             assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, file));
         }
         new DashboardTiles(activity.getSharedPreferences("text_phone", 0)).assign("phone", "fixture.chatgpt", "ChatGPT");
-        activity.onNewIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));
+        home();
         root.measure(View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(720, View.MeasureSpec.EXACTLY)); root.layout(0, 0, 360, 720);
         assertEquals("ChatGPT", ((TextView)root.findViewWithTag("tile_label_phone")).getText().toString());
         bitmap.eraseColor(android.graphics.Color.BLACK); root.draw(new Canvas(bitmap));
@@ -197,7 +201,7 @@ public class RomHomeTest {
         // A long task and larger text must leave all three softkeys on the screen.
         store.save(task, "task", "Review the project proposal and send the revised document before the next meeting");
         activity.getSharedPreferences("text_phone", 0).edit().putBoolean("large_text", true).commit();
-        activity.onNewIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));
+        home();
         root = activity.findViewById(android.R.id.content);
         root.measure(View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(720, View.MeasureSpec.EXACTLY));
