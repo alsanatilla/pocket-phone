@@ -1,6 +1,6 @@
 // Google Drive appDataFolder over fetch. Same files and lookup rule as CloudSync.java:
 // always use the oldest file with a name, so the phone and the web agree if both ever created one.
-import { CLIENT_ID } from "./config.js?v=20261006-dither1";
+import { CLIENT_ID } from "./config.js?v=20261006-movement1";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.appdata";
 const DRIVE = "https://www.googleapis.com/drive/v3/files", UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";

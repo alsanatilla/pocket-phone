@@ -1,17 +1,17 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
-import * as drive from "./drive.js?v=20261006-dither1";
-import * as reader from "./reader.js?v=20261006-dither1";
-import * as pip from "./pip.js?v=20261006-dither1";
-import { backdrop } from "./pixel-backdrop.js?v=20261006-dither1";
-import * as zines from "./zines.js?v=20261006-dither1";
-import * as movement from "./movement.js?v=20261006-dither1";
-import * as coros from "./coros.js?v=20261006-dither1";
-import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-dither1";
-import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-dither1";
+import * as drive from "./drive.js?v=20261006-movement1";
+import * as reader from "./reader.js?v=20261006-movement1";
+import * as pip from "./pip.js?v=20261006-movement1";
+import { backdrop } from "./pixel-backdrop.js?v=20261006-movement1";
+import * as zines from "./zines.js?v=20261006-movement1";
+import * as movement from "./movement.js?v=20261006-movement1";
+import * as coros from "./coros.js?v=20261006-movement1";
+import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-movement1";
+import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-movement1";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-const TOOLS = ["today", "thoughts", "tasks", "notes", "apps"];
+const TOOLS = ["today", "thoughts", "tasks", "notes", "movement", "apps"];
 let content = null, notice = null, parkingDraft = "";
 
 // ── DOM helpers ──
@@ -51,7 +51,7 @@ function view(tool, actions = []) {
   zines.leave(); pip.leave(); shell(); closeDialog(); say("");
   content.querySelectorAll('.pixel-backdrop').forEach(canvas=>canvas.dispose?.());
   const pipEntry = document.getElementById("pip-entry"); pipEntry.classList.toggle("selected", tool === "pip"); pipEntry.setAttribute("aria-current", tool === "pip" ? "page" : "false");
-  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "movement", "sync"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
+  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
   const activeTab = document.querySelector(".tab.active"), tabs = activeTab?.parentElement;
   if (tabs) tabs.scrollLeft = activeTab.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - activeTab.clientWidth) / 2;
   document.title = tool === "sync" ? "pocket · sync" : "pocket · " + tool;
@@ -183,7 +183,7 @@ function searchView() {
 function appsView() {
   const body=view("apps");workspaceTitle(body,"apps","Supporting tools, each with a place in the workflow.");
   split(body,[section("THINK"),rowButton("pip","",()=>go("/pip")),section("REVIEW"),rowButton("Activity","",()=>go("/receipt")),section("CREATE & KEEP"),rowButton("Zines","",()=>go("/zines"))],
-    [section("EXTRAS"),rowButton("Dice","",()=>go("/dice")),rowButton("Movement","",()=>go("/movement")),section("SETTINGS"),rowButton("Storage & devices","",()=>go("/sync"))]);
+    [section("EXTRAS"),rowButton("Dice","",()=>go("/dice")),section("SETTINGS"),rowButton("Storage & devices","",()=>go("/sync"))]);
 }
 
 // ── Notes: list on the left, the open note on the right. Saves as you type. ──

@@ -1,6 +1,6 @@
 // Reads one journal page with Claude and turns the answer into a note, like JournalReader.java.
 // The key is typed for this tab only and goes straight to Anthropic: the web page has no server of its own.
-import { journal, notes, parkThought, thought, receipt, KIND, NOTE_LIMIT } from "./store.js?v=20261006-dither1";
+import { journal, notes, parkThought, thought, receipt, KIND, NOTE_LIMIT } from "./store.js?v=20261006-movement1";
 
 export const MODEL = "claude-sonnet-5-5";
 const INPUT_PRICE = 2.0, OUTPUT_PRICE = 10.0, MAX_TOKENS = 8000;
