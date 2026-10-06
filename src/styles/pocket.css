@@ -1,6 +1,6 @@
 /* Pocket's visual language on a bigger screen: black, white, one accent, pixel headings, no idle dividers. See DESIGN.md. */
-@font-face { font-family: "VT323"; src: url("../fonts/VT323-Regular.ttf") format("truetype"); font-display: swap; }
-@font-face { font-family: "Jacquard 24"; src: url("../fonts/Jacquard24-Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "VT323"; src: url("/fonts/VT323-Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Jacquard 24"; src: url("/fonts/Jacquard24-Regular.ttf") format("truetype"); font-display: swap; }
 
 :root {
   --black: #000; --white: #fff; --muted: #aaa; --line: #303438; --disabled: #858b91;
@@ -15,6 +15,9 @@
 html, body { margin: 0; background: var(--black); color: var(--white); }
 body { font: 16px/1.4 var(--mono); -webkit-font-smoothing: antialiased; }
 [hidden] { display: none !important; }
+.account-form { display: grid; gap: 16px; margin: 24px 0; }
+.account-form input[type="email"], .account-form input[type="password"] { width: 100%; box-sizing: border-box; }
+.account-form label { display: flex; align-items: center; gap: 8px; }
 .muted { color: var(--muted); } .meta { font-size: 12px; } .small { font-size: 14px; }
 .warn { color: var(--warning); } .accent { color: var(--accent); } .center { text-align: center; }
 p { margin: 8px 0; }

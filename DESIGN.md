@@ -1,4 +1,4 @@
-# Pocket design system — 0.8.0
+# Pocket design system — 0.9.0
 
 Pocket is a daily Android dashboard and a set of small native apps for the Nothing Phone (3a). Its character comes from black, white monospace text, pixel titles and icons, and labelled soft keys. Its polish comes from every app using the same few patterns, so a page can be scanned without learning it first.
 

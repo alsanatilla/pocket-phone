@@ -1,7 +1,7 @@
 // Run with: node --test tools/scores.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { trimp, strainOf, maxHeartRate, recoveryOn, cardioStatus, conditioning, scores, key } from "../docs/js/scores.js";
+import { trimp, strainOf, maxHeartRate, recoveryOn, cardioStatus, conditioning, scores, key } from "../src/client/scores.js";
 
 test("maximum heart rate follows age, and a spiking lap can lift it only 10 bpm", () => {
   assert.equal(maxHeartRate(40), 180);

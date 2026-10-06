@@ -1,97 +1,75 @@
-# Cloud sync and Pocket on the web
+# Pocket storage and sync
 
-Cloud sync is **off by default**. When you turn it on in Settings → Storage & devices, Pocket copies these to a hidden app folder (`appDataFolder`) in your own Google Drive:
+Pocket saves edits locally first. Signing in to a Pocket account connects the phone and browser through the Astro API on [Vercel](https://pocket-phone.vercel.app/) and a libSQL/Turso database. The database token stays on the server. Browser sessions use cookies; the phone encrypts its session token with Android Keystore. Passwords are hashed by Better Auth and are never stored on the phone.
 
-| File | Contents |
+## Shared workspace
+
+| Collection | Contents |
 |---|---|
-| `parking.json` | Undecided thoughts, optional review times, source-note links and handled records. Making a task is explicit on both phone and web. |
-| `receipt.json` | Receipt lines of the last 30 days |
-| `dice.json` | The Dice pick list |
-| `notes.json` | Workspace notes with pins; deleted notes remain as markers for offline devices |
-| `tasks.json` | Task titles, completion, due dates, importance, checklist progress, chosen next task and selected source text; deletion markers remain for offline devices |
-| `gym.json` | Workouts: start/end time and each exercise’s sets (kg, reps, time); per workout the later edit wins and deleted workouts stay as markers |
-| `journal.json` + `page-<uid>.jpg` | Journal pages: the photo, its transcript lines with their position on the photo, and the linked note |
+| parking.json | Undecided thoughts, optional review times, source-note links and handled records |
+| tasks.json | Chosen actions, completion, dates, importance, checklist progress, selected source text and the next task |
+| notes.json | Notes, pins and deletion markers |
+| journal.json | Paper pages, positioned transcript lines and linked notes |
+| receipt.json | Activity lines from the last 30 days |
+| dice.json | The Dice pick list |
+| gym.json | Workout times, exercises, sets and deletion markers |
 
-Calendar appointments, timers, task reminders, editor drafts, notification handles, messages, contacts, calls and Pocket Camera album photos stay on the phone. Only the source text explicitly selected when creating a task is included with it. Journal page photos are included when cloud sync is enabled. The hidden folder is only visible to Pocket's own Google Cloud project; it does not show up in Drive.
+Paper JPEGs are stored as private database files, limited to 2 MB per photo. Workspace requests are limited to 3 MB. Removing a Paper page removes its server photo in the same transaction. Stale uploads cannot restore a removed photo.
 
-Every local change asks Android for a sync job that waits for any network, so edits made offline upload once the phone is online again. A periodic job also picks up web edits every hour, and opening a Pocket app syncs at most every two minutes. This is why the APK now declares `INTERNET` and `ACCESS_NETWORK_STATE`. With cloud sync off, no Drive sync is scheduled. Journal transcription is a separate optional network feature, enabled by entering an Anthropic key in Journal settings.
+Calendar appointments, alarms, task reminders, drafts, notification handles, calls, SMS, contacts and Camera album photos remain on the phone. Pip chats remain in native SQLite or browser storage. Photo zines remain in browser IndexedDB. Provider keys, COROS tokens and COROS caches are excluded from sync. Items explicitly kept from Pip use the shared Notes, Thoughts or Tasks collection.
 
-In 0.5.15, **Sync now** runs directly while Cloud sync is open, without waiting for Android's background scheduler. It shows **Syncing…**, then a last-sync time or a persistent error. Google sign-in also starts the first sync immediately. Code 10 identifies a Google OAuth setup mismatch and shows the installed build's signing fingerprint; code 7 identifies a network failure. Background failures update the open Cloud sync page as well.
+## Connect devices
 
-## Movement on the phone
+In the browser, open **Apps → storage & devices** and create an account with an email and a password of at least 12 characters, or sign in. **Use this browser’s copy** imports guest records and chats into this account’s local copy; it does not copy provider keys or COROS authorization. Account copies stay separate. Switching or signing out reloads the workspace, and other open tabs reload when the selected account changes.
 
-Open **Settings → Movement · COROS** or tap the movement line on Home, then **Connect COROS**. Sign in on the COROS page in your browser and return to Pocket. Pending sign-in survives closing and recreating the activity; **Check sign-in** resumes it.
+On the phone, open **Settings → Storage & devices → sign in to Pocket** with the same account. Signing in starts sync. The phone’s personal workspace is bound to its first Pocket account; signing in with another account is refused so existing phone records cannot be sent to another person. Turning sync off keeps the local copy and saved session. Signing out revokes the session and keeps local records.
 
-The phone uses COROS's public-client PKCE and browser login-session flow, as shipped by its `coros-mcp` CLI. Tokens and pending login are encrypted with an Android Keystore key. The phone reads 90 days of activities and recent resting heart rate, nightly HRV and daily health data. Home uses a private cached snapshot and refreshes it in the background on return, at most every 15 minutes. Older snapshots keep their date. No movement data or tokens are sent to Google Drive or placed in the public repository. Phone and browser have separate connections.
+The browser uploads after local changes, reconnecting and returning to the tab, and polls for remote changes every minute while visible. Android schedules edits for the next available network, polls periodically and refreshes on app entry. **Sync now** runs immediately. Failed requests leave local edits available. A browser edit made during a request remains queued until a later response acknowledges it.
 
-Recovery, Strain and Conditioning are Pocket estimates, based on the formulas in `Scores.java` and `docs/js/scores.js`. They are not Bevel or COROS scores. Tap a score to see its inputs and calculation note. Disconnect removes the phone's tokens, pending login and cached readings.
+Accounts currently use email/password without email verification or a password reset service. Email is an account identifier; Pocket does not send mail.
 
-The web page in [`docs/`](docs/) is a workstation for Thoughts, notes, Receipt and Dice in Pocket's terminal style: numbered tool tabs, two-column layouts on wide windows and one column on phones. It keeps its own copy in the browser, works offline, and uploads waiting edits when it is online and connected.
+## Deploy on Vercel
 
-## Photo zines on the web
+The repository root is an Astro project. vercel.json selects Astro, npm ci and npm run build. The adapter creates static client assets and server functions for /api/auth/*, /api/sync and /api/files/*.
 
-The **zines** tab makes black-and-white pocket photobooks from selected photos. On your phone, select images from the Pocket Camera album using **+ photos**; on desktop, use the file picker or drop images into an open zine. Each book holds up to 40 photos. The first photo also becomes the cover. Use the arrows beside photos to arrange them, add captions, and choose a full-photo black frame or a cropped page. The default **deep dark · smooth** treatment preserves photographic midtones and gently darkens them; **soft silver** keeps a natural grayscale. **photocopy grain** and **hard ink** are optional graphic print treatments. All treatments are reversible.
+Set these server environment variables in Vercel for Production, and for Preview if preview deployments should use that database:
 
-Read the book in the browser with page buttons, swipes or arrow keys. **reading PDF** downloads individual A6 pages. **print booklet** arranges A6 pages on A5 landscape sheets, adds any needed blank pages inside the covers, and downloads a PDF ready to print at 100%, double-sided with a short-edge flip. Fold the stack in half and staple.
+~~~dotenv
+TURSO_DATABASE_URL=libsql://your-database.turso.io
+TURSO_AUTH_TOKEN=your-private-token
+~~~
 
-Books and their photo copies save automatically in this browser's IndexedDB, without an account or API key. They are separate from Drive sync and the Android app. Download a PDF to keep or share a copy; clearing site data removes the editable books. Photos are normalized to JPEG at up to 2000 pixels on the long edge, while print treatments are applied only when rendering the book. Deleting a photo or zine also deletes its stored image data.
+Do not use PUBLIC_ prefixes. .env is ignored by Git. For local development, copy .env.example to .env, fill in the values, then run npm ci and npm run dev. npm run db:setup checks the connection and creates missing Pocket tables. The API also creates them on first use. Schema setup is additive and uses pocket_ table names.
 
-## Merge rule
+Optional BETTER_AUTH_SECRET separates session signing from the database token. Without it, the application derives a signing secret from TURSO_AUTH_TOKEN, so the two supplied variables are sufficient. Changing that token without a separate signing secret expires existing sessions. Optional BETTER_AUTH_URL fixes the canonical origin; otherwise authentication uses the request origin.
 
-Both sides use the same rule (`SyncMerge.java` and `docs/js/store.js`):
+Queries are parameterized and always scoped to the authenticated user. Browser writes check the request origin and account ID. Native writes use a bearer session and account ID. The server merges records in one write transaction rather than replacing a document with a device’s old copy. Sign-in and account creation use database-backed rate limits. API responses and private photos are not cached by the offline worker.
 
-- Parking items: per `id`, the copy with the later `updated` wins. Handled records remain so a long-offline copy cannot revive them.
-- Receipt lines never change, so a day is the union of both copies by line id `i`. Days older than 30 days are dropped.
-- Dice list: the later `updated` wins.
-- Notes: per `uid`, the later `updated` wins; a deletion is a note with `deleted: true` and also wins if it is newer. The phone keeps its own small note ids and maps them to the random `uid`.
-- Tasks: the same `uid`/`updated` rule, including completion and checklist steps. Titles, due dates, importance and source snapshots travel together. The chosen next task has a separate timestamp and portable task `uid`. Local drafts and live source handles are retained. Downloading a completed/deleted task cancels its local reminders; importing or reopening a task never creates an alarm. Phone and web both edit tasks. Source tokens keep the explicit thought-to-task transition idempotent across devices.
-- Thoughts in notes: a note line starting with `>>` (optionally ending in `@1h`, `@tonight`, `@tomorrow` or `@nextweek`) parks a Parking item that keeps the note's `uid` in `note`. Without a tag it stays undecided with no review alarm; a tag sets an optional review time. Making a task is a separate choice. Its id is `9000000000000000 + FNV-1a("uid
-line")` on both sides, so the phone and the web create the same item. A new line parks when the note is saved on the phone, or once the cursor leaves the line on the web. The note text is never rewritten; the previews show each thought's state.
-- If a file exists twice, both sides use the one created first.
+## Move existing data
 
-Change both implementations together.
+For an existing phone Drive workspace, sync it once with Drive, then sign in to Pocket. The next sync merges the current local records into the new account. Drive remains a selectable legacy phone transport.
 
-## One-time setup
+In the browser, **import from Drive** reads the existing seven collections and Paper photos into the signed-in Pocket account. It never writes to Drive. The public OAuth client in src/client/config.js needs the Vercel origin in its Google authorized JavaScript origins. The Google sign-in script loads only when importing.
 
-1. In the [Google Cloud console](https://console.cloud.google.com/), create a project and enable the **Google Drive API**.
-2. Configure the **OAuth consent screen**: type *External*, add the scope `https://www.googleapis.com/auth/drive.appdata` and add your own Google account as a test user. In *Testing* status Google may ask you to approve access again after a while; publishing the app for personal use avoids that but shows an "unverified app" notice.
-3. Create an **Android** OAuth client: package `org.textphone.launcher` and the SHA-1 of the key that signs your APK:
-   ```sh
-   keytool -list -v -keystore your-release.keystore -alias your-alias
-   ```
-   Debug and release keys have different fingerprints; add a client for each key you install. The signed 0.5.14 APK retains the existing release certificate, SHA-1 `57651e7742d17aa12af0e1c823bd5f73759e9dbf`.
-4. Create a **Web application** OAuth client in the same project. Add these authorized JavaScript origins:
-   - `https://alsanatilla.github.io`
-   - `http://localhost:8777` (optional, for local testing)
-5. Put the web client id into [`docs/js/config.js`](docs/js/config.js). A client id is not a secret.
-6. Publish `docs/` with GitHub Pages: repository **Settings → Pages → Deploy from a branch → `main` / `/docs`**. GitHub Pages for a **private** repository needs a paid GitHub plan; otherwise publish `docs/` from a separate public repository and update `CloudSync.WEB` and the origin in step 4.
+GitHub Pages and Vercel are different browser origins. Open the [old Pages URL](https://alsanatilla.github.io/pocket-phone/) in the browser that holds the old copy, choose **download this browser’s workspace**, then use **restore backup** in the Vercel app. That export contains the seven workspace JSON collections. Existing chats and zines stay in the old origin’s storage; this export does not transfer them.
 
-The Android app needs no client id in code: Google matches the package name and signing key.
+**Download backup** exports the seven workspace collections, including deletion markers. Restoring merges records using the usual timestamps. Backups exclude photo bytes, chats, zines, passwords and provider keys. **Forget this browser’s copy** removes only the current account’s local storage; server records and other accounts remain. Clearing all browser site data also removes local chats and zines.
 
-### Account selection returns to Pocket without connecting
+## Merge rules
 
-A **Web application** OAuth client is sufficient for the browser, but the phone also needs an **Android** OAuth client in the same project. Keep the web client and add the Android client with package `org.textphone.launcher` and the installed APK's signing SHA-1. For the signed 0.5.14 and 0.5.17 releases, it is `57:65:1E:77:42:D1:7A:A1:2A:F0:E1:C8:23:BD:5F:73:75:9E:9D:BF`. A build signed with a different key needs its own matching client. See [Google's Android authorization setup](https://developer.android.com/identity/authorization).
+Shared rules live in src/shared/workspace.js and mirror the Android stores.
 
-Version 0.5.19 reads Google's returned authorization status even when Android reports a cancelled activity. Code 10 shows the installed certificate fingerprint and identifies an OAuth registration mismatch; code 16 or a missing result means authorization did not finish and does not establish that the user cancelled. Pocket enables sync only after Google returns an access token and grants its Drive app-data scope.
+- Thoughts, Notes, Tasks, Paper pages and workouts merge by portable ID. The later updated timestamp wins. Existing server records win exact timestamp ties.
+- Handled thoughts and deleted items stay as markers so offline copies do not revive them.
+- Activity is a union of immutable line IDs, capped at 300 per day and 30 days.
+- Dice uses the later document timestamp. The chosen next task has its own timestamp.
+- Source tokens keep a thought linked to the action you explicitly chose. Sync never turns a thought into a task on its own.
+- Task updates retain local drafts and device handles. Completing or deleting remotely cancels existing local reminders; downloading or reopening a task does not create an alarm.
 
-## Local chat storage
+## Paper, Movement and zines
 
-Version 0.6.0 keeps Drive as the sync layer for the existing shared collections. Pip's conversations, drafts, reasoning summaries and attached source snapshots use private SQLite on the phone and local browser storage on the web. Chats and keys are excluded from Drive; native chats are excluded from Android backups. Notes, Thoughts and Tasks explicitly kept from replies use their existing shared collections. The prior single-chat JSON file is imported and retained until the database copy is verified. Queued writes remain readable during chat switching; a provider request waits for its own user message to be saved. Starting a new chat retains the old one. See [PIP.md](PIP.md) for the storage decision and browser behavior.
+Paper photos upload through the authenticated API. Pages can wait for the phone to transcribe them, or **read with Claude** can use the browser tab’s Anthropic key. Provider requests remain direct; the database does not receive API keys. Network failures leave a page waiting. Source-linked note lines retain their positions on the original handwriting.
 
-## Local preview
+Movement keeps its separate COROS connection on each device. The phone’s authorization and cached readings use Android Keystore/private storage; browser records use the account’s local browser copy. Recovery, Strain and Conditioning are Pocket estimates implemented in Scores.java and src/client/scores.js. See Movement for their inputs.
 
-Serve `docs/` with any static server, for example `npx serve docs -l 8777`, and open `http://localhost:8777/`.
-
-When publishing web changes, bump the shared `?v=` asset version in `docs/index.html` and the imports in `docs/js/` together so browsers fetch the complete new version.
-
-## Journal pages
-
-Journal (a Pocket app you can put on a tile) keeps photos of paper journal pages. Each page is read once by **Claude Sonnet 5.5** with the user's own Anthropic API key, entered in Journal → Settings and stored only on the phone, encrypted with the Android Keystore. Reading costs about 1–2¢ per page; pages photographed offline wait and are read once the phone is online. A waiting page can also be read from the web page, where the key is typed for that tab alone.
-
-Sonnet 5.5 was chosen in a comparison on real handwriting (German cursive, two inks, bleed-through, a brace): it read about 98–100% of the words and placed every line on the photo, where Claude Haiku 4.5 got about three quarters of the words right. The instructions are in `JournalReader.PROMPT`.
-
-Pages can also be added on the web: "+ page" in the notes tab (or dropping photos onto it) uploads the photo to Drive as a waiting page. Opening the page offers **read with Claude**: the browser calls Anthropic directly (the `anthropic-dangerous-direct-browser-access` header) with the key typed for that tab and kept in `sessionStorage`, so it disappears when the tab closes and is never committed or sent anywhere else. If you don't read the page there, the phone fetches the photo and reads it on its next sync as usual. A read that fails only because the network or Claude is busy leaves the page waiting, so the phone can still pick it up.
-
-Each page becomes a note. One note line per handwritten line, so each line keeps its position on the photo (`note_line`, `top`, `bottom`); a page titled "Todos" becomes `- [ ]` items, and a brace with a time such as "ab 16:30" becomes a thought line `>> … @16:30` that parks itself until then. The photo stays the original: on the phone, tap a line of the page to unfold its strip of handwriting, or switch to "paper"; on the web, notes read from a page get "paper" and a ▸ per line in preview.
-
-Thought lines also accept a clock time: `@16:30` comes back at the next 16:30.
+Photo zines save automatically in account-scoped IndexedDB. Existing guest books retain their original database. A zine holds up to 40 photos with reversible print treatments, order, captions and crop options. Download a reading PDF or an A5 print booklet to retain or share a copy. Zines and their photo bytes are not uploaded to libSQL.

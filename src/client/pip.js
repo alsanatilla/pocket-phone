@@ -1,11 +1,12 @@
+import { storage as localStorage, tabStorage as sessionStorage } from './workspace-storage.js';
 // Component structure informed by beautifului.dev: conversation navigation,
 // reply + expandable details, context cards, composer. Pocket owns the visuals.
-import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings, apiKey, setKey, keyName, identity } from "./pip-core.js?v=20261006-080";
-import { notes, tasks, parking, noteTitle, receipt, KIND } from "./store.js?v=20261006-080";
-import { mascot } from "./pip-pixels.js?v=20261006-080";
-import { backdrop } from "./pixel-backdrop.js?v=20261006-080";
-import { CATEGORIES, access, saveAccess, definitions } from "./pip-tools.js?v=20261006-080";
-import { activity, settle, mark, elapsed, activityTitle, phaseLabel } from "./pip-activity.js?v=20261006-080";
+import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings, apiKey, setKey, keyName, identity } from "./pip-core.js";
+import { notes, tasks, parking, noteTitle, receipt, KIND } from "./store.js";
+import { mascot } from "./pip-pixels.js";
+import { backdrop } from "./pixel-backdrop.js";
+import { CATEGORIES, access, saveAccess, definitions } from "./pip-tools.js";
+import { activity, settle, mark, elapsed, activityTitle, phaseLabel } from "./pip-activity.js";
 
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0;

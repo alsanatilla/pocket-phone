@@ -1,8 +1,9 @@
-import { notes, tasks, parking, gym, noteTitle } from "./store.js?v=20261006-080";
+import { storage as localStorage } from './workspace-storage.js';
+import { notes, tasks, parking, gym, noteTitle } from "./store.js";
 
 export const CATEGORIES = [["notes", "Notes"], ["thoughts", "Thoughts"], ["tasks", "Tasks"], ["gym", "Gym"], ["coros", "Movement · COROS cache"]];
 const permissionKey = value => "pocket:pip-access:" + value.provider + "|" + value.baseUrl;
-export function access(value, storage = globalThis.localStorage) {
+export function access(value, storage = localStorage) {
   try { const allowed = JSON.parse(storage?.getItem(permissionKey(value)) || "[]"); return CATEGORIES.map(([key]) => key).filter(key => Array.isArray(allowed) && allowed.includes(key)); } catch { return []; }
 }
 export function saveAccess(value, categories, storage = localStorage) {

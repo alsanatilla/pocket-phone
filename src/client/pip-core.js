@@ -1,7 +1,8 @@
-// pip's local conversations and direct API transport. This data is outside Drive sync.
-import { definitions } from "./pip-tools.js?v=20261006-080";
-import { activity, settle, source } from "./pip-activity.js?v=20261006-080";
-import { streamChat } from "./pip-stream.js?v=20261006-080";
+import { storage as localStorage, tabStorage as sessionStorage } from './workspace-storage.js';
+// Pip's local conversations and direct API transport. Chats stay on this device.
+import { definitions } from "./pip-tools.js";
+import { activity, settle, source } from "./pip-activity.js";
+import { streamChat } from "./pip-stream.js";
 export const DEFAULT_CONFIG = Object.freeze({ provider: "anthropic", model: "claude-sonnet-5-5", baseUrl: "https://api.anthropic.com/v1", maxTokens: 2048, thinking: false, webSearch: false });
 const PREFIX = "pocket:pip-chat:", SETTINGS = "pocket:pip-settings";
 const copy = value => structuredClone(value);

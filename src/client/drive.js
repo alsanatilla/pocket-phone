@@ -1,6 +1,7 @@
+import { storage as localStorage, tabStorage as sessionStorage } from './workspace-storage.js';
 // Google Drive appDataFolder over fetch. Same files and lookup rule as CloudSync.java:
 // always use the oldest file with a name, so the phone and the web agree if both ever created one.
-import { CLIENT_ID } from "./config.js?v=20261006-080";
+import { CLIENT_ID } from "./config.js";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.appdata";
 const DRIVE = "https://www.googleapis.com/drive/v3/files", UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
@@ -19,7 +20,8 @@ function gis() {
 }
 /** Must run from a click or key press: browsers block the Google window otherwise. */
 export async function connect(quiet = false) {
-  if (!configured()) throw new Error("Add the web client id to docs/js/config.js first (see CLOUD.md).");
+  if (!globalThis.google?.accounts?.oauth2) await new Promise((resolve, reject) => { const script = document.createElement("script"); script.src = "https://accounts.google.com/gsi/client"; script.onload = resolve; script.onerror = () => reject(new Error("Could not open Drive sign-in.")); document.head.append(script); });
+  if (!configured()) throw new Error("Drive import is not configured.");
   const oauth = await gis();
   return new Promise((resolve, reject) => {
     const client = oauth.initTokenClient({

@@ -1,8 +1,8 @@
 // Run with: node --test tools/zines.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bookletPages } from "../docs/js/zine-pdf.js";
-import { monochrome } from "../docs/js/zine-render.js";
+import { bookletPages } from "../src/client/zine-pdf.js";
+import { monochrome } from "../src/client/zine-render.js";
 
 test("folded sheets keep covers outside and every reading page exactly once", () => {
   for (let count = 3; count <= 42; count++) {

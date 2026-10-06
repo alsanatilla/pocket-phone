@@ -2,7 +2,7 @@
 // Invented activities in the same text and FIT layouts COROS uses; no real data lives in this public repo.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseRecords, parseFit, routePath, sportLabel, unwrap } from "../docs/js/coros-data.js";
+import { parseRecords, parseFit, routePath, sportLabel, unwrap } from "../src/client/coros-data.js";
 
 const RECORDS = JSON.stringify(`Sport Records — 2026-09-01 to 2026-09-30 (2 records)
 ========================
@@ -69,7 +69,7 @@ test("routes fit inside the drawing box and start at the first point", () => {
 });
 
 test("health, sleep, load and fitness text become numbers, oldest day first", async () => {
-  const d = await import("../docs/js/coros-data.js");
+  const d = await import("../src/client/coros-data.js");
   assert.deepEqual(d.parseRecovery("Recovery Status\n===\n\nRecovery: 76%\nLevel: Ready\nEstimated Full Recovery: 11h"), { percent: 76, level: "Ready", full: "11h" });
   const fitness = d.parseFitness("VO2max: 50\nRunning Level: 70\nThreshold Pace: 5:00 /km\n5 km Prediction: 22:10\nHalf Marathon Prediction: 1:45:00");
   assert.deepEqual(fitness, { vo2max: 50, level: 70, threshold: "5:00 /km", predictions: [["5 km", "22:10"], ["Half Marathon", "1:45:00"]] });
@@ -90,7 +90,7 @@ test("health, sleep, load and fitness text become numbers, oldest day first", as
 });
 
 test("laps use plain units and the activity series is bucketed along the distance", async () => {
-  const d = await import("../docs/js/coros-data.js");
+  const d = await import("../src/client/coros-data.js");
   const laps = d.parseLaps(JSON.stringify({ lapGroups: [{ type: 2, lapDistance: 100000, fastLapIndexList: [1], laps: [
     { lapIndex: 1, distance: 100000, time: 300, avgPace: 300, avgSpeedV2: 1200, avgHr: 150, avgCadence: 170, avgStrideLength: 118, strideHeight: 85, strideRatio: 72, groundTime: 240, avgPower: 0, elevGain: 4 }] }] }));
   assert.deepEqual(laps.laps[0], { index: 1, km: 1, seconds: 300, pace: 300, speed: 12, adjusted: null, hr: 150, maxHr: null, cadence: 170, power: null,

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parking, notes, tasks, thought, parkThought, thoughtStatus, load, save, merge, taskDay } from '../docs/js/store.js';
+import { parking, notes, tasks, thought, parkThought, thoughtStatus, load, save, merge, taskDay } from '../src/client/store.js';
 const copies=new Map();
 globalThis.localStorage={getItem:key=>copies.get(key)??null,setItem:(key,value)=>copies.set(key,String(value)),removeItem:key=>copies.delete(key)};
 test.beforeEach(()=>copies.clear());

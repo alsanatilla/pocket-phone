@@ -37,7 +37,7 @@ import org.json.JSONObject;
  */
 final class CloudSync {
     static final String SCOPE = "https://www.googleapis.com/auth/drive.appdata";
-    static final String WEB = "https://alsanatilla.github.io/pocket-phone/";
+    static final String WEB = "https://pocket-phone.vercel.app/";
     static final String ACTION_SYNCED = "org.textphone.launcher.SYNCED";
     static final String[] FILES = {"parking.json", "receipt.json", "dice.json", "notes.json", "tasks.json", "journal.json", "gym.json"};
     static final int JOB_SOON = 7301, JOB_PERIODIC = 7302;
@@ -93,6 +93,7 @@ final class CloudSync {
         synchronized (RUN) {
             if (!enabled(c)) return;
             prefs(c).edit().putLong("last_try", System.currentTimeMillis()).apply();
+            if (PocketCloud.selected(c)) { PocketCloud.run(c); return; }
             String token = token(c);
             try {
                 for (String name : FILES) {
@@ -246,6 +247,7 @@ final class CloudSync {
      */
     static boolean downloadPageImage(Context c, String uid) throws IOException, SignInNeeded {
         if (!enabled(c)) return false;
+        if (PocketCloud.selected(c)) return PocketCloud.downloadPageImage(c, uid);
         String token = token(c);
         try {
             String id = fileId(c, token, "page-" + uid + ".jpg"); if (id == null) return false;

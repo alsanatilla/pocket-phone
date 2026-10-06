@@ -1,77 +1,103 @@
 {
-  "component": "Pocket Phone Android launcher/apps and browser workspace",
-  "version_name": "0.8.0",
-  "version_code": 33,
+  "component": "Pocket Phone Android launcher/apps and Astro browser workspace",
+  "version_name": "0.9.0",
+  "version_code": 34,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-06T13:33:07.758Z",
-  "build": "assembleRom passed. Test suite skipped at the user’s request. APK remains unsigned for the release agent.",
+  "checked_at_utc": "2026-10-06T14:36:20.122Z",
+  "build": "Final Astro/Vercel production build and Android assembleRom passed. Test suite skipped at the user’s request. APK unsigned for the release agent.",
   "commands": [
-    "./gradlew.bat -I app/build/tmp/release-output-080.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
+    "npm run build",
+    "./gradlew.bat -I app/build/tmp/release-output-090-final.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain",
+    "npm run db:setup"
   ],
   "build_environment": {
     "java": "17.0.20.1+1",
     "android_sdk": 35,
-    "output_directory": "app/build/release-080",
-    "note": "A temporary Gradle init script set a fresh build directory after Windows locked an older classes.dex. The standard assembleRom command builds the same sources."
+    "node": "v24.19.0",
+    "astro": "7.3.6",
+    "vercel_adapter": "11.0.12",
+    "libsql_client": "0.18.0",
+    "better_auth": "1.7.7",
+    "drizzle": "0.45.3",
+    "output_directory": "app/build/release-090-final",
+    "note": "A temporary Gradle init script uses a fresh build directory to avoid a Windows lock on an earlier classes.dex."
   },
   "final_test_suite": {
     "status": "Skipped",
-    "reason": "Explicit user instruction"
+    "reason": "Explicit user instruction; no lint run"
   },
-  "prior_checks_before_final_chat_ui": {
-    "android_rom": {
-      "tests": 511,
-      "failures": 0,
-      "skipped": 0
-    },
-    "android_debug": {
-      "tests": 506,
-      "failures": 0,
-      "skipped": 0
-    },
-    "web_node": {
-      "tests": 32,
-      "failures": 0
-    },
-    "lint": {
-      "errors": 0,
-      "warnings": 80
-    },
-    "note": "These earlier results precede the final chat context, animation and copy changes; they are not final-build test results."
-  },
-  "web_manual_checks": {
-    "asset_version": "20261006-080",
-    "status": "All 23 browser modules passed Node syntax checks. Isolated stream/storage fixtures passed; T3 preview_status and preview_open returned Authentication required, so the rendered chat was not inspected.",
-    "handset_rendered": false,
-    "live_browser_rendered": false
-  },
-  "live_preview_incidents": {
-    "drive": "An earlier shared preview connected to Drive during manual checking. Its sample task was tombstoned and the remote deletion verified. Handled markers and append-only Activity records may remain. Later fixtures use an isolated disconnected origin.",
-    "chat": "The user independently tried a provider in the shared preview. A fixture temporarily replaced that tab's key; the fake key and sample reply were removed, fetch restored, and the user was informed to re-enter their key. User conversation history was retained."
-  },
-  "agent_paid_api_requests": 0,
   "apk": {
-    "file": "app/build/release-080/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.8.0-unsigned.apk",
-    "bytes": 8930824,
-    "sha256": "2402fc107699411346da791358270e7358e4c924455f2f8a0cbc02ae66fcf667",
+    "file": "app/build/release-090-final/outputs/apk/rom/app-rom-unsigned.apk",
+    "release_asset": "pocket-phone-0.9.0-unsigned.apk",
+    "bytes": 8937096,
+    "sha256": "f2b896465121cea3a9c71054f0cac2db1aa81c48077344d2f22d6ba371c9b63d",
     "signed": false,
     "installable_update": false,
-    "signing": "Left unsigned for the other release agent"
+    "signing": "Another release agent handles signing"
   },
-  "changes": [
-    "Shared capture/decide/plan/act/review flow through Home, Today, Thoughts, Tasks and Notes; purpose-grouped app directory",
-    "Thoughts stay separate until explicit task promotion; stable source tokens preserve chosen actions across phone and web",
-    "Task details link exact-task Focus, local Calendar reservations and Activity completion; drafts and source Back routes persist",
-    "Pocket Calendar uses local storage without Google Calendar provider permissions; optional Drive transport retains seven shared collections",
-    "Browser Pip with conversation navigation, Markdown streaming, separate reasoning, context cards and bottom composer; Pocket design on phone and web",
-    "Explicit Thought/Task/Note snapshots accompany chat messages; keep note, park thought, make task and copy actions",
-    "Matching pixel mascot waves, walks, juggles, reads and hops; animation pauses with reduced motion and hidden/detached views",
-    "Unnecessary inline helpers removed from workspace, capture and chat screens",
-    "Earlier camera rendering and format/aspect/JPEG options, centered Home readings and shared motion/design controls retained"
-  ],
+  "web": {
+    "framework": "Astro, server output",
+    "hosting": "Vercel",
+    "url": "https://pocket-phone.vercel.app/",
+    "static_output": ".vercel/output/static",
+    "server_output": ".vercel/output/functions/_render.func",
+    "release_asset": "pocket-web-0.9.0-source.zip",
+    "backup_origin": "https://alsanatilla.github.io/pocket-phone/",
+    "root_prerendered": true,
+    "hashed_client_assets": true,
+    "offline_worker": "pocket-astro-090",
+    "browser_token_scan": "Passed: supplied token absent from source, public files and entire .vercel/output",
+    "private_env_ignored": true
+  },
+  "database_connection": {
+    "status": "Passed",
+    "provider": "libSQL/Turso",
+    "operation": "Additive pocket_ table setup and SELECT 1 with the supplied private .env configuration",
+    "real_fixture_accounts_created": 0,
+    "real_fixture_photos_uploaded": 0,
+    "destructive_operations": 0
+  },
+  "api_smoke_check": {
+    "status": "Passed",
+    "storage": "Temporary local libSQL/SQLite database; fictional accounts and photos only",
+    "checks": [
+      "Email/password signup and bearer sign-in",
+      "Unauthenticated workspace and photo requests rejected",
+      "Accounts read only their own documents",
+      "Account ID mismatch rejected",
+      "Foreign-origin browser writes rejected",
+      "Concurrent writes retain both devices’ records",
+      "Deletion markers win over stale offline copies",
+      "Unknown collections rejected",
+      "Native bearer session read without browser Origin",
+      "Private JPEG upload/download",
+      "Paper deletion removes its server photo",
+      "Stale photo upload after page deletion rejected",
+      "Sign-out invalidates the bearer session"
+    ]
+  },
+  "client_storage_smoke_check": {
+    "status": "Passed",
+    "storage": "Isolated in-memory browser storage and fake API; no user data or provider account touched",
+    "checks": [
+      "Guest chat lists and drafts retained",
+      "Each account enumerates only its own chats",
+      "Tab API keys are account scoped",
+      "Explicit guest import excludes provider keys",
+      "Clearing one account retains other accounts and guest copies",
+      "An edit made during sync remains local and waiting",
+      "Remote records merge without replacing that edit",
+      "Next sync acknowledges and clears the waiting edit",
+      "Deleted note remains a server tombstone"
+    ]
+  },
+  "visual_review": {
+    "live_browser_rendered": false,
+    "handset_rendered": false,
+    "status": "T3 preview_status and preview_open returned Authentication required. No alternative browser automation used."
+  },
   "sync_collections": [
     "Thoughts",
     "Tasks",
@@ -81,110 +107,32 @@
     "Dice lists",
     "Gym workouts"
   ],
+  "changes": [
+    "Astro migration preserves the existing Pocket client and design",
+    "Authenticated account-scoped libSQL API with transactional record merges",
+    "Private Paper JPEG storage with transactional deletion",
+    "Pocket account transport on phone with encrypted native session tokens",
+    "Account-scoped browser copies, chats, drafts, provider settings and zines",
+    "Legacy phone Drive transport, read-only browser import and old-origin JSON export",
+    "Workspace JSON backup/restore; API data excluded from offline caching"
+  ],
   "known_limits": [
-    "The release APK is unsigned; another agent handles signing before installation.",
-    "Final test suite skipped at the user's request; final lint not run.",
-    "Nothing Phone (3a) gestures, animation smoothness, camera frames, cellular delivery and live account synchronization remain unverified.",
-    "Android/Nothing OS controls Recents and Home gestures; no full custom ROM was built.",
-    "Pip chats stay local to each device, outside Drive; browser data removal or app uninstall removes local conversations.",
-    "Camera tuning used existing phone JPEGs rather than real Pocket YUV captures and may need handset retuning.",
-    "Gym logging and header artwork have not been checked on a handset; phone layouts were compiled, not rendered.",
-    "Compatible browser endpoints must allow CORS and function tools when Pocket access is enabled. The generic compatible adapter does not advertise web search.",
-    "Anthropic web search needs a supported model and account. Live provider/tool requests were not exercised; transport checks used fictional local fixtures.",
-    "Phone and browser chats remain device-local; browser tool access is limited to its saved/synced records.",
-    "The 0.8.0 chat UI was not rendered in a live browser or handset. Preview requires authentication; Java compilation and isolated stream/SDK checks passed."
+    "APK needs signing by the release agent before installation.",
+    "The test suite and lint were skipped as requested.",
+    "Physical handset sync, gestures, camera and cellular behavior remain unverified.",
+    "Live browser rendering could not be inspected because preview requires authentication.",
+    "Vercel must have TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in its deployment environment.",
+    "Email/password accounts have no email verification or password reset service.",
+    "Phone workspace remains bound to the first Pocket account.",
+    "Pip chats, photo zines, provider keys, COROS connections and native communication/calendar records are device-local.",
+    "Workspace JSON backups exclude photos, chats and zines.",
+    "Sync requests are capped at 3 MB and Paper photos at 2 MB.",
+    "Generic compatible chat endpoints still require browser CORS and function tool support; live paid providers were not checked."
   ],
+  "agent_paid_api_requests": 0,
   "full_custom_rom_compiled": false,
-  "previous_release": "v0.7.2",
-  "changes_in_0_7_0": [
-    "Gym on phone (GymActivity) and web (tab 6): workouts, set logging, last time, best, rest timer, e1RM progress per lift, weekly volume and history",
-    "gym.json joins Drive sync on both sides; merge per workout by newest edit with deletion markers (GymStore.merge / store.js merge)",
-    "Eight dithered header scenes from one shared kernel: sky, stars, road, waves, terrain, iron, tiles, rings, used per area on phone and web",
-    "PocketActivity.scene() hook gives Pocket apps a header scene; titles over artwork get a dark halo",
-    "Web subtitles replaced by counts; Apps lists Movement and Gym under Body"
-  ],
-  "previous_web_manual_checks": {
-    "origin": "Isolated localhost:8881 preview, Drive disconnected",
-    "asset_version": "20261006-gym2",
-    "status": "Gym tab checked at 1280px and 390px with temporary local workouts (removed afterwards, never marked for sync): logging form, rest timer, last time/best, volume bars, progress, e1RM chart and history. Every area header canvas rendered (sky, stars, road, waves, tiles, rings, iron, terrain). No horizontal overflow at 390px."
-  },
-  "changes_in_0_7_1": [
-    "Approved full-height Pip glow scene on Android and web: three fine rings, light behind the composer, top-right bloom and pixel sparks with a dark reading area",
-    "Pip controls and composer reveal the artwork while keeping shared focus and pressed feedback; text has a dark halo for legibility",
-    "Native bitmap cached by size; web canvas painted only on resize and its observer disconnected on chat replacement and page exit",
-    "Movement and Gym remain separate workspace tabs; web asset version advanced to 20261006-glow1"
-  ],
-  "previous_web_manual_checks_0_7_1": {
-    "asset_version": "20261006-glow1",
-    "status": "Generated glow artwork inspected at 412x840 (phone) and 1160x660 (desktop). Changed JavaScript modules passed Node syntax checks. Live browser layout was not inspected: T3 preview_status and preview_open both returned Authentication required.",
-    "handset_rendered": false,
-    "live_browser_rendered": false
-  },
-  "gym_storage_smoke_check": {
-    "storage": "Isolated in-memory localStorage in Node; no user browser data or Drive touched",
-    "exercises": [
-      "Squat",
-      "Bench press",
-      "Face pull"
-    ],
-    "workouts": 1,
-    "retained_sets_after_undo_and_finish": 3,
-    "status": "Passed: original weights and sets retained per exercise in one serialized finished workout; undo affected only Squat and finish closed the workout",
-    "limit": "Storage behavior only; the exercise picker was reviewed in source, not exercised in a rendered browser. Android UI compiled but was not rendered."
-  },
-  "changes_in_0_7_2": [
-    "Pip keeps only the upper-corner pixel bloom and fades to black; lower rings and composer glow removed on phone and web",
-    "Web Gym replaces the ambiguous exercise input and blur-triggered form rerender with an explicit picker and + exercise command",
-    "Native Gym exposes + exercise directly while logging; chooser includes the current workout lifts and existing selections keep their sets",
-    "Starting a web workout opens its exercise picker; choosing existing lifts avoids needless sync edits; shared dialogs scroll within the viewport",
-    "Web asset version advanced to 20261006-072; test suite skipped as requested"
-  ],
-  "previous_web_manual_checks_0_7_2": {
-    "asset_version": "20261006-072",
-    "status": "Generated upper-only Pip glow inspected at 412x840 (phone) and 1160x660 (desktop). app.js, gym.js and pixel-backdrop.js passed Node syntax checks. T3 preview_status and preview_open both returned Authentication required; live browser layout was not rendered.",
-    "handset_rendered": false,
-    "live_browser_rendered": false
-  },
-  "pip_stream_smoke_check": {
-    "storage": "Isolated in-memory localStorage in Node; no user browser storage, Drive or provider account touched",
-    "status": "Passed",
-    "checks": [
-      "Anthropic and compatible client tool continuations",
-      "Split UTF-8/SSE framing",
-      "Signed thinking retained in current-request continuation",
-      "Deferred search alongside client reads",
-      "pause_turn continuation and original block preservation",
-      "Clickable citations from actual provider events",
-      "Search errors inside HTTP 200",
-      "Unrecognized tools rejected",
-      "Recipient-scoped default-off permissions and revocation",
-      "COROS cache whitelist, days and activities; no authentication fields",
-      "Incomplete stream rejection",
-      "Stop settles activity; late callbacks cannot replace the saved partial answer"
-    ],
-    "paid_requests": 0
-  },
-  "pip_sdk_smoke_check": {
-    "status": "Passed",
-    "sdk": "Anthropic Java 2.34.0",
-    "checks": [
-      "Versioned web search declaration and max_uses",
-      "Serialized server search and citation event shapes",
-      "Streamed query accumulation",
-      "Empty-input client tool workaround",
-      "Original search result data and tool IDs retained by toParam()"
-    ],
-    "network_requests": 0,
-    "limit": "Standalone Java SDK fixture; Android storage migration and UI compiled but were not exercised on a device."
-  },
-  "changes_in_0_8_0": [
-    "Persistent per-reply tool/search activity, separate from reasoning, on phone and web",
-    "Compact activity folds after completion; inspect query, state, elapsed time, result summary, parameters and source links",
-    "Default-off read-only Notes, Thoughts, Tasks, Gym and cached COROS access scoped to provider/endpoint",
-    "Default-off Anthropic web search with server-tool activity, actual citations, deferred search and pause/resume handling",
-    "Bounded reads/searches/continuations and output budgets, validated arguments, explicit failures and Stop state",
-    "SQLite chat schema 4 retains existing conversations and adds structured activity",
-    "Early-console geometric signal marks, matching composer corner ticks, retained upper-only pixel glow and a matching gamepad mascot routine",
-    "Web assets advanced to 20261006-080; test suite skipped as requested; lint not run"
-  ]
+  "previous_release": "v0.8.0",
+  "prior_checks": {
+    "note": "Pip stream/SDK and rendered Gym fixtures belong to v0.8.0 or earlier and are not final 0.9.0 test-suite results. See historical Git/release build status."
+  }
 }

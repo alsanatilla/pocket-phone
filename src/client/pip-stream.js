@@ -1,5 +1,5 @@
-import { activity, source, settle } from "./pip-activity.js?v=20261006-080";
-import { execute, label, summary, sources } from "./pip-tools.js?v=20261006-080";
+import { activity, source, settle } from "./pip-activity.js";
+import { execute, label, summary, sources } from "./pip-tools.js";
 
 const httpError = code => code === 401 || code === 403 ? "The provider rejected your key or access. Check API settings."
   : code === 429 ? "The provider is busy or your quota is exhausted. Retry when you’re ready."

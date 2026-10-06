@@ -1,0 +1,21 @@
+{
+  "name": "pocket-phone",
+  "version": "0.9.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env node_modules/astro/bin/astro.mjs dev --host 127.0.0.1",
+    "build": "astro build",
+    "preview": "astro preview",
+    "db:setup": "node --env-file=.env scripts/db-setup.mjs"
+  },
+  "dependencies": {
+    "@astrojs/vercel": "11.0.12",
+    "@better-auth/drizzle-adapter": "1.7.7",
+    "@libsql/client": "0.18.0",
+    "astro": "7.3.6",
+    "better-auth": "1.7.7",
+    "drizzle-orm": "0.45.3"
+  }
+}

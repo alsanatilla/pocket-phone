@@ -8,6 +8,13 @@ local.properties
 .externalNativeBuild/
 .DS_Store
 .playwright-mcp/
+node_modules/
+dist/
+.astro/
+.vercel/
+*.db
+*.db-shm
+*.db-wal
 
 # Private signing material and credentials
 *.jks

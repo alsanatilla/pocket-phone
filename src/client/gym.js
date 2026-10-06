@@ -1,5 +1,5 @@
 // Gym: log sets during a workout, then read each lift's estimated best over time. Same records as GymActivity on the phone.
-import { gym, e1rm, kgText, weekStart } from "./store.js?v=20261006-080";
+import { gym, e1rm, kgText, weekStart } from "./store.js";
 
 const day = at => new Date(at).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
 const minutes = ms => { const m = Math.max(0, Math.floor(ms / 60000)); return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m` : `${m} min`; };

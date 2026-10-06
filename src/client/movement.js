@@ -1,8 +1,9 @@
+import { tabStorage as sessionStorage } from './workspace-storage.js';
 // Movement: a cockpit of COROS readiness, trends, fitness and activities, or an invented sample until COROS is connected.
-import * as coros from "./coros.js?v=20261006-080";
-import { svg, ring, meter, stack, dayLine, dayBars, dayPair, trace } from "./movement-charts.js?v=20261006-080";
-import { scores } from "./scores.js?v=20261006-080";
-import { backdrop } from "./pixel-backdrop.js?v=20261006-080";
+import * as coros from "./coros.js";
+import { svg, ring, meter, stack, dayLine, dayBars, dayPair, trace } from "./movement-charts.js";
+import { scores } from "./scores.js";
+import { backdrop } from "./pixel-backdrop.js";
 
 // A visual concept only. These activities and readings are invented and never read or saved.
 const SAMPLE = [

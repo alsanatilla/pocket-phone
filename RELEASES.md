@@ -2,6 +2,14 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.9.0 — Astro and Pocket accounts
+
+- The browser workspace moves to Astro on Vercel, with hashed client assets and an offline shell. The existing Pocket design and flows remain.
+- Server-only libSQL/Turso credentials back an authenticated, account-scoped API for the seven workspace collections and private Paper JPEGs. Writes merge in a transaction, retain deletion markers and preserve browser edits made during sync.
+- Phone and browser share email/password accounts. The native session token is encrypted with Android Keystore; browser copies, chats, drafts and settings are separated per account.
+- Existing phone Drive connections remain selectable. Browser Drive import, legacy GitHub Pages export and workspace JSON backup/restore provide migration paths.
+- Android and Astro builds passed. Real libSQL connection/schema setup and isolated account, concurrency, deletion, photo and storage checks passed. The test suite is skipped as requested; visual browser and handset checks remain unverified. The APK is unsigned for the release agent.
+
 ## 0.8.0 — Pip activity and console character
 
 - Real tool/search activity on phone and web: queries, pending/running/completed/failed/stopped state, elapsed time, result summaries and source links persist with each reply. Activity folds after completion; provider reasoning stays separate.

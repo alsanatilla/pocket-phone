@@ -1,14 +1,19 @@
-// Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
-import * as drive from "./drive.js?v=20261006-080";
-import * as reader from "./reader.js?v=20261006-080";
-import * as pip from "./pip.js?v=20261006-080";
-import { backdrop } from "./pixel-backdrop.js?v=20261006-080";
-import * as zines from "./zines.js?v=20261006-080";
-import * as movement from "./movement.js?v=20261006-080";
-import * as gymView from "./gym.js?v=20261006-080";
-import * as coros from "./coros.js?v=20261006-080";
-import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-080";
-import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-080";
+import { storage as localStorage } from './workspace-storage.js';
+// Pocket workstation, hosted by Astro.
+import * as cloud from "./cloud.js";
+import * as legacyDrive from "./drive.js";
+import { clearWorkspace, activeAccount } from "./workspace-storage.js";
+import { FILES, importDocument, merge } from "./store.js";
+import { validDocument } from '../shared/workspace.js';
+import * as reader from "./reader.js";
+import * as pip from "./pip.js";
+import { backdrop } from "./pixel-backdrop.js";
+import * as zines from "./zines.js";
+import * as movement from "./movement.js";
+import * as gymView from "./gym.js";
+import * as coros from "./coros.js";
+import { syncNow, describe, onStatus, status } from "./sync.js";
+import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -220,7 +225,7 @@ function notesView(uid) {
   renderList();
   split(body, [picker, pages, search, list], editing ? editor(open, renderList) : h("div", { class: "empty" }, h("div", { class: "empty-title", text: "NOTES" })));
 }
-/** Scales a photo like the phone does (long edge 2000 px, upright, JPEG) so Drive and the phone get the same kind of file. */
+/** Scales a photo like the phone does (long edge 2000 px, upright, JPEG). */
 async function pagePhoto(file) {
   let bitmap;
   try { bitmap = await createImageBitmap(file, { imageOrientation: "from-image" }); }
@@ -232,17 +237,17 @@ async function pagePhoto(file) {
   if (!blob) throw new Error(`${file.name} could not be converted.`);
   return { blob, width: canvas.width, height: canvas.height };
 }
-/** Uploads journal photos to Drive as waiting pages: read by the phone, or on demand here with Claude. */
+/** Uploads Paper photos as waiting pages: read by the phone, or on demand here with Claude. */
 async function uploadPages(files) {
   const images = files.filter(f => f.type.startsWith("image/"));
   if (!images.length) { say("Drop photos (JPEG or PNG) of journal pages."); return; }
-  if (!drive.connected()) { say("Connect Google Drive first (sync, top right): pages go to your Drive, where your phone can read them."); return; }
+  if (!cloud.connected()) { say("Sign in to Pocket to save Paper photos."); return; }
   let done = 0;
   for (const file of images) {
     say(`Uploading page ${done + 1} of ${images.length}…`);
     try {
       const photo = await pagePhoto(file), uid = crypto.randomUUID();
-      await drive.writeImage(`page-${uid}.jpg`, photo.blob);
+      await cloud.writeImage(`page-${uid}.jpg`, photo.blob);
       photos.set(uid, Promise.resolve({ url: URL.createObjectURL(photo.blob), width: photo.width, height: photo.height, blob: photo.blob }));
       journal.addWaiting(uid); done++;
     } catch (error) { say(error.message); return; }
@@ -260,7 +265,7 @@ async function pageDialog(page) {
   const actions = reading ? [["close", null]] : [["read with Claude", "read"], ["remove", "remove"], ["close", null]];
   const choice = await dialog("Journal page", body, actions);
   if (choice === "read") readPage(page);
-  else if (choice === "remove" && await confirmBox("Remove this page? Its photo stays in Drive until your phone syncs.", "remove")) { journal.remove(page.uid); refreshNotes(); }
+  else if (choice === "remove" && await confirmBox("Remove this page?", "remove")) { journal.remove(page.uid); refreshNotes(); }
 }
 /** Re-renders the notes tab on the page it is showing, after a page changed. */
 function refreshNotes() { if (location.hash.startsWith("#/notes")) notesView(location.hash.split("/")[2]); }
@@ -395,25 +400,25 @@ function markdown(source, uid = null) {
   return node;
 }
 
-// ── Journal photos: loaded from Drive once per page and kept for this visit. ──
+// ── Paper photos: loaded from Pocket once per page and kept for this visit. ──
 const photos = new Map();
 function paperPhoto(pageUid) {
   if (!photos.has(pageUid)) photos.set(pageUid, (async () => {
-    if (!drive.connected()) throw new Error("Connect Google Drive to see the handwriting.");
-    const blob = await drive.readBlob("page-" + pageUid + ".jpg");
+    if (!cloud.connected()) throw new Error("Sign in to Pocket to see the handwriting.");
+    const blob = await cloud.readBlob("page-" + pageUid + ".jpg");
     if (!blob) throw new Error("The photo hasn't synced from the phone yet.");
     const url = URL.createObjectURL(blob), image = new Image(); image.src = url; await image.decode();
     return { url, width: image.naturalWidth, height: image.naturalHeight, blob };
   })().catch(error => { photos.delete(pageUid); throw error; }));
   return photos.get(pageUid);
 }
-/** The page photo bytes, from this visit's upload or from Drive; a missing photo keeps the page waiting. */
+/** The page photo bytes, from this visit's upload or Pocket; a missing photo keeps the page waiting. */
 async function pageBlob(uid) {
-  if (photos.has(uid)) { try { const photo = await photos.get(uid); if (photo.blob) return photo.blob; } catch { /* ask Drive below */ } }
-  if (!drive.connected()) throw new reader.Later("Connect Google Drive to fetch this page's photo.");
-  try { const blob = await drive.readBlob("page-" + uid + ".jpg"); if (blob) return blob; }
-  catch { throw new reader.Later("Drive could not be reached; the page keeps waiting."); }
-  throw new reader.Later("The photo isn't on Drive yet; it arrives with your phone's next sync.");
+  if (photos.has(uid)) { try { const photo = await photos.get(uid); if (photo.blob) return photo.blob; } catch { /* fetch below */ } }
+  if (!cloud.connected()) throw new reader.Later("Sign in to Pocket to fetch this page's photo.");
+  try { const blob = await cloud.readBlob("page-" + uid + ".jpg"); if (blob) return blob; }
+  catch { throw new reader.Later("Pocket could not be reached; the page keeps waiting."); }
+  throw new reader.Later("This photo has not synced yet.");
 }
 /** One line of the page, cut from the photo by CSS alone: the photo scaled to the width, shifted to the line. */
 function strip(photo, top, bottom) {
@@ -519,29 +524,77 @@ async function roll(result, detail) {
 
 // ── Sync settings ──
 function syncView() {
-  const body = view("sync"), connected = drive.connected();
-  const parked = load("parking.json").items.filter(i => i.state === "parked").length, days = Object.keys(load("receipt.json").days || {}).length;
-  add(body, h("div", { class: "narrow" },
-    h("p", { class: connected ? "accent" : "", text: describe() }),
-    status.error ? h("p", { class: "small warn", text: status.error }) : null,
-    section("DRIVE"),h("p", { class: "small muted", text: "Thoughts · Tasks · Notes · Paper · Activity · Dice · Gym" }),
-    drive.configured() ? null : h("p", { class: "small warn", text: "This page has no Google client id yet. Add it to docs/js/config.js (see CLOUD.md)." }),
-    connected ? [rowButton("sync now", "", async () => { say("Syncing…"); const ok = await syncNow(); syncView(); say(ok ? "Synced." : describe()); }),
-      rowButton("disconnect", "this browser keeps its copy", async () => { await drive.disconnect(); syncView(); })]
-      : rowButton("connect google drive", drive.remembered() ? "you were connected before" : "", () => connectFlow(drive.remembered())),
-    section("IN THIS BROWSER"),
-    h("p", { class: "small muted", style: "white-space:pre-line", text: `thoughts  ${parked} undecided\ntasks     ${tasks.list().filter(t=>!t.done).length} open\nnotes     ${notes.list().length}\nreceipt   ${days} day${days === 1 ? "" : "s"}\ndice      ${dice.list().length} on the list
-gym       ${load("gym.json").workouts.filter(w=>!w.deleted).length} workouts` }),
-    rowButton("forget this browser's copy", "", async () => {
-      if (await confirmBox("Forget the copy in this browser? Your Drive copy and the phone are not touched.", "forget")) {
-        Object.keys(localStorage).filter(k => k.startsWith("pocket:")).forEach(k => localStorage.removeItem(k)); syncView();
+  const body = view('sync');
+  workspaceTitle(body, 'storage & devices');
+  const pane = h('div', { class: 'narrow' });
+  add(body, pane);
+  add(pane, h('p', { class: cloud.connected() ? 'accent' : '', text: describe() }));
+  if (status.error) add(pane, h('p', { class: 'small warn', text: status.error }));
+  if (cloud.connected()) {
+    add(pane, h('p', { class: 'small muted', text: cloud.account().email }),
+      rowButton('sync now', '', async () => { const ok = await syncNow(); syncView(); say(ok ? 'Synced.' : describe()); }),
+      rowButton('import from Drive', '', importDrive),
+      rowButton('sign out', '', async () => { try { await syncNow(); await cloud.disconnect(); } catch (error) { say(error.message); } }));
+  } else if (cloud.configured()) {
+    const email = h('input', { type: 'email', placeholder: 'email', autocomplete: 'email', 'aria-label': 'Email', required: true });
+    const password = h('input', { type: 'password', placeholder: 'password', autocomplete: 'current-password', minlength: 12, maxlength: 128, 'aria-label': 'Password', required: true });
+    const copy = h('input', { type: 'checkbox', checked: !activeAccount() });
+    let busy = false;
+    const signIn = async create => {
+      if (busy) return;
+      if (!email.checkValidity() || !password.value) { email.reportValidity(); password.reportValidity(); return; }
+      if (create && password.value.length < 12) { say('Use at least 12 characters for your password.'); return; }
+      busy = true; say(create ? 'Creating account…' : 'Signing in…');
+      try { await cloud.login(email.value.trim(), password.value, create, copy.checked); }
+      catch (error) { busy = false; say(error.message); }
+    };
+    const form = h('form', { class: 'account-form', onsubmit: event => { event.preventDefault(); signIn(false); } },
+      email, password, h('label', { class: 'small' }, copy, ' use this browser’s copy'),
+      h('div', { class: 'keys' }, h('button', { type: 'submit', class: 'accent' }, 'sign in'), h('button', { type: 'button', onclick: () => signIn(true) }, 'create account')));
+    add(pane, form);
+  } else add(pane, h('p', { class: 'small muted', text: 'Cloud storage is not configured.' }));
+  add(pane, section('THIS DEVICE'), rowButton('download backup', '', exportWorkspace), rowButton('restore backup', '', restoreWorkspace),
+    rowButton('forget this browser’s copy', '', async () => {
+      if (await confirmBox('Forget this browser’s copy?', 'forget')) { clearWorkspace(); location.reload(); }
+    }), section('CLAUDE'), rowButton(reader.hasKey() ? 'Claude key · set for this tab (' + reader.hint() + ')' : 'set Claude API key', '', keySettings));
+}
+function exportWorkspace() {
+  const data = { format: 'pocket-workspace', version: 1, exportedAt: new Date().toISOString(), documents: Object.fromEntries(FILES.map(name => [name, load(name)])) };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  const link = h('a', { href: url, download: 'pocket-backup-' + new Date().toISOString().slice(0, 10) + '.json' });
+  link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function restoreWorkspace() {
+  const picker = h('input', { type: 'file', accept: '.json,application/json' });
+  picker.onchange = async () => {
+    try {
+      const file = picker.files?.[0]; if (!file) return;
+      if (file.size > 3 * 1024 * 1024) throw new Error('Keep a workspace backup under 3 MB.');
+      const backup = JSON.parse(await file.text());
+      if (backup.format !== 'pocket-workspace' || backup.version !== 1 || !backup.documents || Object.entries(backup.documents).some(([name, value]) => !FILES.includes(name) || !validDocument(name, value))) throw new Error('This is not a Pocket workspace backup.');
+      if (!await confirmBox('Merge this backup into your workspace?', 'restore')) return;
+      for (const [name, value] of Object.entries(backup.documents)) importDocument(name, merge[name](load(name), value, Date.now()));
+      await syncNow(); route(); say('Restored.');
+    } catch (error) { say(error.message); }
+  };
+  picker.click();
+}
+async function importDrive() {
+  try {
+    say('Opening Drive…'); await legacyDrive.connect();
+    for (const name of FILES) {
+      const remote = await legacyDrive.read(name);
+      if (!remote) continue;
+      if (name === 'journal.json') for (const page of remote.pages || []) {
+        if (page.deleted) continue;
+        const name = 'page-' + page.uid + '.jpg', photo = await legacyDrive.readBlob(name);
+        if (photo) await cloud.writeImage(name, photo);
       }
-    }),
-    section("CLAUDE"),
-    rowButton(reader.hasKey() ? "Claude key · set for this tab (" + reader.hint() + ")" : "set Claude API key",
-      "",
-      () => keySettings()),
-    h("p", { class: "small muted", text: "Key storage · this tab" })));
+      importDocument(name, merge[name](load(name), remote, Date.now()));
+    }
+    await syncNow(); route(); say('Imported.');
+  } catch (error) { say(error.message); }
+  finally { await legacyDrive.disconnect(); }
 }
 /** Sets or forgets the Claude key kept for this tab. */
 async function keySettings() {
@@ -551,11 +604,6 @@ async function keySettings() {
   }
   if (await askKey()) { syncView(); say("Key set for this tab."); }
 }
-async function connectFlow(quiet) {
-  try { say("Opening Google…"); await drive.connect(quiet); say("Connected. Syncing…"); await syncNow(); route(); }
-  catch (error) { say(error.message); }
-}
-
 // ── Routing and keys ──
 function route() {
   const [, name, arg] = (location.hash.replace(/^#/, "") || "/").split("/");
@@ -586,6 +634,7 @@ addEventListener("keydown", event => {
 // A COROS sign-in comes back to this page with ?code=…; finish it before drawing the Movement tab.
 if (coros.returning()) coros.finish().then(() => { route(); say("COROS connected."); }, error => { route(); say(error.message); });
 else route();
-syncNow();
+cloud.init().then(() => { if (!document.activeElement?.matches('input, textarea')) route(); return syncNow(); }).catch(error => say(error.message));
+if ('serviceWorker' in navigator && !import.meta.env.DEV) navigator.serviceWorker.register('/sw.js').catch(() => {});
 addEventListener("pagehide", () => zines.leave());
 addEventListener("pageshow", event => { if (event.persisted) route(); });

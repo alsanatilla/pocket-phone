@@ -1,6 +1,7 @@
+import { storage as localStorage } from './workspace-storage.js';
 // Edits save locally first and are marked waiting; they upload when the browser is online and connected.
-import * as drive from "./drive.js?v=20261006-080";
-import { FILES, load, save, merge, clean, dirty, onChange } from "./store.js?v=20261006-080";
+import * as cloud from "./cloud.js";
+import { FILES, load, save, merge, clean, dirty, onChange } from "./store.js";
 
 export const status = { state: "idle", last: Number(localStorage.getItem("pocket:last-sync") || 0), error: "" };
 const listeners = new Set();
@@ -10,9 +11,9 @@ let running = null, timer = 0;
 
 export function describe() {
   const waiting = dirty().size;
-  if (!drive.configured()) return "WEB ONLY · NOT SET UP";
+  if (!cloud.configured()) return "LOCAL";
   if (!navigator.onLine) return waiting ? `OFFLINE · ${waiting} WAITING` : "OFFLINE";
-  if (!drive.connected()) return waiting ? `NOT CONNECTED · ${waiting} WAITING` : "NOT CONNECTED";
+  if (!cloud.connected()) return waiting ? `SIGN IN · ${waiting} WAITING` : "SIGN IN";
   if (status.state === "syncing") return "SYNCING…";
   if (status.state === "error") return "SYNC FAILED · " + status.error.toUpperCase();
   if (waiting) return `${waiting} WAITING`;
@@ -22,22 +23,29 @@ export function describe() {
 /** Download, merge into the local copy, upload the merged copy. One run at a time. */
 export function syncNow() {
   if (running) return running;
-  if (!navigator.onLine || !drive.connected()) { emit(); return Promise.resolve(false); }
+  if (!navigator.onLine || !cloud.connected()) { emit(); return Promise.resolve(false); }
   running = (async () => {
     status.state = "syncing"; status.error = ""; status.changed = false; emit();
     try {
+      const sent = Object.fromEntries(FILES.map(name => [name, load(name)]));
+      const received = await cloud.exchange(sent);
       for (const name of FILES) {
-        const local = load(name), remote = await drive.read(name), merged = merge[name](local, remote, Date.now());
+        const local = load(name), remote = received[name]?.value;
+        if (!remote) throw new Error('Pocket returned an incomplete workspace.');
+        const unchanged = JSON.stringify(local) === JSON.stringify(sent[name]);
+        const merged = unchanged ? remote : merge[name](local, remote, Date.now());
         // Only a merge that changed the local copy needs a redraw; otherwise focus and scroll stay put.
         if (JSON.stringify(merged) !== JSON.stringify(local)) status.changed = true;
-        save(name, merged); await drive.write(name, merged); clean(name);
+        save(name, merged);
+        // An edit made during the request stays queued. Only acknowledged contents are clean.
+        if (unchanged || JSON.stringify(merged) === JSON.stringify(remote)) clean(name);
       }
       status.state = "idle"; status.last = Date.now(); localStorage.setItem("pocket:last-sync", String(status.last));
       return true;
     } catch (error) {
-      status.state = error instanceof drive.Expired ? "idle" : "error"; status.error = error instanceof drive.Expired ? "" : (error.message || "error");
+      status.state = error instanceof cloud.Expired ? "idle" : "error"; status.error = error instanceof cloud.Expired ? "" : (error.message || "error");
       return false;
-    } finally { running = null; emit(); }
+    } finally { running = null; emit(); if (dirty().size && cloud.connected() && status.state !== 'error') soon(); }
   })();
   return running;
 }

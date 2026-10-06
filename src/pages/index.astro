@@ -1,0 +1,20 @@
+---
+import '../styles/pocket.css';
+export const prerender = true;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="color-scheme" content="dark" />
+    <title>pocket</title>
+    <link rel="preload" href="/fonts/Jacquard24-Regular.ttf" as="font" type="font/ttf" crossorigin />
+  </head>
+  <body>
+    <div id="app" class="app"><noscript>Pocket needs JavaScript.</noscript></div>
+    <div id="dialog" class="dialog" hidden></div>
+    <script>import '../client/app.js';</script>
+  </body>
+</html>

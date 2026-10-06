@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, apiKey, setKey, saveSettings, settings, requestBody, streamReply, sse } from '../docs/js/pip-core.js';
+import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, apiKey, setKey, saveSettings, settings, requestBody, streamReply, sse } from '../src/client/pip-core.js';
 
 class Memory {
   values = new Map();

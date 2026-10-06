@@ -1,14 +1,15 @@
+import { FILES, EMPTY, merge, mergeById, pruneParking } from '../shared/workspace.js';
+export { FILES, merge, mergeById };
+import { storage as localStorage } from './workspace-storage.js';
 // Local copies of the synced documents and the merge rules. These mirror the phone exactly:
 // SyncMerge.java, ParkingStore.java, ReceiptTape.java, NoteSync.java and DiceActivity.merge. Change both sides together.
 
 const HOUR = 3_600_000, DAY = 24 * HOUR, KEEP_CLOSED = 7 * DAY, KEEP_DAYS = 30, DAY_LIMIT = 300, KEEP_DELETED = 30 * DAY;
 export const NOTE_LIMIT = 8000;
-export const FILES = ["parking.json", "receipt.json", "dice.json", "notes.json", "tasks.json", "journal.json", "gym.json"];
 export const DELAYS = ["1 hour", "tonight", "tomorrow", "next week"];
 export const HECKLE = 3;
 export const KIND = { ROLL: "ROLL", PARK: "PARK", CLEAR: "CLEAR", KILL: "KILL", MEMO: "MEMO", DONE: "DONE", PHOTO: "PHOTO", ALARM: "ALARM", TASK: "TASK" };
 
-const EMPTY = { "gym.json": () => ({ v: 1, workouts: [] }), "parking.json": () => ({ v: 1, items: [] }), "receipt.json": () => ({ v: 1, days: {} }), "dice.json": () => ({ v: 1, list: "", updated: 0 }), "notes.json": () => ({ v: 1, notes: [] }), "tasks.json": () => ({ v: 1, tasks: [], next: { uid: "", updated: 0 } }), "journal.json": () => ({ v: 1, pages: [] }) };
 const listeners = new Set();
 export const onChange = fn => listeners.add(fn);
 const changed = name => { markDirty(name); listeners.forEach(fn => fn(name)); };
@@ -18,45 +19,10 @@ export function load(name) {
   return EMPTY[name]();
 }
 export function save(name, doc) { localStorage.setItem("pocket:" + name, JSON.stringify(doc)); }
+export function importDocument(name, doc) { if (!FILES.includes(name)) throw new Error('Unknown Pocket collection.'); save(name, doc); changed(name); }
 export function dirty() { try { return new Set(JSON.parse(localStorage.getItem("pocket:dirty") || "[]")); } catch { return new Set(); } }
 function markDirty(name) { const set = dirty(); set.add(name); localStorage.setItem("pocket:dirty", JSON.stringify([...set])); }
 export function clean(name) { const set = dirty(); set.delete(name); localStorage.setItem("pocket:dirty", JSON.stringify([...set])); }
-
-/** Per item, the later edit wins; a tie keeps the local copy. */
-export function mergeById(local = [], remote = [], idKey, updatedKey) {
-  const merged = new Map();
-  for (const item of local || []) if (item && item[idKey] != null) merged.set(String(item[idKey]), item);
-  for (const item of remote || []) {
-    if (!item || item[idKey] == null) continue;
-    const mine = merged.get(String(item[idKey]));
-    if (!mine || (item[updatedKey] || 0) > (mine[updatedKey] || 0)) merged.set(String(item[idKey]), item);
-  }
-  return [...merged.values()];
-}
-const pruneParking = items => items; // Keep handled records so an offline device cannot revive them.
-export const merge = {
-  "parking.json": (local, remote, now) => ({ v: 1, items: pruneParking(mergeById(local.items, remote?.items, "id", "updated"), now) }),
-  "receipt.json": (local, remote, now) => {
-    const cutoff = dayKey(now - KEEP_DAYS * DAY), days = {}, names = new Set([...Object.keys(local.days || {}), ...Object.keys(remote?.days || {})]);
-    for (const day of [...names].sort()) {
-      if (!/^\d{8}$/.test(day) || day < cutoff) continue;
-      days[day] = mergeById(local.days?.[day], remote?.days?.[day], "i", "t").sort((a, b) => a.t - b.t).slice(0, DAY_LIMIT);
-    }
-    return { v: 1, days };
-  },
-  "dice.json": (local, remote) => (remote && (remote.updated || 0) > (local.updated || 0) ? { v: 1, list: remote.list || "", updated: remote.updated } : { v: 1, list: local.list || "", updated: local.updated || 0 }),
-  // Keep deletion markers so a device returning after a long absence cannot revive old records.
-  "notes.json": (local, remote, now) => ({ v: 1, notes: mergeById(local.notes, remote?.notes, "uid", "updated") }),
-  // Tasks use the same records and source links on the phone and the web.
-  "tasks.json": (local, remote, now) => ({ v: 1,
-    tasks: mergeById(local.tasks, remote?.tasks, "uid", "updated"),
-    next: (remote?.next?.updated || 0) > (local.next?.updated || 0) ? remote.next : (local.next || { uid: "", updated: 0 }),
-  }),
-  // Journal pages are written by the phone; same rule as JournalStore.merge.
-  "journal.json": (local, remote, now) => ({ v: 1, pages: mergeById(local.pages, remote?.pages, "uid", "updated") }),
-  // Workouts: same rule as GymStore.merge; deleted workouts stay as markers.
-  "gym.json": (local, remote) => ({ v: 1, workouts: mergeById(local.workouts, remote?.workouts, "id", "updated") }),
-};
 
 // ── Journal pages: photographed on the phone, read by Claude; each line knows where it sits on the photo. ──
 export const journal = {
@@ -72,7 +38,7 @@ export const journal = {
   edit(uid, change) {
     const doc = load("journal.json"), page = doc.pages.find(p => p.uid === uid && !p.deleted);
     if (!page) throw new Error("This page was removed.");
-    change(page); page.updated = Date.now(); save("journal.json", doc); changed("journal.json"); return page;
+    change(page); page.updated = Math.max(Date.now(), (page.updated || 0) + 1); save("journal.json", doc); changed("journal.json"); return page;
   },
   remove(uid) {
     const doc = load("journal.json"), page = doc.pages.find(p => p.uid === uid); if (!page) return;
@@ -95,7 +61,7 @@ export const notes = {
   edit(uid, change) {
     const doc = load("notes.json"), note = doc.notes.find(n => n.uid === uid && !n.deleted);
     if (!note) throw new Error("This note was deleted.");
-    change(note); note.updated = Date.now(); save("notes.json", doc); changed("notes.json"); return note;
+    change(note); note.updated = Math.max(Date.now(), (note.updated || 0) + 1); save("notes.json", doc); changed("notes.json"); return note;
   },
   update(uid, text) { return this.edit(uid, n => { n.text = String(text).slice(0, NOTE_LIMIT); }); },
   pin(uid, pinned) { return this.edit(uid, n => { n.pinned = pinned; }); },
@@ -267,7 +233,7 @@ export const gym = {
   edit(id, change) {
     const doc = load("gym.json"), w = doc.workouts.find(x => x.id === id && !x.deleted);
     if (!w) throw new Error("This workout was removed.");
-    change(w); w.updated = Date.now(); save("gym.json", doc); changed("gym.json"); return w;
+    change(w); w.updated = Math.max(Date.now(), (w.updated || 0) + 1); save("gym.json", doc); changed("gym.json"); return w;
   },
   start() {
     const open = gym.active(); if (open) return open;

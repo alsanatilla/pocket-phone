@@ -1,9 +1,10 @@
-// Photo books live in IndexedDB, alongside (not inside) Pocket's Drive documents.
+import { activeAccount } from './workspace-storage.js';
+// Photo books live in account-scoped IndexedDB, outside Pocket workspace sync.
 let opening;
 let writes = Promise.resolve();
 function database() {
   if (!opening) opening = new Promise((resolve, reject) => {
-    const request = indexedDB.open("pocket-zines", 1);
+    const request = indexedDB.open(activeAccount() ? "pocket-zines:" + activeAccount() : "pocket-zines", 1);
     request.onupgradeneeded = () => {
       request.result.createObjectStore("books", { keyPath: "id" });
       request.result.createObjectStore("photos", { keyPath: "id" });
