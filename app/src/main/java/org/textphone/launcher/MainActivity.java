@@ -81,6 +81,7 @@ public class MainActivity extends Activity {
     private static final int AMBER = PocketDesign.WARNING;
     private static final int CAMERA_REQUEST = 41;
     private static final int EXPORT_REQUEST = 72;
+    private static final int NOTE_HISTORY_REQUEST = 73;
     private static final int[] ACCENTS = {0xFFF9F594, 0xFF9BE564, 0xFF8FDDE7, Color.WHITE};
     private static final String[] ACCENT_NAMES = {"Yellow", "Green", "Blue", "White"};
     private static final String[] SHORTCUTS = {"smart txt", "whatsapp", "dumb txt", "contacts",
@@ -100,6 +101,9 @@ public class MainActivity extends Activity {
     private LinearLayout pocketAppResults;
     private long captureReview;
     private String workspaceSearchQuery="";
+    private volatile int workspaceSearchRequest;
+    private Runnable workspaceSearchTask;
+    private boolean openingSearchResult;
     private boolean captureImportant;
     private int captureSelectionStart = -1, captureSelectionEnd = -1;
     private long captureId;
@@ -1684,6 +1688,7 @@ public class MainActivity extends Activity {
             LinearLayout row=ReadableRows.item(this,excerpt[0],(planner.notePinned(entry.id)?"Pinned · ":"")+excerpt[1],SECONDARY,"note_open_"+entry.id,()->openNote(entry.id));
             row.setOnLongClickListener(v->{entryMenu(entry);return true;});host.addView(row);
         }
+        if(PocketCloud.selected(this)&&PocketCloud.saved(this))actionInto(host,"recently deleted",14,SECONDARY,()->openNoteHistory(0));
     }
     private void renderThoughts(LinearLayout host) {
         List<ParkingStore.Item> items = ParkingStore.open(this); section(host,"thoughts · "+items.size(),true);
@@ -1743,16 +1748,50 @@ public class MainActivity extends Activity {
         hideKeyboard(captureEditor);captureEditor=null;captureText="";leave(workspace()?"today":"home");showFeedback("Thought saved.");
     }); }
     private void renderWorkspaceSearch() {
-        heading("search","today");EditText search=new EditText(this);PocketDesign.input(search);search.setSingleLine(true);search.setTag("workspace_search");search.setHint("Thoughts, tasks, notes and appointments");search.setText(workspaceSearchQuery);content.addView(search);
+        heading("search","today");EditText search=new EditText(this);PocketDesign.input(search);search.setSingleLine(true);search.setTag("workspace_search");search.setHint("Find anything…");search.setFilters(new InputFilter[]{new InputFilter.LengthFilter(200)});search.setText(workspaceSearchQuery);content.addView(search);
         LinearLayout results=new LinearLayout(this);results.setOrientation(LinearLayout.VERTICAL);results.setTag("workspace_search_results");content.addView(results);
-        Runnable find=()->{workspaceSearchQuery=search.getText().toString();results.removeAllViews();String query=workspaceSearchQuery.trim().toLowerCase(Locale.ROOT);
-            if(query.isEmpty()){results.addView(text("Find a thought, an action, a note or time you set aside.",16,SECONDARY));return;}int count=0;
-            for(ParkingStore.Item item:ParkingStore.open(this))if(item.text.toLowerCase(Locale.ROOT).contains(query)){results.addView(ReadableRows.item(this,item.text,"Thought",SECONDARY,"search_thought_"+item.id,()->openThought(item.id)));count++;}
-            for(PlannerStore.Entry entry:planner.entries()){String haystack=entry.text+"\n"+PlannerStore.stepsText(entry.steps)+(entry.source==null?"":"\n"+entry.source.text);
-                if(haystack.toLowerCase(Locale.ROOT).contains(query)){results.addView(ReadableRows.item(this,ReadableRows.excerpt(entry.text)[0],"task".equals(entry.kind)?(entry.done?"Task · done":"Task"):"Note",SECONDARY,"search_entry_"+entry.id,()->{if("task".equals(entry.kind))openTask(entry.id);else openNote(entry.id);}));count++;}}
-            for(AgendaStore.Event event:AgendaStore.list(this))if(event.title.toLowerCase(Locale.ROOT).contains(query)){results.addView(ReadableRows.item(this,event.title,"Appointment · "+java.text.DateFormat.getDateTimeInstance().format(new Date(event.when)),SECONDARY,"search_appointment_"+event.id,()->startActivity(new Intent(this,AgendaActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("appointment_id",event.id))));count++;}
-            if(count==0)results.addView(text("Nothing found.",16,SECONDARY));
-        };search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){find.run();}public void afterTextChanged(Editable e){}});find.run();addFeedback();
+        final int page=pageGeneration;android.content.Context app=getApplicationContext();final String account=PocketCloud.accountId(app);
+        Runnable find=()->{
+            workspaceSearchQuery=search.getText().toString();String query=workspaceSearchQuery.trim();int request=++workspaceSearchRequest;
+            if(workspaceSearchTask!=null)appUi.removeCallbacks(workspaceSearchTask);results.removeAllViews();if(query.isEmpty())return;
+            results.addView(text("…",16,SECONDARY));
+            workspaceSearchTask=()->appWorker.execute(()->{
+                if(request!=workspaceSearchRequest)return;
+                try{
+                    PocketSearch.Snapshot local=PocketSearch.local(app,query);
+                    appUi.post(()->{if(!destroyed&&page==pageGeneration&&request==workspaceSearchRequest)showSearchResults(results,local.hits,local);});
+                    if(!PocketCloud.selected(app)||!PocketCloud.saved(app)||request!=workspaceSearchRequest)return;
+                    org.json.JSONObject response=PocketCloud.api(app,"GET","/api/search?q="+Uri.encode(query),null);
+                    if(!account.equals(response.optString("accountId"))||!account.equals(PocketCloud.accountId(app)))return;
+                    org.json.JSONArray remote=response.optJSONArray("results");if(remote==null)return;
+                    List<PocketSearch.Hit> merged=local.combine(remote);
+                    appUi.post(()->{if(!destroyed&&page==pageGeneration&&request==workspaceSearchRequest)showSearchResults(results,merged,local);});
+                }catch(IOException|org.json.JSONException|IllegalStateException unavailable){appUi.post(()->{if(!destroyed&&page==pageGeneration&&request==workspaceSearchRequest&&results.getChildCount()==1&&results.getChildAt(0) instanceof TextView&&"…".contentEquals(((TextView)results.getChildAt(0)).getText())){results.removeAllViews();results.addView(text("Search is unavailable. Try again.",16,AMBER));}});}
+            });appUi.postDelayed(workspaceSearchTask,180);
+        };
+        search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){find.run();}public void afterTextChanged(Editable e){}});find.run();addFeedback();
+    }
+    private void showSearchResults(LinearLayout results,List<PocketSearch.Hit> list,PocketSearch.Snapshot local){
+        results.removeAllViews();if(list.isEmpty()){results.addView(text("Nothing found.",16,SECONDARY));return;}
+        for(PocketSearch.Hit hit:list){String body=hit.body.replaceAll("[\\r\\n]+"," ").trim();if(body.length()>160)body=body.substring(0,160)+"…";
+            PocketSearch.Hit copy=local.copies.get(hit.key());boolean fetch=copy==null||copy.updated<hit.updated;
+            results.addView(ReadableRows.item(this,hit.title,hit.label()+(body.isEmpty()?"":" · "+body),SECONDARY,"search_"+hit.kind+"_"+hit.uid,()->openSearchResult(hit,fetch)));
+        }
+    }
+    private void openSearchResult(PocketSearch.Hit hit,boolean fetch){
+        if(!fetch&&PocketSearch.available(this,hit.kind,hit.uid)){showSearchResult(hit);return;}
+        if("appointment".equals(hit.kind)){showSearchResult(hit);return;}
+        if(openingSearchResult)return;openingSearchResult=true;int page=pageGeneration,request=workspaceSearchRequest;showFeedback("Loading…");android.content.Context app=getApplicationContext();
+        appWorker.execute(()->{try{PocketSearch.download(app,hit.kind);appUi.post(()->{openingSearchResult=false;if(destroyed||!appVisible||page!=pageGeneration||request!=workspaceSearchRequest)return;showFeedback("");if(PocketSearch.available(this,hit.kind,hit.uid))showSearchResult(hit);else showFeedback("This item was removed.");});}
+            catch(IOException|org.json.JSONException|IllegalStateException error){appUi.post(()->{openingSearchResult=false;if(!destroyed&&appVisible&&page==pageGeneration&&request==workspaceSearchRequest)showFeedback("Connect to load this result.");});}});
+    }
+    private void showSearchResult(PocketSearch.Hit hit){
+        if("note".equals(hit.kind)){PlannerStore.Entry note=NoteSync.byUid(planner,hit.uid);if(note!=null)openNote(note.id);}
+        else if("task".equals(hit.kind)){PlannerStore.Entry task=TaskSync.byUid(planner,hit.uid);if(task!=null)openTask(task.id);}
+        else if("thought".equals(hit.kind)){try{openThought(Long.parseLong(hit.uid));}catch(NumberFormatException invalid){showFeedback("This thought is unavailable.");}}
+        else if("chat".equals(hit.kind)){ClaudeChatRepository.get(this).open(hit.uid);openChat();}
+        else if("paper".equals(hit.kind))startActivity(new Intent(this,JournalPageActivity.class).putExtra("page",hit.uid));
+        else if("appointment".equals(hit.kind)){try{startActivity(new Intent(this,AgendaActivity.class).putExtra("appointment_id",Long.parseLong(hit.uid)));}catch(NumberFormatException invalid){showFeedback("This appointment is unavailable.");}}
     }
     private void searchOrganizer(){
         int page=pageGeneration;EditText search=new EditText(this);search.setTag("organizer_search");search.setTextColor(PRIMARY);search.setHintTextColor(SECONDARY);search.setTextSize(16);search.setTypeface(Typeface.MONOSPACE);search.setSingleLine(true);search.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);search.setMinHeight(dp(48));search.setHint("> Find tasks or notes");search.setText(organizerQuery);PocketDesign.input(search);
@@ -1927,17 +1966,23 @@ public class MainActivity extends Activity {
     private void entryMenu(PlannerStore.Entry entry) {
         boolean task = "task".equals(entry.kind);
         String[] choices = task && !entry.done ? new String[]{"Make next", "Schedule", "Edit", "Delete"}
-                : task ? new String[]{"Edit", "Delete"} : new String[]{"Edit","Delete",planner.notePinned(entry.id)?"Unpin":"Pin"};
+                : task ? new String[]{"Edit", "Delete"} : PocketCloud.selected(this)&&PocketCloud.saved(this)
+                ? new String[]{"Edit","Delete",planner.notePinned(entry.id)?"Unpin":"Pin","History"}
+                : new String[]{"Edit","Delete",planner.notePinned(entry.id)?"Unpin":"Pin"};
         new AlertDialog.Builder(this).setTitle(task ? "Task" : "Note").setItems(choices, (dialog, which) -> {
             String choice = choices[which];
             if ("Make next".equals(choice)) plannerAction(() -> { planner.makeNext(entry.id); render(); });
             else if ("Schedule".equals(choice)) startActivity(new Intent(this,TaskReminderActivity.class).putExtra("task",entry.id));
             else if ("Edit".equals(choice)) openCapture(entry.kind, entry.id, entry.text);
             else if("Pin".equals(choice)||"Unpin".equals(choice))plannerAction(()->{planner.pinNote(entry.id,"Pin".equals(choice));render();});
+            else if("History".equals(choice))openNoteHistory(entry.id);
             else new AlertDialog.Builder(this).setTitle("Delete " + (task ? "task" : "note") + "?")
                     .setNegativeButton("Cancel", null).setPositiveButton("Delete", (confirmation, button) ->
                             plannerAction(() -> { TaskReminders.delete(this,entry.id); planner.clearDraft(entry.kind, entry.id); if("note_preview".equals(screen)){trail.take(pageKey("capture"));leave("today");}else render(); })).show();
         }).show();
+    }
+    private void openNoteHistory(long id) {
+        persistDraft(); startActivityForResult(new Intent(this,NoteHistoryActivity.class).putExtra("note",id),NOTE_HISTORY_REQUEST);
     }
 
     private void openCapture(String kind, long id, String text) {
@@ -2200,6 +2245,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if(requestCode==NOTE_HISTORY_REQUEST){if(resultCode==RESULT_OK&&data!=null)openNote(data.getLongExtra("note",0));return;}
         if (requestCode != EXPORT_REQUEST || resultCode != RESULT_OK || data == null || data.getData() == null) return;
         try (OutputStream output = getContentResolver().openOutputStream(data.getData(), "wt")) {
             if (output == null) throw new IOException("No writable file.");

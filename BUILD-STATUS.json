@@ -1,157 +1,80 @@
 {
-  "component": "Pocket Phone Android launcher/apps and Astro browser workspace",
-  "version_name": "0.10.0",
-  "version_code": 36,
+  "component": "Pocket Android launcher/apps and Astro browser workspace",
+  "version_name": "0.11.0",
+  "version_code": 37,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-06T16:16:37.851Z",
-  "build": "Astro build and assembleRom passed. Test suite skipped at the user request. APK unsigned for the release agent.",
+  "checked_at_utc": "2026-10-06T19:43:00Z",
+  "build": "Astro production build and Android assembleRom passed. Full test suite and lint skipped at the user's request. APK unsigned for the signing agent.",
   "commands": [
     "npm run build",
-    "./gradlew.bat -I app/build/tmp/release-output-091-final.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain",
+    "./gradlew.bat -I app/build/tmp/release-0110.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain",
     "npm run db:setup"
   ],
   "build_environment": {
     "java": "17.0.20.1+1",
-    "android_sdk": 35,
     "node": "v24.19.0",
     "astro": "7.3.6",
     "vercel_adapter": "11.0.12",
     "libsql_client": "0.18.0",
     "better_auth": "1.7.7",
+    "passkey_plugin": "1.7.7",
+    "simplewebauthn_browser": "13.3.0",
     "drizzle": "0.45.3",
-    "output_directory": "app/build/release-0100",
-    "note": "A temporary Gradle init script uses a fresh build directory to avoid a Windows lock on an earlier classes.dex."
-  },
-  "final_test_suite": {
-    "status": "Skipped",
-    "reason": "Explicit user instruction; no lint run"
+    "output_directory": "app/build/release-0110",
+    "note": "An ignored Gradle init script selects a fresh output directory to avoid an earlier Windows file lock."
   },
   "apk": {
-    "file": "app/build/release-0100/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.10.0-unsigned.apk",
-    "bytes": 8945288,
-    "sha256": "d828e61d7ba8e1897a8e08dcb8ed18ba76dc4670b0100f1631d97039e9525726",
+    "file": "app/build/release-0110/outputs/apk/rom/app-rom-unsigned.apk",
+    "release_asset": "pocket-phone-0.11.0-unsigned.apk",
+    "bytes": 8960988,
+    "sha256": "fe16103e34cb18b9929c42767d82edd6cd0200ba8692cd979246d31dfbac2e33",
     "signed": false,
     "installable_update": false,
-    "signing": "Another release agent handles signing"
+    "signing": "Another release agent handles signing. Retaining installed app data requires the existing certificate."
   },
   "web": {
-    "framework": "Astro, server output",
+    "framework": "Astro server output",
     "hosting": "Vercel",
     "url": "https://pocket-phone.vercel.app/",
     "static_output": ".vercel/output/static",
     "server_output": ".vercel/output/functions/_render.func",
-    "release_asset": "pocket-web-0.9.1-source.zip",
-    "backup_origin": "https://alsanatilla.github.io/pocket-phone/",
+    "release_asset": "pocket-web-0.11.0-source.zip",
     "root_prerendered": true,
     "hashed_client_assets": true,
-    "offline_worker": "pocket-astro-091",
-    "browser_token_scan": "Passed: supplied token absent from source, public files and entire .vercel/output",
-    "private_env_ignored": true
+    "offline_worker": "pocket-astro-0110"
   },
-  "database_connection": {
-    "status": "Passed",
-    "provider": "libSQL/Turso",
-    "operation": "Additive pocket_ table setup and SELECT 1 with the supplied private .env configuration",
-    "real_fixture_accounts_created": 0,
-    "real_fixture_photos_uploaded": 0,
-    "destructive_operations": 0
+  "focused_verification": {
+    "environment": "Isolated file databases, fictional credentials and synthetic accounts; no production records or paid provider requests",
+    "passkey_protocol": "Passed: real synthetic P-256 registration/assertions, user verification, origins, challenge replay, expired contexts, duplicate email, multiple passkeys sharing one owner, atomic last-key guard and session revocation",
+    "phone_protocol": "Passed: claim, approve, redeem and bearer session retain one owner; foreign approvals rejected; codes redeem once; denial and revocation enforced",
+    "private_http": "Passed: ten unauthenticated private routes return 401, foreign account-start Origin returns 403, null/array restore bodies return 400, owner isolation for sync/search/history/restore/photos",
+    "search_and_history": "Passed: complete bounded text, ownership, first-checkpoint preservation, editing coalescing, 60-version cap, recent deletion dates, concurrent backfill/sync and rollback when indexing fails",
+    "browser": "Passed: separate account creation and password sign-in, history restores original text, deleted-note recovery creates a new UID, accent-insensitive Notes/Tasks/Thoughts/Pip matches, newer server matches download before opening and phone-code approval",
+    "layout": "Account checked at 1280px and 390px; no horizontal overflow",
+    "production_database": "Connection, additive schema and FTS5 index setup passed; user records were not read or edited"
   },
-  "api_smoke_check": {
-    "status": "Passed",
-    "storage": "Temporary local libSQL/SQLite database; fictional accounts and photos only",
-    "checks": [
-      "Email/password signup and bearer sign-in",
-      "Unauthenticated workspace and photo requests rejected",
-      "Accounts read only their own documents",
-      "Account ID mismatch rejected",
-      "Foreign-origin browser writes rejected",
-      "Concurrent writes retain both devices’ records",
-      "Deletion markers win over stale offline copies",
-      "Unknown collections rejected",
-      "Native bearer session read without browser Origin",
-      "Private JPEG upload/download",
-      "Paper deletion removes its server photo",
-      "Stale photo upload after page deletion rejected",
-      "Sign-out invalidates the bearer session"
-    ]
-  },
-  "client_storage_smoke_check": {
-    "status": "Passed",
-    "storage": "Isolated in-memory browser storage and fake API; no user data or provider account touched",
-    "checks": [
-      "Guest chat lists and drafts retained",
-      "Each account enumerates only its own chats",
-      "Tab API keys are account scoped",
-      "Explicit guest import excludes provider keys",
-      "Clearing one account retains other accounts and guest copies",
-      "An edit made during sync remains local and waiting",
-      "Remote records merge without replacing that edit",
-      "Next sync acknowledges and clears the waiting edit",
-      "Deleted note remains a server tombstone",
-      "Offline startup performs no network requests",
-      "Failed reconnect retains queued edits",
-      "Recovered network re-reads the session and syncs without a reload"
-    ]
-  },
-  "visual_review": {
-    "live_browser_rendered": false,
-    "handset_rendered": false,
-    "status": "T3 preview_status and preview_open returned Authentication required. No alternative browser automation used."
-  },
-  "sync_collections": [
-    "Thoughts",
-    "Tasks",
-    "Notes",
-    "Paper",
-    "Activity",
-    "Dice lists",
-    "Gym workouts",
-    "Pip chats",
-    "Photo zines (browser)",
-    "COROS connection and readings"
-  ],
+  "full_test_suite": { "status": "Skipped", "reason": "Explicit user instruction; lint also skipped" },
   "changes": [
-    "Server-held, encrypted COROS connection per account with stored readings, 15-minute on-demand refresh, hourly phone job and a daily scheduled refresh",
-    "Pip chats sync phone and browser with per-reply merge; provider keys stay local",
-    "Photo zines sync between browsers with their photos"
+    "One account with separate create/sign-in flows, multiple passkeys, browser-approved native phone codes and revocable sessions",
+    "Shared local/account search across Notes, Tasks, parked Thoughts, Paper and Pip",
+    "Account note history and 30-day deleted-note recovery on phone and web",
+    "Encrypted phone grants and durable sign-out cleanup survive transient failures"
   ],
   "known_limits": [
-    "APK needs signing by the release agent before installation.",
-    "The test suite and lint were skipped as requested.",
-    "Physical handset sync, gestures, camera and cellular behavior remain unverified.",
-    "Live browser rendering could not be inspected because preview requires authentication.",
-    "Vercel must have TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in its deployment environment.",
-    "Email/password accounts have no email verification or password reset service.",
+    "APK requires signing before installation.",
+    "Physical authenticator prompts and handset behavior remain unverified.",
+    "Passkeys belong to their site's domain; development and production accounts are separate.",
+    "Email verification and password-reset mail are not configured.",
     "Phone workspace remains bound to the first Pocket account.",
-    "Pip chats, photo zines, provider keys, COROS connections and native communication/calendar records are device-local.",
+    "Offline server revocations retry on later eligible account activity or sync.",
+    "Provider keys, native communication/calendar records and camera album photos remain on their device.",
     "Workspace JSON backups exclude photos, chats and zines.",
-    "Sync requests are capped at 3 MB and Paper photos at 2 MB.",
-    "Generic compatible chat endpoints still require browser CORS and function tool support; live paid providers were not checked."
+    "Generic compatible chat endpoints require browser CORS and function-tool support; live paid providers were not checked."
   ],
   "agent_paid_api_requests": 0,
+  "physical_handset_checked": false,
   "full_custom_rom_compiled": false,
-  "previous_release": "v0.9.1",
-  "prior_checks": {
-    "note": "Pip stream/SDK and rendered Gym fixtures belong to v0.8.0 or earlier and are not final 0.9.0 test-suite results. See historical Git/release build status."
-  },
-  "persistence_checks": {
-    "database": "Isolated file database with fictional credentials",
-    "covered": [
-      "COROS token rotation and failed refreshes keep saved readings",
-      "concurrent chat edits merge per reply",
-      "zine photo upload gating and deletion",
-      "account separation, origin guards, expired sessions",
-      "job endpoint authorization"
-    ],
-    "http_smoke": "PASS (local Astro dev server, fictional environment)",
-    "real_coros_data": false
-  },
-  "scheduled_job": {
-    "workflow": ".github/workflows/coros-refresh.yml",
-    "schedule": "daily 06:23 UTC",
-    "secret": "POCKET_COROS_CRON_SECRET set in the repository (derived server-side value, not printed)"
-  }
+  "previous_release": "v0.10.0"
 }

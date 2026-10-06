@@ -9,47 +9,142 @@ import com.google.android.gms.auth.api.identity.Identity;
 import com.google.android.gms.common.api.ApiException;
 import java.text.DateFormat;
 import java.util.Date;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /** Pocket accounts sync through the Astro API; existing Drive connections remain available. */
 public final class CloudActivity extends PocketActivity {
     private static final int AUTHORIZE = 731;
     private boolean syncing;
+    private boolean foreground, linking;
+    private PocketCloud.Link link;
+    private String linkError = "";
+    private int linkGeneration, deviceGeneration;
+    private final Runnable poll = this::pollLink;
 
     @Override protected void onCreate(Bundle state) { super.onCreate(state); render(); }
-    @Override protected void onResume() { super.onResume(); render(); }
+    @Override protected void onResume() {
+        super.onResume(); foreground = true; int generation = linkGeneration;
+        load(() -> PocketCloud.pendingLink(getApplicationContext()), pending -> {
+            if (generation != linkGeneration) return; link = pending; linkError = ""; render(); schedulePoll();
+        }, error -> { if (generation != linkGeneration) return; linkError = reason(error); render(); message(linkError); });
+    }
+    @Override protected void onPause() { foreground = false; ui.removeCallbacks(poll); super.onPause(); }
     @Override protected void onCloudSynced() { render(); }
+    @Override protected String scene() { return PixelBackdrop.STARS; }
 
     private void render() {
-        screen("storage & devices");
+        screen("account");
+        appSettings(this::accountOptions);
         boolean on = CloudSync.enabled(this);
         long ok = CloudSync.prefs(this).getLong("last_ok", 0); String error = CloudSync.prefs(this).getString("last_error", "");
-        String status = syncing ? "Syncing…" : !on ? "Off" : ok == 0 ? "On · waiting for the first sync" : "On · last synced " + DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(new Date(ok));
-        body.addView(label((on ? (PocketCloud.selected(this) ? "Pocket · " : "Drive · ") : "") + status, PocketDesign.BODY, on ? PocketDesign.accent(this) : WHITE));
-        if (!error.isEmpty()) body.addView(label(error, PocketDesign.SMALL, PocketDesign.WARNING));
-        section("Pocket");
-        if (!PocketCloud.email(this).isEmpty()) body.addView(label(PocketCloud.email(this), PocketDesign.SMALL, GRAY));
-        if (PocketCloud.selected(this) && PocketCloud.saved(this)) {
-            if (!on) action("turn on", () -> { CloudSync.enable(this); syncNow(); });
-            else {
-                android.widget.Button sync = action(syncing ? "Syncing…" : "Sync now", this::syncNow); sync.setEnabled(!syncing); sync.setTag("cloud_sync");
-                action("turn off", () -> { CloudSync.disable(this); render(); }).setTag("cloud_off");
+        if (link != null) {
+            section("LINK THIS PHONE");
+            TextView code = label(link.displayCode(), 52, PocketDesign.accent(this)); code.setTypeface(PocketFonts.pixel(this));
+            code.setGravity(android.view.Gravity.CENTER); code.setPadding(0, dp(28), 0, dp(28)); code.setTextIsSelectable(true); body.addView(code);
+            TextView address = label("pocket-phone.vercel.app/link", PocketDesign.SMALL, GRAY); address.setGravity(android.view.Gravity.CENTER); body.addView(address);
+            action("open browser", () -> openWeb(link.browser));
+            action("copy code", () -> { ((android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(android.content.ClipData.newPlainText("Pocket phone code", link.displayCode())); message("Copied."); });
+            if (!linkError.isEmpty()) {
+                body.addView(label(linkError, PocketDesign.SMALL, PocketDesign.WARNING));
+                action("try again", this::pollLink).setEnabled(!linking);
             }
-            if (!error.isEmpty()) action("sign in again", this::pocketSignIn);
-            action("sign out", () -> load(() -> { PocketCloud.signOut(getApplicationContext()); return true; }, done -> render(), reason -> failed(reason.getMessage())));
-        } else action("sign in to Pocket", this::pocketSignIn);
-        section("Drive");
-        if (!on || PocketCloud.selected(this)) action("connect Drive", this::authorize).setTag("cloud_on");
-        else {
-            android.widget.Button sync = action(syncing ? "Syncing…" : "Sync now", this::syncNow); sync.setTag("cloud_sync"); sync.setEnabled(!syncing);
-            action("sign in again", this::authorize);
-            action("turn off", () -> confirm("Turn off cloud sync? The copy in Drive stays.", () -> { CloudSync.disable(this); render(); })).setTag("cloud_off");
+            action("cancel", this::cancelPhoneLink);
+            return;
         }
-        action("open on the web\n" + CloudSync.WEB, () -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(CloudSync.WEB)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
+        if (!PocketCloud.saved(this)) {
+            body.addView(label("not signed in", PocketDesign.SMALL, GRAY));
+            android.widget.Button primary = action(linking ? "connecting…" : "link this phone", this::startLink);
+            primary.setEnabled(!linking); primary.setTag("pocket_link_phone"); primary.setTextSize(28); primary.setTypeface(PocketFonts.pixel(this)); primary.setTextColor(PocketDesign.accent(this));
+            action("use a password", this::pocketSignIn);
+            action("create account in browser", () -> openWeb(CloudSync.WEB + "#/account/new"));
+            if (on && !PocketCloud.selected(this)) { section("DRIVE"); body.addView(label(status(ok), PocketDesign.SMALL, GRAY)); action("sync now", this::syncNow); }
+            return;
+        }
+        TextView email = label(PocketCloud.email(this), PocketDesign.BODY, WHITE); email.setTextIsSelectable(true); body.addView(email);
+        TextView state = label(syncing ? "syncing…" : !error.isEmpty() ? "sync failed" : !on ? "sync paused" : !PocketCloud.selected(this) ? "Drive connected" : status(ok), 25, !error.isEmpty() ? PocketDesign.WARNING : PocketDesign.accent(this));
+        state.setTypeface(PocketFonts.pixel(this)); body.addView(state);
+        if (!error.isEmpty()) body.addView(label(error, PocketDesign.SMALL, PocketDesign.WARNING));
+        section("DEVICES"); LinearLayout devices = new LinearLayout(this); devices.setOrientation(LinearLayout.VERTICAL); body.addView(devices);
+        drawDevices(devices);
+        action("passkeys", () -> openWeb(CloudSync.WEB + "#/account"));
+        softKeys(new String[]{syncing ? "syncing…" : "sync now", on && PocketCloud.selected(this) ? "pause" : "use Pocket", "sign out"}, 0,
+                () -> { if (!PocketCloud.selected(this)) CloudSync.prefs(this).edit().putString("transport", "pocket").apply(); CloudSync.enable(this); syncNow(); },
+                () -> { if (on && PocketCloud.selected(this)) CloudSync.disable(this); else { CloudSync.prefs(this).edit().putString("transport", "pocket").apply(); CloudSync.enable(this); } render(); },
+                () -> confirm("Sign out of Pocket on this phone?", () -> load(() -> { PocketCloud.signOut(getApplicationContext()); return true; }, done -> render(), reason -> failed(reason.getMessage()))));
+    }
+    private String status(long ok) { return ok == 0 ? "waiting to sync" : "synced " + DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date(ok)); }
+    private void openWeb(String url) { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); }
+    private void accountOptions() {
+        String[] choices = {"link with a new code", "password sign in", "Drive", "open web"};
+        new android.app.AlertDialog.Builder(this).setTitle("Account").setItems(choices, (dialog, index) -> {
+            if (index == 0) startLink(); else if (index == 1) pocketSignIn();
+            else if (index == 2) new android.app.AlertDialog.Builder(this).setTitle("Drive").setItems(new String[]{"connect Drive", "pause sync"}, (d, i) -> { if (i == 0) authorize(); else { CloudSync.disable(this); render(); } }).show();
+            else openWeb(CloudSync.WEB + "#/account");
+        }).show();
+    }
+    private void startLink() {
+        if (linking || syncing) return; linking = true; int generation = ++linkGeneration; message("Getting a code…");
+        load(() -> PocketCloud.startLink(getApplicationContext()), pending -> { if (generation != linkGeneration) return; linking = false; link = pending; linkError = ""; render(); schedulePoll(); },
+                error -> { if (generation == linkGeneration) recoverLink(generation, error); });
+    }
+    private void cancelPhoneLink() {
+        linkGeneration++; ui.removeCallbacks(poll);
+        try { PocketCloud.cancelLink(this); linking = false; link = null; linkError = ""; render(); }
+        catch (IllegalStateException error) { linking = false; linkError = reason(error); render(); message(linkError); }
+    }
+    private static String reason(Exception error) { return error.getMessage() == null ? "Pocket could not connect. Try again." : error.getMessage(); }
+    /** A network error does not invalidate an encrypted grant that can still finish linking. */
+    private void recoverLink(int generation, Exception error) {
+        ui.removeCallbacks(poll); String failure = reason(error);
+        load(() -> PocketCloud.pendingLink(getApplicationContext()), pending -> {
+            if (generation != linkGeneration) return; linking = false; link = pending; linkError = pending == null ? "" : failure; render();
+            if (pending == null) message(failure);
+        }, unreadable -> {
+            if (generation != linkGeneration) return; linking = false; linkError = reason(unreadable); render(); message(linkError);
+        });
+    }
+    private void schedulePoll() {
+        ui.removeCallbacks(poll);
+        if (foreground && link != null && !closed) ui.postDelayed(poll, Math.max(500, link.nextPoll - System.currentTimeMillis()));
+    }
+    private void pollLink() {
+        if (!foreground || link == null || linking || closed) return;
+        linking = true; int generation = linkGeneration;
+        if (!linkError.isEmpty()) { linkError = ""; render(); message("Connecting…"); }
+        load(() -> { boolean done = PocketCloud.pollLink(getApplicationContext()); return done ? null : PocketCloud.pendingLink(getApplicationContext()); }, pending -> {
+            if (generation != linkGeneration) return; linking = false;
+            link = pending;
+            if (pending == null) { render(); if (PocketCloud.saved(this)) syncNow(); else message("That code expired. Show a new one."); }
+            else schedulePoll();
+        }, error -> { if (generation == linkGeneration) recoverLink(generation, error); });
+    }
+    private void drawDevices(LinearLayout host) {
+        int generation = ++deviceGeneration;
+        load(() -> new JSONObject().put("list", PocketCloud.authList(this, "/api/auth/list-sessions")).put("current", PocketCloud.api(this, "GET", "/api/auth/get-session", null).getJSONObject("session").getString("id")), value -> {
+            if (generation != deviceGeneration || host.getParent() == null) return;
+            JSONArray list = value.optJSONArray("list"); if (list == null) return;
+            for (int i = 0; i < list.length(); i++) {
+                JSONObject device = list.optJSONObject(i); if (device == null) continue;
+                boolean mine = device.optString("id").equals(value.optString("current")); String name = mine ? "this phone" : deviceName(device.optString("userAgent"));
+                LinearLayout line = row(); line.addView(label(name, PocketDesign.SMALL, mine ? PocketDesign.accent(this) : WHITE), new LinearLayout.LayoutParams(0, -2, 1));
+                if (!mine) line.addView(button("sign out", () -> confirm("Sign out " + name + "?", () -> load(() -> PocketCloud.api(this, "POST", "/api/auth/revoke-session", new JSONObject().put("token", device.optString("token"))), result -> render(), reason -> message(reason.getMessage())))), new LinearLayout.LayoutParams(dp(92), -2));
+                host.addView(line);
+            }
+        }, error -> { if (generation == deviceGeneration) { host.addView(label(error.getMessage(), PocketDesign.SMALL, PocketDesign.WARNING)); if (error.getCause() instanceof CloudSync.SignInNeeded) action("link again", this::startLink); } });
+    }
+    private static String deviceName(String agent) {
+        if (agent.contains("Pocket Android")) return "Pocket phone";
+        String os = agent.contains("Android") ? "Android" : agent.contains("iPhone") || agent.contains("iPad") ? "iPhone / iPad" : agent.contains("Windows") ? "Windows" : agent.contains("Mac") ? "Mac" : "browser";
+        String browser = agent.contains("Edg/") ? "Edge" : agent.contains("Firefox/") ? "Firefox" : agent.contains("Chrome/") ? "Chrome" : agent.contains("Safari/") ? "Safari" : "";
+        return os + (browser.isEmpty() ? "" : " · " + browser);
     }
     private void pocketSignIn() {
         android.widget.LinearLayout fields = new android.widget.LinearLayout(this); fields.setOrientation(android.widget.LinearLayout.VERTICAL); fields.setPadding(dp(20), 0, dp(20), 0);
-        android.widget.EditText email = input("email", android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS); email.setSingleLine(true); email.setText(PocketCloud.email(this));
-        android.widget.EditText password = input("password", android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD); password.setSingleLine(true); password.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(128)});
+        android.widget.EditText email = new android.widget.EditText(this); email.setHint("email"); email.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS); PocketDesign.input(email); email.setSingleLine(true); email.setText(PocketCloud.email(this));
+        android.widget.EditText password = new android.widget.EditText(this); password.setHint("password"); password.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD); PocketDesign.input(password); password.setSingleLine(true); password.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(128)});
         password.setSaveEnabled(false);
         fields.addView(email); fields.addView(password);
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this).setTitle("Pocket account").setView(fields).setPositiveButton("sign in", null).setNeutralButton("create account", null).setNegativeButton("cancel", null).create();
@@ -64,8 +159,11 @@ public final class CloudActivity extends PocketActivity {
         if (address.isEmpty() || secret.isEmpty()) { message("Enter your email and password."); return; }
         if (create && secret.length() < 12) { message("Use at least 12 characters for your password."); return; }
         dialog.dismiss(); message(create ? "Creating account…" : "Signing in…");
+        int generation = ++linkGeneration; ui.removeCallbacks(poll);
         android.content.Context app = getApplicationContext();
-        load(() -> { PocketCloud.signIn(app, address, secret, create); return true; }, done -> syncNow(), error -> failed(error.getMessage()));
+        load(() -> { PocketCloud.signIn(app, address, secret, create); return true; }, done -> {
+            if (generation != linkGeneration) return; linking = false; link = null; linkError = ""; syncNow();
+        }, error -> { if (generation == linkGeneration) recoverLink(generation, error); });
     }
     private void authorize() {
         message("Opening Google…");

@@ -20,17 +20,27 @@ Calendar appointments, alarms, task reminders, drafts, notification handles, cal
 
 ## Connect devices
 
-In the browser, open **Apps → storage & devices** and create an account with an email and a password of at least 12 characters, or sign in. **Use this browser’s copy** imports guest records and chats into this account’s local copy; it does not copy provider keys or COROS authorization. Account copies stay separate. Switching or signing out reloads the workspace, and other open tabs reload when the selected account changes.
+In the browser, open **Apps → Account & devices**. Choose **sign in with passkey** or **use a password** for an existing account. **Create account** opens a separate form: register a passkey, or choose a password of at least 12 characters. A passkey is attached to your Pocket account, not a new account for its device. Once signed in, add another passkey from **Passkeys** if needed; a password account can add passkeys too.
 
-On the phone, open **Settings → Storage & devices → sign in to Pocket** with the same account. Signing in starts sync. The phone’s personal workspace is bound to its first Pocket account; signing in with another account is refused so existing phone records cannot be sent to another person. Turning sync off keeps the local copy and saved session. Signing out revokes the session and keeps local records.
+**Bring this browser’s workspace** imports guest records and chats into the chosen account’s local copy and transfers an existing guest COROS connection to the account. It does not copy provider keys. Account copies stay separate. Switching or signing out reloads the workspace, and other open tabs reload when the selected account changes.
+
+On the phone, open **Settings → storage & devices → link this phone**. Open the supplied browser link or enter the short code at [Pocket’s link page](https://pocket-phone.vercel.app/link), sign in to the same Pocket account, and approve the displayed code. The phone receives its own session and starts sync; it does not create another account or need its own passkey. Password sign-in remains available. Codes expire after ten minutes.
+
+The account screen lists device sessions and can sign out another session. Removing a passkey removes that sign-in key; the last key cannot be removed from an account without another sign-in method. The phone’s personal workspace is bound to its first Pocket account; signing in with another account is refused so existing phone records cannot be sent to another person. Turning sync off keeps the local copy and saved session. Signing out revokes the session and keeps local records.
 
 The browser uploads after local changes, reconnecting and returning to the tab, and polls for remote changes every minute while visible. Android schedules edits for the next available network, polls periodically and refreshes on app entry. **Sync now** runs immediately. Failed requests leave local edits available. A browser edit made during a request remains queued until a later response acknowledges it.
 
-Accounts currently use email/password without email verification or a password reset service. Email is an account identifier; Pocket does not send mail.
+Email is an account identifier. Pocket does not send verification or password-reset mail. A passkey created on one device may be available on another through its password manager or the browser’s nearby-device prompt; otherwise use an existing account password or an already-authorized browser to link the phone.
+
+## Search and note recovery
+
+Search covers Notes, Tasks and their steps/source text, parked Thoughts, Paper transcripts and Pip messages. Server results are scoped to the signed-in account; saved local records remain searchable offline. Phone appointments are local search results. Saves, deletions and the server search index change together in one transaction. Existing account records are indexed on their first search.
+
+Signed-in Notes offer **history** in the editor and **recently deleted** in the notes list. History keeps up to 60 text checkpoints per note. Edits within a ten-minute editing session coalesce while preserving the initial text. Restoring a version preserves the text being replaced, including a local draft that has not synced yet; a conflicting newer edit requires reviewing history again. Notes deleted within the last 30 days can be restored as new notes, keeping the old deletion marker intact.
 
 ## Deploy on Vercel
 
-The repository root is an Astro project. vercel.json selects Astro, npm ci and npm run build. The adapter creates static client assets and server functions for /api/auth/*, /api/sync and /api/files/*.
+The repository root is an Astro project. vercel.json selects Astro, npm ci and npm run build. The adapter creates static client assets and server functions for authentication, workspace/object sync, private photos, COROS, account search and note history.
 
 Set these server environment variables in Vercel for Production, and for Preview if preview deployments should use that database:
 
@@ -41,7 +51,7 @@ TURSO_AUTH_TOKEN=your-private-token
 
 Do not use PUBLIC_ prefixes. .env is ignored by Git. For local development, copy .env.example to .env, fill in the values, then run npm ci and npm run dev. npm run db:setup checks the connection and creates missing Pocket tables. The API also creates them on first use. Schema setup is additive and uses pocket_ table names.
 
-Optional BETTER_AUTH_SECRET separates session signing from the database token. Without it, the application derives a signing secret from TURSO_AUTH_TOKEN, so the two supplied variables are sufficient. Changing that token without a separate signing secret expires existing sessions. Optional BETTER_AUTH_URL fixes the canonical origin; otherwise authentication uses the request origin.
+Optional BETTER_AUTH_SECRET separates session signing from the database token. Without it, the application derives a signing secret from TURSO_AUTH_TOKEN, so the two supplied variables are sufficient. Changing that token without a separate signing secret expires existing sessions. Optional BETTER_AUTH_URL fixes the canonical origin; otherwise authentication uses the request origin. No additional key or environment variable is required for passkeys, device linking, search or history. Keep the production origin stable: passkeys registered for pocket-phone.vercel.app are tied to that hostname, and unrelated preview hostnames do not share them. Use the production URL when linking devices.
 
 Queries are parameterized and always scoped to the authenticated user. Browser writes check the request origin and account ID. Native writes use a bearer session and account ID. The server merges records in one write transaction rather than replacing a document with a device’s old copy. Sign-in and account creation use database-backed rate limits. API responses and private photos are not cached by the offline worker.
 

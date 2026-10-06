@@ -1,0 +1,5 @@
+---
+// Phone link codes open the account screen with the code filled in.
+const code = (Astro.url.searchParams.get('user_code') || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 16);
+return Astro.redirect('/#/link' + (code ? '/' + encodeURIComponent(code) : ''), 302);
+---

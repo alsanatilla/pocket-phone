@@ -2,9 +2,11 @@ import { storage as localStorage } from './workspace-storage.js';
 // Pocket workstation, hosted by Astro.
 import * as cloud from "./cloud.js";
 import * as legacyDrive from "./drive.js";
-import { clearWorkspace, activeAccount } from "./workspace-storage.js";
+import { clearWorkspace, activeAccount, guestHasData } from "./workspace-storage.js";
 import { FILES, importDocument, merge } from "./store.js";
 import { validDocument } from '../shared/workspace.js';
+import { SEARCH_KINDS, documentRows, chatRows, localSearch } from '../shared/search.js';
+import { ChatStore } from './pip-core.js';
 import * as reader from "./reader.js";
 import * as pip from "./pip.js";
 import { backdrop } from "./pixel-backdrop.js";
@@ -60,7 +62,7 @@ function view(tool, actions = []) {
   document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
   const activeTab = document.querySelector(".tab.active"), tabs = activeTab?.parentElement;
   if (tabs) tabs.scrollLeft = activeTab.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - activeTab.clientWidth) / 2;
-  document.title = tool === "sync" ? "pocket · sync" : "pocket · " + tool;
+  document.title = "pocket · " + (tool === "sync" ? "account" : tool);
   content.replaceChildren();
   if (actions.length) add(content, h("div", { class: "toolbar" }, actions.map(([label, run, extra]) => h("button", { onclick: run, ...(extra || {}) }, label))));
   const body = h("div", { class: "tool tool-" + tool }); add(content, body);
@@ -181,18 +183,65 @@ function taskEditor(body, task) {
   add(body,rowButton("‹ tasks","",()=>go("/tasks")),h("div",{class:"narrow"},section(task?"EDIT ACTION":"NEW ACTION"),title,h("label",{},"Date",due),h("label",{class:"check-label"},important,"Important"),section("STEPS"),steps,
     keys(["save task",guard(()=>{const value=values();if(!value.text||value.text.length>500)throw new Error("Write an action, up to 500 characters.");if(value.steps.length>32||value.steps.some(s=>s.text.length>160))throw new Error("Use up to 32 steps, each within 160 characters.");const saved=task?tasks.edit(task.uid,t=>Object.assign(t,value)):tasks.create(value.text,null,value);localStorage.removeItem(draftKey);go("/tasks/"+saved.uid);}),{class:"accent"}])));
 }
+const KIND_LABEL = { note: "NOTES", task: "TASKS", thought: "THOUGHTS", chat: "PIP", paper: "PAPER" };
+const marked = text => text.split("\u0001").flatMap((part, i) => { if (!i) return [part]; const [hit, rest = ""] = part.split("\u0002"); return [h("mark", { text: hit }), rest]; });
+let searchOpening = 0;
+async function openResult(kind, uid, updated = 0, current = () => true) {
+  const available = () => kind === 'note' ? notes.get(uid) : kind === 'task' ? tasks.list().find(t => t.uid === uid) : kind === 'thought' ? parking.open().find(t => String(t.id) === String(uid)) : kind === 'paper' ? journal.get(uid) : kind === 'chat' ? new ChatStore().get(uid) : null;
+  const copy = available();
+  if ((!copy || (copy.updated || 0) < updated) && cloud.connected()) {
+    say('Loading…'); searchOpening++;
+    try { const synced = await syncNow(); if (!current()) return; if (!synced) { say(describe()); return; } }
+    finally { searchOpening--; }
+    say('');
+  }
+  if (!current()) return;
+  if (!available()) { say('Connect to load this result.'); return; }
+  if (kind === "note") go("/notes/" + uid); else if (kind === "task") go("/tasks/" + uid); else if (kind === "thought") go("/thoughts/" + uid);
+  else if (kind === "chat") go("/pip/" + uid);
+  else if (kind === "paper") { const page = journal.get(uid); if (page?.note) go("/notes/" + page.note); else if (page) pageDialog(page); else say("This page is not in this browser yet."); }
+}
+let searchQuery = "";
 function searchView() {
-  const body=view("today",[["‹ today",()=>go("/today")]]),field=h("input",{placeholder:"Find a thought, task or note…","aria-label":"Search workspace"}),results=h("div",{});
+  const body=view("search",[["‹ today",()=>go("/today")]]),field=h("input",{placeholder:"Find anything…","aria-label":"Search workspace",value:searchQuery,maxlength:200}),results=h("div",{class:"search-results","aria-live":"polite"});
   workspaceTitle(body,"search");add(body,field,results);
-  const find=()=>{const q=field.value.trim().toLowerCase();results.replaceChildren();if(!q)return;let count=0;
-    const groups=[["THOUGHTS",parking.open(),t=>t.text,t=>go("/thoughts/"+t.id)],["TASKS",tasks.list(),t=>[t.text,...(t.steps||[]).map(s=>s.text),t.source?.text||""].join("\n"),t=>go("/tasks/"+t.uid)],["NOTES",notes.list(),n=>n.text,n=>go("/notes/"+n.uid)]];
-    for(const [name,items,text,open] of groups){const hits=items.filter(t=>text(t).toLowerCase().includes(q));if(hits.length)add(results,section(name));for(const item of hits){count++;add(results,rowButton(name==="NOTES"?noteTitle(item):item.text,"",()=>open(item)));}}
-    if(!count)add(results,h("p",{class:"small muted",text:"Nothing found."}));};field.addEventListener("input",find);field.focus();
+  let timer=0, asked=0;
+  const local=q=>{
+    const chats=[],store=new ChatStore();
+    for(let i=0;i<localStorage.length;i++){const key=localStorage.key(i);if(key?.startsWith('pocket:pip-chat:'))try{const chat=store.get(key.slice('pocket:pip-chat:'.length));if(chat)chats.push(chat);}catch{/* Preserve an unreadable chat while searching the remaining records. */}}
+    return localSearch([...Object.keys(SEARCH_KINDS).flatMap(name=>documentRows(name,load(name))),...chats.flatMap(chatRows)],q);
+  };
+  const combine=(remote,q)=>{
+    const hits=local(q), key=r=>r.kind+':'+r.uid, matched=new Map(hits.map(r=>[key(r),r]));
+    const copies=new Map();
+    for(const [name,kinds] of Object.entries(SEARCH_KINDS)){
+      const doc=load(name),items=doc.notes||doc.tasks||doc.items||doc.pages||[];
+      for(const item of items)copies.set(kinds[0]+':'+String(item.uid??item.id),item);
+    }
+    for(let i=0;i<localStorage.length;i++){
+      const name=localStorage.key(i);if(!name?.startsWith('pocket:pip-chat:'))continue;
+      try{const chat=JSON.parse(localStorage.getItem(name));copies.set('chat:'+chat.uid,chat);}catch{}
+    }
+    const list=[];
+    for(const result of remote){const id=key(result),copy=copies.get(id);
+      if(copy&&(copy.deleted||result.kind==='thought'&&copy.state!=='parked'||(copy.updated||0)>=result.updated)){
+        const fresh=matched.get(id);if(fresh){list.push(fresh);matched.delete(id);}continue;
+      }
+      list.push(result);matched.delete(id);
+    }
+    return [...matched.values(),...list].slice(0,40);
+  };
+  const show=list=>{results.replaceChildren();if(!list.length){add(results,h("p",{class:"small muted",text:"Nothing found."}));return;}
+    for(const r of list)add(results,h("button",{class:"row-button search-hit",onclick:()=>{const ticket=asked;openResult(r.kind,r.uid,r.updated,()=>ticket===asked&&body.isConnected).catch(error=>{if(ticket===asked&&body.isConnected)say(error.message);});}},h("span",{class:"search-kind",text:KIND_LABEL[r.kind]||r.kind}),h("span",{text:r.title}),r.snippet?h("span",{class:"sub"},marked(r.snippet)):null));};
+  const find=()=>{const q=field.value.trim(),ticket=++asked;searchQuery=field.value;clearTimeout(timer);if(!q){results.replaceChildren();return;}
+    show(local(q));if(!cloud.connected())return;
+    timer=setTimeout(async()=>{try{const {results:list}=await cloud.search(q);if(ticket===asked&&body.isConnected)show(combine(list,q));}catch{if(ticket===asked&&body.isConnected)show(local(q));}},180);};
+  field.addEventListener("input",find);field.focus();if(searchQuery)find();
 }
 function appsView() {
   const body=view("apps");workspaceTitle(body,"apps");
   split(body,[section("THINK"),rowButton("pip","",()=>go("/pip")),section("REVIEW"),rowButton("Activity","",()=>go("/receipt")),section("CREATE & KEEP"),rowButton("Zines","",()=>go("/zines"))],
-    [section("BODY"),rowButton("Movement","",()=>go("/movement")),rowButton("Gym","",()=>go("/gym")),section("EXTRAS"),rowButton("Dice","",()=>go("/dice")),section("SETTINGS"),rowButton("Storage & devices","",()=>go("/sync"))]);
+    [section("BODY"),rowButton("Movement","",()=>go("/movement")),rowButton("Gym","",()=>go("/gym")),section("EXTRAS"),rowButton("Dice","",()=>go("/dice")),section("SETTINGS"),rowButton("Account & devices","",()=>go("/sync"))]);
 }
 
 // ── Notes: list on the left, the open note on the right. Saves as you type. ──
@@ -223,7 +272,37 @@ function notesView(uid) {
       : [h("p", { class: "small muted", text: q ? "No note matches." : "No notes yet." })]));
   };
   renderList();
-  split(body, [picker, pages, search, list], editing ? editor(open, renderList) : h("div", { class: "empty" }, h("div", { class: "empty-title", text: "NOTES" })));
+  const deleted = cloud.connected() ? h("button", { class: "row-button quiet-row", onclick: recentlyDeleted }, "recently deleted") : null;
+  split(body, [picker, pages, search, list, deleted], editing ? editor(open, renderList) : h("div", { class: "empty" }, h("div", { class: "empty-title", text: "NOTES" })));
+}
+const stamp = at => new Date(at).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+/** The server preserves the current text before applying an older version. */
+async function noteHistory(uid) {
+  try {
+    say("Loading history…"); const { versions } = await cloud.noteHistory(uid); say("");
+    const current = notes.get(uid)?.text || "";
+    const older = versions.filter(v => v.text !== current);
+    if (!older.length) { say("No earlier versions yet."); return; }
+    const pick = await dialog("History", h("div", { class: "history-list" }, older.map((v, i) => rowButton(stamp(v.updated), v.text.split("\n").find(line => line.trim())?.slice(0, 80) + " · " + v.text.length + " chars", () => closeDialog(i)))), [["close", null]]);
+    if (pick == null) return;
+    const version = older[pick];
+    const ok = await dialog(stamp(version.updated), h("pre", { class: "history-text", text: version.text }), [["back", false], ["restore", true]]);
+    if (!ok) { noteHistory(uid); return; }
+    const { document } = await cloud.restoreNote(uid, version.id, notes.get(uid));
+    importDocument('notes.json', merge['notes.json'](load('notes.json'), document.value, Date.now()));
+    notesView(uid); say("Restored.");
+  } catch (error) { say(error.message); }
+}
+async function recentlyDeleted() {
+  try {
+    const { notes: gone } = await cloud.deletedNotes();
+    if (!gone.length) { say("No notes deleted in the last 30 days."); return; }
+    const pick = await dialog("Recently deleted", h("div", { class: "history-list" }, gone.map((n, i) => rowButton(n.text.split("\n").find(line => line.trim())?.replace(/^#+\s*/, "").slice(0, 80) || "Untitled", "deleted " + stamp(n.updated), () => closeDialog(i)))), [["close", null]]);
+    if (pick == null) return;
+    const ok = await dialog("Restore this note?", h("pre", { class: "history-text", text: gone[pick].text }), [["cancel", false], ["restore", true]]);
+    if (!ok) return;
+    const note = notes.create(gone[pick].text); go("/notes/" + note.uid); say("Restored.");
+  } catch (error) { say(error.message); }
 }
 /** Scales a photo like the phone does (long edge 2000 px, upright, JPEG). */
 async function pagePhoto(file) {
@@ -355,6 +434,7 @@ function editor(note, onSaved = () => {}) {
   const bar = h("div", { class: "editor-bar" },
     h("button", { class: "narrow-only", onclick: () => { save(true); go("/notes"); } }, "‹ notes"), state, h("span", { class: "spacer" }), page ? paperButton : null, mode, h("button", { onclick: async () => { save(true); if(!uid)return; const selected=area.value.substring(area.selectionStart,area.selectionEnd).trim(); const title=await ask("Choose an action from this note", { value:selected||noteTitle(notes.get(uid)), limit:500 }); if(title?.trim())guard(()=>{const n=notes.get(uid);const task=tasks.create(title,{kind:"note",name:noteTitle(n),text:n.text,note_uid:n.uid});go("/tasks/"+task.uid);})(); } }, "make task"),
     h("button", { onclick: () => { save(true); if (!uid) return; const n = notes.get(uid); notes.pin(uid, !n.pinned); notesView(uid); } }, note?.pinned ? "unpin" : "pin"),
+    cloud.connected() ? h("button", { onclick: () => { save(true); if (uid) noteHistory(uid); } }, "history") : null,
     h("button", { onclick: () => { save(true); if(!uid)return; const n=notes.get(uid),selected=area.value.substring(area.selectionStart,area.selectionEnd).trim(); thinkWithPip("note",n.uid,noteTitle(n),selected||n.text,"/notes/"+n.uid); } }, "pip"),
     h("button", { onclick: async () => { if (!uid) { go("/notes"); return; } if (await confirmBox("Delete this note on all devices?", "delete")) { notes.remove(uid); go("/notes"); say("Deleted."); } } }, "delete"));
   if (!previewing) setTimeout(() => area.focus({ preventScroll: true }), 0);
@@ -522,41 +602,111 @@ async function roll(result, detail) {
   receipt.log(KIND.ROLL, log); rolling = false; diceView();
 }
 
-// ── Sync settings ──
-function syncView() {
-  const body = view('sync');
-  workspaceTitle(body, 'storage & devices');
-  const pane = h('div', { class: 'narrow' });
-  add(body, pane);
-  add(pane, h('p', { class: cloud.connected() ? 'accent' : '', text: describe() }));
-  if (status.error) add(pane, h('p', { class: 'small warn', text: status.error }));
-  if (cloud.connected()) {
-    add(pane, h('p', { class: 'small muted', text: cloud.account().email }),
-      rowButton('sync now', '', async () => { const ok = await syncNow(); syncView(); say(ok ? 'Synced.' : describe()); }),
-      rowButton('import from Drive', '', importDrive),
-      rowButton('sign out', '', async () => { try { await syncNow(); await cloud.disconnect(); } catch (error) { say(error.message); } }));
-  } else if (cloud.configured()) {
-    const email = h('input', { type: 'email', placeholder: 'email', autocomplete: 'email', 'aria-label': 'Email', required: true });
-    const password = h('input', { type: 'password', placeholder: 'password', autocomplete: 'current-password', minlength: 12, maxlength: 128, 'aria-label': 'Password', required: true });
-    const copy = h('input', { type: 'checkbox', checked: !activeAccount() });
-    let busy = false;
-    const signIn = async create => {
-      if (busy) return;
-      if (!email.checkValidity() || !password.value) { email.reportValidity(); password.reportValidity(); return; }
-      if (create && password.value.length < 12) { say('Use at least 12 characters for your password.'); return; }
-      busy = true; say(create ? 'Creating account…' : 'Signing in…');
-      try { await cloud.login(email.value.trim(), password.value, create, copy.checked); }
-      catch (error) { busy = false; say(error.message); }
-    };
-    const form = h('form', { class: 'account-form', onsubmit: event => { event.preventDefault(); signIn(false); } },
-      email, password, h('label', { class: 'small' }, copy, ' use this browser’s copy'),
-      h('div', { class: 'keys' }, h('button', { type: 'submit', class: 'accent' }, 'sign in'), h('button', { type: 'button', onclick: () => signIn(true) }, 'create account')));
-    add(pane, form);
-  } else add(pane, h('p', { class: 'small muted', text: 'Cloud storage is not configured.' }));
-  add(pane, section('THIS DEVICE'), rowButton('download backup', '', exportWorkspace), rowButton('restore backup', '', restoreWorkspace),
-    rowButton('forget this browser’s copy', '', async () => {
-      if (await confirmBox('Forget this browser’s copy?', 'forget')) { clearWorkspace(); location.reload(); }
-    }), section('CLAUDE'), rowButton(reader.hasKey() ? 'Claude key · set for this tab (' + reader.hint() + ')' : 'set Claude API key', '', keySettings));
+// ── Account: who you are, which devices are linked, and this browser's copy ──
+let passwordMode = false;
+const KEY_GLYPH = '<svg viewBox="0 0 12 7" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M1 1h3v1h1v1h6v1h-1v1h-1v-1h-1v1h-1v-1h-2v1h-1v1h-3v-1h-1v-3h1zM2 3v1h1v-1z"/></svg>';
+const deviceLabel = ua => !ua ? 'linked device' : /Pocket Android|okhttp|Dalvik/i.test(ua) ? 'Pocket phone' : [
+  /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Browser',
+  /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Mac OS/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : ''].filter(Boolean).join(' · ');
+const keyGlyph = () => { const glyph = h('span', { class: 'account-glyph' }); glyph.innerHTML = KEY_GLYPH; return glyph; };
+const shortDay = at => new Date(at).toLocaleDateString([], { day: 'numeric', month: 'short' });
+const bringGuest = () => !activeAccount() && guestHasData();
+const normalCode = value => value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8).replace(/^(.{4})(.+)$/, '$1-$2');
+
+const PHONE_LINK = 'pocket:pending-phone-link';
+function accountView(code = '', creating = false) {
+  if (code) globalThis.sessionStorage.setItem(PHONE_LINK, normalCode(decodeURIComponent(code)));
+  const body = view('sync'), signed = cloud.connected();
+  workspaceTitle(body, !signed && creating ? 'new account' : 'account', signed ? cloud.account().email : cloud.configured() ? creating ? '' : 'not signed in' : 'this browser only');
+  const left = h('div', { class: 'account' }), right = h('div', {});
+  split(body, left, right);
+  add(right, section('THIS BROWSER'),
+    signed ? rowButton('import from Drive', '', importDrive) : null,
+    rowButton('download backup', '', exportWorkspace), rowButton('restore backup', '', restoreWorkspace),
+    rowButton('forget this browser’s copy', '', async () => { if (await confirmBox('Forget this browser’s copy?', 'forget')) { clearWorkspace(); location.reload(); } }),
+    section('CLAUDE'), rowButton(reader.hasKey() ? 'Claude key · ' + reader.hint() : 'set Claude API key', '', keySettings));
+  if (!cloud.configured()) return;
+  if (signed) signedInAccount(left); else signedOutAccount(left, creating);
+}
+
+function signedOutAccount(pane, creating = false) {
+  const passkeys = cloud.passkeysSupported(), usePassword = passwordMode || !passkeys;
+  let busy = false;
+  const run = async (label, work) => {
+    if (busy) return; busy = true; say(label);
+    const controls=[...pane.querySelectorAll('button,input')];controls.forEach(control=>control.disabled=true);
+    try { if (await work() === false) say(''); } catch (error) { say(error.message); } finally { busy = false;controls.forEach(control=>control.disabled=false); }
+  };
+  const field = (label, input) => h('label', { class: 'account-field' }, h('span', { text: label }), input);
+  const email = h('input', { type: 'email', autocomplete: usePassword ? 'username' : 'username webauthn', placeholder: 'you@example.com', maxlength: 254, required: true });
+  const bring=h('input',{type:'checkbox'});
+  if(bringGuest())add(pane,h('label',{class:'check-label account-import'},bring,'bring this browser’s workspace'));
+  if (!usePassword) {
+    if(creating)add(pane,h('form',{class:'account-create',onsubmit:event=>{event.preventDefault();if(!email.checkValidity()){email.reportValidity();return;}
+      run('Creating your account and passkey…',()=>cloud.createAccount(email.value.trim(),bring.checked));}},
+      field('EMAIL',email),h('button',{type:'submit',class:'account-primary'},keyGlyph(),'create account')));
+    else add(pane,h('button',{class:'account-primary',onclick:()=>run('Waiting for your passkey…',()=>cloud.signInWithPasskey(bring.checked))},keyGlyph(),'sign in with passkey'));
+    add(pane,h('button',{class:'account-switch',onclick:()=>{passwordMode=true;route();}},'use a password'),
+      h('button',{class:'account-switch',onclick:()=>go(creating?'/account':'/account/new')},creating?'back to sign in':'create account'));
+    return;
+  }
+  const password = h('input', { type: 'password', autocomplete: creating ? 'new-password' : 'current-password', minlength: creating ? 12 : null, maxlength: 128, required: true });
+  const submit = () => {
+    if (!email.checkValidity() || !password.value) { email.reportValidity(); password.reportValidity(); return; }
+    if (creating && password.value.length < 12) { say('Use at least 12 characters for your password.'); return; }
+    run(creating ? 'Creating account…' : 'Signing in…', () => cloud.login(email.value.trim(), password.value, creating, bring.checked));
+  };
+  add(pane, h('form', { class: 'account-create', onsubmit: event => { event.preventDefault(); submit(); } },
+    field('EMAIL', email), field('PASSWORD', password),
+    h('button', { type: 'submit', class: 'account-commit' }, creating ? 'create account' : 'sign in')),
+    passkeys ? h('button', { class: 'account-switch', onclick: () => { passwordMode = false; route(); } }, 'use a passkey') : null,
+    h('button',{class:'account-switch',onclick:()=>go(creating?'/account':'/account/new')},creating?'back to sign in':'create account'));
+}
+
+function signedInAccount(pane) {
+  const state = h('div', { class: 'account-status' },
+    h('span', { class: status.state === 'error' ? 'warn' : 'accent', text: status.state === 'error' ? 'sync failed' : describe().toLowerCase() }),
+    h('button', { onclick: async () => { const ok = await syncNow(); route(); say(ok ? 'Synced.' : describe()); } }, 'sync now'));
+  const devices = h('div', {}, h('p', { class: 'small muted', text: '…' })), keysList = h('div', {}, h('p', { class: 'small muted', text: '…' }));
+  const link = h('form', { class: 'account-link', onsubmit: event => { event.preventDefault(); linkPhone(codeInput.value); } });
+  const codeInput = h('input', { class: 'code-input', placeholder: 'XXXX-XXXX', maxlength: 9, autocomplete: 'one-time-code', 'aria-label': 'Code shown on the phone',
+    oninput: event => { event.target.value = normalCode(event.target.value); } });
+  add(link, codeInput, h('button', { type: 'submit', class: 'account-commit' }, 'link phone'));
+  add(pane, state, section('DEVICES'), devices, section('LINK A PHONE'), link, section('PASSKEYS'), keysList,
+    rowButton('sign out', '', async () => { try { await syncNow(); await cloud.disconnect(); } catch (error) { say(error.message); } }));
+  const pending = globalThis.sessionStorage.getItem(PHONE_LINK);
+  if (pending) { codeInput.value = pending; globalThis.sessionStorage.removeItem(PHONE_LINK); setTimeout(() => codeInput.focus(), 0); }
+  drawDevices(devices); drawPasskeys(keysList);
+}
+async function drawDevices(host) {
+  try {
+    const [list, current] = await Promise.all([cloud.sessions(), cloud.request('/api/auth/get-session')]);
+    list.sort((a, b) => (b.id === current?.session?.id) - (a.id === current?.session?.id) || new Date(b.updatedAt) - new Date(a.updatedAt));
+    host.replaceChildren(...list.map(item => {
+      const mine = item.id === current?.session?.id;
+      return h('div', { class: 'account-item' }, h('div', {}, h('div', { text: deviceLabel(item.userAgent) }), h('div', { class: 'small muted', text: mine ? 'this browser' : 'active ' + shortDay(item.updatedAt) })),
+        mine ? null : h('button', { onclick: async () => { if (!await confirmBox('Sign out ' + deviceLabel(item.userAgent) + '?', 'sign out')) return;
+          try { await cloud.revokeSession(item.token); drawDevices(host); say('Signed out.'); } catch (error) { say(error.message); } } }, 'sign out'));
+    }));
+  } catch (error) { host.replaceChildren(h('p', { class: 'small warn', text: error.message })); }
+}
+async function drawPasskeys(host) {
+  try {
+    const list = await cloud.passkeys();
+    host.replaceChildren(...list.map(item => h('div', { class: 'account-item' },
+      h('div', {}, h('div', { text: item.name || 'passkey' }), h('div', { class: 'small muted', text: 'added ' + shortDay(item.createdAt) })),
+      h('button', { onclick: async () => { if (!await confirmBox('Remove this passkey?', 'remove')) return; try { await cloud.removePasskey(item.id); drawPasskeys(host); } catch (error) { say(error.message); } } }, 'remove'))),
+      cloud.passkeysSupported() ? h('button', { class: 'account-add', onclick: async () => { try { if (await cloud.addPasskey()) { drawPasskeys(host); say('Passkey added.'); } } catch (error) { say(error.message); } } }, '+ add passkey to this account') : null);
+  } catch (error) { host.replaceChildren(h('p', { class: 'small warn', text: error.message })); }
+}
+async function linkPhone(value) {
+  const code = normalCode(value);
+  if (code.length !== 9) { say('Enter the 8-character code shown on the phone.'); return; }
+  try {
+    await cloud.checkCode(code);
+    if (!await confirmBox('Link the phone showing ' + code + ' to this account?', 'link')) { await cloud.denyCode(code).catch(() => {}); return; }
+    await cloud.approveCode(code); route(); say('Phone linked.');
+  } catch (error) { say(/invalid|expired|not found/i.test(error.message) ? 'That code has expired. Show a new one on the phone.' : error.message); }
 }
 function exportWorkspace() {
   const data = { format: 'pocket-workspace', version: 1, exportedAt: new Date().toISOString(), documents: Object.fromEntries(FILES.map(name => [name, load(name)])) };
@@ -599,15 +749,15 @@ async function importDrive() {
 /** Sets or forgets the Claude key kept for this tab. */
 async function keySettings() {
   if (reader.hasKey()) {
-    if (await confirmBox("Forget the Claude key in this tab?", "forget")) { reader.clearKey(); syncView(); say("Key forgotten."); }
+    if (await confirmBox("Forget the Claude key in this tab?", "forget")) { reader.clearKey(); route(); say("Key forgotten."); }
     return;
   }
-  if (await askKey()) { syncView(); say("Key set for this tab."); }
+  if (await askKey()) { route(); say("Key set for this tab."); }
 }
 // ── Routing and keys ──
 function route() {
   const [, name, arg] = (location.hash.replace(/^#/, "") || "/").split("/");
-  if (name === "notes") notesView(arg); else if (name === "receipt") receiptView(arg); else if (name === "dice") diceView(); else if (name === "sync") syncView();
+  if (name === "notes") notesView(arg); else if (name === "receipt") receiptView(arg); else if (name === "dice") diceView(); else if (name === "sync" || name === "account" || name === "link") accountView(name === "link" ? arg || "" : "", name === "account" && arg === "new");
   else if (name === "pip") pip.mount(view("pip"), arg, pipHelpers);
   else if (name === "zines") zines.mount(view("zines"), arg, { go, say, dialog, confirm: confirmBox });
   else if (name === "movement") movement.mount(view("movement"), { say });
@@ -620,7 +770,7 @@ onStatus(() => {
   const state = document.getElementById("sync-status"); if (state) state.textContent = describe();
   const finished = lastState === "syncing" && status.state === "idle"; lastState = status.state;
   // Merged edits from the phone appear without a reload, unless the user is typing or a dialog is open.
-  if (finished && status.changed && !["#/zines", "#/movement", "#/pip"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea")) { const text = notice?.textContent; route(); say(text); }
+  if (finished && status.changed && !searchOpening && !["#/zines", "#/movement", "#/pip"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea")) { const text = notice?.textContent; route(); say(text); }
 });
 addEventListener("keydown", event => {
   if (!dialogHost.hidden) { if (event.key === "Escape") closeDialog(); return; }

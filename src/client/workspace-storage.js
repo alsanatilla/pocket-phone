@@ -32,6 +32,14 @@ export function clearWorkspace() {
     if (scope ? key.startsWith(scope) : key.startsWith('pocket:') && !key.startsWith('pocket:account:') && key !== ACTIVE) native().removeItem(key);
   }
 }
+/** True when this browser holds guest records worth bringing into an account. */
+export function guestHasData() {
+  if(Object.keys(native()).some(key=>key.startsWith('pocket:pip-chat:')))return true;
+  for (const name of ['notes.json', 'tasks.json', 'parking.json', 'journal.json', 'gym.json']) {
+    try { const doc = JSON.parse(native().getItem('pocket:' + name) || 'null'); if (doc && Object.values(doc).some(value => Array.isArray(value) && value.length)) return true; } catch { /* unreadable copy */ }
+  }
+  return false;
+}
 export function importGuestCopy() {
   if (!activeAccount()) return;
   const excluded = /(?:token|expires|connected|coros|access|settings|key)/i;

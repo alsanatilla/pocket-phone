@@ -1,4 +1,5 @@
 import { database } from './database.js';
+import { ensureSearch, reindexChat } from './search.js';
 import { validObject, mergeObject, sanitizeObject } from '../shared/objects.js';
 
 export function collectionName(value) {
@@ -16,6 +17,7 @@ export async function writeObject(userId, collection, incoming) {
   if (!validObject(collection, incoming)) throw Object.assign(new Error('Invalid ' + collection + ' record.'), { status: 400 });
   incoming = sanitizeObject(collection, incoming);
   const uid = collection === 'chats' ? incoming.uid : incoming.id;
+  if (collection === 'chats') await ensureSearch();
   for (let attempt = 0; attempt < 4; attempt++) {
   let tx;
   try {
@@ -39,7 +41,9 @@ export async function writeObject(userId, collection, incoming) {
         for (const file of files.rows) if (!keep.has(String(file.name))) await tx.execute({ sql: 'DELETE FROM pocket_media WHERE user_id = ? AND name = ?', args: [userId, String(file.name)] });
       }
     }
-    await tx.commit(); return { value, revision };
+    if (collection === 'chats' && revision !== Number(previous?.revision || 0)) await reindexChat(tx, userId, value);
+    await tx.commit();
+    return { value, revision };
   } catch (error) {
     await tx?.rollback().catch(() => {});
     if (attempt === 3 || !/SQLITE_BUSY|TRANSACTION_CLOSED|TRANSACTION_ACTIVE/.test(error.code || '')) throw error;

@@ -15,9 +15,35 @@
 html, body { margin: 0; background: var(--black); color: var(--white); }
 body { font: 16px/1.4 var(--mono); -webkit-font-smoothing: antialiased; }
 [hidden] { display: none !important; }
-.account-form { display: grid; gap: 16px; margin: 24px 0; }
-.account-form input[type="email"], .account-form input[type="password"] { width: 100%; box-sizing: border-box; }
-.account-form label { display: flex; align-items: center; gap: 8px; }
+/* Account */
+.account { max-width: 520px; }
+.account-primary { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 76px; margin: 8px 0 28px; padding: 0 20px; text-align: left;
+  font: 30px/1 var(--pixel); color: var(--black); background: var(--accent); border-radius: 2px; }
+.account-primary:not(:disabled):hover, .account-primary:focus-visible { color: var(--black); background: var(--white); box-shadow: none; }
+.account-glyph { display: inline-flex; width: 36px; height: 21px; }
+.account-glyph svg { width: 100%; height: 100%; image-rendering: pixelated; }
+.account-create { display: grid; gap: 12px; }
+.account-field { display: grid; gap: 2px; }
+.account-field span { font-size: 12px; letter-spacing: .06em; color: var(--muted); }
+.account-field input { box-shadow: inset 0 -1px 0 #3a3d40; padding: 10px 0; }
+.account-field input:focus { box-shadow: inset 0 -2px 0 var(--accent); }
+.account-commit { color: var(--accent); justify-self: start; padding: 0 2px; }
+.account-actions { display: flex; gap: 24px; }
+.account-switch { color: var(--muted); font-size: 13px; margin-top: 20px; padding: 0 2px; }
+.account-switch + .account-switch { margin-left: 24px; }
+.account-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; font: 24px/1 var(--pixel); }
+.account-status button { font: 14px var(--mono); color: var(--muted); }
+.account-status span { min-width: 0; overflow-wrap: anywhere; }
+.account-status button { flex-shrink: 0; }
+.account-import { margin-bottom: 16px; font-size: 14px; }
+.account-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 60px; padding: 4px 0; }
+.account-item button { color: var(--muted); font-size: 13px; flex-shrink: 0; }
+.account-add { color: var(--accent); font-size: 14px; padding: 0 2px; }
+.account-link { display: flex; align-items: end; gap: 16px; }
+.account-link button { flex-shrink: 0; white-space: nowrap; }
+.account-link .code-input { flex: 1; min-width: 0; }
+.code-input { font: 34px/1.2 var(--pixel); letter-spacing: .14em; text-transform: uppercase; max-width: 260px; box-shadow: inset 0 -1px 0 #3a3d40; }
+.code-input:focus { box-shadow: inset 0 -2px 0 var(--accent); }
 .muted { color: var(--muted); } .meta { font-size: 12px; } .small { font-size: 14px; }
 .warn { color: var(--warning); } .accent { color: var(--accent); } .center { text-align: center; }
 p { margin: 8px 0; }
@@ -493,3 +519,11 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
   .scores-block .cockpit-quiet { display: none; }
   .cockpit-trends { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Search and history */
+.search-hit .sub { white-space: normal; }
+.search-kind { display: block; color: var(--muted); font-size: 11px; letter-spacing: .06em; margin-bottom: 4px; }
+.search-hit mark, .search-results mark { background: none; color: var(--accent); }
+.history-list { max-height: 60vh; overflow-y: auto; }
+.history-text { white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.5 var(--mono); max-height: 55vh; overflow-y: auto; margin: 0; color: var(--white); }
+.quiet-row { color: var(--muted); font-size: 14px; }

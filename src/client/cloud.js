@@ -1,3 +1,4 @@
+import { startAuthentication, startRegistration, browserSupportsWebAuthn } from '@simplewebauthn/browser';
 import { activeAccount, switchAccount, importGuestCopy } from './workspace-storage.js';
 
 let user = null, ready = false;
@@ -9,7 +10,7 @@ export async function request(path, options = {}) {
   const response = await fetch(path, { credentials: 'same-origin', ...options });
   if (response.status === 401) { user = null; throw new Expired(); }
   const value = await response.json();
-  if (!response.ok) throw new Error(value.error || value.message || 'Pocket storage did not answer.');
+  if (!response.ok) throw new Error(value.error_description || value.message || (typeof value.error === 'string' ? value.error : '') || 'Pocket storage did not answer.');
   return value;
 }
 export async function init() {
@@ -21,19 +22,51 @@ export async function init() {
     if (user && activeAccount() !== user.id) { switchAccount(user.id); location.reload(); }
   } catch (error) { if (!(error instanceof Expired)) throw error; }
 }
-export async function login(email, password, create = false, importCopy = false) {
-  const result = await request('/api/auth/' + (create ? 'sign-up/email' : 'sign-in/email'), {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, ...(create ? { name: email.split('@')[0] } : {}) }),
-  });
-  if (!result.user?.id) throw new Error('Sign-in did not finish.');
-  switchAccount(result.user.id);
-  if (importCopy) {
-    importGuestCopy();
-    await (await import('./zine-store.js')).importGuestBooks(result.user.id);
-  }
+const send = (path, body = {}) => request(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+async function finish(user, importCopy) {
+  if (!user?.id) throw new Error('Sign-in did not finish.');
+  switchAccount(user.id);
+  if (importCopy) { importGuestCopy(); await (await import('./zine-store.js')).importGuestBooks(user.id); }
   location.reload();
 }
+const cancelled = error => error?.name === 'NotAllowedError' || error?.name === 'AbortError';
+export const passkeysSupported = () => browserSupportsWebAuthn();
+export async function login(email, password, create = false, importCopy = false) {
+  const result = await send('/api/auth/' + (create ? 'sign-up/email' : 'sign-in/email'), { email, password, ...(create ? { name: email.split('@')[0] } : {}) });
+  await finish(result.user, importCopy);
+}
+/** Returns false when the person closed the passkey prompt. */
+export async function signInWithPasskey(importCopy = false) {
+  const options = await request('/api/auth/passkey/generate-authenticate-options');
+  let response; try { response = await startAuthentication({ optionsJSON: { ...options, userVerification: 'required' } }); } catch (error) { if (cancelled(error)) return false; throw error; }
+  await send('/api/auth/passkey/verify-authentication', { response });
+  await finish((await request('/api/auth/get-session'))?.user, importCopy); return true;
+}
+const deviceName = () => { const ua = navigator.userAgent; const os = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iPhone' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'this device'; return os; };
+export async function addPasskey(name = deviceName()) {
+  const options = await request('/api/auth/passkey/generate-register-options');
+  let response; try { response = await startRegistration({ optionsJSON: options }); } catch (error) { if (cancelled(error)) return false; throw error; }
+  await send('/api/auth/passkey/verify-registration', { response, name }); return true;
+}
+/** Create the user and its session only after a verified passkey ceremony. */
+export async function createAccount(email, importCopy = false) {
+  const { context } = await send('/api/auth/pocket/start-account', { email });
+  const options = await request('/api/auth/passkey/generate-register-options?context=' + encodeURIComponent(context));
+  let response; try { response = await startRegistration({ optionsJSON: options }); } catch (error) { if (cancelled(error)) return false; throw error; }
+  const result = await send('/api/auth/passkey/verify-registration', { response, name: deviceName(), createSession: true });
+  await finish(result.user, importCopy); return true;
+}
+export const passkeys = () => request('/api/auth/passkey/list-user-passkeys');
+export const removePasskey = id => send('/api/auth/passkey/delete-passkey', { id });
+export const sessions = () => request('/api/auth/list-sessions');
+export const revokeSession = token => send('/api/auth/revoke-session', { token });
+export const checkCode = code => request('/api/auth/device?user_code=' + encodeURIComponent(code));
+export const approveCode = userCode => send('/api/auth/device/approve', { userCode });
+export const denyCode = userCode => send('/api/auth/device/deny', { userCode });
+export const search = q => request('/api/search?q=' + encodeURIComponent(q));
+export const noteHistory = uid => request('/api/history/notes/' + encodeURIComponent(uid));
+export const restoreNote = (uid, version, current) => post('/api/history/notes/' + encodeURIComponent(uid) + '/restore', { version, current });
+export const deletedNotes = () => request('/api/history/deleted');
 export async function disconnect() {
   await request('/api/auth/sign-out', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   user = null; switchAccount(''); location.reload();

@@ -2,6 +2,14 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.11.0 — One account, easier to find and recover
+
+- **Account access.** Sign-in and account creation have separate screens. Passkeys attach to one Pocket account; multiple devices can use that account, with password sign-in retained. A phone can show a short code for approval in a signed-in browser. The account screen lists revocable device sessions and passkeys.
+- **Search.** Notes, Tasks and their steps/source text, parked Thoughts, Paper and Pip share a search on phone and web. Local records remain searchable offline; phone appointments stay local. Server indexes update atomically with saves and deletions, and older account data is indexed on first search.
+- **Note recovery.** Signed-in Notes offer up to 60 text checkpoints, ten-minute editing-session coalescing with the initial text preserved, and restore checkpoints that retain the text being replaced. Recently deleted recovers notes deleted within 30 days as new notes.
+- COROS, chats and browser zines retain the account persistence introduced in 0.10.0. No additional server key or environment variable is required; keep the production origin stable for passkeys.
+- Astro production and Android APK builds passed. Browser previews with fictional data verified separate account creation/sign-in, accent-insensitive search, opening newer server-only matches, history restore and deleted-note recovery. Isolated API checks covered private-route authentication, origin checks, account isolation, phone linking, revocation and invalid restore requests; backend checks covered search/history rollback. The test suite is skipped as requested. Physical passkey/handset behavior remains unverified. The APK is 0.11.0, version code 37, unsigned for the signing agent.
+
 ## 0.10.0 — Everything persists
 
 - **COROS.** Signed in, the COROS connection moves to your Pocket account: the authorization is encrypted on the server and the last readings are stored there. Phone and browser show the same readings, and a failed refresh never clears them. Refreshes run while Pocket is open (at most every 15 minutes), hourly from the phone when it has a network, and once a day from a scheduled job even when both apps are closed (Vercel Hobby allows one daily run, so the job runs from GitHub Actions against a protected endpoint). An expired authorization keeps the readings and offers reconnect.

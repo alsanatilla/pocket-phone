@@ -15,6 +15,7 @@ import org.json.JSONObject;
 /** Portable tasks in Drive. Alarm ids, notification handles and editor drafts remain local. */
 final class TaskSync {
     private static final long KEEP_DELETED = 30L * 24 * 3_600_000L;
+    static PlannerStore.Entry byUid(PlannerStore store, String uid) { return uid == null || uid.isEmpty() ? null : tasksByUid(store).get(uid); }
 
     static String uid(PlannerStore store, long id) {
         synchronized (PlannerStore.WRITE_LOCK) {

@@ -117,6 +117,26 @@ final class ChatStore {
         Collections.sort(result, (a, b) -> Long.compare(b.updated, a.updated));
         return result;
     }
+    /** Full conversation search runs off the UI thread and returns only the matching captions. */
+    List<Summary> search(String[] words) {
+        List<Summary> found = new ArrayList<>(); if (words.length == 0) return found;
+        SQLiteDatabase db = helper.getReadableDatabase();
+        // Fold the stored text too: cafe must still find café after restarting the phone.
+        // Read individual turns so a long conversation never overflows Android's cursor window.
+        try (Cursor rows = db.rawQuery("SELECT id,title,updated,draft FROM chats ORDER BY updated DESC", null)) {
+            while (rows.moveToNext()) {
+                String id = rows.getString(0), title = rows.getString(1), draft = rows.getString(3);
+                List<String> remaining = new ArrayList<>(java.util.Arrays.asList(words));
+                String header = PocketSearch.fold(title + "\n" + draft); remaining.removeIf(header::contains);
+                if (!remaining.isEmpty()) try (Cursor turns = db.rawQuery("SELECT text FROM turns WHERE chat = ? ORDER BY position", new String[]{id})) {
+                    while (turns.moveToNext() && !remaining.isEmpty()) { String text = PocketSearch.fold(turns.getString(0)); remaining.removeIf(text::contains); }
+                }
+                if (remaining.isEmpty()) found.add(new Summary(id, caption(title, draft), rows.getLong(2), 0));
+                if (found.size() == 30) break;
+            }
+        } catch (android.database.sqlite.SQLiteException unavailable) { return found; }
+        return found;
+    }
 
     static String caption(String title, String draft) {
         return !title.isEmpty() ? title : draft.trim().isEmpty() ? "new chat" : ClaudeChatRepository.title(draft);
@@ -280,7 +300,7 @@ final class ChatStore {
             if (transaction) try { db.endTransaction(); } catch (RuntimeException ignored) { }
         }
     }
-    private org.json.JSONObject cloudValue(String id) {
+    org.json.JSONObject cloudValue(String id) {
         try (Cursor rows=helper.getReadableDatabase().rawQuery("SELECT payload FROM cloud_chats WHERE id = ?",new String[]{id})) {
             return rows.moveToFirst()?new org.json.JSONObject(rows.getString(0)):null;
         } catch(org.json.JSONException invalid){throw new IllegalStateException("Saved chat sync data could not be read.",invalid);}

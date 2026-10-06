@@ -23,3 +23,15 @@ export const verification = sqliteTable('pocket_verification', {
 export const rateLimit = sqliteTable('pocket_rate_limit', {
   id: text('id').primaryKey(), key: text('key').notNull().unique(), count: integer('count').notNull(), lastRequest: integer('lastRequest').notNull(),
 });
+export const passkey = sqliteTable('pocket_passkey', {
+  id: text('id').primaryKey(), name: text('name'), publicKey: text('publicKey').notNull(),
+  userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }), credentialID: text('credentialID').notNull(),
+  counter: integer('counter').notNull(), deviceType: text('deviceType').notNull(), backedUp: integer('backedUp', { mode: 'boolean' }).notNull(),
+  transports: text('transports'), createdAt: integer('createdAt', { mode: 'timestamp_ms' }), aaguid: text('aaguid'),
+});
+export const deviceCode = sqliteTable('pocket_device_code', {
+  id: text('id').primaryKey(), deviceCode: text('deviceCode').notNull().unique(), userCode: text('userCode').notNull().unique(),
+  userId: text('userId'), expiresAt: integer('expiresAt', { mode: 'timestamp_ms' }).notNull(), status: text('status').notNull(),
+  lastPolledAt: integer('lastPolledAt', { mode: 'timestamp_ms' }), pollingInterval: integer('pollingInterval'), clientId: text('clientId'), scope: text('scope'),
+  createdAt: integer('createdAt', { mode: 'timestamp_ms' }), updatedAt: integer('updatedAt', { mode: 'timestamp_ms' }),
+});

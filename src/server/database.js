@@ -18,6 +18,13 @@ export const TABLES = [
   `CREATE INDEX IF NOT EXISTS pocket_account_user ON pocket_account(userId)`,
   `CREATE TABLE IF NOT EXISTS pocket_verification (id TEXT PRIMARY KEY, identifier TEXT NOT NULL, value TEXT NOT NULL, expiresAt INTEGER NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS pocket_verification_identifier ON pocket_verification(identifier)`,
+  `CREATE TABLE IF NOT EXISTS pocket_passkey (id TEXT PRIMARY KEY, name TEXT, publicKey TEXT NOT NULL, userId TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, credentialID TEXT NOT NULL, counter INTEGER NOT NULL, deviceType TEXT NOT NULL, backedUp INTEGER NOT NULL, transports TEXT, createdAt INTEGER, aaguid TEXT)`,
+  `CREATE INDEX IF NOT EXISTS pocket_passkey_user ON pocket_passkey(userId)`,
+  `CREATE INDEX IF NOT EXISTS pocket_passkey_credential ON pocket_passkey(credentialID)`,
+  `CREATE TABLE IF NOT EXISTS pocket_device_code (id TEXT PRIMARY KEY, deviceCode TEXT NOT NULL UNIQUE, userCode TEXT NOT NULL UNIQUE, userId TEXT, expiresAt INTEGER NOT NULL, status TEXT NOT NULL, lastPolledAt INTEGER, pollingInterval INTEGER, clientId TEXT, scope TEXT, createdAt INTEGER, updatedAt INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS pocket_note_versions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, note_uid TEXT NOT NULL, text TEXT NOT NULL, created INTEGER NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)`,
+  `CREATE INDEX IF NOT EXISTS pocket_note_versions_note ON pocket_note_versions(user_id, note_uid, id)`,
+  `CREATE TABLE IF NOT EXISTS pocket_search_rows (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, kind TEXT NOT NULL, uid TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY(user_id, kind, uid))`,
   `CREATE TABLE IF NOT EXISTS pocket_rate_limit (id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, count INTEGER NOT NULL, lastRequest INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS pocket_documents (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, name TEXT NOT NULL, payload TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL, PRIMARY KEY(user_id, name))`,
   `CREATE TABLE IF NOT EXISTS pocket_files (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, name TEXT NOT NULL, content BLOB NOT NULL, content_type TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(user_id, name))`,
@@ -41,5 +48,20 @@ export async function execute(statement) {
       if (attempt >= 3 || !/SQLITE_BUSY|TRANSACTION_CLOSED|TRANSACTION_ACTIVE/.test(error.code || '')) throw error;
       await new Promise(resolve => setTimeout(resolve, 40 * (attempt + 1)));
     }
+  }
+}
+export async function writeTransaction(operation) {
+  for (let attempt = 0; ; attempt++) {
+    let tx;
+    try {
+      tx = await database().transaction('write');
+      const result = await operation(tx);
+      await tx.commit();
+      return result;
+    } catch (error) {
+      await tx?.rollback().catch(() => {});
+      if (attempt >= 3 || !/SQLITE_BUSY|TRANSACTION_CLOSED|TRANSACTION_ACTIVE/.test(error.code || '')) throw error;
+      await new Promise(resolve => setTimeout(resolve, 40 * (attempt + 1)));
+    } finally { tx?.close(); }
   }
 }

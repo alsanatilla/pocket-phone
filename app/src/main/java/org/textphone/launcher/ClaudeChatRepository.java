@@ -162,6 +162,22 @@ final class ClaudeChatRepository {
     private final Set<String> deleted = new java.util.HashSet<>();
 
     synchronized String currentId() { return chat.id; }
+    boolean removed(String id) {
+        synchronized(this){if(deleted.contains(id))return true;}
+        org.json.JSONObject copy=store.cloudValue(id);return copy!=null&&copy.optBoolean("deleted");
+    }
+    List<ChatStore.Summary> search(String[] words) {
+        List<ChatStore.Summary> matches = store.search(words);
+        synchronized (this) {
+            matches.removeIf(summary -> deleted.contains(summary.id) || summary.id.equals(chat.id) || busy != null && summary.id.equals(busy.id));
+            for (Chat live : busy == null || busy == chat ? new Chat[]{chat} : new Chat[]{chat,busy}) {
+                StringBuilder text = new StringBuilder(live.title).append('\n').append(live.draft);
+                for (Turn turn : live.turns) text.append('\n').append(turn.text);
+                if ((!live.turns.isEmpty() || !live.draft.isEmpty()) && PocketSearch.matches(text.toString(), words)) matches.add(new ChatStore.Summary(live.id, ChatStore.caption(live.title,live.draft),live.updated,0));
+            }
+        }
+        matches.sort((a,b)->Long.compare(b.updated,a.updated)); return matches;
+    }
     synchronized void openReplyingChat() { if (busy != null) open(busy.id); }
     synchronized boolean acceptsProvider(ChatProvider.Config provider) { return chat.provider == null || chat.provider.identity.equals(provider.identity); }
 
