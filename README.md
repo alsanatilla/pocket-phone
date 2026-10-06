@@ -1,6 +1,6 @@
 # Pocket Phone
 
-Pocket 0.9.0 is a native launcher and personal workspace for the Nothing Phone (3a), with an Astro browser app hosted on [Vercel](https://pocket-phone.vercel.app/). The workflow is **capture → decide → plan → act → review**. See [WORKFLOW.md](WORKFLOW.md) for each app’s purpose and connections.
+Pocket 0.9.1 is a native launcher and personal workspace for the Nothing Phone (3a), with an Astro browser app hosted on [Vercel](https://pocket-phone.vercel.app/). The workflow is **capture → decide → plan → act → review**. See [WORKFLOW.md](WORKFLOW.md) for each app’s purpose and connections.
 
 **Today, Thoughts, Tasks and Notes** share a workspace. Thoughts stay undecided until you choose an action. Notes hold context; Tasks hold chosen actions. On the phone a task can reserve time in Pocket Calendar, start Focus and record completion in Activity. Movement and Gym stay separate. Camera leads to Photos; Paper leads to source-linked Notes; selected messages can lead to Tasks.
 
@@ -39,7 +39,7 @@ Use JDK 17 and Android SDK 35. Set the SDK path in an untracked local.properties
 
 The normal output is app/build/outputs/apk/rom/app-rom-unsigned.apk. This is a launcher/app build, not a full ROM image; Android owns Recents and system Home gestures.
 
-[GitHub Releases](https://github.com/alsanatilla/pocket-phone/releases) includes the unsigned APK, web source, complete source, checksums and build status. Another release agent handles signing. The existing certificate is needed to update an installed Pocket app while retaining its local data. See [USE-POCKET-0.9.0.md](USE-POCKET-0.9.0.md).
+[GitHub Releases](https://github.com/alsanatilla/pocket-phone/releases) includes the unsigned APK, web source, complete source, checksums and build status. Another release agent handles signing. The existing certificate is needed to update an installed Pocket app while retaining its local data. See [USE-POCKET-0.9.1.md](USE-POCKET-0.9.1.md).
 
 The test suite is skipped at the user’s request. Android and Astro compilation, isolated storage/API checks and the real libSQL connection are recorded in [BUILD-STATUS.json](BUILD-STATUS.json). Browser preview requires authentication, and handset behavior remains unverified.
 

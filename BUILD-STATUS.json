@@ -1,15 +1,15 @@
 {
   "component": "Pocket Phone Android launcher/apps and Astro browser workspace",
-  "version_name": "0.9.0",
-  "version_code": 34,
+  "version_name": "0.9.1",
+  "version_code": 35,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-06T14:36:20.122Z",
+  "checked_at_utc": "2026-10-06T14:49:41.277Z",
   "build": "Final Astro/Vercel production build and Android assembleRom passed. Test suite skipped at the user’s request. APK unsigned for the release agent.",
   "commands": [
     "npm run build",
-    "./gradlew.bat -I app/build/tmp/release-output-090-final.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain",
+    "./gradlew.bat -I app/build/tmp/release-output-091-final.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain",
     "npm run db:setup"
   ],
   "build_environment": {
@@ -21,7 +21,7 @@
     "libsql_client": "0.18.0",
     "better_auth": "1.7.7",
     "drizzle": "0.45.3",
-    "output_directory": "app/build/release-090-final",
+    "output_directory": "app/build/release-091-final",
     "note": "A temporary Gradle init script uses a fresh build directory to avoid a Windows lock on an earlier classes.dex."
   },
   "final_test_suite": {
@@ -29,10 +29,10 @@
     "reason": "Explicit user instruction; no lint run"
   },
   "apk": {
-    "file": "app/build/release-090-final/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.9.0-unsigned.apk",
-    "bytes": 8937096,
-    "sha256": "f2b896465121cea3a9c71054f0cac2db1aa81c48077344d2f22d6ba371c9b63d",
+    "file": "app/build/release-091-final/outputs/apk/rom/app-rom-unsigned.apk",
+    "release_asset": "pocket-phone-0.9.1-unsigned.apk",
+    "bytes": 8937092,
+    "sha256": "23012b2046af9d4268b8b0a044db1e073660feae59b57a8cd4a14c39cce50a1a",
     "signed": false,
     "installable_update": false,
     "signing": "Another release agent handles signing"
@@ -43,11 +43,11 @@
     "url": "https://pocket-phone.vercel.app/",
     "static_output": ".vercel/output/static",
     "server_output": ".vercel/output/functions/_render.func",
-    "release_asset": "pocket-web-0.9.0-source.zip",
+    "release_asset": "pocket-web-0.9.1-source.zip",
     "backup_origin": "https://alsanatilla.github.io/pocket-phone/",
     "root_prerendered": true,
     "hashed_client_assets": true,
-    "offline_worker": "pocket-astro-090",
+    "offline_worker": "pocket-astro-091",
     "browser_token_scan": "Passed: supplied token absent from source, public files and entire .vercel/output",
     "private_env_ignored": true
   },
@@ -90,7 +90,10 @@
       "An edit made during sync remains local and waiting",
       "Remote records merge without replacing that edit",
       "Next sync acknowledges and clears the waiting edit",
-      "Deleted note remains a server tombstone"
+      "Deleted note remains a server tombstone",
+      "Offline startup performs no network requests",
+      "Failed reconnect retains queued edits",
+      "Recovered network re-reads the session and syncs without a reload"
     ]
   },
   "visual_review": {
@@ -114,7 +117,8 @@
     "Pocket account transport on phone with encrypted native session tokens",
     "Account-scoped browser copies, chats, drafts, provider settings and zines",
     "Legacy phone Drive transport, read-only browser import and old-origin JSON export",
-    "Workspace JSON backup/restore; API data excluded from offline caching"
+    "Workspace JSON backup/restore; API data excluded from offline caching",
+    "Offline startup and temporary session lookup failures recover on reconnect or retry"
   ],
   "known_limits": [
     "APK needs signing by the release agent before installation.",
@@ -131,7 +135,7 @@
   ],
   "agent_paid_api_requests": 0,
   "full_custom_rom_compiled": false,
-  "previous_release": "v0.8.0",
+  "previous_release": "v0.9.0",
   "prior_checks": {
     "note": "Pip stream/SDK and rendered Gym fixtures belong to v0.8.0 or earlier and are not final 0.9.0 test-suite results. See historical Git/release build status."
   }

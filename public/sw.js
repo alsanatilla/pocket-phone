@@ -1,4 +1,4 @@
-const CACHE = 'pocket-astro-090';
+const CACHE = 'pocket-astro-091';
 const allowed = url => url.origin === self.location.origin && (url.pathname === '/' || url.pathname.startsWith('/_astro/') || url.pathname.startsWith('/fonts/'));
 self.addEventListener('install', event => {
   event.waitUntil((async () => {

@@ -23,10 +23,14 @@ export function describe() {
 /** Download, merge into the local copy, upload the merged copy. One run at a time. */
 export function syncNow() {
   if (running) return running;
-  if (!navigator.onLine || !cloud.connected()) { emit(); return Promise.resolve(false); }
+  if (!navigator.onLine) { emit(); return Promise.resolve(false); }
   running = (async () => {
     status.state = "syncing"; status.error = ""; status.changed = false; emit();
     try {
+      // A cached shell can open offline before the session has been read.
+      // Re-read it on reconnect, and retry after a temporary startup failure.
+      if (!cloud.connected()) await cloud.init();
+      if (!cloud.connected()) { status.state = "idle"; return false; }
       const sent = Object.fromEntries(FILES.map(name => [name, load(name)]));
       const received = await cloud.exchange(sent);
       for (const name of FILES) {

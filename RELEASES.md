@@ -2,6 +2,11 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.9.1 — Offline reconnect
+
+- A browser opened from its cached shell while offline reads its Pocket session after reconnecting, then uploads waiting edits without a reload. A temporary startup failure can be retried with Sync now or the next refresh.
+- Isolated offline/reconnect checks passed without user data or paid provider requests. The test suite remains skipped as requested.
+
 ## 0.9.0 — Astro and Pocket accounts
 
 - The browser workspace moves to Astro on Vercel, with hashed client assets and an offline shell. The existing Pocket design and flows remain.
