@@ -46,4 +46,3 @@ export const merge = {
   // Workouts: same rule as GymStore.merge; deleted workouts stay as markers.
   "gym.json": (local, remote) => ({ v: 1, workouts: mergeById(local.workouts, remote?.workouts, "id", "updated") }),
 };
-
