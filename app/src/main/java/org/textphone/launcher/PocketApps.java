@@ -8,12 +8,12 @@ import android.app.Activity;
  */
 final class PocketApps {
     static final String[] IDS = {"phone", "messages", "contacts", "clock", "camera", "calculator",
-            "files", "today", "settings", "dice", "parking", "receipt", "journal", "movement"};
+            "files", "today", "settings", "dice", "parking", "receipt", "journal", "movement", "gym"};
     /** What a tile or group can be set to. */
     static final String[] CHOICES = {"phone", "messages", "contacts", "clock", "camera", "calculator",
-            "files", "today", "settings", "dice", "parking", "receipt", "journal", "movement"};
+            "files", "today", "settings", "dice", "parking", "receipt", "journal", "movement", "gym"};
     /** Pocket apps listed in Tools after the everyday ones. */
-    static final String[] TOOLS = {"contacts", "files", "dice", "receipt", "journal", "movement"};
+    static final String[] TOOLS = {"contacts", "files", "dice", "receipt", "journal", "movement", "gym"};
     static final int GROUP_ICON = 14, APP_ICON = 18;
 
     static boolean known(String id) { for (String value : IDS) if (value.equals(id)) return true; return false; }
@@ -34,6 +34,7 @@ final class PocketApps {
             case "receipt": return 17;
             case "journal": return 19;
             case "movement": return 13;
+            case "gym": return 13;
             default: return APP_ICON;
         }
     }
@@ -53,6 +54,7 @@ final class PocketApps {
             case "receipt": return ReceiptActivity.class;
             case "journal": return JournalActivity.class;
             case "movement": return MovementActivity.class;
+            case "gym": return GymActivity.class;
             default: return null;
         }
     }

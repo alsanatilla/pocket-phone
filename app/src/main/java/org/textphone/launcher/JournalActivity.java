@@ -26,6 +26,7 @@ public final class JournalActivity extends PocketActivity {
     @Override protected void onCreate(Bundle state) { super.onCreate(state); render(); }
     @Override protected void onResume() { super.onResume(); render(); }
     @Override protected void onCloudSynced() { render(); }
+    @Override protected String scene() { return PixelBackdrop.WAVES; }
 
     private void render() {
         screen("journal"); appSettings(this::settings);

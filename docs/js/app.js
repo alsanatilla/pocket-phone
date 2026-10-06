@@ -1,17 +1,18 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
-import * as drive from "./drive.js?v=20261006-movement1";
-import * as reader from "./reader.js?v=20261006-movement1";
-import * as pip from "./pip.js?v=20261006-movement1";
-import { backdrop } from "./pixel-backdrop.js?v=20261006-movement1";
-import * as zines from "./zines.js?v=20261006-movement1";
-import * as movement from "./movement.js?v=20261006-movement1";
-import * as coros from "./coros.js?v=20261006-movement1";
-import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-movement1";
-import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-movement1";
+import * as drive from "./drive.js?v=20261006-gym1";
+import * as reader from "./reader.js?v=20261006-gym1";
+import * as pip from "./pip.js?v=20261006-gym1";
+import { backdrop } from "./pixel-backdrop.js?v=20261006-gym1";
+import * as zines from "./zines.js?v=20261006-gym1";
+import * as movement from "./movement.js?v=20261006-gym1";
+import * as gymView from "./gym.js?v=20261006-gym1";
+import * as coros from "./coros.js?v=20261006-gym1";
+import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-gym1";
+import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-gym1";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-const TOOLS = ["today", "thoughts", "tasks", "notes", "movement", "apps"];
+const TOOLS = ["today", "thoughts", "tasks", "notes", "movement", "gym", "apps"];
 let content = null, notice = null, parkingDraft = "";
 
 // ── DOM helpers ──
@@ -92,10 +93,11 @@ function thinkWithPip(kind, uid, title, text, href) { guard(() => go("/pip/" + p
 const source = item => item.note ? notes.get(item.note) : null;
 const thoughtMeta = item => !item.due ? "Undecided" : item.due <= Date.now() ? "Ready to revisit" : "Revisit " + relative(item.due);
 const taskMeta = task => [task.done ? "Done" : task.due ? (task.due < taskDay() ? "Overdue · " : "") + task.due : "No date", task.important ? "Important" : "", task.steps?.length ? task.steps.filter(s => s.done).length + "/" + task.steps.length + " steps" : ""].filter(Boolean).join(" · ");
-function workspaceTitle(body, title, meta = "") {
-  const heading=h("h1", { class: "workspace-title", text: title });
-  if(title==='today')add(body,h('header',{class:'workspace-sky'},backdrop(),h('div',{class:'workspace-sky-title'},heading,meta?h('p',{class:'small muted',text:meta}):null)));
-  else add(body,heading);
+// Each area has its own header artwork, so a page is recognisable before it is read.
+const SCENE = { today: "sky", thoughts: "stars", tasks: "road", notes: "waves", search: "rings", apps: "tiles", gym: "iron" };
+function workspaceTitle(body, title, meta = "", scene = SCENE[title] || SCENE[body.className.match(/tool-(\w+)/)?.[1]] || "sky") {
+  add(body, h("header", { class: "workspace-sky" + (title === "notes" ? " compact" : "") }, backdrop(scene),
+    h("div", { class: "workspace-sky-title" }, h("h1", { class: "workspace-title", text: title }), meta ? h("p", { class: "small muted", text: meta }) : null)));
 }
 async function capture() {
   const choice = await choose("Capture", ["Thought", "Task", "Note"]);
@@ -118,7 +120,7 @@ function todayView() {
 }
 function parkingView(id) {
   const body = view("thoughts", [["+ thought", () => { go("/thoughts"); setTimeout(() => document.getElementById("thought-capture")?.focus(), 0); }], ["search", () => go("/search")]]);
-  workspaceTitle(body, "thoughts", "Ideas you haven’t committed to. Make a task when you choose an action.");
+  workspaceTitle(body, "thoughts", parking.open().length + " undecided");
   const item = id ? load("parking.json").items.find(i => String(i.id) === String(id)) : null;
   if(item) {
     add(body,rowButton("‹ thoughts", "", () => go("/thoughts")),h("p", { class: "thought", text: item.text }),h("p", { class: "meta muted", text: item.state === "parked" ? thoughtMeta(item) : item.state === "task" ? "Made into a task" : "Let go" }));
@@ -143,7 +145,7 @@ let taskFilter = "Open";
 function tasksView(uid) {
   const task = uid && uid !== "new" ? tasks.get(uid) : null;
   const body = view("tasks", [["+ task",()=>go("/tasks/new")],["search",()=>go("/search")]]);
-  workspaceTitle(body,"tasks","Actions you’ve chosen. Give them a date or choose what to do next.");
+  workspaceTitle(body,"tasks",tasks.list().filter(t=>!t.done).length+" open");
   if(uid === "new" || task && location.hash.endsWith("/edit")){taskEditor(body,task);return;}
   if(uid && !task){add(body,rowButton("‹ tasks","",()=>go("/tasks")),h("p",{class:"small muted",text:"This task was removed."}));return;}
   if(task){
@@ -174,16 +176,16 @@ function taskEditor(body, task) {
 }
 function searchView() {
   const body=view("today",[["‹ today",()=>go("/today")]]),field=h("input",{placeholder:"Find a thought, task or note…","aria-label":"Search workspace"}),results=h("div",{});
-  workspaceTitle(body,"search","Find context and actions in your workspace.");add(body,field,results);
+  workspaceTitle(body,"search");add(body,field,results);
   const find=()=>{const q=field.value.trim().toLowerCase();results.replaceChildren();if(!q)return;let count=0;
     const groups=[["THOUGHTS",parking.open(),t=>t.text,t=>go("/thoughts/"+t.id)],["TASKS",tasks.list(),t=>[t.text,...(t.steps||[]).map(s=>s.text),t.source?.text||""].join("\n"),t=>go("/tasks/"+t.uid)],["NOTES",notes.list(),n=>n.text,n=>go("/notes/"+n.uid)]];
     for(const [name,items,text,open] of groups){const hits=items.filter(t=>text(t).toLowerCase().includes(q));if(hits.length)add(results,section(name));for(const item of hits){count++;add(results,rowButton(name==="NOTES"?noteTitle(item):item.text,"",()=>open(item)));}}
     if(!count)add(results,h("p",{class:"small muted",text:"Nothing found."}));};field.addEventListener("input",find);field.focus();
 }
 function appsView() {
-  const body=view("apps");workspaceTitle(body,"apps","Supporting tools, each with a place in the workflow.");
+  const body=view("apps");workspaceTitle(body,"apps");
   split(body,[section("THINK"),rowButton("pip","",()=>go("/pip")),section("REVIEW"),rowButton("Activity","",()=>go("/receipt")),section("CREATE & KEEP"),rowButton("Zines","",()=>go("/zines"))],
-    [section("EXTRAS"),rowButton("Dice","",()=>go("/dice")),section("SETTINGS"),rowButton("Storage & devices","",()=>go("/sync"))]);
+    [section("BODY"),rowButton("Movement","",()=>go("/movement")),rowButton("Gym","",()=>go("/gym")),section("EXTRAS"),rowButton("Dice","",()=>go("/dice")),section("SETTINGS"),rowButton("Storage & devices","",()=>go("/sync"))]);
 }
 
 // ── Notes: list on the left, the open note on the right. Saves as you type. ──
@@ -194,6 +196,7 @@ function notesView(uid) {
   const picker = h("input", { type: "file", accept: "image/*", multiple: true, hidden: true, onchange: e => { uploadPages([...e.target.files]); e.target.value = ""; } });
   const body = view("notes", [["+ page", () => picker.click(), { title: "Upload photos of journal pages" }], ["+ new note", () => go("/notes/new")]]);
   body.classList.toggle("editing", editing);
+  workspaceTitle(body, "notes", notes.list().length + " notes");
   // Photos of journal pages can also be dropped anywhere on the notes tab.
   body.addEventListener("dragover", event => { if ([...event.dataTransfer.types].includes("Files")) { event.preventDefault(); body.classList.add("dropping"); } });
   body.addEventListener("dragleave", event => { if (event.target === body) body.classList.remove("dropping"); });
@@ -519,13 +522,14 @@ function syncView() {
   add(body, h("div", { class: "narrow" },
     h("p", { class: connected ? "accent" : "", text: describe() }),
     status.error ? h("p", { class: "small warn", text: status.error }) : null,
-    section("DRIVE"),h("p", { class: "small muted", text: "Thoughts · Tasks · Notes · Paper · Activity · Dice" }),
+    section("DRIVE"),h("p", { class: "small muted", text: "Thoughts · Tasks · Notes · Paper · Activity · Dice · Gym" }),
     drive.configured() ? null : h("p", { class: "small warn", text: "This page has no Google client id yet. Add it to docs/js/config.js (see CLOUD.md)." }),
     connected ? [rowButton("sync now", "", async () => { say("Syncing…"); const ok = await syncNow(); syncView(); say(ok ? "Synced." : describe()); }),
       rowButton("disconnect", "this browser keeps its copy", async () => { await drive.disconnect(); syncView(); })]
       : rowButton("connect google drive", drive.remembered() ? "you were connected before" : "", () => connectFlow(drive.remembered())),
     section("IN THIS BROWSER"),
-    h("p", { class: "small muted", style: "white-space:pre-line", text: `thoughts  ${parked} undecided\ntasks     ${tasks.list().filter(t=>!t.done).length} open\nnotes     ${notes.list().length}\nreceipt   ${days} day${days === 1 ? "" : "s"}\ndice      ${dice.list().length} on the list` }),
+    h("p", { class: "small muted", style: "white-space:pre-line", text: `thoughts  ${parked} undecided\ntasks     ${tasks.list().filter(t=>!t.done).length} open\nnotes     ${notes.list().length}\nreceipt   ${days} day${days === 1 ? "" : "s"}\ndice      ${dice.list().length} on the list
+gym       ${load("gym.json").workouts.filter(w=>!w.deleted).length} workouts` }),
     rowButton("forget this browser's copy", "", async () => {
       if (await confirmBox("Forget the copy in this browser? Your Drive copy and the phone are not touched.", "forget")) {
         Object.keys(localStorage).filter(k => k.startsWith("pocket:")).forEach(k => localStorage.removeItem(k)); syncView();
@@ -557,6 +561,7 @@ function route() {
   else if (name === "pip") pip.mount(view("pip"), arg, pipHelpers);
   else if (name === "zines") zines.mount(view("zines"), arg, { go, say, dialog, confirm: confirmBox });
   else if (name === "movement") movement.mount(view("movement"), { say });
+  else if (name === "gym") gymView.mount(view("gym"), arg, { h, add, say, section, rowButton, keys, split, go, confirm: confirmBox, title: workspaceTitle });
   else if (name === "thoughts" || name === "parking") parkingView(arg); else if (name === "tasks") tasksView(arg); else if (name === "apps") appsView(); else if (name === "search") searchView(); else if (name === "today") todayView(); else { history.replaceState(null, "", "#/today"); todayView(); }
 }
 addEventListener("hashchange", route);

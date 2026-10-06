@@ -47,10 +47,11 @@ flowchart LR
 | pip | Think with the context you choose | The same chat design on phone and web. Attach a Thought, Task or Note, then explicitly keep a reply as a Note, park a Thought or choose a Task. Conversations stay on each device. |
 | Activity | Reviewing what you did | The day’s completed tasks and deliberate Pocket actions. Reach it from Today and Settings. |
 | Movement | Your physical context | COROS readings appear on Home; tapping a reading opens its detail. |
+| Gym | Strength progress | Start a workout, log sets with last time and your best beside them, then read each lift’s estimated best (e1RM) and weekly volume. Synced with the web. |
 | Calculator / Dice | Small supporting tools | Reach them under Apps → Extras. They do not become competing organizers. |
 | Settings | App choices and connections | Home selection, custom shortcuts, permissions, storage/devices and optional accounts. |
 
-Apps groups communication, planning/thinking, capture/keeping and extras. Custom shortcuts and groups remain accessible above those groups. Installed apps remain searchable, so Pocket can be used as the default launcher while keeping needed external apps.
+Apps groups communication, planning/thinking, capture/keeping, body and extras. Custom shortcuts and groups remain accessible above those groups. Installed apps remain searchable, so Pocket can be used as the default launcher while keeping needed external apps.
 
 ## A complete journey
 
@@ -66,6 +67,6 @@ Back follows the path you took. A saved task opens its details so its next actio
 
 The phone works locally without signing in. Drive stays as the optional transport between devices. The web has the same **Today / Thoughts / Tasks / Notes** structure and can capture, decide, edit, complete and review those shared records. Source tokens keep one thought linked to its chosen action across phone and web. Handled and deleted records remain as sync markers so older copies do not revive them.
 
-The current shared collections are Thoughts, Tasks, Notes, Paper pages, Activity and Dice lists. Pip works on phone and web; its chats remain local to each device, while records you explicitly keep use the existing shared collections. Calendar, timers/reminders, Camera photos, calls, SMS and contacts stay on the phone. Drive authentication and live device synchronization still need account/handset verification; no private server has been added.
+The current shared collections are Thoughts, Tasks, Notes, Paper pages, Activity, Dice lists and Gym workouts. Pip works on phone and web; its chats remain local to each device, while records you explicitly keep use the existing shared collections. Calendar, timers/reminders, Camera photos, calls, SMS and contacts stay on the phone. Drive authentication and live device synchronization still need account/handset verification; no private server has been added.
 
 Pocket is a launcher and a set of native apps running on Nothing OS. Android still owns Recents and system gestures. The current local APK needs the existing release signing key before it can update an installed release.

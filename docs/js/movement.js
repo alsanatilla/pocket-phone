@@ -1,7 +1,8 @@
 // Movement: a cockpit of COROS readiness, trends, fitness and activities, or an invented sample until COROS is connected.
-import * as coros from "./coros.js?v=20261006-movement1";
-import { svg, ring, meter, stack, dayLine, dayBars, dayPair, trace } from "./movement-charts.js?v=20261006-movement1";
-import { scores } from "./scores.js?v=20261006-movement1";
+import * as coros from "./coros.js?v=20261006-gym1";
+import { svg, ring, meter, stack, dayLine, dayBars, dayPair, trace } from "./movement-charts.js?v=20261006-gym1";
+import { scores } from "./scores.js?v=20261006-gym1";
+import { backdrop } from "./pixel-backdrop.js?v=20261006-gym1";
 
 // A visual concept only. These activities and readings are invented and never read or saved.
 const SAMPLE = [
@@ -308,7 +309,7 @@ export function mount(body, { say = () => {} } = {}) {
   let at = saved?.at || 0, loading = false, selected = items[0]?.id;
   let open = sessionStorage.getItem("pocket:movement-open") || null, allCharts = false, moreOpen = false;
   const details = {}; // activity id → everything COROS has on it, "loading" or "error"
-  const list = el("div", "movement-list"), detail = el("section", "movement-detail");
+  const list = el("div", "movement-list"), detail = el("section", "movement-detail"), sky = backdrop("terrain");
 
   const load = async () => {
     loading = true; draw();
@@ -448,7 +449,7 @@ export function mount(body, { say = () => {} } = {}) {
     }
     const focused = body.contains(document.activeElement) ? document.activeElement.dataset.id : null;
     body.replaceChildren(...[
-      el("div", "movement-heading", words("h1", "movement-title", "movement"), el("div", "movement-heading-side", deck.device ? words("span", "movement-device", deck.device.toUpperCase()) : null, source)),
+      el("div", "movement-heading movement-sky", sky, words("h1", "movement-title", "movement"), el("div", "movement-heading-side", deck.device ? words("span", "movement-device", deck.device.toUpperCase()) : null, source)),
       connect,
       scoresBox,
       el("div", "cockpit-block-head cockpit-activities-head", kicker(live ? "ACTIVITIES · LAST 90 DAYS" : "ACTIVITIES")),

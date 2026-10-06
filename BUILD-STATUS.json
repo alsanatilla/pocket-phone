@@ -1,11 +1,11 @@
 {
   "component": "Pocket Phone Android launcher/apps and browser workspace",
-  "version_name": "0.6.1",
-  "version_code": 29,
+  "version_name": "0.7.0",
+  "version_code": 30,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-06T10:06:07.814Z",
+  "checked_at_utc": "2026-10-06T11:45:45.837Z",
   "build": "assembleRom passed. Test suite skipped at the user's request. APK remains unsigned for the release agent.",
   "commands": [
     "./gradlew.bat -I app/build/tmp/release-output.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
@@ -13,7 +13,7 @@
   "build_environment": {
     "java": "17.0.20.1+1",
     "android_sdk": 35,
-    "output_directory": "app/build/release-061",
+    "output_directory": "app/build/release-070",
     "note": "A temporary Gradle init script set a fresh build directory after Windows locked an older classes.dex. The standard assembleRom command builds the same sources."
   },
   "final_test_suite": {
@@ -43,8 +43,8 @@
   },
   "web_manual_checks": {
     "origin": "Isolated localhost:8881 preview, Drive disconnected",
-    "asset_version": "20261006-dither1",
-    "status": "Canvas artwork inspected at 390px and 1280px. Horizontal overflow checks passed at 1280px and 691px. A 691px preview confirmed static frames and resize-observer disposal when leaving Today. Browser screenshot capture failed in the preview client; the canvas artwork was inspected directly. The desktop preview host then disconnected before further checks."
+    "asset_version": "20261006-gym1",
+    "status": "Gym tab checked at 1280px and 390px with temporary local workouts (removed afterwards, never marked for sync): logging form, rest timer, last time/best, volume bars, progress, e1RM chart and history. Every area header canvas rendered (sky, stars, road, waves, tiles, rings, iron, terrain). No horizontal overflow at 390px."
   },
   "live_preview_incidents": {
     "drive": "An earlier shared preview connected to Drive during manual checking. Its sample task was tombstoned and the remote deletion verified. Handled markers and append-only Activity records may remain. Later fixtures use an isolated disconnected origin.",
@@ -52,10 +52,10 @@
   },
   "agent_paid_api_requests": 0,
   "apk": {
-    "file": "app/build/release-061/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.6.1-unsigned.apk",
-    "bytes": 8906096,
-    "sha256": "100e9f6b2c813946e5f8918c53ae22d95125f9732945f0fbe1db9c52c878f673",
+    "file": "app/build/release-070/outputs/apk/rom/app-rom-unsigned.apk",
+    "release_asset": "pocket-phone-0.7.0-unsigned.apk",
+    "bytes": 8921600,
+    "sha256": "88a3c674754b02423a5d5114cffbddeccd6e8818de98bc5af55aa251a9eeab4f",
     "signed": false,
     "installable_update": false,
     "signing": "Left unsigned for the other release agent"
@@ -77,7 +77,8 @@
     "Notes",
     "Paper",
     "Activity",
-    "Dice lists"
+    "Dice lists",
+    "Gym workouts"
   ],
   "known_limits": [
     "The release APK is unsigned; another agent handles signing before installation.",
@@ -86,14 +87,16 @@
     "Android/Nothing OS controls Recents and Home gestures; no full custom ROM was built.",
     "Pip chats stay local to each device, outside Drive; browser data removal or app uninstall removes local conversations.",
     "Compatible browser API endpoints must support CORS; native Pocket tool lookups are not offered in the browser.",
-    "Camera tuning used existing phone JPEGs rather than real Pocket YUV captures and may need handset retuning."
+    "Camera tuning used existing phone JPEGs rather than real Pocket YUV captures and may need handset retuning.",
+    "Gym logging and header artwork have not been checked on a handset; phone layouts were compiled, not rendered."
   ],
   "full_custom_rom_compiled": false,
-  "previous_release": "v0.6.0",
-  "changes_in_0_6_1": [
-    "Static original pixel sky for native Home/Today and browser Today, using matching ordered-dither formulas and Pocket's accent palette",
-    "Artwork fades to black and keeps the left side subdued behind clock/title text; lists and editors retain plain backgrounds",
-    "Android caches the bitmap by size, the browser repaints on resize and disposes its observer on route changes; no background requests or animation loop",
-    "No data schema or sync-scope changes from 0.6.0"
+  "previous_release": "v0.6.1",
+  "changes_in_0_7_0": [
+    "Gym on phone (GymActivity) and web (tab 6): workouts, set logging, last time, best, rest timer, e1RM progress per lift, weekly volume and history",
+    "gym.json joins Drive sync on both sides; merge per workout by newest edit with deletion markers (GymStore.merge / store.js merge)",
+    "Eight dithered header scenes from one shared kernel: sky, stars, road, waves, terrain, iron, tiles, rings, used per area on phone and web",
+    "PocketActivity.scene() hook gives Pocket apps a header scene; titles over artwork get a dark halo",
+    "Web subtitles replaced by counts; Apps lists Movement and Gym under Body"
   ]
 }

@@ -578,23 +578,30 @@ public class MainActivity extends Activity {
             default: renderHome(); break;
         }
         View page=viewport;
-        boolean todayPage="today".equals(screen),taskEditor="capture".equals(screen)&&"task".equals(captureKind);
-        if(todayPage||taskEditor){
-            LinearLayout shell=new LinearLayout(this);shell.setOrientation(LinearLayout.VERTICAL);shell.setBackgroundColor(BACKGROUND);shell.setTag(todayPage?"today_workspace":"task_editor_workspace");
+        boolean todayPage="today".equals(screen),taskEditor="capture".equals(screen)&&"task".equals(captureKind);String scene=headerScene();
+        if(todayPage||taskEditor||scene!=null){
+            LinearLayout shell=new LinearLayout(this);shell.setOrientation(LinearLayout.VERTICAL);shell.setBackgroundColor(BACKGROUND);shell.setTag(todayPage?"today_workspace":taskEditor?"task_editor_workspace":screen+"_workspace");
             shell.setPadding(dp(horizontal),dp(4),dp(horizontal),dp(4));
             shell.setOnApplyWindowInsetsListener((view,insets)->{int left,top,right,bottom;
                 if(Build.VERSION.SDK_INT>=30){android.graphics.Insets safe=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout()|WindowInsets.Type.ime());left=safe.left;top=safe.top;right=safe.right;bottom=safe.bottom;}
                 else{left=insets.getSystemWindowInsetLeft();top=insets.getSystemWindowInsetTop();right=insets.getSystemWindowInsetRight();bottom=insets.getSystemWindowInsetBottom();}
                 view.setPadding(dp(horizontal)+left,dp(4)+top,dp(horizontal)+right,dp(4)+bottom);return insets.consumeSystemWindowInsets();});
             View header=content.findViewWithTag("page_header");content.removeView(header);
-            if(todayPage&&"today".equals(workspaceTab)){shell.setBackground(new PixelBackdrop(this,accent(),140));header.setBackgroundColor(android.graphics.Color.TRANSPARENT);}
+            if(scene!=null){shell.setBackground(new PixelBackdrop(this,accent(),todayPage?140:88,scene));header.setBackgroundColor(android.graphics.Color.TRANSPARENT);TextView heading=header.findViewWithTag("page_heading");if(heading!=null)heading.setShadowLayer(dp(6),0,0,android.graphics.Color.BLACK);}
             shell.addView(header,new LinearLayout.LayoutParams(-1,-2));
             if(todayPage){content.removeView(todayDate);shell.addView(todayDate,new LinearLayout.LayoutParams(-1,-2));content.removeView(workspaceTabs);shell.addView(workspaceTabs,new LinearLayout.LayoutParams(-1,-2));}
-            viewport.setPadding(0,0,0,0);viewport.setOnApplyWindowInsetsListener(null);viewport.setTag(todayPage?"today_scroll":"task_editor_scroll");
+            viewport.setPadding(0,0,0,0);viewport.setOnApplyWindowInsetsListener(null);viewport.setTag(todayPage?"today_scroll":taskEditor?"task_editor_scroll":screen+"_scroll");
             shell.addView(viewport,new LinearLayout.LayoutParams(-1,0,1));if(todayPage)shell.addView(todayActions,new LinearLayout.LayoutParams(-1,-2));page=shell;
         }
         motion.show(page, pageKey(screen)); if (appRowsReady || !"apps".equals(screen) && !"assign".equals(screen)) motion.dataReady(); page.requestApplyInsets();if(planHost!=null)refreshDayPlan();
         renderedOrganizer = "today".equals(screen) || "task_detail".equals(screen) || "thought_detail".equals(screen) || "search".equals(screen) ? organizerState() : "";
+    }
+    /** Each area has its own header artwork, so a page is recognisable before it is read. */
+    private String headerScene() {
+        if ("today".equals(screen)) switch (workspaceTab) { case "thoughts": return PixelBackdrop.STARS; case "tasks": return PixelBackdrop.ROAD; case "notes": return PixelBackdrop.WAVES; default: return PixelBackdrop.SKY; }
+        if ("apps".equals(screen)) return PixelBackdrop.TILES;
+        if ("search".equals(screen)) return PixelBackdrop.RINGS;
+        return null;
     }
     private String renderedOrganizer = "";
     /** Everything the Today and task pages show that can change while another app is in front. */
@@ -1487,7 +1494,7 @@ public class MainActivity extends Activity {
             int index=i;TextView row=actionInto(pocketAppResults,tiles.label(slot),18,PRIMARY,()->openShortcut(index));
             row.setTag("all_shortcut_"+slot);row.setOnLongClickListener(v->{editShortcut(slot);return true;});
         }
-        String[][] groups={{"communicate","phone","messages","contacts"},{"plan & think","today","thoughts","tasks","notes","calendar","clock","pip"},{"capture & keep","camera","photos","paper"},{"extras","calculator","dice","movement"}};
+        String[][] groups={{"communicate","phone","messages","contacts"},{"plan & think","today","thoughts","tasks","notes","calendar","clock","pip"},{"capture & keep","camera","photos","paper"},{"body","movement","gym"},{"extras","calculator","dice"}};
         for(String[] group:groups){boolean heading=false;for(int i=1;i<group.length;i++){String name=group[i];if(!AppSearch.matches(name,appQuery))continue;
             if(!heading){section(pocketAppResults,group[0],pocketAppResults.getChildCount()==0);heading=true;}
             actionInto(pocketAppResults,name,18,PRIMARY,()->{

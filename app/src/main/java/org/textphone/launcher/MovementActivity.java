@@ -33,6 +33,7 @@ public final class MovementActivity extends PocketActivity {
     @Override protected void onPause() { visible = false; ui.removeCallbacks(claim); super.onPause(); }
     @Override protected void onSaveInstanceState(Bundle state) { state.putInt("score", selected); state.putBoolean("settings", settings); state.putBoolean("direct", direct); super.onSaveInstanceState(state); }
     @Override protected boolean hasInternalBack() { return settings || selected >= 0 && !direct; }
+    @Override protected String scene() { return PixelBackdrop.TERRAIN; }
     @Override public void onBackPressed() { if (hasInternalBack()) { back(() -> { if (settings) settings = false; else selected = -1; render(); }); } else super.onBackPressed(); }
     private void render() {
         screen(settings ? "movement settings" : "movement", settings ? "movement-settings" : "movement");

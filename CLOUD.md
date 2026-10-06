@@ -9,6 +9,7 @@ Cloud sync is **off by default**. When you turn it on in Settings → Storage & 
 | `dice.json` | The Dice pick list |
 | `notes.json` | Workspace notes with pins; deleted notes remain as markers for offline devices |
 | `tasks.json` | Task titles, completion, due dates, importance, checklist progress, chosen next task and selected source text; deletion markers remain for offline devices |
+| `gym.json` | Workouts: start/end time and each exercise’s sets (kg, reps, time); per workout the later edit wins and deleted workouts stay as markers |
 | `journal.json` + `page-<uid>.jpg` | Journal pages: the photo, its transcript lines with their position on the photo, and the linked note |
 
 Calendar appointments, timers, task reminders, editor drafts, notification handles, messages, contacts, calls and Pocket Camera album photos stay on the phone. Only the source text explicitly selected when creating a task is included with it. Journal page photos are included when cloud sync is enabled. The hidden folder is only visible to Pocket's own Google Cloud project; it does not show up in Drive.

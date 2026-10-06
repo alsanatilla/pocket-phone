@@ -1,4 +1,4 @@
-# Pocket design system — 0.6.1
+# Pocket design system — 0.7.0
 
 Pocket is a daily Android dashboard and a set of small native apps for the Nothing Phone (3a). Its character comes from black, white monospace text, pixel titles and icons, and labelled soft keys. Its polish comes from every app using the same few patterns, so a page can be scanned without learning it first.
 
@@ -10,13 +10,13 @@ Pocket is a daily Android dashboard and a set of small native apps for the Nothi
 2. Chrome is lowercase: page titles, header buttons, tabs, item commands, soft keys and setting names. Content keeps its own case: task and note text, messages, explanations, names such as COROS or WhatsApp.
 3. Everything starts at the same left edge (16 dp plus safe insets). Commands under an item start where the item's text starts.
 4. Accent marks one thing per group: a commit (save, send, + task), the selected tab, the next/now item, and the classic Home soft keys. Everything else is white or muted.
-5. Group with space, not lines. Sections use a small uppercase label and a 24 dp gap. No dividers, cards or shadows. Home and Today may use dithered artwork fading into black behind the header; working lists and editors stay plain.
+5. Group with space, not lines. Sections use a small uppercase label and a 24 dp gap. No dividers, cards or shadows. Each area has its own dithered artwork fading into black behind its header; working lists and editors below stay plain.
 6. Touch targets stay at least 48 dp (rows 56 dp) even when labels are small.
 7. Android owns Home, Recents, the keyboard and permission dialogs.
 
 ## Tokens
 
-Home and Today use an original pixel sky inspired by the supplied dithered-header reference. The bitmap is generated from a shared ordered-dither kernel in `PixelBackdrop.java` and `pixel-backdrop.js`, tinted with Pocket's accent and faded toward black. Text remains native text. The artwork is static, cached by size on Android, and redrawn only on resize in the browser. No background photo, animation loop or external asset is downloaded.
+Each area has an original scene so a page is recognisable before it is read: sky (Home, Today), stars (Thoughts), road (Tasks), waves (Notes, Paper), terrain (Movement), iron (Gym), tiles (Apps) and rings (Search). The bitmaps come from one ordered-dither kernel in `PixelBackdrop.java` and `pixel-backdrop.js`, tinted with Pocket's accent and faded toward black. The left side and lower edge stay quiet and titles carry a dark halo, so text over the artwork stays readable. Text remains native text. The artwork is static, cached by size on Android, and redrawn only on resize in the browser. No background photo, animation loop or external asset is downloaded.
 
 | Role | Value | Purpose |
 | --- | --- | --- |

@@ -84,6 +84,7 @@ public abstract class PocketActivity extends Activity {
         Button home = button("home", () -> { startActivity(new Intent(this, MainActivity.class)
                 .setAction(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK)); }); PocketDesign.headerControl(home, GRAY);headerRight=home;
         header.addView(home, new LinearLayout.LayoutParams(PocketDesign.headerWidth(home,64), PocketDesign.headerHeight(this))); PocketDesign.header(header);
+        if (scene() != null) { root.setBackground(new PixelBackdrop(this, PocketDesign.accent(this), 88, scene())); header.setBackgroundColor(Color.TRANSPARENT); name.setShadowLayer(dp(6), 0, 0, Color.BLACK); }
         root.addView(header);
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true);
         body = new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(0, dp(4), 0, dp(4));
@@ -206,6 +207,8 @@ public abstract class PocketActivity extends Activity {
             .setNegativeButton("Cancel", null).setPositiveButton("Confirm", (d, w) -> action.run()).show(); }
     /** A page that is leaving accepts no late results: a permission answer or read tied to it can no longer act. */
     @Override public void finish() { pageGeneration++; super.finish(); }
+    /** The header artwork of this app's area, or null for a plain header. */
+    protected String scene() { return null; }
     protected boolean hasInternalBack() { return false; }
     protected String backPageKey(String rootPage) { return rootPage; }
     protected void back(Runnable action) { motion.back(action); }

@@ -2,7 +2,7 @@
 // All chat requests are fake; no provider key or account is used.
 (async () => {
   if (location.origin !== "http://localhost:8881") throw new Error("Use the isolated preview origin.");
-  const drive = await import("/js/drive.js?v=20261006-movement1");
+  const drive = await import("/js/drive.js?v=20261006-gym1");
   if (drive.connected()) throw new Error("Disconnect this preview before using fixtures.");
   globalThis.pipFixture = { requests: [], mode: "answer", fetch: globalThis.fetch };
   globalThis.fetch = async (url, options) => {

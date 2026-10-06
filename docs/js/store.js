@@ -3,12 +3,12 @@
 
 const HOUR = 3_600_000, DAY = 24 * HOUR, KEEP_CLOSED = 7 * DAY, KEEP_DAYS = 30, DAY_LIMIT = 300, KEEP_DELETED = 30 * DAY;
 export const NOTE_LIMIT = 8000;
-export const FILES = ["parking.json", "receipt.json", "dice.json", "notes.json", "tasks.json", "journal.json"];
+export const FILES = ["parking.json", "receipt.json", "dice.json", "notes.json", "tasks.json", "journal.json", "gym.json"];
 export const DELAYS = ["1 hour", "tonight", "tomorrow", "next week"];
 export const HECKLE = 3;
 export const KIND = { ROLL: "ROLL", PARK: "PARK", CLEAR: "CLEAR", KILL: "KILL", MEMO: "MEMO", DONE: "DONE", PHOTO: "PHOTO", ALARM: "ALARM", TASK: "TASK" };
 
-const EMPTY = { "parking.json": () => ({ v: 1, items: [] }), "receipt.json": () => ({ v: 1, days: {} }), "dice.json": () => ({ v: 1, list: "", updated: 0 }), "notes.json": () => ({ v: 1, notes: [] }), "tasks.json": () => ({ v: 1, tasks: [], next: { uid: "", updated: 0 } }), "journal.json": () => ({ v: 1, pages: [] }) };
+const EMPTY = { "gym.json": () => ({ v: 1, workouts: [] }), "parking.json": () => ({ v: 1, items: [] }), "receipt.json": () => ({ v: 1, days: {} }), "dice.json": () => ({ v: 1, list: "", updated: 0 }), "notes.json": () => ({ v: 1, notes: [] }), "tasks.json": () => ({ v: 1, tasks: [], next: { uid: "", updated: 0 } }), "journal.json": () => ({ v: 1, pages: [] }) };
 const listeners = new Set();
 export const onChange = fn => listeners.add(fn);
 const changed = name => { markDirty(name); listeners.forEach(fn => fn(name)); };
@@ -54,6 +54,8 @@ export const merge = {
   }),
   // Journal pages are written by the phone; same rule as JournalStore.merge.
   "journal.json": (local, remote, now) => ({ v: 1, pages: mergeById(local.pages, remote?.pages, "uid", "updated") }),
+  // Workouts: same rule as GymStore.merge; deleted workouts stay as markers.
+  "gym.json": (local, remote) => ({ v: 1, workouts: mergeById(local.workouts, remote?.workouts, "id", "updated") }),
 };
 
 // ── Journal pages: photographed on the phone, read by Claude; each line knows where it sits on the photo. ──
@@ -249,5 +251,55 @@ export const tasks = {
     if(current.state!=="parked")throw new Error("This thought has already been handled.");
     const note=current.note?notes.get(current.note):null,source={kind:note?"note":"shared",name:note?noteTitle(note):"Thought",text:note?note.text:current.text,token:"thought:"+current.id};if(note)source.note_uid=note.uid;
     const task=this.create(current.text,source);parking.close(current.id,"task");receipt.log(KIND.TASK,current.text);return task;
+  },
+};
+
+// ── Gym: workouts of sets; the same records and rules as GymStore.java. ──
+export const STARTERS = ["Squat", "Bench press", "Deadlift", "Overhead press", "Barbell row", "Pull-up"];
+export const e1rm = (kg, reps) => reps <= 1 ? kg : kg * (1 + reps / 30);
+export const kgText = v => Math.abs(v - Math.round(v)) < .05 ? String(Math.round(v)) : v.toFixed(1);
+const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+export const weekStart = at => { const d = new Date(at); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return d.getTime(); };
+export const gym = {
+  all() { return load("gym.json").workouts.filter(w => !w.deleted).sort((a, b) => b.started - a.started); },
+  get(id) { return gym.all().find(w => w.id === id) || null; },
+  active() { return gym.all().find(w => !w.ended) || null; },
+  edit(id, change) {
+    const doc = load("gym.json"), w = doc.workouts.find(x => x.id === id && !x.deleted);
+    if (!w) throw new Error("This workout was removed.");
+    change(w); w.updated = Date.now(); save("gym.json", doc); changed("gym.json"); return w;
+  },
+  start() {
+    const open = gym.active(); if (open) return open;
+    const doc = load("gym.json"), now = Date.now(), w = { id: crypto.randomUUID(), started: now, ended: 0, updated: now, entries: [] };
+    doc.workouts.push(w); save("gym.json", doc); changed("gym.json"); return w;
+  },
+  entry(w, exercise) { let e = (w.entries ||= []).find(x => same(x.exercise, exercise)); if (!e) { e = { exercise, sets: [] }; w.entries.push(e); } return e; },
+  addExercise(id, exercise) { return gym.edit(id, w => gym.entry(w, exercise.trim())); },
+  addSet(id, exercise, kg, reps) {
+    if (!exercise?.trim()) throw new Error("Choose an exercise.");
+    if (!(reps >= 1 && reps <= 100 && kg >= 0 && kg <= 1000)) throw new Error("Use 1–100 reps and up to 1000 kg.");
+    return gym.edit(id, w => gym.entry(w, exercise.trim()).sets.push({ kg: Math.round(kg * 100) / 100, reps: Math.round(reps), at: Date.now() }));
+  },
+  undoSet(id, exercise) { gym.edit(id, w => gym.entry(w, exercise).sets.pop()); },
+  finish(id) { gym.edit(id, w => { w.ended = Date.now(); w.entries = (w.entries || []).filter(e => e.sets.length); if (!w.entries.length) w.deleted = true; }); },
+  remove(id) { gym.edit(id, w => { w.deleted = true; w.entries = []; }); },
+  sets(w, exercise) { return (w.entries || []).filter(e => same(e.exercise, exercise)).flatMap(e => e.sets || []); },
+  names(w) { return (w.entries || []).map(e => e.exercise); },
+  count(w) { return (w.entries || []).reduce((n, e) => n + (e.sets?.length || 0), 0); },
+  volume(w) { return (w.entries || []).reduce((n, e) => n + (e.sets || []).reduce((m, s) => m + s.kg * s.reps, 0), 0); },
+  /** Exercises with sets, most recently used first. */
+  trained() { const seen = new Map(); for (const w of gym.all()) for (const name of gym.names(w)) if (gym.sets(w, name).length && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name); return [...seen.values()]; },
+  exercises() { const seen = new Map(gym.trained().map(n => [n.toLowerCase(), n])); for (const n of STARTERS) if (!seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n); return [...seen.values()]; },
+  previous(exercise, exceptId) { for (const w of gym.all()) { if (w.id === exceptId) continue; const sets = gym.sets(w, exercise); if (sets.length) return sets; } return []; },
+  /** One point per workout, oldest first: the best estimated single. */
+  history(exercise) {
+    return gym.all().map(w => { const best = gym.sets(w, exercise).reduce((b, s) => !b || e1rm(s.kg, s.reps) > e1rm(b.kg, b.reps) ? s : b, null); return best && { at: w.started, e1rm: e1rm(best.kg, best.reps), best }; }).filter(Boolean).reverse();
+  },
+  record(history) { return history.reduce((b, p) => !b || p.e1rm > b.e1rm ? p : b, null); },
+  weekly(weeks = 8) {
+    const out = Array(weeks).fill(0), start = weekStart(Date.now());
+    for (const w of gym.all()) { const ago = Math.round((start - weekStart(w.started)) / (7 * DAY)); if (ago >= 0 && ago < weeks) out[weeks - 1 - ago] += gym.volume(w); }
+    return out;
   },
 };

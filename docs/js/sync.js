@@ -1,6 +1,6 @@
 // Edits save locally first and are marked waiting; they upload when the browser is online and connected.
-import * as drive from "./drive.js?v=20261006-movement1";
-import { FILES, load, save, merge, clean, dirty, onChange } from "./store.js?v=20261006-movement1";
+import * as drive from "./drive.js?v=20261006-gym1";
+import { FILES, load, save, merge, clean, dirty, onChange } from "./store.js?v=20261006-gym1";
 
 export const status = { state: "idle", last: Number(localStorage.getItem("pocket:last-sync") || 0), error: "" };
 const listeners = new Set();

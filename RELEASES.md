@@ -2,6 +2,13 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.7.0 — Gym and area artwork
+
+- **Gym.** A strength log on phone and web. Start a workout, pick an exercise, and log sets with kg/reps steppers (phone) or fields (web). Last time, your best and a rest timer sit beside the set being logged. Progress shows each lift's best estimated single (Epley e1RM) with its four-week change, an e1RM chart, weekly volume and history. Workouts sync through Drive as `gym.json`; per workout the later edit wins and deletions stay as markers.
+- **Area artwork.** Every area has its own dithered scene behind its header: stars for Thoughts, a road for Tasks, waves for Notes and Paper, terrain for Movement, iron bars for Gym, tiles for Apps and rings for Search. Home and Today keep the sky. Phone and web share the same formulas. Titles get a dark halo, the left side stays quiet, and web subtitles are counts instead of explanations.
+- **Web.** Gym is tab 6, between Movement and Apps. Apps lists Movement and Gym under Body.
+- The APK remains unsigned for the release agent. Compilation results are in BUILD-STATUS.json; the test suite is skipped as requested.
+
 ## 0.6.1 — Dithered headers
 
 - Home and Today add an original pixel sky inspired by the supplied reference, tinted with Pocket's accent and fading into black. Phone and web use the same ordered-dither pattern. Text stays crisp and working lists stay plain.

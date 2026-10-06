@@ -132,6 +132,7 @@
         <activity android:name=".ParkingActivity" android:label="Pocket Thoughts" android:taskAffinity="org.textphone.launcher.parking" android:exported="false" />
         <activity android:name=".ReceiptActivity" android:label="Pocket Receipt" android:taskAffinity="org.textphone.launcher.receipt" android:exported="false" />
         <activity android:name=".MovementActivity" android:label="Pocket Movement" android:taskAffinity="org.textphone.launcher.movement" android:exported="false" />
+        <activity android:name=".GymActivity" android:label="Pocket Gym" android:taskAffinity="org.textphone.launcher.gym" android:windowSoftInputMode="adjustResize" android:exported="false" />
         <activity android:name=".CloudActivity" android:label="Pocket Storage and Devices" android:taskAffinity="org.textphone.launcher.settings" android:exported="false" />
         <service android:name=".SyncJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />
         <activity android:name=".JournalActivity" android:label="Pocket Journal" android:taskAffinity="org.textphone.launcher.journal" android:exported="false" />
