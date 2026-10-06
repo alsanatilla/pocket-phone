@@ -20,7 +20,7 @@ Calendar appointments, alarms, task reminders, drafts, notification handles, cal
 
 ## Connect devices
 
-In the browser, open **Apps → Account & devices**. Choose **sign in with passkey** or **use a password** for an existing account. **Create account** opens a separate form: register a passkey, or choose a password of at least 12 characters. A passkey is attached to your Pocket account, not a new account for its device. Once signed in, add another passkey from **Passkeys** if needed; a password account can add passkeys too.
+In the browser, open **Apps → Account & devices**. Email/password sign-in is shown first; **sign in with passkey** is an optional action. **Create account** opens a separate email/password form, with a password of at least 12 characters. **Create with a passkey** explicitly chooses passkey registration instead. A passkey is attached to your Pocket account, not a new account for its device. Once signed in, add another passkey from **Passkeys** if needed; a password account can add passkeys too.
 
 **Bring this browser’s workspace** imports guest records and chats into the chosen account’s local copy and transfers an existing guest COROS connection to the account. It does not copy provider keys. Account copies stay separate. Switching or signing out reloads the workspace, and other open tabs reload when the selected account changes.
 

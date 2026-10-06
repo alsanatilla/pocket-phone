@@ -603,7 +603,7 @@ async function roll(result, detail) {
 }
 
 // ── Account: who you are, which devices are linked, and this browser's copy ──
-let passwordMode = false;
+let passwordMode = true;
 const KEY_GLYPH = '<svg viewBox="0 0 12 7" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M1 1h3v1h1v1h6v1h-1v1h-1v-1h-1v1h-1v-1h-2v1h-1v1h-3v-1h-1v-3h1zM2 3v1h1v-1z"/></svg>';
 const deviceLabel = ua => !ua ? 'linked device' : /Pocket Android|okhttp|Dalvik/i.test(ua) ? 'Pocket phone' : [
   /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Browser',
@@ -615,6 +615,7 @@ const normalCode = value => value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(
 
 const PHONE_LINK = 'pocket:pending-phone-link';
 function accountView(code = '', creating = false) {
+  if (!creating) passwordMode = true;
   if (code) globalThis.sessionStorage.setItem(PHONE_LINK, normalCode(decodeURIComponent(code)));
   const body = view('sync'), signed = cloud.connected();
   workspaceTitle(body, !signed && creating ? 'new account' : 'account', signed ? cloud.account().email : cloud.configured() ? creating ? '' : 'not signed in' : 'this browser only');
@@ -644,7 +645,7 @@ function signedOutAccount(pane, creating = false) {
   if (!usePassword) {
     if(creating)add(pane,h('form',{class:'account-create',onsubmit:event=>{event.preventDefault();if(!email.checkValidity()){email.reportValidity();return;}
       run('Creating your account and passkey…',()=>cloud.createAccount(email.value.trim(),bring.checked));}},
-      field('EMAIL',email),h('button',{type:'submit',class:'account-primary'},keyGlyph(),'create account')));
+      field('EMAIL',email),h('button',{type:'submit',class:'account-primary'},keyGlyph(),'create account with passkey')));
     else add(pane,h('button',{class:'account-primary',onclick:()=>run('Waiting for your passkey…',()=>cloud.signInWithPasskey(bring.checked))},keyGlyph(),'sign in with passkey'));
     add(pane,h('button',{class:'account-switch',onclick:()=>{passwordMode=true;route();}},'use a password'),
       h('button',{class:'account-switch',onclick:()=>go(creating?'/account':'/account/new')},creating?'back to sign in':'create account'));
@@ -658,8 +659,11 @@ function signedOutAccount(pane, creating = false) {
   };
   add(pane, h('form', { class: 'account-create', onsubmit: event => { event.preventDefault(); submit(); } },
     field('EMAIL', email), field('PASSWORD', password),
-    h('button', { type: 'submit', class: 'account-commit' }, creating ? 'create account' : 'sign in')),
-    passkeys ? h('button', { class: 'account-switch', onclick: () => { passwordMode = false; route(); } }, 'use a passkey') : null,
+    h('button', { type: 'submit', class: 'account-primary' }, creating ? 'create account' : 'sign in')),
+    passkeys ? h('button', { class: 'account-switch', onclick: () => {
+      if (creating) { passwordMode = false; route(); }
+      else run('Waiting for your passkey…', () => cloud.signInWithPasskey(bring.checked));
+    } }, creating ? 'create with a passkey' : 'sign in with passkey') : null,
     h('button',{class:'account-switch',onclick:()=>go(creating?'/account':'/account/new')},creating?'back to sign in':'create account'));
 }
 

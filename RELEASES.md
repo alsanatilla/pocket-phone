@@ -4,6 +4,7 @@ Each release labels its signing status and supplies an APK, source snapshot, che
 
 ## 0.11.0 — One account, easier to find and recover
 
+- Web sign-in follow-up: email/password is shown first, passkey sign-in is optional, and passkey account creation is explicitly labelled.
 - **Account access.** Sign-in and account creation have separate screens. Passkeys attach to one Pocket account; multiple devices can use that account, with password sign-in retained. A phone can show a short code for approval in a signed-in browser. The account screen lists revocable device sessions and passkeys.
 - **Search.** Notes, Tasks and their steps/source text, parked Thoughts, Paper and Pip share a search on phone and web. Local records remain searchable offline; phone appointments stay local. Server indexes update atomically with saves and deletions, and older account data is indexed on first search.
 - **Note recovery.** Signed-in Notes offer up to 60 text checkpoints, ten-minute editing-session coalescing with the initial text preserved, and restore checkpoints that retain the text being replaced. Recently deleted recovers notes deleted within 30 days as new notes.

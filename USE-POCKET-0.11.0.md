@@ -1,6 +1,6 @@
 # Pocket 0.11.0
 
-Open the [web workspace](https://pocket-phone.vercel.app/). In **Apps → Account & devices**, choose **sign in with passkey** or **use a password** for your existing Pocket account. **Create account** is a separate action. A passkey is a sign-in key attached to the account; adding another key does not create another workspace.
+Open the [web workspace](https://pocket-phone.vercel.app/). In **Apps → Account & devices**, enter your email and password for your existing account. **Sign in with passkey** is optional. **Create account** is a separate action. A passkey is a sign-in key attached to the account; adding another key does not create another workspace.
 
 On the phone, open **Settings → storage & devices → link this phone**. Open the supplied browser link, or enter its code at [Pocket’s link page](https://pocket-phone.vercel.app/link). Sign in to the same account and approve the code. The phone receives its own session. Password sign-in remains available, and **Devices** can sign out another session.
 

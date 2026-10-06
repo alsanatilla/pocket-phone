@@ -43,7 +43,8 @@
     "release_asset": "pocket-web-0.11.0-source.zip",
     "root_prerendered": true,
     "hashed_client_assets": true,
-    "offline_worker": "pocket-astro-0110"
+    "offline_worker": "pocket-astro-0110-signin",
+    "sign_in_followup": "Email/password is shown first. Passkey sign-in is explicit, and passkey creation is labelled separately. Astro build and 390px/1280px account-screen checks passed; the Android APK is unchanged."
   },
   "focused_verification": {
     "environment": "Isolated file databases, fictional credentials and synthetic accounts; no production records or paid provider requests",
