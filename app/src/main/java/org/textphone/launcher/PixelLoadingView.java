@@ -19,7 +19,7 @@ final class PixelLoadingView extends View {
             scheduled = false;
             if (!visibleRunning() || !motionAllowed) return;
             frame = (frame + 1) % FRAMES;
-            if(frame==0)activityPose=(activityPose+1+random.nextInt(4))%5;
+            if(frame==0)activityPose=(activityPose+1+random.nextInt(5))%6;
             invalidate();
             schedule();
         }
@@ -42,7 +42,7 @@ final class PixelLoadingView extends View {
     void setRunning(boolean value) {
         if (running == value || destroyed) return;
         running = value;
-        if(value)activityPose=random.nextInt(5);
+        if(value)activityPose=random.nextInt(6);
         if (!value) frame = 0;
         update();
     }
@@ -132,6 +132,7 @@ final class PixelLoadingView extends View {
         else if(activityPose==2){rectangle(canvas,left,top,cell,x-1,y+6,x+1,y+8);rectangle(canvas,left,top,cell,x+15,y+6,x+17,y+8);for(int i=0;i<3;i++){double arc=angle+i*Math.PI*2/3;int bx=15+Math.round((float)Math.cos(arc)*11),by=5+Math.round((float)Math.sin(arc)*3);rectangle(canvas,left,top,cell,bx,by,bx+2,by+2);}}
         else if(activityPose==3){rectangle(canvas,left,top,cell,x-1,y+7,x+1,y+10);rectangle(canvas,left,top,cell,x+15,y+7,x+17,y+10);pixels.setColor(PocketDesign.WHITE);rectangle(canvas,left,top,cell,x+3,y+9,x+13,y+14);pixels.setColor(PocketDesign.BLACK);rectangle(canvas,left,top,cell,x+8,y+9,x+9,y+14);rectangle(canvas,left,top,cell,x+4,y+10,x+7,y+11);int line=y+11+(frame%32<16?0:1);rectangle(canvas,left,top,cell,x+10,line,x+12,line+1);}
         else if(activityPose==4){rectangle(canvas,left,top,cell,x-1,y+4,x+1,y+7);rectangle(canvas,left,top,cell,x+15,y+4,x+17,y+7);rectangle(canvas,left,top,cell,x-2,y+2,x,y+4);rectangle(canvas,left,top,cell,x+17,y+2,x+19,y+4);}
+        else if(activityPose==5){rectangle(canvas,left,top,cell,x-1,y+8,x+1,y+11);rectangle(canvas,left,top,cell,x+15,y+8,x+17,y+11);pixels.setColor(PocketDesign.WHITE);rectangle(canvas,left,top,cell,x+3,y+10,x+13,y+14);pixels.setColor(PocketDesign.BLACK);rectangle(canvas,left,top,cell,x+4,y+11,x+7,y+12);rectangle(canvas,left,top,cell,x+5,y+10,x+6,y+13);int press=frame%16<8?1:0;rectangle(canvas,left,top,cell,x+10+press,y+11,x+11+press,y+12);rectangle(canvas,left,top,cell,x+10,y+12,x+11,y+13);}
         else{rectangle(canvas,left,top,cell,x-1,y+6+step,x+1,y+9+step);rectangle(canvas,left,top,cell,x+15,y+7-step,x+17,y+10-step);}
     }
 

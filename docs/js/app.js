@@ -1,14 +1,14 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
-import * as drive from "./drive.js?v=20261006-072";
-import * as reader from "./reader.js?v=20261006-072";
-import * as pip from "./pip.js?v=20261006-072";
-import { backdrop } from "./pixel-backdrop.js?v=20261006-072";
-import * as zines from "./zines.js?v=20261006-072";
-import * as movement from "./movement.js?v=20261006-072";
-import * as gymView from "./gym.js?v=20261006-072";
-import * as coros from "./coros.js?v=20261006-072";
-import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-072";
-import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-072";
+import * as drive from "./drive.js?v=20261006-080";
+import * as reader from "./reader.js?v=20261006-080";
+import * as pip from "./pip.js?v=20261006-080";
+import { backdrop } from "./pixel-backdrop.js?v=20261006-080";
+import * as zines from "./zines.js?v=20261006-080";
+import * as movement from "./movement.js?v=20261006-080";
+import * as gymView from "./gym.js?v=20261006-080";
+import * as coros from "./coros.js?v=20261006-080";
+import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-080";
+import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-080";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;

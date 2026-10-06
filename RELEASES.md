@@ -2,6 +2,14 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.8.0 — Pip activity and console character
+
+- Real tool/search activity on phone and web: queries, pending/running/completed/failed/stopped state, elapsed time, result summaries and source links persist with each reply. Activity folds after completion; provider reasoning stays separate.
+- Composer controls expose opt-in read-only Notes, Thoughts, Tasks, Gym and cached COROS access. Anthropic web search has its own toggle, streamed activity and clickable citations. Compatible endpoints use function tools for Pocket reads and need browser CORS support. Reads/searches and continuations are bounded; keys and COROS authentication are excluded from tool results.
+- Early-console details use Pocket's own pixel type, geometric signal marks, corner ticks and the retained upper-only glow. Pip gains a matching tiny-gamepad animation on both platforms. Reduced-motion behavior stays in place.
+- Phone chat storage upgrades to SQLite schema 4 while retaining existing conversations. Original tool IDs, signed thinking and encrypted search blocks survive current-request continuations; only completed text answers are replayed on later questions.
+- Java compilation, isolated browser stream checks and a standalone SDK fixture passed. The test suite is skipped as requested. Live chat rendering is unverified because preview requires authentication; the APK is unsigned for the release agent. Actual verification is in BUILD-STATUS.json.
+
 ## 0.7.2 — Quieter Pip and exercise selection
 
 - Pip keeps only the upper-corner pixel glow, fading to black. The lower rings and composer glow are removed on phone and web.

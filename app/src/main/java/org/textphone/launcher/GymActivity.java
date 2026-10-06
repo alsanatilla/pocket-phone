@@ -29,6 +29,7 @@ public final class GymActivity extends PocketActivity {
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         if (state != null) { page = state.getString("page", HOME); exercise = state.getString("exercise", ""); workoutId = state.getString("workout", ""); kg = state.getDouble("kg", 20); reps = state.getInt("reps", 8); }
+        else { String linked = getIntent().getStringExtra("pocket_workout"); if (linked != null && GymStore.find(this, linked) != null) { workoutId = linked; page = WORKOUT; } }
         render();
     }
     @Override protected void onSaveInstanceState(Bundle state) {

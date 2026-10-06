@@ -21,9 +21,12 @@ final class ChatProvider {
     static final class Config {
         final String provider, model, baseUrl, identity;
         final int maxTokens;
-        final boolean promptCaching;
+        final boolean promptCaching, webSearch;
 
         Config(String provider, String model, String baseUrl, int maxTokens, boolean promptCaching) {
+            this(provider, model, baseUrl, maxTokens, promptCaching, false);
+        }
+        Config(String provider, String model, String baseUrl, int maxTokens, boolean promptCaching, boolean webSearch) {
             if (!("anthropic".equals(provider) || "compatible".equals(provider)))
                 throw new IllegalArgumentException("Choose a supported provider.");
             this.provider = provider;
@@ -31,6 +34,7 @@ final class ChatProvider {
             this.baseUrl = "anthropic".equals(provider) ? ANTHROPIC_URL : normalize(baseUrl);
             this.maxTokens = maxTokens;
             this.promptCaching = promptCaching;
+            this.webSearch = "anthropic".equals(provider) && webSearch;
             identity = provider + "|" + this.baseUrl + "|" + this.model;
         }
 
@@ -56,7 +60,7 @@ final class ChatProvider {
             Config fallback = defaults(provider);
             return new Config(provider, values.getString("model", fallback.model),
                     values.getString("base_url", fallback.baseUrl), values.getInt("max_tokens", 2048),
-                    values.getBoolean("prompt_caching", true));
+                    values.getBoolean("prompt_caching", true), values.getBoolean("web_search", false));
         } catch (RuntimeException damaged) { return defaults("anthropic"); }
     }
 
@@ -113,7 +117,7 @@ final class ChatProvider {
         }
         edit.putString("provider", config.provider).putString("model", config.model)
                 .putString("base_url", config.baseUrl).putInt("max_tokens", config.maxTokens)
-                .putBoolean("prompt_caching", config.promptCaching);
+                .putBoolean("prompt_caching", config.promptCaching).putBoolean("web_search", config.webSearch);
         if (!previous.provider.equals(config.provider) || !previous.baseUrl.equals(config.baseUrl))
             PocketChatTools.reset(context);
         if (!edit.commit()) throw new IllegalStateException("Could not save the chat settings.");

@@ -251,6 +251,27 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
 .pip-reasoning { color: var(--muted); font-size: 13px; margin: 6px 0 14px; }
 .pip-reasoning summary, .pip-context summary, .pip-navigation > summary { min-height: 44px; padding: 12px 0; cursor: pointer; overflow-wrap: anywhere; }
 .pip-reasoning-text { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px 0; }
+.pip-activity { margin: 4px 0 12px; }
+.pip-activity-title, .pip-sources > summary { font-size: 12px; min-height: 44px; padding: 12px 0; cursor: pointer; color: var(--accent); overflow-wrap: anywhere; }
+.pip-activity-title { list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+.pip-activity-title::after { content: "+"; flex-shrink: 0; }
+.pip-activity[open] > .pip-activity-title::after { content: "−"; }
+.pip-activity-steps { margin-left: 8px; }
+.pip-tool summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-height: 44px; padding: 10px 0; font-size: 12px; cursor: pointer; }
+.pip-tool summary > span:first-child { overflow-wrap: anywhere; color: var(--accent); }
+.pip-tool summary > span:last-child { flex-shrink: 0; font-size: 11px; }
+.pip-tool.failed summary > span:first-child { color: var(--warning); }
+.pip-tool-details { padding: 4px 0 12px 16px; border-left: 1px solid var(--line); font-size: 12px; }
+.pip-tool-details pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 120px; overflow: auto; color: var(--muted); font: 12px/1.5 var(--mono); }
+.pip-parameters > summary { min-height: 44px; padding: 12px 0; cursor: pointer; color: var(--muted); }
+.pip-source { display: block; text-align: left; font-size: 12px; min-height: 44px; padding: 10px 0; overflow-wrap: anywhere; }
+.pip-capabilities { display: flex; gap: 16px; }
+.pip-capabilities { position: relative; padding: 0 8px; border-top: 1px solid var(--line); }
+.pip-capabilities::before, .pip-capabilities::after { content: ""; position: absolute; top: -1px; width: 4px; height: 4px; border-top: 1px solid var(--accent); opacity: .5; pointer-events: none; }
+.pip-capabilities::before { left: 0; border-left: 1px solid var(--accent); }
+.pip-capabilities::after { right: 0; border-right: 1px solid var(--accent); }
+.pip-capabilities button { font-size: 12px; min-height: 44px; padding: 8px 0; }
+.pip-capabilities button[aria-pressed="true"] { color: var(--accent); }
 .pip-phase:empty { display: none; }
 .pip-reply-actions { display: flex; flex-wrap: wrap; gap: 2px 10px; }
 .pip-reply-actions button { min-height: 44px; font-size: 12px; padding: 8px 0; color: var(--muted); }

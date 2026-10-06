@@ -1,4 +1,4 @@
-# Pocket design system — 0.7.2
+# Pocket design system — 0.8.0
 
 Pocket is a daily Android dashboard and a set of small native apps for the Nothing Phone (3a). Its character comes from black, white monospace text, pixel titles and icons, and labelled soft keys. Its polish comes from every app using the same few patterns, so a page can be scanned without learning it first.
 
@@ -18,7 +18,7 @@ Pocket is a daily Android dashboard and a set of small native apps for the Nothi
 
 Each area has an original scene so a page is recognisable before it is read: sky (Home, Today), stars (Thoughts), road (Tasks), waves (Notes, Paper), terrain (Movement), iron (Gym), tiles (Apps) and rings (Search). The bitmaps come from one ordered-dither kernel in `PixelBackdrop.java` and `pixel-backdrop.js`, tinted with Pocket's accent and faded toward black. The left side and lower edge stay quiet and titles carry a dark halo, so text over the artwork stays readable. Text remains native text. The artwork is static, cached by size on Android, and redrawn only on resize in the browser. No background photo, animation loop or external asset is downloaded.
 
-Pip uses just the upper-corner pixel glow. It fades to black before the middle of the page, and sparse sparks stay inside the light. The conversation and composer sit on black. Pip's controls retain the shared focus underline and pressed state. The background has no animation loop; Pip's character continues its existing activities. Browser observers are disconnected on chat replacement and page exit.
+Pip uses just the upper-corner pixel glow. It fades to black before the middle of the page, and sparse sparks stay inside the light. The conversation and composer sit on black. Pip's controls retain the shared focus underline and pressed state. The background has no animation loop; Pip's character continues its activities, including playing a tiny gamepad. Browser observers are disconnected on chat replacement and page exit. Geometric status marks, square corner ticks and terse signal labels give chat an early PS1/PS2 feel within Pocket's own palette and typography. No full-screen effects or sound are added.
 
 | Role | Value | Purpose |
 | --- | --- | --- |
@@ -93,7 +93,7 @@ One searchable directory: custom shortcuts, communicate, plan & think, capture &
 
 ### Chat
 
-Pip is a Pocket page: same header (`back` · `pip` · `settings`), a conversation strip with `chats` and `+ new`, and a monospace transcript. Your message is a prompt line in accent (`> …`); replies use white body text, pixel headings and accent emphasis. An expandable reasoning section separates provider summaries and lookup steps from the answer. A small pixel character blinks and looks around during thinking, reading and writing, with motion disabled when hidden or reduced motion is on. A quiet status line shows what pip may read (`reads notes · COROS` or `pocket access · off`) and `input reused` only for reported prompt-cache reads. The composer is a field with a `send` soft key (`stop` while replying). On a phone it covers the full width; on wide screens it stays a side panel over the dimmed page. See [PIP.md](PIP.md).
+Pip is a Pocket page: same header (`back` · `pip` · `settings`), a conversation strip with `chats` and `+ new`, and a monospace transcript. Your message is a prompt line in accent (`> …`); replies use white body text, pixel headings and accent emphasis. Actual searches and Pocket reads appear as compact activity above the answer: expanded while working, folded afterward. Queries, status, durations, result summaries and source links are inspectable; parameters stay secondary. Provider reasoning remains a separate expandable section. The composer exposes `□ tools [n]`, `△ web · on/off`, attachments, model and send/stop. Access starts off and is scoped to the chosen API recipient. Pip's matching pixel routines pause when hidden or reduced motion is on. On a phone the panel covers the full width; on wide screens it stays a side panel over the dimmed page. See [PIP.md](PIP.md).
 
 ### Camera
 

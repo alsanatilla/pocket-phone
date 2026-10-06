@@ -35,18 +35,24 @@ final class ClaudeChatRepository {
     }
 
     static final class Turn {
-        final String id, role, text, state, reasoning, context;
+        final String id, role, text, state, reasoning, context, activity;
         final long created;
         Turn(String id, String role, String text, String state) { this(id, role, text, state, "", System.currentTimeMillis()); }
         Turn(String id, String role, String text, String state, String reasoning, long created) {
             this(id,role,text,state,reasoning,created,"[]");
         }
         Turn(String id, String role, String text, String state, String reasoning, long created, String context) {
+            this(id, role, text, state, reasoning, created, context, "[]");
+        }
+        Turn(String id, String role, String text, String state, String reasoning, long created, String context, String activity) {
             this.id = id; this.role = role; this.text = text; this.state = state;
             this.reasoning = reasoning == null ? "" : reasoning; this.created = created; this.context=context;
+            this.activity = activity;
         }
-        Turn text(String value, String nextState) { return new Turn(id, role, value, nextState, reasoning, created, context); }
-        Turn reasoning(String value) { return new Turn(id, role, text, state, value, created, context); }
+        Turn text(String value, String nextState) { return new Turn(id, role, value, nextState, reasoning, created, context,
+                "pending".equals(nextState) ? activity : ChatActivity.settle(activity, "stopped".equals(nextState) ? "stopped" : "failed")); }
+        Turn reasoning(String value) { return new Turn(id, role, text, state, value, created, context, activity); }
+        Turn activity(String value) { return new Turn(id, role, text, state, reasoning, created, context, ChatActivity.normalize(value)); }
         int lookups() { int count = 0; for (String line : reasoning.split("\n")) if (line.startsWith(STEP)) count++; return count; }
     }
 
@@ -294,7 +300,7 @@ final class ClaudeChatRepository {
         if (target.draft.equals(original)) { target.draft = ""; target.draftRevision++; }
         final long composerRevision = target.draftRevision;
         busy = target;
-        status = "thinking";
+        status = "requesting";
         startedAt = SystemClock.elapsedRealtime();
         target.error = "";
         target.usage = ClaudeChatClient.Usage.EMPTY;
@@ -315,6 +321,7 @@ final class ClaudeChatRepository {
             public boolean text(String delta) { return append(request, replyId, delta); }
             public void reasoning(String delta) { trail(request, replyId, delta, false); }
             public void step(String label) { trail(request, replyId, label, true); }
+            public void activity(String value) { toolActivity(request, replyId, value); }
             public void interim() { aside(request, replyId); }
             public void status(String value) { progress(request, replyId, value, null); }
             public void usage(ClaudeChatClient.Usage tokens) { progress(request, replyId, null, tokens); }
@@ -350,6 +357,11 @@ final class ClaudeChatRepository {
 
     private Turn reply() { return busy.turns.get(busy.turns.size() - 1); }
 
+    private synchronized void toolActivity(long request, String replyId, String value) {
+        if (!current(request, replyId)) return;
+        busy.turns.set(busy.turns.size() - 1, reply().activity(value)); saveStream(); changed();
+    }
+
     private synchronized boolean append(long request, String replyId, String delta) {
         if (!current(request, replyId)) return false;
         Turn reply = reply();
@@ -384,7 +396,7 @@ final class ClaudeChatRepository {
         if (replaceOnDelta || reply.text.trim().isEmpty()) return;
         String value = reply.reasoning + (reply.reasoning.isEmpty() || reply.reasoning.endsWith("\n\n") ? "" : reply.reasoning.endsWith("\n") ? "\n" : "\n\n") + reply.text.trim() + "\n\n";
         busy.turns.set(busy.turns.size() - 1, new Turn(reply.id, reply.role, "", "pending",
-                value.length() > MAX_REASONING_CHARS ? reply.reasoning : value, reply.created));
+                value.length() > MAX_REASONING_CHARS ? reply.reasoning : value, reply.created, reply.context, reply.activity));
         persist(busy);
         changed();
     }

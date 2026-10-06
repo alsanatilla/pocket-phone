@@ -19,7 +19,7 @@ import org.json.JSONObject;
 
 /** Opt-in, read-only local tools. No refresh, credentials, drafts or cloud writes. */
 final class PocketChatTools {
-    static final String NOTES = "notes", THOUGHTS = "thoughts", COROS = "coros";
+    static final String NOTES = "notes", THOUGHTS = "thoughts", TASKS = "tasks", GYM = "gym", COROS = "coros";
     private static final String PREFS = "pocket_chat_access";
     private static final int RESULT_LIMIT = 8000;
 
@@ -43,7 +43,7 @@ final class PocketChatTools {
         SharedPreferences.Editor edit = prefs.edit();
         String recipient = recipient(context);
         if (value && !recipient.equals(prefs.getString("recipient", "")))
-            edit.remove(NOTES).remove(THOUGHTS).remove(COROS).putString("recipient", recipient);
+            edit.remove(NOTES).remove(THOUGHTS).remove(TASKS).remove(GYM).remove(COROS).putString("recipient", recipient);
         edit.putBoolean(category, value).apply();
     }
 
@@ -72,7 +72,15 @@ final class PocketChatTools {
                         + "The truncated field indicates missing text. Drafts and tasks are excluded.",
                         schema(json("id", id), new JSONArray().put("id"))));
             }
-            // Parked thoughts became tasks (0.5.21). Tasks stay outside chat access, so no thoughts tool is offered.
+            for (String category : new String[]{THOUGHTS, TASKS}) if (enabled(context, category))
+                result.add(new Definition("search_" + category, "thoughts".equals(category)
+                        ? "Search undecided, parked Pocket thoughts. All query words must match; empty lists recent thoughts. Thoughts are separate from tasks. Read only; never turns an idea into an action."
+                        : "Search chosen Pocket tasks, including completion and due date. All query words must match; empty lists recent tasks. Read only; never edits or completes a task.",
+                        schema(json("query", stringProperty("Words to match; empty lists recent records.", 200),
+                                "limit", integerProperty("Maximum results.", 1, 5, 5)), new JSONArray())));
+            if (enabled(context, GYM))
+                result.add(new Definition("gym_summary", "Read locally saved workouts and exercise sets from the last 1–30 calendar days. Use for questions about logged strength training. Results may be partial; check truncated. Read only; never edits a workout.",
+                        schema(json("days", integerProperty("Calendar days ending today.", 1, 30, 7)), new JSONArray())));
             if (enabled(context, COROS))
                 result.add(new Definition("coros_summary", "Read COROS data already cached on this phone for the last 1–30 calendar days "
                         + "(default 7). Includes recent activities, daily HRV, resting heart rate, sleep and steps when available. "
@@ -101,7 +109,15 @@ final class PocketChatTools {
                     break;
                 case "search_thoughts":
                     keys(args, "query", "limit");
-                    result = searchThoughts(context, query(args), integer(args, "limit", 8, 1, 8));
+                    result = searchThoughts(context, query(args), integer(args, "limit", 5, 1, 5));
+                    break;
+                case "search_tasks":
+                    keys(args, "query", "limit");
+                    result = searchTasks(context, query(args), integer(args, "limit", 5, 1, 5));
+                    break;
+                case "gym_summary":
+                    keys(args, "days");
+                    result = gym(context, integer(args, "days", 7, 1, 30));
                     break;
                 default:
                     keys(args, "days");
@@ -188,6 +204,49 @@ final class PocketChatTools {
         return result;
     }
 
+    private static JSONObject searchTasks(Context context, String query, int limit) throws JSONException {
+        List<PlannerStore.Entry> tasks = new ArrayList<>();
+        for (PlannerStore.Entry entry : planner(context).entries()) {
+            checkInterrupted(); if ("task".equals(entry.kind) && matches(entry.text, query)) tasks.add(entry);
+        }
+        Collections.sort(tasks, (a, b) -> Long.compare(b.created, a.created));
+        JSONArray found = new JSONArray();
+        JSONObject result = json("source", "pocket:tasks", "matched", tasks.size(), "truncated", tasks.size() > limit, "tasks", found);
+        for (PlannerStore.Entry task : tasks) {
+            checkInterrupted(); if (found.length() >= limit) break;
+            JSONObject item = json("id", Long.toString(task.id), "text", excerpt(task.text, query, 500),
+                    "text_truncated", task.text.length() > 500, "done", task.done, "due", task.due);
+            if (!append(result, found, item)) { result.put("truncated", true); break; }
+        }
+        return result;
+    }
+
+    private static JSONObject gym(Context context, int days) throws JSONException {
+        long start = LocalDate.now().minusDays(days - 1L).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        List<JSONObject> saved = new ArrayList<>();
+        for (JSONObject workout : GymStore.workouts(context)) { checkInterrupted(); if (workout.optLong("started") >= start) saved.add(workout); }
+        JSONArray workouts = new JSONArray();
+        JSONObject result = json("source", "pocket:gym", "days", days, "matched", saved.size(), "truncated", saved.size() > 10, "workouts", workouts);
+        for (JSONObject workout : saved) {
+            checkInterrupted(); if (workouts.length() >= 10) break;
+            JSONArray exercises = new JSONArray(); int total = 0;
+            List<String> names = GymStore.exerciseNames(workout);
+            for (String name : names) {
+                List<GymStore.Set> sets = GymStore.sets(workout, name); total += sets.size();
+                if (exercises.length() >= 12) continue;
+                JSONArray values = new JSONArray();
+                for (int n = Math.max(0, sets.size() - 8); n < sets.size(); n++) {
+                    GymStore.Set set = sets.get(n); values.put(json("kg", set.kg, "reps", set.reps, "at", set.at));
+                }
+                exercises.put(json("exercise", name, "sets", values, "truncated", sets.size() > 8));
+            }
+            JSONObject item = json("id", workout.optString("id"), "started", workout.optLong("started"), "ended", workout.optLong("ended"),
+                    "sets", total, "volume_kg", GymStore.volume(workout), "exercises", exercises, "truncated", names.size() > 12);
+            if (!append(result, workouts, item)) { result.put("truncated", true); break; }
+        }
+        return result;
+    }
+
     private static JSONObject coros(Context context, int days) throws JSONException {
         ZoneId zone = ZoneId.systemDefault();
         LocalDate end = LocalDate.now(zone), start = end.minusDays(days - 1L);
@@ -270,12 +329,14 @@ final class PocketChatTools {
     }
 
     private static boolean category(String value) {
-        return NOTES.equals(value) || THOUGHTS.equals(value) || COROS.equals(value);
+        return NOTES.equals(value) || THOUGHTS.equals(value) || TASKS.equals(value) || GYM.equals(value) || COROS.equals(value);
     }
 
     private static String toolCategory(String name) {
         if ("search_notes".equals(name) || "read_note".equals(name)) return NOTES;
         if ("search_thoughts".equals(name)) return THOUGHTS;
+        if ("search_tasks".equals(name)) return TASKS;
+        if ("gym_summary".equals(name)) return GYM;
         return "coros_summary".equals(name) ? COROS : null;
     }
 

@@ -69,7 +69,7 @@ final class ClaudeSidebar extends FrameLayout {
     private final LinearLayout panel, log, errorRow, loadingRow, empty, contextRow;
     private final ScrollView scroll;
     private final EditText composer;
-    private final Button back, settings, setup, send, retry, chats, newChat, openReply, modelPicker;
+    private final Button back, settings, setup, send, retry, chats, newChat, openReply, modelPicker, toolsPicker, webPicker;
     private String shownContext="";
     private final TextView error, cacheStatus, loadingLabel, accessStatus, emptyText, conversationTitle;
     private final PixelLoadingView loading;
@@ -226,6 +226,27 @@ final class ClaudeSidebar extends FrameLayout {
         statusRow.setVisibility(View.GONE);
         panel.addView(statusRow, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         contextRow=new LinearLayout(activity);contextRow.setOrientation(LinearLayout.VERTICAL);contextRow.setPadding(dp(16),0,dp(16),0);contextRow.setTag("pip_context");panel.addView(contextRow);
+        LinearLayout capabilities = horizontal(); capabilities.setPadding(dp(16), 0, dp(16), 0);
+        capabilities.setBackground(new android.graphics.drawable.Drawable() {
+            final android.graphics.Paint line = new android.graphics.Paint();
+            @Override public void draw(android.graphics.Canvas canvas) {
+                android.graphics.Rect bounds = getBounds(); line.setColor(PocketDesign.LINE); line.setStrokeWidth(dp(1));
+                canvas.drawLine(dp(16), bounds.top, bounds.right - dp(16), bounds.top, line);
+                line.setColor(PocketDesign.accent(activity)); line.setAlpha(128);
+                canvas.drawLine(dp(16), bounds.top, dp(20), bounds.top, line); canvas.drawLine(dp(16), bounds.top, dp(16), bounds.top + dp(4), line);
+                canvas.drawLine(bounds.right - dp(20), bounds.top, bounds.right - dp(16), bounds.top, line); canvas.drawLine(bounds.right - dp(16), bounds.top, bounds.right - dp(16), bounds.top + dp(4), line);
+            }
+            @Override public void setAlpha(int alpha) { }
+            @Override public void setColorFilter(android.graphics.ColorFilter filter) { }
+            @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
+        });
+        toolsPicker = control("□ tools [0]", this::showPocketAccess); toolsPicker.setTag("pip_tools");
+        webPicker = control("△ web · off", this::toggleWebSearch); webPicker.setTag("pip_web_search");
+        for (Button command : new Button[]{toolsPicker, webPicker}) {
+            PocketDesign.command(command, false); command.setTextSize(12);
+            capabilities.addView(command, new LinearLayout.LayoutParams(0, dp(44), 1));
+        }
+        panel.addView(capabilities);
 
         LinearLayout inputRow = horizontal();
         inputRow.setGravity(Gravity.BOTTOM);
@@ -497,6 +518,10 @@ final class ClaudeSidebar extends FrameLayout {
         setup.setVisibility(View.GONE);
         emptyText.setVisibility(View.GONE);
         chats.setText("chats ["+repository.chats().size()+"]");modelPicker.setText(provider.model);
+        toolsPicker.setText("□ tools [" + PocketChatTools.definitions(activity).size() + "]");
+        boolean searchAvailable = "anthropic".equals(provider.provider);
+        webPicker.setText(searchAvailable ? "△ web · " + (provider.webSearch ? "on" : "off") : "△ web · unavailable");
+        webPicker.setEnabled(searchAvailable); webPicker.setTextColor(provider.webSearch ? PocketDesign.accent(activity) : PocketDesign.MUTED);
         String context=ChatContext.write(repository.context());if(!context.equals(shownContext)){shownContext=context;contextRow.removeAllViews();addContextRows(contextRow,repository.context(),true);}
         StringBuilder access = new StringBuilder();
         String[] categories = {PocketChatTools.NOTES, PocketChatTools.COROS};
@@ -511,8 +536,8 @@ final class ClaudeSidebar extends FrameLayout {
         empty.setVisibility(snapshot.turns.isEmpty() ? View.VISIBLE : View.GONE);
         emptyText.setText(" ");
         loadingRow.setVisibility(snapshot.running || snapshot.busyElsewhere ? View.VISIBLE : View.GONE);
-        String status = snapshot.status == null || snapshot.status.isEmpty() ? "thinking" : snapshot.status;
-        String progress = snapshot.busyElsewhere ? "replying" : status;
+        String status = snapshot.status == null || snapshot.status.isEmpty() ? "requesting" : snapshot.status;
+        String progress = snapshot.busyElsewhere ? "◌ replying" : ChatActivity.phase(status);
         if (!loadingLabel.getText().toString().equals(progress)) loadingLabel.setText(progress);
         openReply.setVisibility(snapshot.busyElsewhere ? View.VISIBLE : View.GONE);
         loading.setPhase(status);
@@ -680,11 +705,10 @@ final class ClaudeSidebar extends FrameLayout {
         LinearLayout fields = new LinearLayout(activity);
         fields.setOrientation(LinearLayout.VERTICAL);
         fields.setPadding(dp(20), dp(8), dp(20), dp(8));
-        TextView description = label("Selected passages and summaries are sent to " + recipient
-                + " when requested in chat. Read only.", 14, PocketDesign.MUTED);
+        TextView description = label(recipient, 14, PocketDesign.MUTED);
         description.setPadding(0, 0, 0, dp(8));
         fields.addView(description, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-        String[] categories = {"notes", "coros"}, names = {"Notes", "COROS readings"};
+        String[] categories = {"notes", "thoughts", "tasks", "gym", "coros"}, names = {"Notes", "Thoughts", "Tasks", "Gym", "Movement · COROS cache"};
         CheckBox[] choices = new CheckBox[categories.length];
         for (int index = 0; index < categories.length; index++) {
             CheckBox choice = new CheckBox(activity);
@@ -698,17 +722,26 @@ final class ClaudeSidebar extends FrameLayout {
         }
         ScrollView form = new ScrollView(activity);
         form.addView(fields);
-        showDialog(new AlertDialog.Builder(activity).setTitle("Pocket access")
+        showDialog(new AlertDialog.Builder(activity).setTitle("Pocket tools · read only")
                 .setView(form).setNegativeButton("Cancel", null).setPositiveButton("Save", (dialog, which) -> {
                     if (destroyed) return;
-                    for (int index = 0; index < categories.length; index++)
-                        if (PocketChatTools.enabled(activity, categories[index]) && !choices[index].isChecked()) { repository.stopAll(); break; }
+                    repository.stopAll();
                     try {
                         for (int index = 0; index < categories.length; index++)
                             PocketChatTools.enabled(activity, categories[index], choices[index].isChecked());
                         render();
                     } catch (IllegalStateException failure) { showSettingsError(failure.getMessage()); }
                 }).create());
+    }
+
+    private void toggleWebSearch() {
+        ChatProvider.Config current = ChatProvider.get(activity);
+        if (!"anthropic".equals(current.provider)) return;
+        try {
+            repository.stopAll();
+            ChatProvider.save(activity, new ChatProvider.Config(current.provider, current.model, current.baseUrl,
+                    current.maxTokens, current.promptCaching, !current.webSearch), ""); render();
+        } catch (IllegalArgumentException | IllegalStateException failure) { showSettingsError(failure.getMessage()); }
     }
 
     private void showProvider() {
@@ -778,7 +811,8 @@ final class ClaudeSidebar extends FrameLayout {
             try {
                 ChatProvider.Config next = new ChatProvider.Config(kind, modelId,
                         "anthropic".equals(kind) ? ChatProvider.defaults(kind).baseUrl : endpoint,
-                        current.maxTokens, "anthropic".equals(kind) && ("anthropic".equals(current.provider) ? current.promptCaching : true));
+                        current.maxTokens, "anthropic".equals(kind) && ("anthropic".equals(current.provider) ? current.promptCaching : true),
+                        kind.equals(current.provider) && current.webSearch);
                 next.validate();
                 String replacement = key.getText().toString().trim();
                 validateReplacementKey(next, replacement);
@@ -825,7 +859,7 @@ final class ClaudeSidebar extends FrameLayout {
                     if (destroyed) return;
                     try {
                         ChatProvider.save(activity, new ChatProvider.Config(current.provider, current.model, current.baseUrl,
-                                limits[index], current.promptCaching), "");
+                                limits[index], current.promptCaching, current.webSearch), "");
                         choice.dismiss();
                     } catch (IllegalArgumentException | IllegalStateException failure) { showSettingsError(failure.getMessage()); }
                 }).setNegativeButton("Cancel", null).create());
@@ -839,7 +873,7 @@ final class ClaudeSidebar extends FrameLayout {
                     if (destroyed) return;
                     try {
                         ChatProvider.save(activity, new ChatProvider.Config(current.provider, current.model, current.baseUrl,
-                                current.maxTokens, !current.promptCaching), "");
+                                current.maxTokens, !current.promptCaching, current.webSearch), "");
                     } catch (IllegalArgumentException | IllegalStateException failure) { showSettingsError(failure.getMessage()); }
                 }).create());
     }
@@ -974,6 +1008,8 @@ final class ClaudeSidebar extends FrameLayout {
     private final class TurnView {
         final LinearLayout root = new LinearLayout(activity);
         final TextView name = label("pip", 24, PocketDesign.WHITE);
+        final LinearLayout toolRows = new LinearLayout(activity);
+        final Button activityToggle = control("activity", this::toggleActivity);
         final Button reasoningToggle = control("reasoning", this::toggleReasoning);
         final TextView reasoning = label("", 14, PocketDesign.MUTED);
         final TextView body = label("", 16, PocketDesign.WHITE);
@@ -983,7 +1019,7 @@ final class ClaudeSidebar extends FrameLayout {
         final Button parkThought = control("park thought", () -> keepReply(1));
         final Button makeTask = control("make task", () -> keepReply(2));
         final Button copy = control("copy", () -> keepReply(3));
-        String lastText, lastState, lastReasoning, lastContext; boolean lastAssistant, expanded, chosen;
+        String lastText, lastState, lastReasoning, lastContext, lastActivity; boolean lastAssistant, expanded, chosen, activityExpanded, activityChosen;
         long styledAt; int lookups;
         ClaudeChatRepository.Turn turn;
         TurnView() {
@@ -1009,6 +1045,10 @@ final class ClaudeSidebar extends FrameLayout {
             }
             actions.addView(firstActions); actions.addView(secondActions);
             root.addView(name, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+            toolRows.setOrientation(LinearLayout.VERTICAL);
+            PocketDesign.command(activityToggle, false); activityToggle.setTextSize(12); activityToggle.setMinHeight(dp(44)); activityToggle.setMaxLines(3);
+            root.addView(activityToggle, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+            root.addView(toolRows, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(reasoningToggle, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(reasoning, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(body, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
@@ -1044,6 +1084,7 @@ final class ClaudeSidebar extends FrameLayout {
                 lastContext = turn.context;
             }
             sources.setVisibility(sources.getChildCount() == 0 ? View.GONE : View.VISIBLE);
+            updateActivity();
             updateReasoning();
             String status = "stopped".equals(turn.state) ? "pip · stopped" : "failed".equals(turn.state) && !turn.text.isEmpty() ? "pip · incomplete" : "";
             state.setText(status);
@@ -1053,6 +1094,30 @@ final class ClaudeSidebar extends FrameLayout {
             makeTask.setTag("pip_task_" + turn.id);
             copy.setTag("pip_copy_" + turn.id);
             actions.setVisibility(assistant && !turn.text.isEmpty() && !"pending".equals(turn.state) ? View.VISIBLE : View.GONE);
+        }
+        void toggleActivity() { activityChosen = true; activityExpanded = !activityExpanded; updateActivity(); }
+        void updateActivity() {
+            org.json.JSONArray events = ChatActivity.read(turn.activity);
+            boolean visible = "assistant".equals(turn.role) && events.length() > 0;
+            if (!activityChosen) activityExpanded = "pending".equals(turn.state);
+            activityToggle.setVisibility(visible ? View.VISIBLE : View.GONE);
+            activityToggle.setText(ChatActivity.heading(events) + (activityExpanded ? " −" : " +"));
+            activityToggle.setContentDescription((activityExpanded ? "Hide" : "Show") + " tool activity: " + ChatActivity.heading(events));
+            activityToggle.setTag("pip_activity_" + turn.id);
+            toolRows.setVisibility(visible && activityExpanded ? View.VISIBLE : View.GONE);
+            if (!turn.activity.equals(lastActivity)) {
+                toolRows.removeAllViews();
+                for (int i = 0; i < events.length(); i++) {
+                    org.json.JSONObject event = events.optJSONObject(i); if (event == null) continue;
+                    String status = event.optString("state"); long duration = event.optLong("ended") - event.optLong("started");
+                    Button row = control(ChatActivity.mark(status) + " " + event.optString("title") + "\n" + status
+                            + (duration > 0 ? " · " + Math.max(1, Math.round(duration / 1000f)) + "s" : ""), () -> showToolDetails(event));
+                    PocketDesign.command(row, false); glowControl(row); row.setTextSize(12); row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                    row.setTextColor("failed".equals(status) ? PocketDesign.WARNING : PocketDesign.accent(activity)); row.setMinHeight(dp(48));
+                    row.setPadding(dp(12), dp(8), 0, dp(8)); row.setMaxLines(4); toolRows.addView(row, new LinearLayout.LayoutParams(-1, -2));
+                }
+                lastActivity = turn.activity;
+            }
         }
         void keepReply(int which) {
             if (destroyed) return;
@@ -1077,16 +1142,17 @@ final class ClaudeSidebar extends FrameLayout {
         }
         void toggleReasoning() { chosen = true; expanded = !expanded; updateReasoning(); }
         void updateReasoning() {
-            boolean shown = "assistant".equals(turn.role) && !turn.reasoning.isEmpty();
+            String display = "[]".equals(turn.activity) ? turn.reasoning : turn.reasoning.replaceAll("(?m)^› .*\\n?", "").trim();
+            boolean shown = "assistant".equals(turn.role) && !display.isEmpty();
             reasoningToggle.setTag("pip_reasoning_" + turn.id);
             reasoningToggle.setVisibility(shown ? View.VISIBLE : View.GONE);
             if (!turn.reasoning.equals(lastReasoning)) lookups = turn.lookups();
-            reasoningToggle.setText((expanded ? "− " : "+ ") + "reasoning summary" + (lookups == 0 ? "" : " · " + lookups + (lookups == 1 ? " lookup" : " lookups")));
+            reasoningToggle.setText((expanded ? "− " : "+ ") + "reasoning summary" + (!"[]".equals(turn.activity) || lookups == 0 ? "" : " · " + lookups + (lookups == 1 ? " lookup" : " lookups")));
             reasoningToggle.setContentDescription((expanded ? "Hide" : "Show") + " reasoning summary and lookup steps");
             reasoning.setTag("pip_reasoning_text_" + turn.id);
             reasoning.setVisibility(shown && expanded ? View.VISIBLE : View.GONE);
             if (!turn.reasoning.equals(lastReasoning)) {
-                android.text.SpannableString text = new android.text.SpannableString(turn.reasoning.trim());
+                android.text.SpannableString text = new android.text.SpannableString(display.trim());
                 int start = 0;
                 for (String line : text.toString().split("\n", -1)) {
                     if (line.startsWith(ClaudeChatRepository.STEP)) text.setSpan(new android.text.style.ForegroundColorSpan(themedAccent),
@@ -1096,6 +1162,40 @@ final class ClaudeSidebar extends FrameLayout {
                 reasoning.setText(text); lastReasoning = turn.reasoning;
             }
         }
+    }
+
+    private void showToolDetails(org.json.JSONObject event) {
+        LinearLayout fields = new LinearLayout(activity); fields.setOrientation(LinearLayout.VERTICAL); fields.setPadding(dp(20), dp(8), dp(20), dp(8));
+        TextView summary = label(event.optString("summary", event.optString("state")), 14, PocketDesign.WHITE);
+        summary.setTextIsSelectable(true); fields.addView(summary);
+        org.json.JSONArray links = event.optJSONArray("sources");
+        if (links != null) for (int i = 0; i < links.length(); i++) {
+            org.json.JSONObject link = links.optJSONObject(i); if (link == null) continue;
+            Button source = control(link.optString("title"), () -> openToolSource(link.optString("href")));
+            PocketDesign.command(source, false); glowControl(source); source.setTextSize(12); source.setMinHeight(dp(44));
+            source.setMaxLines(3); fields.addView(source, new LinearLayout.LayoutParams(-1, -2));
+        }
+        TextView parameters = label(event.optString("name") + "\n" + event.optString("input"), 12, PocketDesign.MUTED);
+        parameters.setTextIsSelectable(true); parameters.setVisibility(View.GONE); parameters.setPadding(0, dp(8), 0, dp(8));
+        Button expand = control("◇ parameters", () -> parameters.setVisibility(parameters.getVisibility() == View.GONE ? View.VISIBLE : View.GONE));
+        PocketDesign.command(expand, false); glowControl(expand); expand.setTextSize(12); fields.addView(expand); fields.addView(parameters);
+        ScrollView scroll = new ScrollView(activity); scroll.addView(fields);
+        showDialog(new AlertDialog.Builder(activity).setTitle(event.optString("title")).setView(scroll).setPositiveButton("close", null).create());
+    }
+
+    private void openToolSource(String href) {
+        if (ChatActivity.source(href, "") == null) return;
+        try {
+            Intent intent;
+            if (href.startsWith("/movement")) intent = new Intent(activity, MovementActivity.class);
+            else if (href.startsWith("/gym/")) intent = new Intent(activity, GymActivity.class).putExtra("pocket_workout", href.substring(5));
+            else if (href.startsWith("/notes/") || href.startsWith("/tasks/") || href.startsWith("/thoughts/")) {
+                String[] parts = href.split("/"); if (parts.length != 3) return;
+                String kind = "notes".equals(parts[1]) ? "note" : "tasks".equals(parts[1]) ? "task" : "thought";
+                intent = new Intent(activity, OrganizerActivity.class).putExtra("pocket_" + kind, Long.parseLong(parts[2]));
+            } else intent = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(href));
+            activity.startActivity(intent);
+        } catch (android.content.ActivityNotFoundException | IllegalArgumentException unavailable) { keepFailure("This source could not be opened."); }
     }
 
     private void keepFailure(String text) {

@@ -56,7 +56,7 @@ final class ChatStore {
     }
 
     private static final class Helper extends SQLiteOpenHelper {
-        Helper(Context context) { super(context, new File(context.getNoBackupFilesDir(), "pocket-chats.db").getPath(), null, 3); }
+        Helper(Context context) { super(context, new File(context.getNoBackupFilesDir(), "pocket-chats.db").getPath(), null, 4); }
         @Override public void onConfigure(SQLiteDatabase db) { db.setForeignKeyConstraintsEnabled(true); }
         @Override public void onCreate(SQLiteDatabase db) {
             db.execSQL("CREATE TABLE chats (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, "
@@ -65,13 +65,14 @@ final class ChatStore {
                     + "cache_read INTEGER NOT NULL DEFAULT 0, cache_write INTEGER NOT NULL DEFAULT 0, draft_context TEXT NOT NULL DEFAULT '[]')");
             db.execSQL("CREATE TABLE turns (id TEXT PRIMARY KEY, chat TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, "
                     + "position INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, state TEXT NOT NULL, "
-                    + "reasoning TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, context TEXT NOT NULL DEFAULT '[]')");
+                    + "reasoning TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, context TEXT NOT NULL DEFAULT '[]', activity TEXT NOT NULL DEFAULT '[]')");
             db.execSQL("CREATE INDEX turns_by_chat ON turns(chat, position)");
             db.execSQL("CREATE INDEX chats_by_update ON chats(updated)");
         }
         @Override public void onUpgrade(SQLiteDatabase db, int from, int to) {
             if (from < 2) db.execSQL("ALTER TABLE chats ADD COLUMN provider_model TEXT");
             if(from<3){db.execSQL("ALTER TABLE chats ADD COLUMN draft_context TEXT NOT NULL DEFAULT '[]'");db.execSQL("ALTER TABLE turns ADD COLUMN context TEXT NOT NULL DEFAULT '[]'");}
+            if (from < 4) db.execSQL("ALTER TABLE turns ADD COLUMN activity TEXT NOT NULL DEFAULT '[]'");
         }
     }
 
@@ -148,7 +149,7 @@ final class ChatStore {
             if (!ClaudeChatClient.safeModel(model)) model = ClaudeChatRepository.MODEL;
             if (error.length() > 300) error = "";
             List<ClaudeChatRepository.Turn> turns = new ArrayList<>(); boolean interrupted = false; int total = 0;
-            try (Cursor rows = db.rawQuery("SELECT id, role, text, state, reasoning, created, context FROM turns WHERE chat = ? ORDER BY position", new String[]{id})) {
+            try (Cursor rows = db.rawQuery("SELECT id, role, text, state, reasoning, created, context, activity FROM turns WHERE chat = ? ORDER BY position", new String[]{id})) {
                 while (rows.moveToNext()) {
                     String turnId = rows.getString(0), role = rows.getString(1), text = rows.getString(2), state = rows.getString(3), reasoning = rows.getString(4);
                     boolean user = turns.size() % 2 == 0;
@@ -160,7 +161,8 @@ final class ChatStore {
                         return null;
                     if ("pending".equals(state)) { state = "failed"; interrupted = true; }
                     String attached=rows.getString(6);ChatContext.read(attached);
-                    ClaudeChatRepository.Turn saved=new ClaudeChatRepository.Turn(turnId, role, text, state, reasoning, rows.getLong(5),attached);
+                    String activity = "pending".equals(rows.getString(3)) ? ChatActivity.settle(rows.getString(7), "failed") : ChatActivity.normalize(rows.getString(7));
+                    ClaudeChatRepository.Turn saved=new ClaudeChatRepository.Turn(turnId, role, text, state, reasoning, rows.getLong(5),attached,activity);
                     total += user?ChatContext.prompt(saved).length():text.length();
                     if (total > ClaudeChatRepository.MAX_HISTORY_CHARS || turns.size() >= ClaudeChatRepository.MAX_TURNS) return null;
                     turns.add(saved);
@@ -241,7 +243,7 @@ final class ChatStore {
                     ClaudeChatRepository.Turn turn = record.turns.get(position);
                     ContentValues row = new ContentValues();
                     row.put("id", turn.id); row.put("chat", record.id); row.put("position", position); row.put("role", turn.role);
-                    row.put("text", turn.text); row.put("state", turn.state); row.put("reasoning", turn.reasoning); row.put("created", turn.created);row.put("context",turn.context);
+                    row.put("text", turn.text); row.put("state", turn.state); row.put("reasoning", turn.reasoning); row.put("created", turn.created);row.put("context",turn.context);row.put("activity",turn.activity);
                     if (db.insert("turns", null, row) == -1) return false;
                 }
             }
