@@ -275,7 +275,7 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
 .pip-empty { height: 100%; min-height: 210px; display: flex; flex-direction: column; justify-content: center; align-items: start; max-width: 440px; padding: 24px 0; }
 .pip-empty h2 { font: 40px/1.1 var(--pixel); font-weight: normal; margin: 18px 0 8px; }
 .pip-empty > p { font-size: 14px; }
-.pip-mascot { width: 64px; height: 64px; color: var(--accent); image-rendering: pixelated; }
+.pip-mascot { width: 96px; height: 96px; color: var(--accent); image-rendering: pixelated; }
 .pip-loading { display: flex; align-items: center; gap: 12px; min-height: 64px; }
 .pip-reasoning { color: var(--muted); font-size: 13px; margin: 6px 0 14px; }
 .pip-reasoning summary, .pip-context summary, .pip-navigation > summary { min-height: 44px; padding: 12px 0; cursor: pointer; overflow-wrap: anywhere; }

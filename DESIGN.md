@@ -1,4 +1,4 @@
-# Pocket design system — 0.9.1
+# Pocket design system — 0.12.0
 
 Pocket is a daily Android dashboard and a set of small native apps for the Nothing Phone (3a). Its character comes from black, white monospace text, pixel titles and icons, and labelled soft keys. Its polish comes from every app using the same few patterns, so a page can be scanned without learning it first.
 
@@ -98,6 +98,10 @@ Pip is a Pocket page: same header (`back` · `pip` · `settings`), a conversatio
 ### Camera
 
 Header `back` · `camera` · `rear`. Below the viewfinder an on-screen menu like the old cameras' OSD: profile · size (`3M`, `2M`, `1.2M`, `VGA`) · aspect (`4:3`, `3:2`, `16:9`, `1:1`) · quality (`fine`, `normal`, `basic`). The viewfinder masks everything outside the chosen aspect. Settings holds flash and exposure.
+
+## Loaders and sprites
+
+Waiting is shown with 48-pixel sprites, drawn with the same lit, ordered-dither look as the header scenes and tinted from the accent colour. Pip (a handheld console with legs) has six activities; a turning cartridge and a spinning coin join him as loaders for sync and pull to refresh. `tools/sprites/build.mjs` draws every frame and writes the same data for the phone (`RetroSprites.java`) and the browser (`src/shared/sprites.js`). Frames step at about 9–14 per second on purpose, and stop with reduced motion, hidden pages and the Motion setting.
 
 ## Motion
 

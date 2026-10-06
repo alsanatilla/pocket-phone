@@ -2,6 +2,14 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.12.0 — Detailed sprites, Today tiles and pull to refresh
+
+- **Sprites.** The loaders are redrawn as 48-pixel, lit and dithered sprites. Pip is a handheld console with legs: glass screen with glowing eyes, d-pad and buttons on a control plate, antenna, and six activities (wave, walk, juggle, read, hop, write) plus a crouch for pulling. A cartridge turns in a tiny software 3D renderer (label, ridges, gold pins) and a coin spins with an embossed star. Everything is tinted from the accent colour. One generator (`tools/sprites`) writes identical frames for the phone (`RetroSprites.java`) and the browser (`src/shared/sprites.js`).
+- **Pull to refresh.** Pull down at the top of any page on the phone, or any page of the browser on a touch screen, to sync now. Pip crouches as you pull, then a random loader plays until the sync finishes. Ctrl/Cmd+Shift+R syncs in the browser.
+- **Today tiles.** Today shows a grid of live tiles — tasks, agenda, thoughts, notes, movement, gym, pip, activity, focus, clock, paper, zines and dice. Add, remove and reorder them from "tiles" in the browser or "edit tiles" on the phone; the layout syncs. Zines stay browser-only, so the phone keeps but does not draw that tile.
+- **Calendar and Clock in the browser.** Appointments, alarms, timers and focus sessions now sync with the phone and have web pages (Apps → Calendar, Clock). Editor drafts and a short list of settings also sync; credentials, keys and alarm handles never do.
+- Astro and Android builds passed; browser checks used fictional data on a throwaway database. The test suite is skipped as requested and the handset was not available, so phone layouts are compiled, not seen. The APK is unsigned for the release agent.
+
 ## 0.11.0 — One account, easier to find and recover
 
 - Web sign-in follow-up: email/password is shown first, passkey sign-in is optional, and passkey account creation is explicitly labelled.

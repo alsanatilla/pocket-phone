@@ -48,6 +48,7 @@ public final class ClockActivity extends PocketActivity {
         requestedSeconds = intent.getIntExtra("seconds", 0); requestedTitle = intent.getStringExtra("title"); if (requestedTitle == null) requestedTitle = "Focus";pageTrail.clear();rootClockPage=page="timer";render();ready(this::startRequested);
     } }
     @Override protected void onPause() { ui.removeCallbacks(tick); super.onPause(); }
+    @Override protected void onCloudSynced() { if(!editingAlarm)render(); }
     @Override protected void onSaveInstanceState(Bundle out) { out.putString("page", page); out.putInt("requested_seconds", requestedSeconds); out.putString("requested_title", requestedTitle);
         out.putStringArrayList("clock_page_trail",new java.util.ArrayList<>(pageTrail));out.putString("clock_root_page",rootClockPage);
         if (timerMinutes != null) out.putString("minutes_draft", timerMinutes.getText().toString()); else out.putString("minutes_draft", minutesDraft);
@@ -110,7 +111,7 @@ public final class ClockActivity extends PocketActivity {
             if (e.title.isEmpty()) e.title = "Alarm"; e.hour = chosenHour; e.minute = chosenMinute; e.due = ClockStore.nextTime(e.hour, e.minute, System.currentTimeMillis()); AlarmScheduler.saveAndArm(this, e); page = "alarms"; render(); };if(existing!=null&&!existing.enabled)commit.run();else ready(commit);}); PocketDesign.primary(save);
     }
     private void timer(int seconds, String title) { if (seconds < 1 || seconds > 86400) throw new IllegalArgumentException("Invalid duration.");
-        ClockStore.Entry e = new ClockStore.Entry(); e.kind = "timer"; e.title = title; e.enabled = true; e.due = System.currentTimeMillis() + seconds * 1000L;
+        ClockStore.Entry e = new ClockStore.Entry(); e.kind = "timer"; e.cloudKind=title.startsWith("Focus")?"focus":"timer"; e.title = title; e.enabled = true; e.remaining=seconds*1000L;e.due = System.currentTimeMillis() + seconds * 1000L;
         e.elapsed = SystemClock.elapsedRealtime() + seconds * 1000L; e.boot = ClockStore.boot(this); AlarmScheduler.saveAndArm(this, e); page = "timer"; render(); }
     private void setup() {
         android.app.NotificationManager alerts = getSystemService(android.app.NotificationManager.class);
@@ -137,14 +138,14 @@ public final class ClockActivity extends PocketActivity {
     static String duration(long value) { long seconds = value / 1000; return String.format(Locale.getDefault(), "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60); }
     private long stopwatchMillis() { android.content.SharedPreferences p = getSharedPreferences("pocket_stopwatch", 0); long total = p.getLong("total", 0);
         if (p.getBoolean("running", false) && p.getInt("boot", -1) == ClockStore.boot(this)) total += Math.max(0, SystemClock.elapsedRealtime() - p.getLong("start", SystemClock.elapsedRealtime())); return total; }
-    private void stopwatch() { android.content.SharedPreferences p = getSharedPreferences("pocket_stopwatch", 0);
+    private void stopwatch() { ClockCloud.restoreStopwatch(this);android.content.SharedPreferences p = getSharedPreferences("pocket_stopwatch", 0);
         if (p.getInt("boot", -1) != ClockStore.boot(this)) p.edit().putBoolean("running", false).apply();
         counter = label(duration(stopwatchMillis()), 36, WHITE); body.addView(counter);
         keys(new String[]{p.getBoolean("running", false) ? "pause" : "start", "reset"}, () -> {
             if (p.getBoolean("running", false)) p.edit().putLong("total", stopwatchMillis()).putBoolean("running", false).apply();
-            else p.edit().putLong("start", SystemClock.elapsedRealtime()).putInt("boot", ClockStore.boot(this)).putBoolean("running", true).apply(); render();
-        }, () -> { p.edit().clear().apply(); render(); });
-        action("lap", () -> { String lap = duration(stopwatchMillis()) + "\n" + p.getString("laps", ""); p.edit().putString("laps", lap.substring(0, Math.min(2400, lap.length()))).apply(); render(); });
+            else p.edit().putLong("start", SystemClock.elapsedRealtime()).putInt("boot", ClockStore.boot(this)).putBoolean("running", true).apply();ClockCloud.touchStopwatch(this); render();
+        }, () -> { p.edit().putLong("total",0).putBoolean("running",false).remove("laps").apply();ClockCloud.touchStopwatch(this); render(); });
+        action("lap", () -> { String lap = duration(stopwatchMillis()) + "\n" + p.getString("laps", ""); p.edit().putString("laps", lap.substring(0, Math.min(2400, lap.length()))).apply();ClockCloud.touchStopwatch(this); render(); });
         body.addView(label(p.getString("laps", ""), 15, GRAY));
     }
     @Override protected boolean hasInternalBack() { return editingAlarm || !pageTrail.isEmpty() || !rootClockPage.equals(page); }

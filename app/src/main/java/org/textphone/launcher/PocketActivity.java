@@ -42,6 +42,9 @@ public abstract class PocketActivity extends Activity {
     private NativeNavigation navigation;
     private PageMotion motion; private String homePage;
     private View launchOrigin;
+    private PullRefreshLayout refreshLayout;
+    private RetroLoadingView loading;
+    private int loadingCount, quietLoads;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -89,7 +92,10 @@ public abstract class PocketActivity extends Activity {
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true);
         body = new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(0, dp(4), 0, dp(4));
         scroll.addView(body, new ScrollView.LayoutParams(-1, -2));
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        refreshLayout = new PullRefreshLayout(this, scroll, this::refreshCloud);
+        root.addView(refreshLayout, new LinearLayout.LayoutParams(-1, 0, 1));
+        loading = new RetroLoadingView(this); loading.setVisibility(View.GONE);
+        root.addView(loading, new LinearLayout.LayoutParams(-1, dp(72)));
         notice = label("", 12, PocketDesign.WARNING); notice.setMinHeight(dp(32)); notice.setPadding(0, dp(8), 0, dp(8));
         notice.setBackgroundColor(Color.BLACK); notice.setVisibility(View.GONE); notice.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); root.addView(notice);
         motion.show(root, pageKey); root.requestApplyInsets();
@@ -179,10 +185,18 @@ public abstract class PocketActivity extends Activity {
     private <T> void loadWith(ExecutorService executor, Callable<T> operation, Result<T> ready, Result<Exception> failed, Result<T> discarded) {
         if (closed) return;
         int page = pageGeneration;
-        executor.submit(() -> { try { T value = operation.call(); resultUi.post(() -> { if (!closed) { ready.accept(value); if (page == pageGeneration) motion.dataReady(); } else discarded.accept(value); }); }
-            catch (Exception e) { resultUi.post(() -> { if (!closed) { failed.accept(e); if (page == pageGeneration) motion.dataReady(); } }); }
-            catch (OutOfMemoryError e) { resultUi.post(() -> { if (!closed) { failed.accept(new java.io.IOException("Not enough memory. Close other apps and try again.")); if (page == pageGeneration) motion.dataReady(); } }); }
+        loadingCount++; ui.postDelayed(() -> { if(!closed&&page==pageGeneration&&loadingCount>quietLoads&&loading!=null){loading.setVisibility(View.VISIBLE);loading.running(true);} },180);
+        executor.submit(() -> { try { T value = operation.call(); resultUi.post(() -> { loadFinished(); if (!closed) { ready.accept(value); if (page == pageGeneration) motion.dataReady(); } else discarded.accept(value); }); }
+            catch (Exception e) { resultUi.post(() -> { loadFinished(); if (!closed) { failed.accept(e); if (page == pageGeneration) motion.dataReady(); } }); }
+            catch (OutOfMemoryError e) { resultUi.post(() -> { loadFinished(); if (!closed) { failed.accept(new java.io.IOException("Not enough memory. Close other apps and try again.")); if (page == pageGeneration) motion.dataReady(); } }); }
         });
+    }
+    private void loadFinished(){loadingCount=Math.max(0,loadingCount-1);if(loadingCount==0&&loading!=null){loading.running(false);loading.setVisibility(View.GONE);}}
+    private void refreshCloud(){
+        final PullRefreshLayout owner=refreshLayout;
+        if(!CloudSync.enabled(this)){owner.busy(false);message("Connect an account to sync.");return;}
+        quietLoads++; // the pull indicator at the top is the loader here
+        load(() -> {CloudSync.run(getApplicationContext());return true;},value->{quietLoads=Math.max(0,quietLoads-1);owner.busy(false);message("Synced");},error->{quietLoads=Math.max(0,quietLoads-1);owner.busy(false);message(error.getMessage()==null?"Could not sync. Try again.":error.getMessage());});
     }
     /** Read results belong to the page that requested them, including a rebuild of that page. */
     protected <T> void loadPage(Callable<T> operation, Result<T> ready) {

@@ -12,6 +12,6 @@ export const POST: APIRoute = async ({ request }) => {
     sameOrigin(request);
     const user = await signedIn(request), body = await readJson(request);
     if (body.accountId !== user.id) return json({ error: 'Account changed. Reload Pocket.' }, 409);
-    return json({ accountId: user.id, documents: await syncDocuments(user.id, body.documents) });
+    return json({ accountId: user.id, documents: await syncDocuments(user.id, body.documents, body.onlyRequested === true) });
   } catch (error) { return failure(error); }
 };

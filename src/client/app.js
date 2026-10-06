@@ -15,6 +15,10 @@ import * as movement from "./movement.js";
 import * as gymView from "./gym.js";
 import * as coros from "./coros.js";
 import { syncNow, describe, onStatus, status } from "./sync.js";
+import { gym, weekStart } from "./store.js";
+import { installRefresh } from "./retro-loading.js";
+import { initExtras, todayTiles, TODAY_CATALOG } from "./extras.js";
+import { agenda, clock as clockStore, mountAgenda, mountClock, startClockRuntime } from "./planner.js";
 import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
@@ -59,7 +63,7 @@ function view(tool, actions = []) {
   zines.leave(); pip.leave(); shell(); closeDialog(); say("");
   content.querySelectorAll('.pixel-backdrop').forEach(canvas=>canvas.dispose?.());
   const pipEntry = document.getElementById("pip-entry"); pipEntry.classList.toggle("selected", tool === "pip"); pipEntry.setAttribute("aria-current", tool === "pip" ? "page" : "false");
-  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
+  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync", "calendar", "clock", "account"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
   const activeTab = document.querySelector(".tab.active"), tabs = activeTab?.parentElement;
   if (tabs) tabs.scrollLeft = activeTab.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - activeTab.clientWidth) / 2;
   document.title = "pocket · " + (tool === "sync" ? "account" : tool);
@@ -93,6 +97,7 @@ function ask(title, { value = "", placeholder = "", multiline = false, ok = "sav
   return dialog(title, hint ? h("div", {}, h("p", { class: "small muted", text: hint }), field) : field, [["cancel", null], [ok, () => field.value]]);
 }
 const confirmBox = (title, ok) => dialog(title, null, [["cancel", false], [ok, true]]);
+const plannerApi = { get h() { return h; }, add, rowButton, section, keys, split, say, go, confirm: confirmBox, title: (...args) => workspaceTitle(...args) };
 const pipHelpers = { h, go, say, ask, choose, dialog, closeDialog, confirm: confirmBox, markdown };
 function thinkWithPip(kind, uid, title, text, href) { guard(() => go("/pip/" + pip.withContext({ kind, uid: String(uid), title, text, href })))(); }
 
@@ -101,7 +106,7 @@ const source = item => item.note ? notes.get(item.note) : null;
 const thoughtMeta = item => !item.due ? "Undecided" : item.due <= Date.now() ? "Ready to revisit" : "Revisit " + relative(item.due);
 const taskMeta = task => [task.done ? "Done" : task.due ? (task.due < taskDay() ? "Overdue · " : "") + task.due : "No date", task.important ? "Important" : "", task.steps?.length ? task.steps.filter(s => s.done).length + "/" + task.steps.length + " steps" : ""].filter(Boolean).join(" · ");
 // Each area has its own header artwork, so a page is recognisable before it is read.
-const SCENE = { today: "sky", thoughts: "stars", tasks: "road", notes: "waves", search: "rings", apps: "tiles", gym: "iron" };
+const SCENE = { calendar: "tiles", clock: "rings", today: "sky", thoughts: "stars", tasks: "road", notes: "waves", search: "rings", apps: "tiles", gym: "iron" };
 // Every area header has the same size; the page's actions sit in its top right corner.
 function workspaceTitle(body, title, meta = "", scene = SCENE[title] || SCENE[body.className.match(/tool-(\w+)/)?.[1]] || "sky") {
   const actions = body.previousElementSibling?.classList.contains("toolbar") ? body.previousElementSibling : null;
@@ -112,9 +117,62 @@ async function capture() {
   const choice = await choose("Capture", ["Thought", "Task", "Note"]);
   if(choice === 0)go("/thoughts"); else if(choice === 1)go("/tasks/new"); else if(choice === 2)go("/notes/new");
 }
+const MINUTE = 60000;
+function tileReading(kind) {
+  const now = Date.now();
+  switch (kind) {
+    case "tasks": { const open = tasks.list().filter(t => !t.done); return [open.length ? open.length + " open" : "clear", open[0]?.text || "nothing waiting", "/tasks"]; }
+    case "agenda": {
+      const next = agenda.all().find(event => event.when + event.minutes * MINUTE >= now);
+      if (!next) return ["free", "no appointments", "/calendar"];
+      const same = new Date(next.when).toDateString() === new Date(now).toDateString();
+      return [(same ? "" : new Date(next.when).toLocaleDateString([], { weekday: "short" }) + " ") + new Date(next.when).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), next.title, "/calendar"];
+    }
+    case "thoughts": { const open = parking.open(), ready = open.filter(t => t.due > 0 && t.due <= now).length; return [open.length + " open", ready ? ready + " to revisit" : "undecided", "/thoughts"]; }
+    case "notes": { const list = notes.list(); return [String(list.length), list[0] ? noteTitle(list[0]) : "no notes yet", "/notes"]; }
+    case "movement": { const percent = coros.connected() ? coros.cachedCockpit()?.recovery?.percent : null; return coros.connected() ? [percent != null ? percent + "%" : "…", "recovery", "/movement"] : ["connect", "COROS", "/movement"]; }
+    case "gym": { if (gym.active()) return ["now", "workout in progress", "/gym"]; const week = gym.all().filter(w => w.started >= weekStart(now)).length; return [week + "×", "this week", "/gym"]; }
+    case "pip": return ["ask", "think with context", "/pip"];
+    case "activity": return [String(receipt.lines(now).length), "recorded today", "/receipt"];
+    case "focus": return ["start", "a focus session", "/clock/new/focus"];
+    case "clock": { const running = clockStore.all().filter(entry => entry.enabled && entry.kind !== "stopwatch").length; return [running ? running + " running" : "clock", "alarms · timers", "/clock"]; }
+    case "paper": { const pages = load("journal.json").pages.filter(p => !p.deleted); return [String(pages.length), journal.unread().length ? "waiting to be read" : "handwritten pages", "/notes"]; }
+    case "zines": return ["zines", "photo books", "/zines"];
+    case "dice": return ["roll", "dice · coin · pick", "/dice"];
+    default: return ["", "", "/today"];
+  }
+}
+function tileGrid() {
+  const grid = h("div", { class: "today-tiles" });
+  for (const tile of todayTiles.list()) {
+    const [value, detail, path] = tileReading(tile.kind), name = tile.label || tile.kind;
+    grid.append(h("button", { class: "row-button today-tile", "data-tile": tile.kind, "aria-label": name + ", " + value + ", " + detail, onclick: () => go(path) },
+      h("span", { class: "section muted", text: name.toUpperCase() }), h("span", { class: "tile-value", text: value }), h("span", { class: "sub", text: detail })));
+  }
+  return grid;
+}
+async function editTiles() {
+  const body = h("div", { class: "today-tile-editor" });
+  const draw = () => {
+    const list = todayTiles.list(), missing = TODAY_CATALOG.filter(kind => !list.some(tile => tile.kind === kind));
+    const mutate = next => { todayTiles.save(next); draw(); };
+    body.replaceChildren(
+      ...list.map((tile, i) => h("div", { class: "tile-row" }, h("span", { text: tile.label || tile.kind }),
+        h("span", { class: "tile-row-keys" },
+          h("button", { disabled: i === 0, "aria-label": "Move " + tile.kind + " up", onclick: () => { const next = [...list]; [next[i - 1], next[i]] = [next[i], next[i - 1]]; mutate(next); } }, "↑"),
+          h("button", { disabled: i === list.length - 1, "aria-label": "Move " + tile.kind + " down", onclick: () => { const next = [...list]; [next[i + 1], next[i]] = [next[i], next[i + 1]]; mutate(next); } }, "↓"),
+          h("button", { "aria-label": "Remove " + tile.kind, onclick: () => mutate(list.filter((_, k) => k !== i)) }, "×")))),
+      missing.length ? section("ADD") : null,
+      ...missing.map(kind => rowButton("+ " + kind, "", () => mutate([...list, { uid: kind, kind }]))));
+  };
+  draw();
+  await dialog("Today tiles", body, [["done", true]]);
+  if (location.hash === "#/today" || location.hash === "" || location.hash === "#/") route();
+}
 function todayView() {
-  const body = view("today", [["+ capture", capture], ["search", () => go("/search")], ["pip", () => go("/pip")]]);
+  const body = view("today", [["+ capture", capture], ["tiles", editTiles], ["search", () => go("/search")], ["pip", () => go("/pip")]]);
   workspaceTitle(body, "today", new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }));
+  add(body, tileGrid());
   const chosen = load("tasks.json").next?.uid, all = tasks.list(), due = all.filter(t => !t.done && (t.uid === chosen || t.due && t.due <= taskDay()));
   due.sort((a,b) => Number(b.uid === chosen) - Number(a.uid === chosen));
   const ready = parking.open().filter(t => t.due > 0 && t.due <= Date.now());
@@ -240,7 +298,7 @@ function searchView() {
 }
 function appsView() {
   const body=view("apps");workspaceTitle(body,"apps");
-  split(body,[section("THINK"),rowButton("pip","",()=>go("/pip")),section("REVIEW"),rowButton("Activity","",()=>go("/receipt")),section("CREATE & KEEP"),rowButton("Zines","",()=>go("/zines"))],
+  split(body,[section("THINK"),rowButton("pip","",()=>go("/pip")),section("PLAN"),rowButton("Calendar","",()=>go("/calendar")),rowButton("Clock","",()=>go("/clock")),section("REVIEW"),rowButton("Activity","",()=>go("/receipt")),section("CREATE & KEEP"),rowButton("Zines","",()=>go("/zines"))],
     [section("BODY"),rowButton("Movement","",()=>go("/movement")),rowButton("Gym","",()=>go("/gym")),section("EXTRAS"),rowButton("Dice","",()=>go("/dice")),section("SETTINGS"),rowButton("Account & devices","",()=>go("/sync"))]);
 }
 
@@ -765,6 +823,8 @@ function route() {
   else if (name === "pip") pip.mount(view("pip"), arg, pipHelpers);
   else if (name === "zines") zines.mount(view("zines"), arg, { go, say, dialog, confirm: confirmBox });
   else if (name === "movement") movement.mount(view("movement"), { say });
+  else if (name === "calendar") mountAgenda(view("calendar"), plannerApi);
+  else if (name === "clock") mountClock(view("clock"), plannerApi);
   else if (name === "gym") gymView.mount(view("gym"), arg, { h, add, say, section, rowButton, keys, split, go, ask, choose, confirm: confirmBox, title: workspaceTitle });
   else if (name === "thoughts" || name === "parking") parkingView(arg); else if (name === "tasks") tasksView(arg); else if (name === "apps") appsView(); else if (name === "search") searchView(); else if (name === "today") todayView(); else { history.replaceState(null, "", "#/today"); todayView(); }
 }
@@ -789,6 +849,9 @@ addEventListener("keydown", event => {
 if (coros.returning()) coros.finish().then(() => { route(); say("COROS connected."); }, error => { route(); say(error.message); });
 else route();
 cloud.init().then(() => { if (!document.activeElement?.matches('input, textarea')) route(); return syncNow(); }).catch(error => say(error.message));
+initExtras();
+startClockRuntime();
+const refresh = installRefresh({ sync: syncNow, status, onStatus, describe, say });
 if ('serviceWorker' in navigator && !import.meta.env.DEV) navigator.serviceWorker.register('/sw.js').catch(() => {});
 addEventListener("pagehide", () => zines.leave());
 addEventListener("pageshow", event => { if (event.persisted) route(); });

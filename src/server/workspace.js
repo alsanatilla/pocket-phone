@@ -6,7 +6,7 @@ export async function readDocuments(userId) {
   const result = await database().execute({ sql: 'SELECT name, payload, revision FROM pocket_documents WHERE user_id = ?', args: [userId] });
   return Object.fromEntries(result.rows.filter(row => FILES.includes(row.name)).map(row => [row.name, { value: JSON.parse(String(row.payload)), revision: Number(row.revision) }]));
 }
-export async function syncDocuments(userId, documents) {
+export async function syncDocuments(userId, documents, onlyRequested = false) {
   if (!documents || typeof documents !== 'object' || Array.isArray(documents) || Object.keys(documents).some(name => !FILES.includes(name))) throw Object.assign(new Error('Unknown workspace collection.'), { status: 400 });
   for (const [name, value] of Object.entries(documents)) if (!validDocument(name, value)) throw Object.assign(new Error('Invalid workspace collection: ' + name), { status: 400 });
   await ensureSearch();
@@ -17,7 +17,7 @@ export async function syncDocuments(userId, documents) {
       const result = await tx.execute({ sql: 'SELECT name, payload, revision FROM pocket_documents WHERE user_id = ?', args: [userId] });
       const current = new Map(result.rows.map(row => [String(row.name), row]));
       const output = {}, indexed = {}, now = Date.now();
-      for (const name of FILES) {
+      for (const name of onlyRequested ? Object.keys(documents) : FILES) {
         const previous = current.get(name);
         const stored = previous ? JSON.parse(String(previous.payload)) : EMPTY[name]();
         // Merge inside one write transaction: another device cannot overwrite this read.

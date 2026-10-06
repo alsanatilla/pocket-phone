@@ -156,7 +156,7 @@ final class ClaudeSidebar extends FrameLayout {
         empty.setOrientation(LinearLayout.VERTICAL);
         empty.setTag("claude_chat_empty");
         empty.setGravity(Gravity.CENTER_VERTICAL);empty.setMinimumHeight(dp(260));
-        PixelLoadingView avatar=new PixelLoadingView(activity);empty.addView(avatar,new LinearLayout.LayoutParams(dp(64),dp(64)));
+        PixelLoadingView avatar=new PixelLoadingView(activity);empty.addView(avatar,new LinearLayout.LayoutParams(dp(96),dp(96)));
         TextView greeting = label("room to think", 40, PocketDesign.WHITE);
         greeting.setTypeface(PocketFonts.pixel(activity));
         greeting.setPadding(0, dp(32), 0, dp(12));
@@ -180,7 +180,7 @@ final class ClaudeSidebar extends FrameLayout {
         loadingRow.setPadding(dp(PocketDesign.INSET), 0, dp(PocketDesign.INSET), 0);
         loading = new PixelLoadingView(activity);
         loading.setTag("pip_loading");
-        loadingRow.addView(loading, new LinearLayout.LayoutParams(dp(64), dp(64)));
+        loadingRow.addView(loading, new LinearLayout.LayoutParams(dp(96), dp(96)));
         loadingLabel = label("thinking", 14, PocketDesign.MUTED);
         loadingLabel.setPadding(dp(4), 0, 0, 0);
         loadingLabel.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);

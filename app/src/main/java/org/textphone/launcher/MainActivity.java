@@ -204,6 +204,7 @@ public class MainActivity extends Activity {
         romProfile = getResources().getBoolean(R.bool.pocket_rom);
         shortcuts = romProfile ? ROM_SHORTCUTS : SHORTCUTS;
         planner = new PlannerStore(getSharedPreferences("pocket_planner", MODE_PRIVATE));
+        WorkspaceExtras.start(this);
         ParkingReceiver.arm(this);
         preferences = getSharedPreferences("text_phone", MODE_PRIVATE);
         tiles = new DashboardTiles(preferences);
@@ -581,7 +582,9 @@ public class MainActivity extends Activity {
             case "focus": renderFocus(); break;
             default: renderHome(); break;
         }
-        View page=viewport;
+        boolean pullable=!("capture".equals(screen)||"focus".equals(screen)||"assign".equals(screen)||"note_preview".equals(screen));
+        pullRefresh=pullable?new PullRefreshLayout(this,viewport,this::pullSync):null;
+        View scrollHost=pullRefresh!=null?pullRefresh:viewport, page=scrollHost;
         boolean todayPage="today".equals(screen),taskEditor="capture".equals(screen)&&"task".equals(captureKind);String scene=headerScene();
         if(todayPage||taskEditor||scene!=null){
             LinearLayout shell=new LinearLayout(this);shell.setOrientation(LinearLayout.VERTICAL);shell.setBackgroundColor(BACKGROUND);shell.setTag(todayPage?"today_workspace":taskEditor?"task_editor_workspace":screen+"_workspace");
@@ -595,7 +598,7 @@ public class MainActivity extends Activity {
             shell.addView(header,new LinearLayout.LayoutParams(-1,-2));
             if(todayPage){content.removeView(todayDate);shell.addView(todayDate,new LinearLayout.LayoutParams(-1,-2));content.removeView(workspaceTabs);shell.addView(workspaceTabs,new LinearLayout.LayoutParams(-1,-2));}
             viewport.setPadding(0,0,0,0);viewport.setOnApplyWindowInsetsListener(null);viewport.setTag(todayPage?"today_scroll":taskEditor?"task_editor_scroll":screen+"_scroll");
-            shell.addView(viewport,new LinearLayout.LayoutParams(-1,0,1));if(todayPage)shell.addView(todayActions,new LinearLayout.LayoutParams(-1,-2));page=shell;
+            shell.addView(scrollHost,new LinearLayout.LayoutParams(-1,0,1));if(todayPage)shell.addView(todayActions,new LinearLayout.LayoutParams(-1,-2));page=shell;
         }
         motion.show(page, pageKey(screen)); if (appRowsReady || !"apps".equals(screen) && !"assign".equals(screen)) motion.dataReady(); page.requestApplyInsets();if(planHost!=null)refreshDayPlan();
         renderedOrganizer = "today".equals(screen) || "task_detail".equals(screen) || "thought_detail".equals(screen) || "search".equals(screen) ? organizerState() : "";
@@ -697,6 +700,19 @@ public class MainActivity extends Activity {
         content.addView(feedback);
     }
 
+    private PullRefreshLayout pullRefresh;
+    /** Pull down at the top of any page to sync now with the account. */
+    private void pullSync() {
+        final PullRefreshLayout owner = pullRefresh;
+        if (!CloudSync.enabled(this)) { if (owner != null) owner.busy(false); showFeedback("Connect an account to sync."); return; }
+        final Context app = getApplicationContext();
+        new Thread(() -> {
+            String failure = null;
+            try { CloudSync.run(app); } catch (Exception error) { failure = error.getMessage() == null ? "Could not sync. Try again." : error.getMessage(); }
+            final String result = failure;
+            appUi.post(() -> { if (destroyed) return; if (owner != null) owner.busy(false); showFeedback(result == null ? "Synced" : result); });
+        }, "Pocket pull sync").start();
+    }
     private void showFeedback(String message) {
         if (feedback != null) {
             feedback.setText(message);
@@ -1640,6 +1656,7 @@ public class MainActivity extends Activity {
         }
         if(daily)commands(content,"today_commands",new String[]{"+ task","+ note","focus"},new String[]{"today_add_task","today_add_note","today_focus"},0,
                 ()->openCapture("task",0,""),()->openCapture("note",0,""),()->navigate("focus"));
+        if(daily)renderTodayTiles();
         section(content,"tasks",false).setTag("today_tasks_heading");
         todayFilters=new LinearLayout(this);todayFilters.setTag("today_filters");
         for(String name:new String[]{"Open","Today","Later","Done"}){
@@ -1657,6 +1674,80 @@ public class MainActivity extends Activity {
             section(content,"review",false);action("done tasks",14,SECONDARY,()->{taskFilter="Done";selectWorkspace("tasks");});action("today's activity",14,SECONDARY,()->openPocket(ReceiptActivity.class));}
         workspaceBottom(daily ? "capture" : "+ task", daily ? this::captureMenu : () -> openCapture("task",0,""));
         addFeedback();
+    }
+    // ── Today tiles: a synced, editable set of live readings. Tapping one opens its app. ──
+    private void renderTodayTiles() {
+        LinearLayout host = new LinearLayout(this); host.setOrientation(LinearLayout.VERTICAL); host.setTag("today_tiles");
+        List<String> kinds = TodayTiles.visible(this);
+        for (int i = 0; i < kinds.size(); i += 2) {
+            LinearLayout line = new LinearLayout(this);
+            for (int k = i; k < Math.min(kinds.size(), i + 2); k++) {
+                LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(0, -2, 1); if (k > i) cell.leftMargin = dp(12);
+                line.addView(todayTile(kinds.get(k)), cell);
+            }
+            if (kinds.size() - i == 1) line.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+            LinearLayout.LayoutParams row = new LinearLayout.LayoutParams(-1, -2); row.bottomMargin = dp(12);
+            host.addView(line, row);
+        }
+        TextView edit = action(kinds.isEmpty() ? "+ add tiles" : "edit tiles", 14, SECONDARY, this::editTodayTiles); edit.setTag("today_edit_tiles");
+        content.removeView(edit); host.addView(edit);
+        content.addView(host);
+    }
+    private View todayTile(String kind) {
+        String[] reading = TodayTiles.reading(this, planner, kind);
+        LinearLayout tile = new LinearLayout(this); tile.setOrientation(LinearLayout.VERTICAL); tile.setPadding(dp(2), dp(10), dp(2), dp(10)); tile.setMinimumHeight(dp(96));
+        tile.setTag("today_tile_" + kind); tile.setFocusable(true); PocketDesign.list(tile);
+        TextView name = text(kind, 12, SECONDARY); name.setAllCaps(true); name.setLetterSpacing(.08f); name.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        TextView value = text(reading[0], 28, PRIMARY); value.setTypeface(PocketFonts.pixel(this)); value.setSingleLine(true); value.setEllipsize(TextUtils.TruncateAt.END);
+        TextView detail = text(reading[1], 12, SECONDARY); detail.setMaxLines(2); detail.setEllipsize(TextUtils.TruncateAt.END);
+        for (TextView part : new TextView[]{name, value, detail}) { part.setPadding(0, dp(2), 0, dp(2)); part.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO); tile.addView(part); }
+        tile.setContentDescription(kind + ", " + reading[0] + ", " + reading[1] + ". Open.");
+        tile.setOnClickListener(v -> openTodayTile(kind));
+        return tile;
+    }
+    private void openTodayTile(String kind) {
+        switch (kind) {
+            case "tasks": case "thoughts": case "notes": selectWorkspace(kind); break;
+            case "agenda": openPocket(AgendaActivity.class); break;
+            case "movement": openPocket(MovementActivity.class); break;
+            case "gym": openPocket(GymActivity.class); break;
+            case "pip": openChat(); break;
+            case "activity": openPocket(ReceiptActivity.class); break;
+            case "focus": navigate("focus"); break;
+            case "clock": openPocket(ClockActivity.class); break;
+            case "paper": openPocket(JournalActivity.class); break;
+            case "dice": openPocket(DiceActivity.class); break;
+            default: break;
+        }
+    }
+    /** One list: add a tile, or open a tile to move or remove it. Changes save at once and sync to the browser. */
+    private void editTodayTiles() {
+        List<String> kinds = TodayTiles.visible(this);
+        List<String> missing = new ArrayList<>(); for (String kind : TodayTiles.CATALOG) if (TodayTiles.onPhone(kind) && !kinds.contains(kind)) missing.add(kind);
+        List<String> rows = new ArrayList<>(); if (!missing.isEmpty()) rows.add("+ add a tile"); rows.addAll(kinds);
+        if (rows.isEmpty()) return;
+        new AlertDialog.Builder(this).setTitle("Today tiles").setItems(rows.toArray(new String[0]), (dialog, which) -> {
+            if (!missing.isEmpty() && which == 0) { addTodayTile(missing); return; }
+            tileMenu(kinds, kinds.get(which - (missing.isEmpty() ? 0 : 1)));
+        }).setNegativeButton("Done", null).show();
+    }
+    private void addTodayTile(List<String> missing) {
+        new AlertDialog.Builder(this).setTitle("Add a tile").setItems(missing.toArray(new String[0]), (dialog, which) -> {
+            List<String> kinds = TodayTiles.visible(this); kinds.add(missing.get(which)); saveTodayTiles(kinds);
+        }).setNegativeButton("Cancel", (dialog, which) -> editTodayTiles()).show();
+    }
+    private void tileMenu(List<String> kinds, String kind) {
+        int at = kinds.indexOf(kind); List<String> choices = new ArrayList<>();
+        if (at > 0) choices.add("Move up"); if (at < kinds.size() - 1) choices.add("Move down"); choices.add("Remove");
+        new AlertDialog.Builder(this).setTitle(kind).setItems(choices.toArray(new String[0]), (dialog, which) -> {
+            List<String> next = new ArrayList<>(kinds); String choice = choices.get(which);
+            if ("Move up".equals(choice)) java.util.Collections.swap(next, at, at - 1); else if ("Move down".equals(choice)) java.util.Collections.swap(next, at, at + 1); else next.remove(kind);
+            saveTodayTiles(next);
+        }).setNegativeButton("Back", (dialog, which) -> editTodayTiles()).show();
+    }
+    private void saveTodayTiles(List<String> kinds) {
+        try { TodayTiles.saveVisible(this, kinds); } catch (RuntimeException error) { showFeedback(error.getMessage() == null ? "Could not save the tiles." : error.getMessage()); return; }
+        persistDraft(); render(); editTodayTiles();
     }
     private void workspaceBottom(String label, Runnable capture) {
         todayActions = softKeys("today_actions",new String[]{label,"search","calendar","pip"},new String[]{"workspace_capture","today_search","today_calendar","today_chat"},0,

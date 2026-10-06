@@ -1,9 +1,12 @@
+import { CONTENT_FILES, CONTENT_EMPTY, validContent, mergeContent } from './pocket-content.js';
 const DAY = 86400000, KEEP_DAYS = 30, DAY_LIMIT = 300;
 const dayKey = time => { const d = new Date(time); return String(d.getFullYear()) + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); };
-export const FILES = ['parking.json','receipt.json','dice.json','notes.json','tasks.json','journal.json','gym.json'];
+export const FILES = ['parking.json','receipt.json','dice.json','notes.json','tasks.json','journal.json','gym.json',...CONTENT_FILES];
 export const EMPTY = { "gym.json": () => ({ v: 1, workouts: [] }), "parking.json": () => ({ v: 1, items: [] }), "receipt.json": () => ({ v: 1, days: {} }), "dice.json": () => ({ v: 1, list: "", updated: 0 }), "notes.json": () => ({ v: 1, notes: [] }), "tasks.json": () => ({ v: 1, tasks: [], next: { uid: "", updated: 0 } }), "journal.json": () => ({ v: 1, pages: [] }) };
+Object.assign(EMPTY, CONTENT_EMPTY);
 const arrays = { 'parking.json': 'items', 'notes.json': 'notes', 'tasks.json': 'tasks', 'journal.json': 'pages', 'gym.json': 'workouts' };
 export function validDocument(name, value) {
+  if(CONTENT_FILES.includes(name))return validContent(name,value);
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   if (arrays[name]) return Array.isArray(value[arrays[name]]) && value[arrays[name]].length <= 20000;
   if (name === 'dice.json') return typeof value.list === 'string' && value.list.length <= 100000;
@@ -24,6 +27,7 @@ export function mergeById(local = [], remote = [], idKey, updatedKey) {
 }
 export const pruneParking = items => items; // Keep handled records so an offline device cannot revive them.
 export const merge = {
+  ...Object.fromEntries(CONTENT_FILES.map(name=>[name,(local,remote)=>mergeContent(name,local,remote)])),
   "parking.json": (local, remote, now) => ({ v: 1, items: pruneParking(mergeById(local.items, remote?.items, "id", "updated"), now) }),
   "receipt.json": (local, remote, now) => {
     const cutoff = dayKey(now - KEEP_DAYS * DAY), days = {}, names = new Set([...Object.keys(local.days || {}), ...Object.keys(remote?.days || {})]);

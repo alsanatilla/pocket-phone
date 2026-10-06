@@ -269,17 +269,22 @@ final class PocketCloud {
         if (token == null || token.isEmpty()) throw new CloudSync.SignInNeeded("Sign in to Pocket in Storage & devices.");
         return token;
     }
-    private static JSONObject merge(Context c, String name, JSONObject remote) throws JSONException {
+    private static JSONObject merge(Context c, String name, JSONObject remote) throws JSONException {return merge(c,name,remote,0);}
+    private static JSONObject merge(Context c, String name, JSONObject remote,long revision) throws JSONException {
         if ("parking.json".equals(name)) return ParkingStore.merge(c, remote);
         if ("receipt.json".equals(name)) return ReceiptTape.merge(c, remote);
         if ("notes.json".equals(name)) return NoteSync.merge(c, remote);
         if ("tasks.json".equals(name)) return TaskSync.merge(c, remote);
         if ("journal.json".equals(name)) return JournalStore.merge(c, remote);
         if ("gym.json".equals(name)) return GymStore.merge(c, remote);
+        if ("agenda.json".equals(name)) return AgendaCloud.merge(c,remote);
+        if ("clock.json".equals(name)) return ClockCloud.merge(c,remote);
+        if ("drafts.json".equals(name)||"preferences.json".equals(name)) return remote==null?WorkspaceExtras.document(c,name):WorkspaceExtras.merge(c,name,remote,revision);
         return DiceActivity.merge(c, remote);
     }
     static void run(Context c) throws IOException, CloudSync.SignInNeeded {
         retryRevocations(c);
+        WorkspaceExtras.start(c);
         try {
             String token = token(c), id = CloudSync.prefs(c).getString("pocket_id", "");
             JSONObject documents = new JSONObject();
@@ -293,7 +298,7 @@ final class PocketCloud {
             for (String name : CloudSync.FILES) {
                 if (!CloudSync.enabled(c) || !selected(c)) return;
                 // Each local store merges again so edits made during the HTTP request survive.
-                merge(c, name, received.getJSONObject(name).getJSONObject("value"));
+                JSONObject document=received.getJSONObject(name);merge(c, name, document.getJSONObject("value"),document.optLong("revision"));
             }
             for (JSONObject page : JournalStore.pages(c)) {
                 String uid = page.optString("uid"), marker = "pocket_uploaded_" + uid;

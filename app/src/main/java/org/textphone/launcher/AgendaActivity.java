@@ -147,6 +147,7 @@ public final class AgendaActivity extends PocketActivity {
         if(text.isEmpty()&&current.id==0&&selected.getTimeInMillis()/60000==current.when/60000&&durationMinutes==current.minutes&&!remind.isChecked())return;
         AgendaStore.Event draft=current.copy();draft.title=text;draft.when=selected.getTimeInMillis();draft.minutes=durationMinutes;AgendaDraft.save(this,draft,remind.isChecked());}
     @Override protected void onResume(){super.onResume();if(!editing)listing();}
+    @Override protected void onCloudSynced(){if(!editing)listing();}
     @Override protected void onPause(){keepDraft();super.onPause();}
     @Override protected void onSaveInstanceState(Bundle out) {out.putBoolean("show_past",showPast); out.putBoolean("direct", direct); out.putBoolean("editing", editing && current != null && title != null); if (editing && current != null && title != null) { out.putLong("id", current.id); out.putLong("task", current.task); out.putLong("alarm", current.alarm);
         out.putLong("google", current.google); out.putLong("calendar", current.calendar);

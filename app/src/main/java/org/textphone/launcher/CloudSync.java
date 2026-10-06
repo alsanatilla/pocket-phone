@@ -39,7 +39,7 @@ final class CloudSync {
     static final String SCOPE = "https://www.googleapis.com/auth/drive.appdata";
     static final String WEB = "https://pocket-phone.vercel.app/";
     static final String ACTION_SYNCED = "org.textphone.launcher.SYNCED";
-    static final String[] FILES = {"parking.json", "receipt.json", "dice.json", "notes.json", "tasks.json", "journal.json", "gym.json"};
+    static final String[] FILES = {"parking.json", "receipt.json", "dice.json", "notes.json", "tasks.json", "journal.json", "gym.json", "agenda.json", "clock.json", "drafts.json", "preferences.json"};
     static final int JOB_SOON = 7301, JOB_PERIODIC = 7302;
     private static final String DRIVE = "https://www.googleapis.com/drive/v3/files", UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
     private static final Object RUN = new Object();
@@ -92,6 +92,7 @@ final class CloudSync {
     static void run(Context c) throws IOException, SignInNeeded {
         synchronized (RUN) {
             if (!enabled(c)) return;
+            WorkspaceExtras.start(c);
             prefs(c).edit().putLong("last_try", System.currentTimeMillis()).apply();
             if (PocketCloud.selected(c)) { PocketCloud.run(c); return; }
             String token = token(c);
@@ -105,6 +106,9 @@ final class CloudSync {
                     else if ("tasks.json".equals(name)) merged = TaskSync.merge(c, remote);
                     else if ("journal.json".equals(name)) merged = JournalStore.merge(c, remote);
                     else if ("gym.json".equals(name)) merged = GymStore.merge(c, remote);
+                    else if ("agenda.json".equals(name)) merged = AgendaCloud.merge(c,remote);
+                    else if ("clock.json".equals(name)) merged = ClockCloud.merge(c,remote);
+                    else if ("drafts.json".equals(name)||"preferences.json".equals(name)) merged = remote==null?WorkspaceExtras.document(c,name):WorkspaceExtras.merge(c,name,remote,0);
                     else merged = DiceActivity.merge(c, remote);
                     upload(c, token, name, merged.toString());
                 }

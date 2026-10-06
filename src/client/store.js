@@ -12,7 +12,7 @@ export const KIND = { ROLL: "ROLL", PARK: "PARK", CLEAR: "CLEAR", KILL: "KILL", 
 
 const listeners = new Set();
 export const onChange = fn => listeners.add(fn);
-const changed = name => { markDirty(name); listeners.forEach(fn => fn(name)); };
+export const changed = name => { markDirty(name); listeners.forEach(fn => fn(name)); };
 
 export function load(name) {
   try { const doc = JSON.parse(localStorage.getItem("pocket:" + name)); if (doc && typeof doc === "object") return doc; } catch { /* damaged copy reads as empty */ }

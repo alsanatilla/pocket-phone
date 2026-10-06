@@ -71,8 +71,8 @@ export async function disconnect() {
   await request('/api/auth/sign-out', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   user = null; switchAccount(''); location.reload();
 }
-export async function exchange(documents) {
-  const result = await request('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: activeAccount(), documents }) });
+export async function exchange(documents, onlyRequested = false) {
+  const result = await request('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: activeAccount(), documents, onlyRequested }) });
   if (result.accountId !== activeAccount()) throw new Error('Account changed. Reload Pocket.');
   return result.documents;
 }

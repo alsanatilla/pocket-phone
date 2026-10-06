@@ -5,6 +5,8 @@ import { FILES, load, save, merge, clean, dirty, onChange } from "./store.js";
 import { waiting } from './persistence-events.js';
 import { syncObjects } from './object-sync.js';
 import * as coros from './coros.js';
+import { applyDocument } from './extras.js';
+import { syncPaperPhotos } from './paper-store.js';
 
 export const status = { state: "idle", last: Number(localStorage.getItem("pocket:last-sync") || 0), error: "" };
 const listeners = new Set();
@@ -34,21 +36,24 @@ export function syncNow() {
       // Re-read it on reconnect, and retry after a temporary startup failure.
       if (!cloud.connected()) await cloud.init();
       if (!cloud.connected()) { status.state = "idle"; return false; }
-      const sent = Object.fromEntries(FILES.map(name => [name, load(name)]));
-      const received = await cloud.exchange(sent);
+      const failures=[];
       for (const name of FILES) {
+        try {
+        const sent = load(name), received = await cloud.exchange({[name]:sent},true);
         const local = load(name), remote = received[name]?.value;
         if (!remote) throw new Error('Pocket returned an incomplete workspace.');
-        const unchanged = JSON.stringify(local) === JSON.stringify(sent[name]);
+        const unchanged = JSON.stringify(local) === JSON.stringify(sent);
         const merged = unchanged ? remote : merge[name](local, remote, Date.now());
         // Only a merge that changed the local copy needs a redraw; otherwise focus and scroll stay put.
         if (JSON.stringify(merged) !== JSON.stringify(local)) status.changed = true;
         save(name, merged);
+        if(name==='drafts.json'||name==='preferences.json')applyDocument(name);
         // An edit made during the request stays queued. Only acknowledged contents are clean.
         if (unchanged || JSON.stringify(merged) === JSON.stringify(remote)) clean(name);
+        }catch(error){if(error instanceof cloud.Expired)throw error;failures.push(error.message);}
       }
-      status.changed = await syncObjects() || status.changed;
-      await coros.syncAccount();
+      for(const operation of [syncPaperPhotos,syncObjects,()=>coros.syncAccount()])try{status.changed=Boolean(await operation())||status.changed;}catch(error){if(error instanceof cloud.Expired)throw error;failures.push(error.message);}
+      if(failures.length)throw new Error([...new Set(failures)].join(' · '));
       status.state = "idle"; status.last = Date.now(); localStorage.setItem("pocket:last-sync", String(status.last));
       return true;
     } catch (error) {
