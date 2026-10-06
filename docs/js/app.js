@@ -1,14 +1,14 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
-import * as drive from "./drive.js?v=20261006-glow1";
-import * as reader from "./reader.js?v=20261006-glow1";
-import * as pip from "./pip.js?v=20261006-glow1";
-import { backdrop } from "./pixel-backdrop.js?v=20261006-glow1";
-import * as zines from "./zines.js?v=20261006-glow1";
-import * as movement from "./movement.js?v=20261006-glow1";
-import * as gymView from "./gym.js?v=20261006-glow1";
-import * as coros from "./coros.js?v=20261006-glow1";
-import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-glow1";
-import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-glow1";
+import * as drive from "./drive.js?v=20261006-072";
+import * as reader from "./reader.js?v=20261006-072";
+import * as pip from "./pip.js?v=20261006-072";
+import { backdrop } from "./pixel-backdrop.js?v=20261006-072";
+import * as zines from "./zines.js?v=20261006-072";
+import * as movement from "./movement.js?v=20261006-072";
+import * as gymView from "./gym.js?v=20261006-072";
+import * as coros from "./coros.js?v=20261006-072";
+import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-072";
+import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-072";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -563,7 +563,7 @@ function route() {
   else if (name === "pip") pip.mount(view("pip"), arg, pipHelpers);
   else if (name === "zines") zines.mount(view("zines"), arg, { go, say, dialog, confirm: confirmBox });
   else if (name === "movement") movement.mount(view("movement"), { say });
-  else if (name === "gym") gymView.mount(view("gym"), arg, { h, add, say, section, rowButton, keys, split, go, confirm: confirmBox, title: workspaceTitle });
+  else if (name === "gym") gymView.mount(view("gym"), arg, { h, add, say, section, rowButton, keys, split, go, ask, choose, confirm: confirmBox, title: workspaceTitle });
   else if (name === "thoughts" || name === "parking") parkingView(arg); else if (name === "tasks") tasksView(arg); else if (name === "apps") appsView(); else if (name === "search") searchView(); else if (name === "today") todayView(); else { history.replaceState(null, "", "#/today"); todayView(); }
 }
 addEventListener("hashchange", route);

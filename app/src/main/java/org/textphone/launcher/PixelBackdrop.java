@@ -120,17 +120,13 @@ final class PixelBackdrop extends Drawable {
         return light;
     }
 
-    /** Pip: a glow behind the composer, three fine rings and a bloom in the top corner. */
-    private static double glow(int x, int y, int width, int height) {
+    /** Pip: only the upper-corner bloom, fading to black before the middle of the page. */
+    private static double glow(int x, int y, double v, int width, int height) {
         double size=Math.min(width,height);
-        double d=Math.hypot((x-width*.72)/size*.6,(y-height*1.08)/size);
         double c=Math.hypot((x-width)/size,(y+height*.02)/size);
-        double light=.42*Math.exp(-d*3)+.26*Math.exp(-c*4.5);
-        light+=.16*Math.exp(-Math.pow((d-.42)*size/1.6,2));
-        light+=.11*Math.exp(-Math.pow((d-.66)*size/1.6,2));
-        light+=.07*Math.exp(-Math.pow((d-.92)*size/1.6,2));
-        if(hash(x/6+31,y/6)>.9&&x%6==2&&y%6==2)light+=.04+1.2*light;
-        return Math.max(0,light-.03);
+        double light=.26*Math.exp(-c*4.5);
+        if(light>.03&&hash(x/6+31,y/6)>.9&&x%6==2&&y%6==2)light+=.04+1.2*light;
+        return Math.max(0,light-.03)*(1-smooth(.1,.5,v));
     }
 
     static int shade(int x, int y, int width, int height) { return shade(SKY, x, y, width, height); }
@@ -144,7 +140,7 @@ final class PixelBackdrop extends Drawable {
             case IRON: light=iron(x,y,u,v,aspect,width,height); break;
             case TILES: light=tiles(x,y,u,v); break;
             case RINGS: light=rings(u,v,aspect,height); break;
-            case GLOW: light=glow(x,y,width,height); break;
+            case GLOW: light=glow(x,y,v,width,height); break;
             default: light=sky(u,v,aspect);
         }
         if(!GLOW.equals(scene)){

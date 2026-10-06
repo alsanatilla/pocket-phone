@@ -1,6 +1,6 @@
-import * as store from "./zine-store.js?v=20261006-glow1";
-import { preparePhoto, renderer, pageCount } from "./zine-render.js?v=20261006-glow1";
-import { makePDF } from "./zine-pdf.js?v=20261006-glow1";
+import * as store from "./zine-store.js?v=20261006-072";
+import { preparePhoto, renderer, pageCount } from "./zine-render.js?v=20261006-072";
+import { makePDF } from "./zine-pdf.js?v=20261006-072";
 
 const LIMIT = 40;
 let current;

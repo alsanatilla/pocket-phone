@@ -1,5 +1,5 @@
 // Gym: log sets during a workout, then read each lift's estimated best over time. Same records as GymActivity on the phone.
-import { gym, e1rm, kgText, weekStart } from "./store.js?v=20261006-glow1";
+import { gym, e1rm, kgText, weekStart } from "./store.js?v=20261006-072";
 
 const day = at => new Date(at).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
 const minutes = ms => { const m = Math.max(0, Math.floor(ms / 60000)); return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m` : `${m} min`; };
@@ -49,22 +49,35 @@ export function mount(body, arg, ui) {
       if (!current || !names.some(n => n.toLowerCase() === current.toLowerCase())) current = names[names.length - 1] || "";
       const picked = current, today = picked ? gym.sets(now, picked) : [], before = picked ? gym.previous(picked, now.id) : [];
       const seed = today[today.length - 1] || before[0] || { kg: /pull|dip/i.test(picked) ? 0 : 20, reps: 8 };
-      const exercise = h("input", { list: "gym-exercises", value: picked, placeholder: "Exercise", "aria-label": "Exercise", maxlength: 60 });
-      const options = h("datalist", { id: "gym-exercises" }, gym.exercises().map(n => h("option", { value: n })));
+      const chooseExercise = async () => {
+        try {
+          const choices = [...new Map([...gym.names(now), ...gym.exercises()].map(name => [name.toLowerCase(), name])).values()];
+          const which = await ui.choose("Exercise", [...choices, "+ new exercise"]);
+          if (which == null) return;
+          const name = (which < choices.length ? choices[which] : await ui.ask("Exercise", { limit: 60 }))?.trim();
+          if (!name) return;
+          const workout = gym.get(now.id);
+          if (!workout || workout.ended) throw new Error("This workout has finished.");
+          const existing = gym.names(workout).find(n => n.toLowerCase() === name.toLowerCase());
+          if (!existing) gym.addExercise(now.id, name);
+          current = existing || name; mount(body, "", ui);
+          body.querySelector(".gym-log input[type=number]")?.focus();
+        } catch (error) { say(error.message); }
+      };
+      const exercise = h("button", { type: "button", class: "gym-exercise", onclick: chooseExercise, "aria-haspopup": "dialog", "aria-label": picked ? "Change exercise: " + picked : "Choose exercise" }, picked ? picked + " ▾" : "choose exercise ▾");
       const kg = h("input", { type: "number", min: 0, max: 1000, step: 2.5, value: kgText(seed.kg), "aria-label": "Kilograms", inputmode: "decimal" });
       const reps = h("input", { type: "number", min: 1, max: 100, step: 1, value: seed.reps, "aria-label": "Reps", inputmode: "numeric" });
       const log = () => { try {
-        const name = exercise.value.trim(), best = gym.record(gym.history(name)), w = Number(kg.value), r = Number(reps.value);
+        const name = picked, best = gym.record(gym.history(name)), w = Number(kg.value), r = Number(reps.value);
         gym.addSet(now.id, name, w, r); current = name; mount(body, "", ui);
         if (best && e1rm(w, r) > best.e1rm + .05) say(`New best: ${kgText(e1rm(w, r))} kg e1RM`);
         body.querySelector(".gym-log input[type=number]")?.focus();
       } catch (error) { say(error.message); } };
-      for (const field of [exercise, kg, reps]) field.addEventListener("keydown", event => { if (event.key === "Enter") log(); });
-      exercise.addEventListener("change", () => { const name = exercise.value.trim(); if (!name) return; try { gym.addExercise(now.id, name); current = name; mount(body, "", ui); } catch (error) { say(error.message); } });
+      for (const field of [kg, reps]) field.addEventListener("keydown", event => { if (event.key === "Enter") log(); });
       const rest = h("span", { class: "gym-rest accent" });
       left.push(section("NOW · " + minutes(Date.now() - now.started).toUpperCase()),
-        h("div", { class: "gym-log" }, exercise, options, h("label", {}, "kg", kg), h("label", {}, "reps", reps)),
-        keys(["log set", log, { class: "accent" }], ["undo", () => { if (!picked || !today.length) return; gym.undoSet(now.id, picked); mount(body, "", ui); }], ["finish", async () => { if (await confirm("Finish this workout?", "finish")) { gym.finish(now.id); current = ""; mount(body, "", ui); } }]),
+        h("div", { class: "gym-log" }, exercise, h("label", {}, "kg", kg), h("label", {}, "reps", reps)),
+        keys(["log set", log, { class: "accent", disabled: !picked }], ["undo", () => { if (!picked || !today.length) return; gym.undoSet(now.id, picked); mount(body, "", ui); }, { disabled: !today.length }], ["+ exercise", chooseExercise], ["finish", async () => { if (await confirm("Finish this workout?", "finish")) { gym.finish(now.id); current = ""; mount(body, "", ui); } }]),
         rest);
       const last = Math.max(0, ...(now.entries || []).flatMap(e => e.sets.map(s => s.at)));
       if (last) { const tick = () => { const s = Math.floor((Date.now() - last) / 1000); rest.textContent = s < 3600 ? `rest ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : ""; };
@@ -74,7 +87,7 @@ export function mount(body, arg, ui) {
       if (before.length) left.push(section("LAST TIME · " + day(before[0].at).toUpperCase()), h("p", { class: "small muted", text: line(before) }));
       const best = picked && gym.record(gym.history(picked));
       if (best) left.push(section("BEST"), h("p", { class: "small muted", text: `${kgText(best.e1rm)} kg e1RM · ${set(best.best)} · ${day(best.at)}` }));
-    } else left.push(keys(["start workout", () => { gym.start(); current = ""; mount(body, "", ui); body.querySelector(".gym-log input")?.focus(); }, { class: "accent" }]));
+    } else left.push(keys(["start workout", () => { gym.start(); current = ""; mount(body, "", ui); body.querySelector(".gym-exercise")?.click(); }, { class: "accent" }]));
     const past = gym.all().filter(w => w.ended).slice(0, 12);
     if (past.length) left.push(section("HISTORY"), past.map(w => rowButton(`${day(w.started)} · ${minutes(w.ended - w.started)}`, `${gym.names(w).join(", ")} · ${gym.count(w)} sets · ${tonnes(gym.volume(w))}`, () => go("/gym/w:" + w.id))));
     const right = [];

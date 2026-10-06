@@ -1,6 +1,6 @@
 # Pocket Phone
 
-Pocket 0.7.1 is a native launcher and personal workspace for the Nothing Phone (3a), running on its current Nothing OS. The workflow is **capture → decide → plan → act → review**. See [WORKFLOW.md](WORKFLOW.md) for every app’s purpose, connections and one complete journey.
+Pocket 0.7.2 is a native launcher and personal workspace for the Nothing Phone (3a), running on its current Nothing OS. The workflow is **capture → decide → plan → act → review**. See [WORKFLOW.md](WORKFLOW.md) for every app’s purpose, connections and one complete journey.
 
 Home shows what matters now and opens communication, capture, Today, pip and Apps. **Today, Thoughts, Tasks and Notes** share a workspace. Thoughts stay undecided until you explicitly make a task; Notes keep context; Tasks hold chosen actions. A task can reserve time in Pocket Calendar, start Focus for that exact action and record completion in Activity. Camera leads to Photos; Paper leads to source-linked Notes; selected messages can lead to Tasks. Supporting apps are grouped by purpose, and custom shortcuts remain reachable.
 
@@ -8,13 +8,13 @@ Data saves locally first. **Drive remains the optional sync transport**, with th
 
 All apps use shared headers, typography, rows, controls and Back conventions. See [DESIGN.md](DESIGN.md), [CAMERA.md](CAMERA.md), [PIP.md](PIP.md), [APP-STATUS.md](APP-STATUS.md) and the historical [release notes](RELEASES.md).
 
-Home and Today have a static dithered sky that fades into Pocket black. Pip has a full-height pixel glow with rings rising behind the composer and a bloom in the top corner. The original artwork uses the same pixel pattern on phone and web; working lists and editors retain their plain backgrounds.
+Home and Today have a static dithered sky that fades into Pocket black. Pip has a pixel glow in the upper corner that fades to black, keeping the conversation and composer quiet. The original artwork uses the same pixel pattern on phone and web; working lists and editors retain their plain backgrounds. Gym has a visible exercise picker and **+ exercise** action for logging multiple lifts in the same workout.
 
-This is a launcher/app build, not a full ROM image. Android owns Recents and system Home gestures. The local 0.7.1 APK is unsigned for the release agent to sign. Handset behavior and live accounts/providers have not been verified here. Actual build results are in [BUILD-STATUS.json](BUILD-STATUS.json).
+This is a launcher/app build, not a full ROM image. Android owns Recents and system Home gestures. The local 0.7.2 APK is unsigned for the release agent to sign. Handset behavior and live accounts/providers have not been verified here. Actual build results are in [BUILD-STATUS.json](BUILD-STATUS.json).
 
 ## Downloads
 
-Builds are available in [GitHub Releases](https://github.com/alsanatilla/pocket-phone/releases). The 0.7.1 artifact is unsigned for signing by the release agent. Earlier signed APKs can be installed over Pocket to retain local data. See [USE-POCKET-0.7.1.md](USE-POCKET-0.7.1.md) for this build.
+Builds are available in [GitHub Releases](https://github.com/alsanatilla/pocket-phone/releases). The 0.7.2 artifact is unsigned for signing by the release agent. Earlier signed APKs can be installed over Pocket to retain local data. See [USE-POCKET-0.7.2.md](USE-POCKET-0.7.2.md) for this build.
 
 Each release labels its signing status and includes its APK, source archive, checksums and build status. Signing keys and local SDK settings are excluded from this repository.
 

@@ -91,13 +91,12 @@ function rings(x,y,u,v,aspect,width,height) {
   if(dist<.03)light=.66;
   return light;
 }
-// Pip: a full-page glow. Light rises behind the composer with rings radiating from it, a bloom spills from the top corner and sparks drift in the light; the middle stays black for reading.
+// Pip: just the upper-corner bloom, fading into black before the middle of the page.
 function glow(x,y,u,v,aspect,width,height) {
-  const size=Math.min(width,height), d=Math.hypot((x-width*.72)/size*.6,(y-height*1.08)/size), c=Math.hypot((x-width)/size,(y+height*.02)/size);
-  let light=.42*Math.exp(-d*3)+.26*Math.exp(-c*4.5);
-  for(const [radius,strength] of [[.42,.16],[.66,.11],[.92,.07]])light+=strength*Math.exp(-Math.pow((d-radius)*size/1.6,2));
-  if(hash(Math.floor(x/6)+31,Math.floor(y/6))>.9&&x%6===2&&y%6===2)light+=.04+1.2*light;
-  return Math.max(0,light-.03);
+  const size=Math.min(width,height), c=Math.hypot((x-width)/size,(y+height*.02)/size);
+  let light=.26*Math.exp(-c*4.5);
+  if(light>.03&&hash(Math.floor(x/6)+31,Math.floor(y/6))>.9&&x%6===2&&y%6===2)light+=.04+1.2*light;
+  return Math.max(0,light-.03)*(1-smooth(.1,.5,v));
 }
 const PAINT = { sky, stars, road, waves, terrain, iron, tiles, rings, glow };
 

@@ -93,6 +93,7 @@ public final class GymActivity extends PocketActivity {
     private void renderLog() {
         JSONObject now = GymStore.active(this);
         screen(exercise.toLowerCase(Locale.getDefault()), "gym-log");
+        keys(new String[]{"+ exercise"}, this::chooseExercise);
         TextView display = label(GymStore.kg(kg) + " kg × " + reps, 40, WHITE); display.setTypeface(PocketFonts.pixel(this)); display.setGravity(Gravity.CENTER);
         display.setMinHeight(dp(88)); display.setTag("gym_display"); display.setContentDescription(GymStore.kg(kg) + " kilograms, " + reps + " reps. Type values.");
         display.setFocusable(true); display.setOnClickListener(v -> typeValues()); PocketDesign.list(display); body.addView(display, new LinearLayout.LayoutParams(-1, -2));
@@ -134,9 +135,11 @@ public final class GymActivity extends PocketActivity {
     }
     private void chooseExercise() {
         JSONObject now = GymStore.active(this); if (now == null) return;
-        List<String> names = GymStore.exercises(this); List<String> options = new ArrayList<>(names); options.add("new exercise…");
+        List<String> names = new ArrayList<>(GymStore.exerciseNames(now));
+        for (String candidate : GymStore.exercises(this)) if (names.stream().noneMatch(name -> name.equalsIgnoreCase(candidate))) names.add(candidate);
+        List<String> options = new ArrayList<>(names); options.add("new exercise…");
         new AlertDialog.Builder(this).setTitle("Exercise").setItems(options.toArray(new String[0]), (d, which) -> {
-            if (which < names.size()) { GymStore.addExercise(this, now.optString("id"), names.get(which)); openLog(names.get(which)); return; }
+            if (which < names.size()) { String name=names.get(which); if (GymStore.exerciseNames(now).stream().noneMatch(existing -> existing.equalsIgnoreCase(name))) GymStore.addExercise(this, now.optString("id"), name); openLog(name); return; }
             EditText name = new EditText(this); name.setSingleLine(true); name.setHint("Exercise"); PocketDesign.input(name);
             LinearLayout box = new LinearLayout(this); box.setPadding(dp(20), dp(8), dp(20), 0); box.addView(name, new LinearLayout.LayoutParams(-1, -2));
             new AlertDialog.Builder(this).setTitle("New exercise").setView(box).setNegativeButton("Cancel", null).setPositiveButton("Add", (d2, w2) -> {

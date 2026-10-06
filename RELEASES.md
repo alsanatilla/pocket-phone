@@ -2,6 +2,12 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.7.2 — Quieter Pip and exercise selection
+
+- Pip keeps only the upper-corner pixel glow, fading to black. The lower rings and composer glow are removed on phone and web.
+- Gym exposes **+ exercise** while logging a workout on both platforms. The web uses an explicit exercise picker rather than a text field that saves and rerenders on blur. Choose an existing lift to switch, or a new one to add; each exercise retains its sets within the same workout. Starting a workout opens the picker, and long dialog lists scroll within the viewport.
+- The APK is unsigned for the release agent. Compilation and verification results are in BUILD-STATUS.json; the test suite is skipped as requested.
+
 ## 0.7.1 — Pip pixel glow
 
 - Pip's chat and composer now use the approved pixel glow on phone and web: three fine rings rising from the bottom, a top-corner bloom and scattered pixel sparks, with a dark reading area.

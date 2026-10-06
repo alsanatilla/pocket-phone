@@ -53,6 +53,7 @@ select { width: 100%; min-height: 48px; padding: 8px 0; background: var(--black)
 .gym-log { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 0 16px; align-items: end; }
 .gym-log label { display: block; color: var(--muted); font-size: 12px; }
 .gym-log input[type=number] { font: 34px/1.1 var(--pixel); }
+.gym-exercise { min-width: 0; text-align: left; padding: 8px 0; overflow-wrap: anywhere; }
 .gym-rest { display: block; min-height: 20px; font-size: 13px; text-align: right; }
 .gym-chart { display: block; width: 100%; height: 72px; margin: 4px 0; }
 .gym-chart rect { fill: var(--accent); opacity: .5; }
@@ -144,7 +145,7 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
 
 /* Dialogs follow Pocket's list dialog: title, choices, cancel. */
 .dialog { position: fixed; inset: 0; background: rgba(0, 0, 0, .72); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 10; }
-.dialog .box { background: #111; width: 100%; max-width: 420px; padding: 16px 20px 8px; border: 1px solid var(--line); }
+.dialog .box { background: #111; width: 100%; max-width: 420px; max-height: calc(100dvh - 48px); overflow-y: auto; padding: 16px 20px 8px; border: 1px solid var(--line); }
 .dialog h2 { font: 26px/1.1 var(--pixel); margin: 0 0 8px; overflow-wrap: anywhere; }
 .dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
 .dialog .actions button { color: var(--accent); min-height: 48px; }
@@ -269,7 +270,6 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
 .pip-settings label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0; }
 .pip-settings .check-label { display: flex; }
 .pip-settings input, .pip-settings select { font-size: 14px; }
-.dialog .box:has(.pip-settings) { max-height: calc(100dvh - 48px); overflow-y: auto; }
 @media (max-width: 899px) {
   .tabs { min-width: 0; }
   .pip-layout { display: flex; flex-direction: column; gap: 12px; }

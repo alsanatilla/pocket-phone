@@ -1,6 +1,6 @@
 // Edits save locally first and are marked waiting; they upload when the browser is online and connected.
-import * as drive from "./drive.js?v=20261006-glow1";
-import { FILES, load, save, merge, clean, dirty, onChange } from "./store.js?v=20261006-glow1";
+import * as drive from "./drive.js?v=20261006-072";
+import { FILES, load, save, merge, clean, dirty, onChange } from "./store.js?v=20261006-072";
 
 export const status = { state: "idle", last: Number(localStorage.getItem("pocket:last-sync") || 0), error: "" };
 const listeners = new Set();
