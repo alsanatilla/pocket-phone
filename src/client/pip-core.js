@@ -1,5 +1,6 @@
 import { storage as localStorage, tabStorage as sessionStorage } from './workspace-storage.js';
-// Pip's local conversations and direct API transport. Chats stay on this device.
+// Replies save locally before direct API transport; signed-in conversations sync separately.
+import { changed } from './persistence-events.js';
 import { definitions } from "./pip-tools.js";
 import { activity, settle, source } from "./pip-activity.js";
 import { streamChat } from "./pip-stream.js";
@@ -52,6 +53,7 @@ export class ChatStore {
     if (!raw) return null;
     try {
       const chat = JSON.parse(raw);
+      if (chat.deleted) return null;
       if (chat.uid !== uid || !Array.isArray(chat.turns) || typeof chat.draft !== "string" || !Array.isArray(chat.context)) throw new Error();
       chat.config = config(chat.config);
       for (const turn of chat.turns) { turn.activity = activity(turn.activity); turn.sources = (Array.isArray(turn.sources) ? turn.sources : []).slice(0, 24).map(source).filter(Boolean); }
@@ -59,7 +61,18 @@ export class ChatStore {
     } catch { throw new Error("A saved chat could not be read. Its original data is still in this browser."); }
   }
   save(chat) {
+    const previous = JSON.parse(this.storage.getItem(PREFIX + chat.uid) || 'null');
+    if (previous?.deleted) throw new Error('This chat was removed.');
+    chat.updated = Math.max(Date.now(), chat.updated || 0, (previous?.updated || 0) + 1);
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    chat.draftUpdated = previous && same([chat.draft, chat.context], [previous.draft, previous.context]) ? previous.draftUpdated ?? previous.updated : chat.updated;
+    for (const turn of chat.turns) {
+      const before = previous?.turns.find(t => t.uid === turn.uid);
+      const content = t => { const { updated, ...value } = t; return value; };
+      turn.updated = before && same(content(turn), content(before)) ? before.updated ?? previous.updated : chat.updated;
+    }
     this.storage.setItem(PREFIX + chat.uid, JSON.stringify(chat));
+    if (this.storage === localStorage) changed('chats', chat.uid);
     return copy(chat);
   }
   create(value = settings(this.storage)) {
@@ -71,7 +84,10 @@ export class ChatStore {
     change(chat); chat.updated = Math.max(Date.now(), chat.updated + 1);
     return this.save(chat);
   }
-  remove(uid) { this.storage.removeItem(PREFIX + uid); }
+  remove(uid) {
+    this.storage.setItem(PREFIX + uid, JSON.stringify({ uid, deleted: true, updated: Date.now() }));
+    if (this.storage === localStorage) changed('chats', uid);
+  }
 }
 
 const SYSTEM = "You are pip, the assistant in Pocket. Help the user think clearly and choose concrete actions. "
@@ -163,7 +179,9 @@ export class ReplyRunner {
       if (chat.title === "New chat") chat.title = text.replace(/\s+/g, " ").slice(0, 64);
       chat.draft = ""; chat.context = [];
     }
-    Object.assign(turn, { attempt: id(), answer: "", reasoning: "", error: "", status: "streaming", usage: {}, activity: [], sources: [], phase: "requesting" });
+    let device = this.store.storage.getItem('pocket:device-id');
+    if (!device) { device = id(); this.store.storage.setItem('pocket:device-id', device); }
+    Object.assign(turn, { owner: device, attempt: id(), answer: "", reasoning: "", error: "", status: "streaming", usage: {}, activity: [], sources: [], phase: "requesting" });
     chat.updated = Date.now(); this.store.save(chat); // Save succeeds before any paid request.
     const active = { chatId: uid, turnId: turn.uid, attempt: turn.attempt, turn, controller: new AbortController() };
     this.active = active; this.onChange({ type: "started", chatId: uid });

@@ -16,7 +16,7 @@ Pocket saves edits locally first. Signing in to a Pocket account connects the ph
 
 Paper JPEGs are stored as private database files, limited to 2 MB per photo. Workspace requests are limited to 3 MB. Removing a Paper page removes its server photo in the same transaction. Stale uploads cannot restore a removed photo.
 
-Calendar appointments, alarms, task reminders, drafts, notification handles, calls, SMS, contacts and Camera album photos remain on the phone. Pip chats remain in native SQLite or browser storage. Photo zines remain in browser IndexedDB. Provider keys, COROS tokens and COROS caches are excluded from sync. Items explicitly kept from Pip use the shared Notes, Thoughts or Tasks collection.
+Calendar appointments, alarms, task reminders, drafts, notification handles, calls, SMS, contacts and Camera album photos remain on the phone. Pip chats save locally first (native SQLite or browser storage), then sync to the signed-in account with their drafts, attached context and reply activity; per reply the later edit wins and deleted chats stay as markers. Photo zines sync between browsers with their photos. Provider keys never leave the device. Items explicitly kept from Pip use the shared Notes, Thoughts or Tasks collection.
 
 ## Connect devices
 
@@ -53,7 +53,7 @@ In the browser, **import from Drive** reads the existing seven collections and P
 
 GitHub Pages and Vercel are different browser origins. Open the [old Pages URL](https://alsanatilla.github.io/pocket-phone/) in the browser that holds the old copy, choose **download this browser’s workspace**, then use **restore backup** in the Vercel app. That export contains the seven workspace JSON collections. Existing chats and zines stay in the old origin’s storage; this export does not transfer them.
 
-**Download backup** exports the seven workspace collections, including deletion markers. Restoring merges records using the usual timestamps. Backups exclude photo bytes, chats, zines, passwords and provider keys. **Forget this browser’s copy** removes only the current account’s local storage; server records and other accounts remain. Clearing all browser site data also removes local chats and zines.
+**Download backup** exports the seven workspace collections, including deletion markers. Restoring merges records using the usual timestamps. Backups exclude photo bytes, chats, zines, passwords and provider keys. **Forget this browser’s copy** removes only the current account’s local storage; server records and other accounts remain. Signed-in chats and zines are restored from the account after clearing browser data; guest copies are not.
 
 ## Merge rules
 
@@ -70,6 +70,6 @@ Shared rules live in src/shared/workspace.js and mirror the Android stores.
 
 Paper photos upload through the authenticated API. Pages can wait for the phone to transcribe them, or **read with Claude** can use the browser tab’s Anthropic key. Provider requests remain direct; the database does not receive API keys. Network failures leave a page waiting. Source-linked note lines retain their positions on the original handwriting.
 
-Movement keeps its separate COROS connection on each device. The phone’s authorization and cached readings use Android Keystore/private storage; browser records use the account’s local browser copy. Recovery, Strain and Conditioning are Pocket estimates implemented in Scores.java and src/client/scores.js. See Movement for their inputs.
+Signed in, the COROS connection belongs to the Pocket account: its authorization is encrypted on the server and the last readings are stored there, so phone and browser show the same data and keep it when a refresh fails. Readings refresh at most every 15 minutes while Pocket is open, hourly from the phone when it has a network, and once a day from a scheduled job (`.github/workflows/coros-refresh.yml`, which needs the `POCKET_COROS_CRON_SECRET` repository secret) even when both apps are closed. If COROS revokes or expires the authorization, the saved readings stay and Movement offers reconnect. Guests keep the previous per-device connection. Recovery, Strain and Conditioning are Pocket estimates implemented in Scores.java and src/client/scores.js. See Movement for their inputs.
 
-Photo zines save automatically in account-scoped IndexedDB. Existing guest books retain their original database. A zine holds up to 40 photos with reversible print treatments, order, captions and crop options. Download a reading PDF or an A5 print booklet to retain or share a copy. Zines and their photo bytes are not uploaded to libSQL.
+Photo zines save automatically in account-scoped IndexedDB. Existing guest books retain their original database. A zine holds up to 40 photos with reversible print treatments, order, captions and crop options. Download a reading PDF or an A5 print booklet to retain or share a copy. Signed in, zines and their photos sync to the account; a zine waits until its photos have uploaded.

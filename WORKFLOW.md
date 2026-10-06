@@ -44,7 +44,7 @@ flowchart LR
 | Phone / Messages / Contacts | Communication | Contacts hand off to calls and SMS. Selected messages can become tasks with context. Messenger notifications open their original apps. |
 | Camera / Photos | Taking and keeping pictures | Camera’s album opens in Photos; sharing uses Android’s chooser. Photos shows Pocket captures. |
 | Paper | Bringing handwriting into the workspace | Keep the original page; optional transcription creates a linked note. Thoughts in the transcript stay undecided. Notes can reopen their original page. |
-| pip | Think with the context you choose | The same chat design on phone and web. Attach a Thought, Task or Note, then explicitly keep a reply as a Note, park a Thought or choose a Task. Conversations stay on each device. |
+| pip | Think with the context you choose | The same chat design on phone and web. Attach a Thought, Task or Note, then explicitly keep a reply as a Note, park a Thought or choose a Task. Conversations sync between phone and browser. |
 | Activity | Reviewing what you did | The day’s completed tasks and deliberate Pocket actions. Reach it from Today and Settings. |
 | Movement | Your physical context | COROS readings appear on Home; tapping a reading opens its detail. |
 | Gym | Strength progress | Start a workout, log sets with last time and your best beside them, then read each lift’s estimated best (e1RM) and weekly volume. Synced with the web. |
@@ -67,6 +67,6 @@ Back follows the path you took. A saved task opens its details so its next actio
 
 The phone works locally without signing in. A Pocket account syncs the shared workspace through the Astro API and libSQL/Turso; existing phone Drive connections remain selectable. The web has the same **Today / Thoughts / Tasks / Notes** structure and can capture, decide, edit, complete and review those shared records. Source tokens keep one thought linked to its chosen action across phone and web. Handled and deleted records remain as sync markers so older copies do not revive them.
 
-The current shared collections are Thoughts, Tasks, Notes, Paper pages, Activity, Dice lists and Gym workouts. Pip works on phone and web; its chats remain local to each device, while records you explicitly keep use the existing shared collections. Calendar, timers/reminders, Camera photos, calls, SMS and contacts stay on the phone. The browser uses Vercel-hosted Astro server functions with account-isolated storage. Live device synchronization still needs handset verification. See CLOUD.md for setup and migration.
+The current shared collections are Thoughts, Tasks, Notes, Paper pages, Activity, Dice lists, Gym workouts, Pip chats, photo zines and COROS readings. Records you explicitly keep from Pip use the existing shared collections. Calendar, timers/reminders, Camera photos, calls, SMS and contacts stay on the phone. The browser uses Vercel-hosted Astro server functions with account-isolated storage. Live device synchronization still needs handset verification. See CLOUD.md for setup and migration.
 
 Pocket is a launcher and a set of native apps running on Nothing OS. Android still owns Recents and system gestures. The current local APK needs the existing release signing key before it can update an installed release.

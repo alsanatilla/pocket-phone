@@ -39,7 +39,7 @@ public final class MovementActivity extends PocketActivity {
         screen(settings ? "movement settings" : "movement", settings ? "movement-settings" : "movement");
         if (settings) {
             action("open COROS", () -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://training.coros.com/"))));
-            if (repository.connected() || repository.pending()) action("disconnect COROS", () -> confirm("Disconnect COROS on this phone?", () -> {
+            if (repository.connected() || repository.pending()) action("disconnect COROS", () -> confirm("Disconnect COROS?", () -> {
                 if (busy) { message("Wait for movement to finish refreshing."); return; }
                 busy = true;
                 load(() -> { repository.disconnect(); return true; }, done -> { busy = false; settings = false; selected = -1; render(); }, error -> { busy = false; message(error.getMessage()); });
@@ -54,8 +54,7 @@ public final class MovementActivity extends PocketActivity {
                 action("check sign-in", this::completeLogin).setTag("coros_check");
                 action("start again", this::connect);
             } else action("connect COROS", this::connect).setTag("coros_connect");
-            body.addView(label("Sign in in your browser, then return to Pocket.", PocketDesign.SMALL, GRAY));
-            return;
+            if (repository.cached() == null) return;
         }
         CorosRepository.Snapshot snapshot = repository.cached();
         if (snapshot == null) body.addView(label(busy ? "Loading movement…" : "Movement has not loaded yet", PocketDesign.BODY, GRAY));

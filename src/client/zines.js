@@ -20,6 +20,17 @@ const button = (text, onclick, attrs = {}) => el("button", { text, onclick, ...a
 const hint = text => el("p", { class: "small muted", text });
 const label = (text, field) => el("label", { class: "zine-field" }, el("span", { class: "meta muted", text }), field);
 const fresh = () => ({ id: crypto.randomUUID(), title: "", byline: "", tone: "deep", photos: [], created: Date.now(), updated: Date.now() });
+addEventListener('pocket-objects-synced', async () => {
+  const state = current; if (!state || !alive(state) || state.dirty || state.busy || document.activeElement?.matches('input, textarea, select')) return;
+  try {
+    if (!state.book) await library(state);
+    else {
+      const book = await store.getBook(state.book.id);
+      if (!book) { state.api.go('/zines'); return; }
+      if (book.updated !== state.book.updated) { state.book = book; editor(state); await photoList(state); paint(state); }
+    }
+  } catch (error) { report(state, error); }
+});
 const alive = state => current === state && state.host.isConnected;
 function report(state, error) {
   if (alive(state)) state.api.say(error.name === "QuotaExceededError" ? "This browser is out of space. Download a PDF, then delete an old zine or add fewer photos." : error.message || "Couldn't open this zine.");
@@ -43,7 +54,7 @@ async function persist(state) {
     await store.saveBook(state.book);
     state.persisted = true;
     if (state.book.updated === stamp) state.dirty = false;
-    if (alive(state) && !state.dirty) { state.saved.textContent = "saved in this browser"; state.retry.hidden = true; }
+    if (alive(state) && !state.dirty) { state.saved.textContent = "saved"; state.retry.hidden = true; }
   } catch (error) {
     if (alive(state)) { state.saved.textContent = "couldn't save"; state.retry.hidden = false; }
     report(state, error); throw error;
@@ -82,7 +93,7 @@ async function addPhotos(state, files) {
     if (alive(state)) {
       // Give the first successful save a durable URL, without remounting the editor.
       history.replaceState(null, "", "#/zines/" + book.id);
-      state.saved.textContent = "saved in this browser";
+      state.saved.textContent = "saved";
       state.retry.hidden = true;
       state.api.say(`${files.length} photo${files.length === 1 ? "" : "s"} added.`);
       await photoList(state); paint(state);
@@ -99,7 +110,7 @@ export async function mount(host, id, api) {
     state.book = id === "new" ? fresh() : await store.getBook(id);
     if (!alive(state)) return;
     if (!state.book) {
-      host.replaceChildren(hint("This zine isn't saved in this browser."), button("← zines", () => api.go("/zines")));
+      host.replaceChildren(hint("This zine is unavailable."), button("← zines", () => api.go("/zines")));
       return;
     }
     state.persisted = id !== "new";

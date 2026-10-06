@@ -197,7 +197,7 @@ function render() {
   const progress=runner.active?.chatId===chat.uid ? ui.h("div",{class:"pip-loading"},mascot(true),ui.h("span",{class:"meta muted",text:phaseLabel(runner.active.turn.phase),role:"status"})) : null;
   const header = ui.h("header", { class: "pip-heading" }, ui.h("div", {}, ui.h("h1", { class: "workspace-title", text: "pip" }), caption(chat.title)), ui.h("div", { class: "pip-chat-actions" },
     button("rename", async () => { const title = await ui.ask("Name this chat", { value: chat.title, limit: 80 }); if (title?.trim()) { store.update(chat.uid, c => { c.title = title.trim(); }); render(); } }),
-    button("delete", async () => { if (await ui.confirm("Delete this chat and its draft from this browser?", "delete")) { if (runner.active?.chatId === chat.uid) runner.stop(); store.remove(chat.uid); localStorage.removeItem("pocket:pip-current"); ui.go("/pip"); } }),
+    button("delete", async () => { if (await ui.confirm("Delete this chat?", "delete")) { if (runner.active?.chatId === chat.uid) runner.stop(); store.remove(chat.uid); localStorage.removeItem("pocket:pip-current"); ui.go("/pip"); } }),
     button("API settings", () => apiSettings(chat.config))));
   const panel = ui.h("div", { class: "pip-panel" }, backdrop("glow"), header, other, thread, progress, composer(chat));
   mounted.root.replaceChildren(ui.h("div", { class: "pip-layout" }, conversationNav(chat), panel));
@@ -247,4 +247,5 @@ async function apiSettings(current) {
 }
 
 addEventListener("pagehide", () => { try { runner.stop(); } catch {} leave(); });
+addEventListener('pocket-objects-synced', () => { if (mounted && !runner.active && !document.activeElement?.matches('textarea, input')) render(); });
 addEventListener("storage", event => { if (event.key?.startsWith("pocket:pip-chat:") && mounted && !document.activeElement?.matches("textarea, input")) render(); });

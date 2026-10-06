@@ -171,7 +171,7 @@ public class MainActivity extends Activity {
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             if (CloudSync.ACTION_SYNCED.equals(intent.getAction())) { if ("today".equals(screen) || "task_detail".equals(screen) || "thought_detail".equals(screen) || "search".equals(screen)) render(); else if ("home".equals(screen)) { homePlanRefresh = true; requestHomeRefresh(false); } return; }
-            if (CorosRepository.ACTION_UPDATED.equals(intent.getAction())) { if ("home".equals(screen)) { homeRebuild |= romProfile && CorosRepository.get(MainActivity.this).connected() != (movementValues.size() == 3); requestHomeRefresh(false); } return; }
+            if (CorosRepository.ACTION_UPDATED.equals(intent.getAction())) { if ("home".equals(screen)) { homeRebuild |= romProfile && (CorosRepository.get(MainActivity.this).connected() || CorosRepository.get(MainActivity.this).cached() != null) != (movementValues.size() == 3); requestHomeRefresh(false); } return; }
             if ("home".equals(screen)) requestHomeRefresh(false);
             else if ("notifications".equals(screen)
                     && PhoneNotifications.ACTION_UPDATED.equals(intent.getAction())) render();
@@ -955,7 +955,7 @@ public class MainActivity extends Activity {
     }
     private void renderDashboardMovement(LinearLayout host) {
         CorosRepository repository = CorosRepository.get(this);
-        if (!repository.connected()) {
+        if (!repository.connected() && repository.cached() == null) {
             LinearLayout connect = dashboardRow((LinearLayout) content.findViewWithTag("dashboard_agenda"), "move", SECONDARY, () -> openPocket(MovementActivity.class));
             connect.setTag("dashboard_movement_connect"); TextView title = (TextView) connect.getChildAt(1);
             title.setText("connect COROS"); title.setTextColor(SECONDARY); showRow(title, true, "Movement. Connect COROS."); return;

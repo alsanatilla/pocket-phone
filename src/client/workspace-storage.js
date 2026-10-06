@@ -38,5 +38,10 @@ export function importGuestCopy() {
   for (const key of Object.keys(native())) {
     if (key.startsWith('pocket:') && !key.startsWith('pocket:account:') && key !== ACTIVE && !excluded.test(key) && storage.getItem(key) === null) storage.setItem(key, native().getItem(key));
   }
+  for (const key of ['pocket:coros', 'pocket:coros-client', 'pocket:coros-activities', 'pocket:coros-cockpit', 'pocket:coros-details']) {
+    if (native().getItem(key) !== null && storage.getItem(key) === null) storage.setItem(key, native().getItem(key));
+  }
+  // All tabs switch to this account; only its server may rotate the transferred token.
+  native().removeItem('pocket:coros'); native().removeItem('pocket:coros-client');
 }
 addEventListener('storage', event => { if (event.key === ACTIVE) location.reload(); });

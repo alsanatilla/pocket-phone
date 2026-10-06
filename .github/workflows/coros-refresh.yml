@@ -1,0 +1,32 @@
+name: Refresh COROS
+on:
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: coros-refresh
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Refresh connected Pocket accounts
+        env:
+          POCKET_JOB_SECRET: ${{ secrets.POCKET_COROS_CRON_SECRET }}
+        run: |
+          node --input-type=module <<'JS'
+          if (!process.env.POCKET_JOB_SECRET) throw new Error('POCKET_COROS_CRON_SECRET is missing.');
+          let more = true;
+          for (let page = 0; more && page < 6; page++) {
+            const response = await fetch('https://pocket-phone.vercel.app/api/jobs/coros', {
+              headers: { Authorization: 'Bearer ' + process.env.POCKET_JOB_SECRET },
+              signal: AbortSignal.timeout(290000),
+            });
+            if (!response.ok) throw new Error('Pocket refresh endpoint answered ' + response.status);
+            const result = await response.json();
+            console.log(JSON.stringify(result)); more = result.more;
+          }
+          if (more) throw new Error('More COROS accounts are waiting; run this workflow again.');
+          JS

@@ -20,6 +20,15 @@ final class PocketCloud {
     static boolean selected(Context c) { return "pocket".equals(CloudSync.prefs(c).getString("transport", "drive")); }
     static boolean saved(Context c) { return new PocketCloudVault(c).present(); }
     static String email(Context c) { return CloudSync.prefs(c).getString("pocket_email", ""); }
+    static String accountId(Context c) { return CloudSync.prefs(c).getString("pocket_id", ""); }
+    static JSONObject api(Context c, String method, String path, JSONObject body) throws IOException {
+        try {
+            if (body != null) body.put("accountId", accountId(c));
+            byte[] value = raw(method, path, token(c), "application/json", body == null ? null : body.toString().getBytes(StandardCharsets.UTF_8), accountId(c));
+            return new JSONObject(new String(value, StandardCharsets.UTF_8));
+        } catch (JSONException error) { throw new IOException("Pocket returned unreadable data.", error); }
+        catch (CloudSync.SignInNeeded error) { throw new IOException(error.getMessage(), error); }
+    }
 
     static void signIn(Context c, String email, String password, boolean create) throws IOException, JSONException {
         JSONObject body = new JSONObject().put("email", email).put("password", password);
@@ -93,6 +102,8 @@ final class PocketCloud {
             }
             ParkingReceiver.arm(c);
             if (JournalStore.unread(c)) JournalJob.schedule(c);
+            ClaudeChatRepository.get(c).syncCloud();
+            CorosRepository.get(c).syncAccount(false);
             CloudSync.prefs(c).edit().putLong("last_ok", System.currentTimeMillis()).remove("last_error").apply();
             c.sendBroadcast(new Intent(CloudSync.ACTION_SYNCED).setPackage(c.getPackageName()));
         } catch (JSONException error) { throw new IOException("Pocket returned a damaged workspace.", error); }
@@ -112,7 +123,8 @@ final class PocketCloud {
         Request.Builder request = new Request.Builder().url(ORIGIN + path).header("Authorization", "Bearer " + token);
         if (!account.isEmpty()) request.header("X-Pocket-Account", account);
         request.method(method, bytes == null ? null : RequestBody.create(bytes, MediaType.parse(type)));
-        try (Response response = HTTP.newCall(request.build()).execute()) {
+        OkHttpClient client = path.equals("/api/coros/refresh") ? HTTP.newBuilder().readTimeout(240, TimeUnit.SECONDS).callTimeout(250, TimeUnit.SECONDS).build() : HTTP;
+        try (Response response = client.newCall(request.build()).execute()) {
             if (response.code() == 401) throw new CloudSync.SignInNeeded("Sign in to Pocket again.");
             if (response.code() == 404) throw new Missing();
             if (!response.isSuccessful()) throw error(response.code(), response.body() == null ? "" : response.body().string());

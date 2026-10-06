@@ -1,11 +1,12 @@
 import { storage as localStorage, tabStorage as sessionStorage } from './workspace-storage.js';
-// COROS through its MCP server, straight from this page: OAuth with PKCE, then JSON-RPC tool calls.
-// Tokens, activities and routes stay in this browser's storage, outside workspace sync.
+import * as cloud from './cloud.js';
+// Signed-in accounts use one server connection; local snapshots remain available offline.
 import { parseRecords, parseFit, routePath, series, unwrap, pairs, parseLaps, parseRecovery, parseFitness, parseLoad, parseDaily, parseSleep, parseHrv, parseResting, parseDevice, parseProfile } from "./coros-data.js";
 
 const DISCOVERY = "https://mcp.coros.com/.well-known/openid-configuration", SCOPE = "openid offline_access mcp.tools";
 const SESSION = "pocket:coros", CLIENT = "pocket:coros-client", PENDING = "pocket:coros-login";
 const ACTIVITIES = "pocket:coros-activities", COCKPIT = "pocket:coros-cockpit", DETAILS = "pocket:coros-details", DETAIL_LIMIT = 25;
+const CLOUD = 'pocket:coros-cloud';
 const read = key => { try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; } };
 const write = (key, value) => localStorage.setItem(key, JSON.stringify(value));
 const redirect = () => location.origin + location.pathname;
@@ -14,9 +15,37 @@ function base64url(bytes) { return btoa(String.fromCharCode(...new Uint8Array(by
 const ymd = date => `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
 
 export class Expired extends Error { constructor() { super("COROS sign-in expired. Connect again."); } }
-export const connected = () => Boolean(read(SESSION)?.refresh);
+export const connected = () => read(CLOUD)?.connected ?? Boolean(read(SESSION)?.refresh);
+export const savedData = () => Boolean(read(ACTIVITIES) || read(COCKPIT));
+export const connectionError = () => read(CLOUD)?.error || '';
 export const cached = () => read(ACTIVITIES);
-export const returning = () => { const query = new URLSearchParams(location.search); return query.has("state") && (query.has("code") || query.has("error")); };
+export const returning = () => { const query = new URLSearchParams(location.search); return query.has('coros') || query.has("state") && (query.has("code") || query.has("error")); };
+function accept(state) {
+  write(CLOUD, { connected: state.connected, needsAuth: state.needsAuth, updated: state.updated, error: state.error });
+  if (state.data?.activities) write(ACTIVITIES, state.data.activities);
+  if (state.data?.cockpit) write(COCKPIT, state.data.cockpit);
+  dispatchEvent(new Event('pocket-coros-synced'));
+  return state;
+}
+let accountRun = null;
+export function syncAccount(refresh = false) {
+  if (accountRun) return accountRun;
+  if (!cloud.connected()) return Promise.resolve(null);
+  accountRun = (async () => {
+    if (refreshing) await refreshing;
+    const legacy = read(SESSION);
+    if (legacy?.refresh) {
+      accept(await cloud.post('/api/coros/import', { credentials: legacy, zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        data: { updated: read(ACTIVITIES)?.at || 0, activities: read(ACTIVITIES), cockpit: read(COCKPIT) } }));
+      localStorage.removeItem(SESSION); // Only after the server accepted ownership of refresh-token rotation.
+      localStorage.removeItem(CLIENT); ready = null;
+    }
+    const state = accept(await cloud.request('/api/coros/state'));
+    if (state.connected && (refresh || !state.updated || Date.now() >= state.next)) return accept(await cloud.post('/api/coros/refresh', { force: refresh }));
+    return state;
+  })().finally(() => { accountRun = null; });
+  return accountRun;
+}
 
 async function post(url, body) {
   const json = !(body instanceof URLSearchParams);
@@ -44,6 +73,11 @@ async function client(meta) {
 
 /** Leaves for the COROS sign-in page; finish() completes it when the browser comes back here. */
 export async function connect() {
+  if (cloud.connected()) {
+    const answer = await cloud.post('/api/coros/connect', { zone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    location.assign(answer.url); return;
+  }
+  if (read(CLOUD)) throw new Error('Sign in to Pocket to reconnect COROS.');
   const meta = await discover(), id = await client(meta), verifier = random(48), state = random(24);
   const challenge = base64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
   sessionStorage.setItem(PENDING, JSON.stringify({ verifier, state, id, issuer: meta.issuer, token: meta.token_endpoint, redirect: redirect() }));
@@ -53,6 +87,11 @@ export async function connect() {
 }
 export async function finish() {
   const query = new URLSearchParams(location.search), pending = JSON.parse(sessionStorage.getItem(PENDING) || "null");
+  if (query.has('coros')) {
+    history.replaceState(null, '', location.pathname + '#/movement');
+    if (query.get('coros') !== 'connected') throw new Error('COROS sign-in did not finish. Connect again.');
+    await cloud.init(); await syncAccount(); return;
+  }
   sessionStorage.removeItem(PENDING);
   history.replaceState(null, "", location.pathname + "#/movement");
   if (query.get("error")) throw new Error("COROS sign-in was cancelled.");
@@ -66,8 +105,9 @@ function save(answer, base) {
   write(SESSION, { ...base, access: answer.access_token, refresh: answer.refresh_token || base.refresh,
     expires: Date.now() + Number(answer.expires_in || 3600) * 1000 });
 }
-export function disconnect() {
-  [SESSION, ACTIVITIES, COCKPIT, DETAILS, "pocket:coros-routes"].forEach(key => localStorage.removeItem(key));
+export async function disconnect() {
+  if (read(CLOUD) || cloud.connected()) accept(await cloud.post('/api/coros/disconnect'));
+  localStorage.removeItem(SESSION);
   ready = null;
 }
 
@@ -79,7 +119,7 @@ async function access(force = false) {
   if (!force && Date.now() < session.expires - 60_000) return session.access;
   refreshing ??= (async () => {
     const { ok, status, answer } = await post(session.token, new URLSearchParams({ grant_type: "refresh_token", client_id: session.client, refresh_token: session.refresh }));
-    if (status === 400 || status === 401) { disconnect(); throw new Expired(); }
+    if (status === 400 || status === 401) { localStorage.removeItem(SESSION); ready = null; throw new Expired(); }
     if (!ok || !answer.access_token) throw new Error("COROS could not be reached.");
     save(answer, session);
     return answer.access_token;
@@ -94,7 +134,7 @@ async function rpc(method, params, retry = true) {
     headers: { Authorization: "Bearer " + token, Accept: "application/json, text/event-stream", "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: ++next, method, params }) });
   if (response.status === 401 && retry) return rpc(method, params, false);
-  if (response.status === 401) { disconnect(); throw new Expired(); }
+  if (response.status === 401) { localStorage.removeItem(SESSION); ready = null; throw new Expired(); }
   if (!response.ok) throw new Error("COROS answered " + response.status + ".");
   const body = await response.text();
   // Streamable HTTP may answer as server-sent events; the reply is the last data line.
@@ -114,7 +154,8 @@ async function tool(name, args) {
 }
 
 /** Activities from the last `days` days, newest first; also kept for the next visit. */
-export async function activities(days = 90) {
+export async function activities(days = 90, force = false) {
+  if (cloud.connected() || read(CLOUD)) { await syncAccount(force); return read(ACTIVITIES)?.list || []; }
   const end = new Date(), start = new Date(); start.setDate(start.getDate() - days + 1);
   const text = await tool("querySportRecords", { startDate: ymd(start), endDate: ymd(end), sportTypeCodes: null,
     minDistanceKm: null, maxDistanceKm: null, minDurationMinutes: null, maxDurationMinutes: null, maxAveragePace: null, locationKeyword: null, limit: 150 });
@@ -124,6 +165,7 @@ export async function activities(days = 90) {
 }
 /** Readiness, sleep, HRV, load and fitness for the cockpit. A tool that fails keeps its last answer. */
 export async function cockpit(days = 28) {
+  if (cloud.connected() || read(CLOUD)) { await syncAccount(); return read(COCKPIT) || {}; }
   const before = read(COCKPIT) || {};
   const asks = {
     recovery: () => tool("queryRecoveryStatus", {}).then(parseRecovery),
@@ -156,6 +198,17 @@ export const observedMaxHr = () => Math.max(0, ...Object.values(read(DETAILS) ||
 export async function activity(item) {
   const kept = read(DETAILS) || {};
   if (kept[item.id]) return kept[item.id];
+  if (cloud.connected() || read(CLOUD)) {
+    const answer = await cloud.request('/api/coros/details/' + encodeURIComponent(item.id) + '?sport=' + Number(item.sport));
+    if (answer.cached) { write(DETAILS, { ...kept, [item.id]: answer.cached }); return answer.cached; }
+    let file = null;
+    if (answer.fitUrl) { try { const response = await fetch(answer.fitUrl); if (response.ok) file = parseFit(await response.arrayBuffer()); } catch {} }
+    const value = { detail: pairs(answer.detail), laps: parseLaps(answer.laps), path: file ? routePath(file.points) : null, climb: file?.ascent ?? null,
+      series: file ? series(file.samples, { steps: item.sport < 200 || item.sport >= 900 && item.sport < 1000 }) : null };
+    // A signed FIT download address is never stored in the account or an offline cache.
+    if (!answer.fitUrl || file) { await cloud.post('/api/coros/details/' + encodeURIComponent(item.id), { value }, 'PUT'); write(DETAILS, { ...kept, [item.id]: value }); }
+    return value;
+  }
   const args = { labelId: item.id, sportType: item.sport };
   const fit = async () => {
     const url = (await tool("queryActivityFitFileDownloadUrls", args)).match(/https:\/\/[^\s"'<>]+\.fit[^\s"'<>]*/)?.[0];

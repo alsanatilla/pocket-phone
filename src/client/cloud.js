@@ -5,7 +5,7 @@ export const connected = () => Boolean(user && user.id === activeAccount());
 export const configured = () => ready;
 export const account = () => user;
 export class Expired extends Error { constructor() { super('Sign in to Pocket again.'); } }
-async function request(path, options = {}) {
+export async function request(path, options = {}) {
   const response = await fetch(path, { credentials: 'same-origin', ...options });
   if (response.status === 401) { user = null; throw new Expired(); }
   const value = await response.json();
@@ -28,7 +28,10 @@ export async function login(email, password, create = false, importCopy = false)
   });
   if (!result.user?.id) throw new Error('Sign-in did not finish.');
   switchAccount(result.user.id);
-  if (importCopy) importGuestCopy();
+  if (importCopy) {
+    importGuestCopy();
+    await (await import('./zine-store.js')).importGuestBooks(result.user.id);
+  }
   location.reload();
 }
 export async function disconnect() {
@@ -39,6 +42,18 @@ export async function exchange(documents) {
   const result = await request('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: activeAccount(), documents }) });
   if (result.accountId !== activeAccount()) throw new Error('Account changed. Reload Pocket.');
   return result.documents;
+}
+export async function post(path, value = {}, method = 'POST') {
+  return request(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...value, accountId: activeAccount() }) });
+}
+export async function media(name, blob, bookId) {
+  const response = await fetch('/api/media/' + encodeURIComponent(name), { credentials: 'same-origin', ...(blob ? {
+    method: 'PUT', headers: { 'Content-Type': 'image/jpeg', 'X-Pocket-Account': activeAccount(), 'X-Pocket-Book': bookId }, body: blob,
+  } : {}) });
+  if (response.status === 401) { user = null; throw new Expired(); }
+  if (response.status === 404 && !blob) return null;
+  if (!response.ok) { const value = await response.json(); throw new Error(value.error || 'Could not sync this zine photo.'); }
+  return blob ? null : response.blob();
 }
 export async function readBlob(name) {
   const response = await fetch('/api/files/' + encodeURIComponent(name), { credentials: 'same-origin' });

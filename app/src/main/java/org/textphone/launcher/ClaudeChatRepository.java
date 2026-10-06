@@ -218,7 +218,7 @@ final class ClaudeChatRepository {
     synchronized String draft() { return chat.draft; }
     synchronized List<ChatContext> context() { return ChatContext.read(chat.draftContext); }
     synchronized void attach(ChatContext source) {
-        List<ChatContext> items=context();for(ChatContext item:items)if(item.kind.equals(source.kind)&&item.id==source.id)return;
+        List<ChatContext> items=context();for(ChatContext item:items)if(item.kind.equals(source.kind)&&item.uid.equals(source.uid))return;
         if(items.size()>=3)throw new IllegalArgumentException("Attach up to three sources.");
         items.add(source);chat.draftContext=ChatContext.write(items);chat.draftRevision++;persist(chat);changed();
     }
@@ -457,10 +457,34 @@ final class ClaudeChatRepository {
     }
 
     private long persist(Chat target) {
+        target.updated = Math.max(System.currentTimeMillis(), target.updated + 1);
         long revision = ++writeRevision;
         store.save(new ChatStore.Record(target.id, target.title, target.draft, target.error, target.model, target.provider,
                 target.usage, target.turns, target.created, target.updated, revision, false, false,target.draftContext));
         return revision;
+    }
+    void syncCloud() throws java.io.IOException {
+        for (org.json.JSONObject local : store.cloudPending()) {
+            org.json.JSONObject response;
+            try { response=PocketCloud.api(context,"POST","/api/objects/chats",new org.json.JSONObject().put("value",local)); acceptCloud(response.getJSONObject("value")); }
+            catch(org.json.JSONException invalid){throw new java.io.IOException("Pocket returned unreadable chat data.",invalid);}
+        }
+        android.content.SharedPreferences prefs=context.getSharedPreferences("pocket_chat_cloud",0);
+        boolean more=true;
+        while(more){
+            org.json.JSONObject response=PocketCloud.api(context,"GET","/api/objects/chats?after="+prefs.getLong("cursor",0),null);
+            try{org.json.JSONArray values=response.getJSONArray("items");for(int i=0;i<values.length();i++)acceptCloud(values.getJSONObject(i));
+                if(!prefs.edit().putLong("cursor",response.getLong("cursor")).commit())throw new java.io.IOException("Could not save the chat sync cursor.");more=response.optBoolean("more");
+            }catch(org.json.JSONException invalid){throw new java.io.IOException("Pocket returned unreadable chat data.",invalid);}
+        }
+    }
+    private synchronized void acceptCloud(org.json.JSONObject value) throws java.io.IOException {
+        org.json.JSONObject merged=store.acceptCloud(value);String id=merged.optString("uid");
+        if(merged.optBoolean("deleted")){
+            if(busy!=null&&busy.id.equals(id))stopRunning();deleted.add(id);
+            if(chat.id.equals(id)){chat=fresh();remember();}
+        }else if(chat.id.equals(id)&&busy!=chat){ChatStore.Record saved=store.read(id);if(saved!=null){chat=Chat.of(saved);remember();}}
+        changed();
     }
 
     private synchronized void storageFailed(long revision) {

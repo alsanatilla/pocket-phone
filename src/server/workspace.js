@@ -8,8 +8,9 @@ export async function syncDocuments(userId, documents) {
   if (!documents || typeof documents !== 'object' || Array.isArray(documents) || Object.keys(documents).some(name => !FILES.includes(name))) throw Object.assign(new Error('Unknown workspace collection.'), { status: 400 });
   for (const [name, value] of Object.entries(documents)) if (!validDocument(name, value)) throw Object.assign(new Error('Invalid workspace collection: ' + name), { status: 400 });
   for (let attempt = 0; attempt < 4; attempt++) {
-    const tx = await database().transaction('write');
+    let tx;
     try {
+      tx = await database().transaction('write');
       const result = await tx.execute({ sql: 'SELECT name, payload, revision FROM pocket_documents WHERE user_id = ?', args: [userId] });
       const current = new Map(result.rows.map(row => [String(row.name), row]));
       const output = {}, now = Date.now();
@@ -33,9 +34,9 @@ export async function syncDocuments(userId, documents) {
       await tx.commit();
       return output;
     } catch (error) {
-      await tx.rollback().catch(() => {});
-      if (attempt === 3 || !/SQLITE_BUSY|TRANSACTION_CLOSED/.test(error.code || '')) throw error;
+      await tx?.rollback().catch(() => {});
+      if (attempt === 3 || !/SQLITE_BUSY|TRANSACTION_CLOSED|TRANSACTION_ACTIVE/.test(error.code || '')) throw error;
       await new Promise(resolve => setTimeout(resolve, 40 * (attempt + 1)));
-    } finally { tx.close(); }
+    } finally { tx?.close(); }
   }
 }

@@ -20,6 +20,7 @@ public final class ParkingReceiver extends BroadcastReceiver {
 
     /** An optional review time invites a decision; it never creates a task. */
     @Override public void onReceive(Context context, Intent intent) {
+        if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction()) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction())) CorosJob.ensure(context);
         if (ACTION_DUE.equals(intent.getAction())) notice(context);
         arm(context);
     }

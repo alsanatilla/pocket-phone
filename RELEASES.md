@@ -2,6 +2,13 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.10.0 — Everything persists
+
+- **COROS.** Signed in, the COROS connection moves to your Pocket account: the authorization is encrypted on the server and the last readings are stored there. Phone and browser show the same readings, and a failed refresh never clears them. Refreshes run while Pocket is open (at most every 15 minutes), hourly from the phone when it has a network, and once a day from a scheduled job even when both apps are closed (Vercel Hobby allows one daily run, so the job runs from GitHub Actions against a protected endpoint). An expired authorization keeps the readings and offers reconnect.
+- **Pip chats** sync between phone and browser through the account, including drafts, attached context and tool/search activity. Each reply merges by its own edit time, so a chat can continue on another device. Provider keys stay on the device.
+- **Zines** sync between browsers with their photos; a zine waits until its photos have uploaded, and removed photos are deleted from the account.
+- Isolated database checks covered token rotation, failed refreshes, concurrent chat edits, zine photo deletion, account separation and job authorization. No real COROS data or paid AI requests were used. Astro and Android builds passed; the test suite is skipped as requested. The APK is unsigned for the release agent.
+
 ## 0.9.1 — Offline reconnect
 
 - A browser opened from its cached shell while offline reads its Pocket session after reconnecting, then uploads waiting edits without a reload. A temporary startup failure can be retried with Sync now or the next refresh.

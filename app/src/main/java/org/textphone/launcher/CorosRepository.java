@@ -24,14 +24,63 @@ final class CorosRepository {
     private CorosRepository(Context context) {
         this.context = context; prefs = context.getSharedPreferences("pocket_movement", 0); vault = new CorosVault(context); auth = new CorosAuth(vault, new CorosAuth.Http());
     }
-    boolean connected() { return vault.present("tokens"); }
-    boolean pending() { return vault.present("pending"); }
-    synchronized String begin() throws IOException { return auth.begin(); }
-    synchronized boolean finish() throws IOException { return auth.finish(); }
+    boolean connected() { return prefs.getBoolean("cloud_owned", false) ? prefs.getBoolean("cloud_connected", false) && !prefs.getBoolean("cloud_disconnect", false) : vault.present("tokens"); }
+    boolean pending() { return prefs.getBoolean("cloud_pending", false) || vault.present("pending"); }
+    synchronized String begin() throws IOException {
+        if (PocketCloud.selected(context) && PocketCloud.saved(context)) {
+            try {
+                JSONObject answer = PocketCloud.api(context, "POST", "/api/coros/start", new JSONObject().put("zone", ZoneId.systemDefault().getId()));
+                prefs.edit().putBoolean("cloud_owned", true).putBoolean("cloud_pending", true).remove("cloud_disconnect").commit();
+                return answer.getString("url");
+            } catch (JSONException error) { throw new IOException("COROS sign-in could not start.", error); }
+        }
+        if (prefs.getBoolean("cloud_owned", false)) throw new IOException("Sign in to Pocket to reconnect COROS.");
+        return auth.begin();
+    }
+    synchronized boolean finish() throws IOException {
+        if (prefs.getBoolean("cloud_pending", false)) {
+            boolean complete = PocketCloud.api(context, "POST", "/api/coros/claim", new JSONObject()).optBoolean("complete");
+            if (complete) { accept(PocketCloud.api(context, "GET", "/api/coros/state", null)); CorosJob.ensure(context); }
+            return complete;
+        }
+        boolean complete = auth.finish(); if (complete) CorosJob.ensure(context); return complete;
+    }
     synchronized void disconnect() {
-        vault.clear(); prefs.edit().clear().commit();
+        if (prefs.getBoolean("cloud_owned", false)) { prefs.edit().putBoolean("cloud_disconnect", true).putBoolean("cloud_pending", false).putBoolean("cloud_connected", false).commit(); CloudSync.soon(context); }
+        vault.clear();
         try { auth.disconnect(); } catch (IOException ignored) { }
         broadcast();
+    }
+    private void accept(JSONObject state) throws IOException {
+        if (!PocketCloud.accountId(context).equals(state.optString("accountId"))) throw new IOException("Pocket account changed.");
+        try {
+            SharedPreferences.Editor edit = prefs.edit().putBoolean("cloud_owned", true).putBoolean("cloud_connected", state.optBoolean("connected"))
+                    .putBoolean("cloud_pending", state.optBoolean("pending")).putString("error", state.optString("error"));
+            JSONObject data = state.optJSONObject("data"), raw = data == null ? null : data.optJSONObject("native");
+            if (raw != null) { new Snapshot(raw); edit.putString("snapshot", raw.toString()); }
+            if (!edit.commit()) throw new IOException("Could not save movement data.");
+            broadcast();
+        } catch (JSONException error) { throw new IOException("COROS readings could not be read.", error); }
+    }
+    synchronized Snapshot syncAccount(boolean force) throws IOException {
+        if (!PocketCloud.selected(context) || !PocketCloud.saved(context)) return cached();
+        try {
+            if (prefs.getBoolean("cloud_disconnect", false)) {
+                accept(PocketCloud.api(context, "POST", "/api/coros/disconnect", new JSONObject()));
+                prefs.edit().remove("cloud_disconnect").commit(); return cached();
+            }
+            if (vault.present("tokens")) {
+                JSONObject data = new JSONObject(), raw = new JSONObject(prefs.getString("snapshot", "{}"));
+                if (raw.has("updated")) data.put("updated", raw.getLong("updated")).put("native", raw);
+                accept(PocketCloud.api(context, "POST", "/api/coros/import", new JSONObject().put("credentials", new JSONObject(vault.get("tokens")))
+                        .put("zone", ZoneId.systemDefault().getId()).put("data", data)));
+                vault.put("tokens", null); // Server acknowledgement precedes removal of phone credentials.
+            }
+            JSONObject state = PocketCloud.api(context, "GET", "/api/coros/state", null); accept(state);
+            if (state.optBoolean("connected") && (force || System.currentTimeMillis() >= state.optLong("next")))
+                accept(PocketCloud.api(context, "POST", "/api/coros/refresh", new JSONObject().put("force", force)));
+            CorosJob.ensure(context); return cached();
+        } catch (JSONException error) { throw new IOException("COROS connection could not be saved.", error); }
     }
     static final class Snapshot {
         final long updated; final LocalDate date; final Scores.Result scores; final List<CorosData.Activity> activities;
@@ -52,7 +101,8 @@ final class CorosRepository {
     }
     String error() { return prefs.getString("error", ""); }
     synchronized Snapshot refresh(boolean force) throws IOException {
-        if (!connected()) return null;
+        if (PocketCloud.selected(context) && PocketCloud.saved(context) || prefs.getBoolean("cloud_owned", false)) return syncAccount(force);
+        if (!connected()) return cached();
         Snapshot saved = cached();
         if (!force && saved != null && saved.today() && System.currentTimeMillis() - saved.updated < 15 * 60_000) return saved;
         try {
@@ -73,7 +123,6 @@ final class CorosRepository {
         } catch (JSONException | RuntimeException error) {
             fail("COROS data could not be read. Try Refresh."); throw new IOException("COROS data could not be read. Try Refresh.", error);
         } catch (IOException error) {
-            if (error instanceof CorosAuth.Expired) prefs.edit().remove("snapshot").apply();
             fail(error.getMessage()); throw error;
         }
     }

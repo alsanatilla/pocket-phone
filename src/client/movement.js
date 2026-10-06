@@ -305,21 +305,21 @@ function bands(series) {
 }
 
 export function mount(body, { say = () => {} } = {}) {
-  const live = coros.connected(), saved = live ? coros.cached() : null;
+  const live = coros.connected() || coros.savedData(), saved = live ? coros.cached() : null;
   let items = live ? saved?.list || [] : sample(), deck = live ? coros.cachedCockpit() || {} : sampleCockpit();
   let at = saved?.at || 0, loading = false, selected = items[0]?.id;
   let open = sessionStorage.getItem("pocket:movement-open") || null, allCharts = false, moreOpen = false;
   const details = {}; // activity id → everything COROS has on it, "loading" or "error"
   const list = el("div", "movement-list"), detail = el("section", "movement-detail"), sky = backdrop("terrain");
 
-  const load = async () => {
+  const load = async event => {
     loading = true; draw();
-    const [activities, cockpit] = await Promise.allSettled([coros.activities(), coros.cockpit(DAYS)]);
+    const [activities, cockpit] = await Promise.allSettled([coros.activities(90, event?.type === 'click'), coros.cockpit(DAYS)]);
     loading = false;
     const failed = [activities, cockpit].find(answer => answer.status === "rejected");
     if (failed?.reason instanceof coros.Expired) { say(failed.reason.message); mount(body, { say }); return; }
     if (failed) say(failed.reason.message);
-    if (activities.status === "fulfilled") { items = activities.value; at = Date.now(); if (!items.some(item => item.id === selected)) selected = items[0]?.id; }
+    if (activities.status === "fulfilled") { items = activities.value; at = coros.cached()?.at || 0; if (!items.some(item => item.id === selected)) selected = items[0]?.id; }
     if (cockpit.status === "fulfilled") deck = cockpit.value;
     if (body.isConnected) draw();
   };
@@ -405,13 +405,13 @@ export function mount(body, { say = () => {} } = {}) {
     let source;
     if (!live) source = words("span", "movement-demo", "SAMPLE DATA");
     else {
-      source = words("button", "movement-source", loading ? "COROS · LOADING…" : at ? "COROS · " + new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "COROS");
+      source = words("button", "movement-source", loading ? "COROS · LOADING…" : coros.connectionError() ? "COROS · RETRY" : at ? "COROS · " + new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: "2-digit", minute: "2-digit" }) : "COROS");
       source.type = "button"; source.disabled = loading; source.title = "Load again from COROS";
       source.addEventListener("click", load);
     }
     let connect = null;
-    if (!live) {
-      const button = el("button", "row-button", "connect coros", words("span", "sub", "your own runs, routes, sleep, HRV and recovery · sign-in happens on COROS, the data stays in this browser"));
+    if (!coros.connected()) {
+      const button = el("button", "row-button", coros.savedData() ? "reconnect coros" : "connect coros");
       button.type = "button";
       button.addEventListener("click", async () => {
         button.disabled = true; say("Opening COROS…");
@@ -443,17 +443,17 @@ export function mount(body, { say = () => {} } = {}) {
       bars.append(column);
     }
     let disconnect = null;
-    if (live) {
+    if (coros.connected()) {
       disconnect = words("button", "movement-disconnect", "disconnect coros");
       disconnect.type = "button";
-      disconnect.addEventListener("click", () => { coros.disconnect(); mount(body, { say }); say("COROS disconnected. This browser's copy of your data is gone."); });
+      disconnect.addEventListener("click", async () => { try { await coros.disconnect(); mount(body, { say }); say("COROS disconnected."); } catch (error) { say(error.message); } });
     }
     const focused = body.contains(document.activeElement) ? document.activeElement.dataset.id : null;
     body.replaceChildren(...[
       el("div", "movement-heading movement-sky", sky, words("h1", "movement-title", "movement"), el("div", "movement-heading-side", deck.device ? words("span", "movement-device", deck.device.toUpperCase()) : null, source)),
       connect,
       scoresBox,
-      el("div", "cockpit-block-head cockpit-activities-head", kicker(live ? "ACTIVITIES · LAST 90 DAYS" : "ACTIVITIES")),
+      el("div", "cockpit-block-head cockpit-activities-head", kicker("ACTIVITIES")),
       el("div", "movement-layout",
         el("div", "movement-overview", hero, bars),
         detail,

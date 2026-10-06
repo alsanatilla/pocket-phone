@@ -16,7 +16,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Chats live in one private SQLite database in no-backup storage: never in Android backups or Pocket cloud sync.
+ * Chats save in a private SQLite database first, then portable records sync to the signed-in account.
  * Writes happen on one worker in revision order; a paid request waits until its user turn is on disk.
  */
 final class ChatStore {
@@ -45,7 +45,7 @@ final class ChatStore {
         }
         static Record deletion(String id, long revision) {
             return new Record(id, "", "", "", ClaudeChatRepository.MODEL, null, ClaudeChatClient.Usage.EMPTY,
-                    Collections.emptyList(), 0, 0, revision, true, false);
+                    Collections.emptyList(), 0, System.currentTimeMillis(), revision, true, false);
         }
     }
 
@@ -56,7 +56,7 @@ final class ChatStore {
     }
 
     private static final class Helper extends SQLiteOpenHelper {
-        Helper(Context context) { super(context, new File(context.getNoBackupFilesDir(), "pocket-chats.db").getPath(), null, 4); }
+        Helper(Context context) { super(context, new File(context.getNoBackupFilesDir(), "pocket-chats.db").getPath(), null, 5); }
         @Override public void onConfigure(SQLiteDatabase db) { db.setForeignKeyConstraintsEnabled(true); }
         @Override public void onCreate(SQLiteDatabase db) {
             db.execSQL("CREATE TABLE chats (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, "
@@ -68,15 +68,18 @@ final class ChatStore {
                     + "reasoning TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, context TEXT NOT NULL DEFAULT '[]', activity TEXT NOT NULL DEFAULT '[]')");
             db.execSQL("CREATE INDEX turns_by_chat ON turns(chat, position)");
             db.execSQL("CREATE INDEX chats_by_update ON chats(updated)");
+            db.execSQL("CREATE TABLE cloud_chats (id TEXT PRIMARY KEY, payload TEXT NOT NULL, dirty INTEGER NOT NULL DEFAULT 1)");
         }
         @Override public void onUpgrade(SQLiteDatabase db, int from, int to) {
             if (from < 2) db.execSQL("ALTER TABLE chats ADD COLUMN provider_model TEXT");
             if(from<3){db.execSQL("ALTER TABLE chats ADD COLUMN draft_context TEXT NOT NULL DEFAULT '[]'");db.execSQL("ALTER TABLE turns ADD COLUMN context TEXT NOT NULL DEFAULT '[]'");}
             if (from < 4) db.execSQL("ALTER TABLE turns ADD COLUMN activity TEXT NOT NULL DEFAULT '[]'");
+            if (from < 5) db.execSQL("CREATE TABLE cloud_chats (id TEXT PRIMARY KEY, payload TEXT NOT NULL, dirty INTEGER NOT NULL DEFAULT 1)");
         }
     }
 
     private final Helper helper;
+    private final Context context;
     private final Failure failure;
     private final ExecutorService writer = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "Pocket chat save"); thread.setDaemon(true); return thread;
@@ -88,6 +91,7 @@ final class ChatStore {
     private boolean writing;
 
     ChatStore(Context context, Failure failure) {
+        this.context = context.getApplicationContext();
         helper = new Helper(context.getApplicationContext());
         this.failure = failure;
         importLegacy(context);
@@ -145,6 +149,8 @@ final class ChatStore {
                 created = chat.getLong(11); updated = chat.getLong(12);
                 draftContext=chat.getString(14);ChatContext.read(draftContext);
             }
+            org.json.JSONObject portable = cloudValue(id);
+            if (portable != null && !portable.optBoolean("deleted")) try { provider = ChatCloudCodec.provider(portable); } catch (org.json.JSONException | IllegalArgumentException ignored) { }
             if (draft.length() > ClaudeChatRepository.MAX_INPUT_CHARS) draft = "";
             if (!ClaudeChatClient.safeModel(model)) model = ClaudeChatRepository.MODEL;
             if (error.length() > 300) error = "";
@@ -159,7 +165,15 @@ final class ChatStore {
                             || (user && (!"complete".equals(state) || text.trim().isEmpty()))
                             || !("complete".equals(state) || "pending".equals(state) || "failed".equals(state) || "stopped".equals(state)))
                         return null;
-                    if ("pending".equals(state)) { state = "failed"; interrupted = true; }
+                    if ("pending".equals(state)) {
+                        state = "failed"; boolean remote = false;
+                        org.json.JSONArray pairs = portable == null ? null : portable.optJSONArray("turns");
+                        if (pairs != null) for (int n=0;n<pairs.length();n++) {
+                            org.json.JSONObject pair=pairs.optJSONObject(n); if(pair!=null && pair.optString("assistantUid",java.util.UUID.nameUUIDFromBytes((pair.optString("uid")+":assistant").getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString()).equals(turnId))
+                                remote="streaming".equals(pair.optString("status"))&&!ChatCloudCodec.device(context).equals(pair.optString("owner"));
+                        }
+                        interrupted |= !remote;
+                    }
                     String attached=rows.getString(6);ChatContext.read(attached);
                     String activity = "pending".equals(rows.getString(3)) ? ChatActivity.settle(rows.getString(7), "failed") : ChatActivity.normalize(rows.getString(7));
                     ClaudeChatRepository.Turn saved=new ClaudeChatRepository.Turn(turnId, role, text, state, reasoning, rows.getLong(5),attached,activity);
@@ -216,16 +230,26 @@ final class ChatStore {
                 notifyAll();
             }
             if (!saved) for (Record record : batch) failure.failed(record.revision);
+            else CloudSync.changed(context);
         }
     }
 
     private boolean write(List<Record> batch) {
+        return write(batch, true);
+    }
+    private boolean write(List<Record> batch, boolean markDirty) {
         SQLiteDatabase db;
         try { db = helper.getWritableDatabase(); } catch (RuntimeException unavailable) { return false; }
         boolean transaction = false;
         try {
             db.beginTransaction(); transaction = true;
             for (Record record : batch) {
+                if (markDirty) {
+                    org.json.JSONObject portable = ChatCloudCodec.encode(context, record, cloudValue(record.id));
+                    ContentValues value = new ContentValues(); value.put("id",record.id); value.put("payload",portable.toString()); value.put("dirty",1);
+                    db.insertWithOnConflict("cloud_chats",null,value,SQLiteDatabase.CONFLICT_REPLACE);
+                    if(portable.optBoolean("deleted")){db.delete("chats","id = ?",new String[]{record.id});continue;}
+                }
                 if (record.deleted) { db.delete("chats", "id = ?", new String[]{record.id}); continue; }
                 ContentValues chat = new ContentValues();
                 chat.put("id", record.id); chat.put("title", record.title); chat.put("created", record.created); chat.put("updated", record.updated);
@@ -250,11 +274,37 @@ final class ChatStore {
             db.setTransactionSuccessful();
             db.endTransaction(); transaction = false;
             return true;
-        } catch (RuntimeException unavailable) {
+        } catch (RuntimeException | org.json.JSONException unavailable) {
             return false;
         } finally {
             if (transaction) try { db.endTransaction(); } catch (RuntimeException ignored) { }
         }
+    }
+    private org.json.JSONObject cloudValue(String id) {
+        try (Cursor rows=helper.getReadableDatabase().rawQuery("SELECT payload FROM cloud_chats WHERE id = ?",new String[]{id})) {
+            return rows.moveToFirst()?new org.json.JSONObject(rows.getString(0)):null;
+        } catch(org.json.JSONException invalid){throw new IllegalStateException("Saved chat sync data could not be read.",invalid);}
+    }
+    List<org.json.JSONObject> cloudPending() throws java.io.IOException {
+        try { return writer.submit(() -> {
+            for(Summary summary:list())if(cloudValue(summary.id)==null){Record record=read(summary.id);if(record!=null&&!write(Collections.singletonList(record)))throw new java.io.IOException("Could not prepare chat sync.");}
+            List<org.json.JSONObject> result=new ArrayList<>();
+            try(Cursor rows=helper.getReadableDatabase().rawQuery("SELECT payload FROM cloud_chats WHERE dirty = 1",null)){while(rows.moveToNext())result.add(new org.json.JSONObject(rows.getString(0)));}
+            return result;
+        }).get(); } catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw new java.io.IOException("Chat sync interrupted.",interrupted);}catch(java.util.concurrent.ExecutionException failed){throw new java.io.IOException("Chat sync could not read local data.",failed.getCause());}
+    }
+    org.json.JSONObject acceptCloud(org.json.JSONObject incoming) throws java.io.IOException {
+        try { return writer.submit(() -> {
+            String id=incoming.getString("uid");org.json.JSONObject merged=ChatCloudCodec.merge(cloudValue(id),incoming);
+            Record record=ChatCloudCodec.decode(merged);
+            SQLiteDatabase db=helper.getWritableDatabase();db.beginTransaction();
+            try{
+                if(!write(Collections.singletonList(record),false))throw new java.io.IOException("Could not save a synced chat.");
+                ContentValues value=new ContentValues();value.put("id",id);value.put("payload",merged.toString());value.put("dirty",ChatCloudCodec.canonical(merged).equals(ChatCloudCodec.canonical(incoming))?0:1);
+                db.insertWithOnConflict("cloud_chats",null,value,SQLiteDatabase.CONFLICT_REPLACE);db.setTransactionSuccessful();
+            }finally{db.endTransaction();}
+            return merged;
+        }).get(); }catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw new java.io.IOException("Chat sync interrupted.",interrupted);}catch(java.util.concurrent.ExecutionException failed){throw new java.io.IOException("Chat sync could not save local data.",failed.getCause());}
     }
 
     /** Import with the old format's validation; retain the original until the database copy is verified. */
