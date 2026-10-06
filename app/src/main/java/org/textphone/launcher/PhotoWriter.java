@@ -25,7 +25,7 @@ final class PhotoWriter {
     });
     private PhotoWriter() {}
 
-    static void save(Context context, YuvFrame frame, CameraProfile profile, int rotation,
+    static void save(Context context, YuvFrame frame, CameraProfile profile, CameraFormat format, int rotation,
                      CompactProcessor.Conditions scene, long taken, Callback callback) {
         Context application = context.getApplicationContext();
         Handler ui = new Handler(Looper.getMainLooper());
@@ -35,11 +35,11 @@ final class PhotoWriter {
             Bitmap photo = null;
             Uri published = null;
             try {
-                photo = CompactProcessor.process(frame.bitmap(), profile, rotation, scene,
+                photo = CompactProcessor.process(frame.bitmap(), profile, format, rotation, scene,
                         frame.timestamp ^ System.nanoTime());
                 temporary = File.createTempFile("pocket-shot-", ".jpg", application.getCacheDir());
                 try (FileOutputStream output = new FileOutputStream(temporary)) {
-                    if (!photo.compress(Bitmap.CompressFormat.JPEG, profile.jpegQuality, output))
+                    if (!photo.compress(Bitmap.CompressFormat.JPEG, format.quality.jpeg(profile), output))
                         throw new IOException("JPEG encoding failed");
                 }
                 addMetadata(temporary, photo.getWidth(), photo.getHeight(), profile, scene, taken);

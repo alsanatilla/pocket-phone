@@ -1,6 +1,37 @@
 # Incremental releases
 
-Each release supplies a separately named, signed APK, source snapshot, checksums and actual build/test results. Install the new APK over Pocket; do not uninstall or clear app storage. The package ID and signing certificate stay the same. Old release downloads remain available. These APKs run on the current Nothing OS; they are not flashable ROM images.
+Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
+
+## 0.6.0 — A connected personal workspace
+
+- **Workflow.** Home, capture and the Today / Thoughts / Tasks / Notes workspace. Apps has one searchable directory grouped by purpose, retaining custom shortcuts and installed apps.
+- **Thoughts.** Ideas stay undecided until Make task. Optional review times invite a decision. Source links and stable promotion tokens travel with tasks; existing saved actions remain intact.
+- **Actions.** Saving a task opens its details. Focus uses the selected task, Plan time creates a linked local appointment, and completion leads to Activity. Source navigation and Back retain the actual route; search has its own screen.
+- **Local calendar.** Pocket Calendar no longer queries or writes Google Calendar, or requests calendar-provider permissions. Drive remains the optional transport for existing shared collections.
+- **Web.** The same Today / Thoughts / Tasks / Notes structure, explicit promotion, dates/steps/next/completion, source context, search and drafts. Extras have a secondary Apps home.
+- **Pip.** Matching mobile and browser chat, conversation navigation, expandable reasoning, attached Thought/Task/Note snapshots, a bottom composer and keep note / park thought / make task / copy actions. BeautifulUI informed the component structure; Pocket supplies the design. Chats remain local to each device.
+- **Motion and copy.** Pip waves, walks, juggles, reads and hops while a reply loads. Phone and web use the same pixel geometry. Reduced motion and visibility pause animation. Unnecessary inline explanations were removed from workspace and chat screens.
+- This APK is unsigned for the release agent to sign, as requested. The final APK compilation skips the test suite. Verification and limitations are in [BUILD-STATUS.json](BUILD-STATUS.json). The agent made no paid provider requests; browser checks used isolated fixtures. An earlier web preview reused a connected Drive session; its sample task was removed before checks moved to an isolated origin. Handset behavior remains unverified.
+
+## 0.5.22 — pip, separate chats and reasoning (local build)
+
+- **Pip.** One assistant name across providers, Pocket pixel headings and accent Markdown emphasis, formatted streaming replies and a pixel character that blinks, looks around and changes with thinking/reading/writing. Reduced motion and lifecycle visibility stop its callbacks.
+- **History and caching.** Pre-lookup remarks, reasoning summaries and lookup steps are separate from the final answer. Later requests replay only completed question/answer pairs; failed and stopped replies are excluded. Both provider adapters retain the protocol continuation within a reply. Prompt caching remains available and is labelled as reused input.
+- **Chats.** Separate conversations, drafts, rename and explicit delete. New chat retains the previous one; switching keeps a reply in its original chat and offers an open command. Settings and access changes stop the active request even if another conversation is open.
+- **Storage.** Private SQLite replaces the single chat file, with verified legacy import, atomic writes, readable queued updates and a save barrier tied to each chat. The requested model and returned model are separate, preserving provider identity on reload. Older chats are not automatically removed. Drive sync remains for existing shared collections and does not upload chats.
+- **Checks.** Local fake SSE fixtures cover both provider adapters, thinking signatures, repeated reasoning fields and lookup continuations. Storage/UI tests cover Android 7 and Android 15. The stale Google authorization test now asserts the missing-result behavior introduced in 0.5.19. Actual suite counts and the APK checksum are in BUILD-STATUS.json; no paid API or handset requests were made.
+- This APK is unsigned and needs the existing release key to install as an update. See [PIP.md](PIP.md) for the audit and storage decision.
+
+## 0.5.21 — One design system, Tasks as the one list, older-looking photos (local build)
+
+- **Design system.** Shared header, section, row, value row, tab, item-command and soft-key components in `PocketDesign`/`PocketActivity`, used by Home, Today, tasks, notes, Tools, Settings, Clock, Agenda, Messages, SMS, Phone, Files, Calculator, Contacts, Dice, Journal, Movement, chat and camera. One monospace typeface for content (sans-serif removed from tasks, steps, editors and chat); lowercase chrome; commands start at the content edge; soft keys align left/centre/right like a keypad phone.
+- **Home.** Appointments, next task and latest note share one list with a fixed time/kind column. Health readings are centered and share one three-column grid with the quick actions and tiles. The returning-thought line is gone.
+- **Tasks vs Parking Lot.** Tasks are the one list. Open parked thoughts become tasks (due on their return day, linked to their note) on first open, after each cloud sync and when an old Parking tile or notification is used; each thought becomes one task even when another copy syncs it again. `>>` note lines create tasks. Parking is no longer offered as a tile, tool or chat access category; Parking's cloud document stays as a sync record, so older copies and the web see the thoughts as moved to Today.
+- **Motion.** Layered shared-axis page transitions (90 ms exit, 60 ms delay, 210 ms decelerating entry) through hardware layers; predictive Back no longer fades the parent; chat slides with matching curves. Today and task pages rebuild on resume only when their data changed.
+- **Back.** New tasks and notes return to where they were started; deleting a task or note returns to its origin. Home readings, appointments, Camera photos and SMS conversations opened from elsewhere return there on Back. Tools → today opens the Today task like its tile.
+- **Chat.** Full-width Pocket page on phones: standard header with `settings`, monospace transcript with `> ` prompt lines in accent and white replies, empty state, quiet access/cache status line, `send`/`stop` soft key, Pocket's dialog theme. Access choices are Notes and COROS.
+- **Camera.** New rendering stages (lens resolution, lateral colour, area contrast, CCD colour matrices, vignetting, wider sharpening halos, bloom and purple fringing, grainy and blotchy noise with high-ISO smoothing, ISO ceiling, chroma bleed) and filtered halving before sampling. On-screen menu for profile, size, aspect and JPEG quality; the viewfinder masks the chosen crop.
+- Verification is listed in BUILD-STATUS.json. Handset behaviour, live gestures, real camera frames and paid APIs were not checked. The local APK needs the existing release signing key before installing as an update.
 
 ## 0.5.20 — Chat tool continuations and Home swipe (local build)
 

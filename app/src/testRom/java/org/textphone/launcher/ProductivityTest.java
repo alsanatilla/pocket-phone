@@ -47,7 +47,7 @@ public class ProductivityTest {
     }
     @After public void stop() { controller.pause().stop().destroy(); }
     private TextView find(View view, String text) {
-        if (view instanceof TextView && text.contentEquals(((TextView) view).getText())) return (TextView) view;
+        if (view instanceof TextView && text.equalsIgnoreCase(((TextView) view).getText().toString())) return (TextView) view;
         if (view instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) view;
             for (int i = 0; i < group.getChildCount(); i++) {
@@ -66,8 +66,9 @@ public class ProductivityTest {
 
     @Test public void taskCaptureUpdatesStandbyAndCompletion() {
         today(); label("+ Task").performClick(); editor().setText("Send invoice"); label("save").performClick();
+        // A new task returns to Today (0.5.21); Home then counts it and opens it.
         assertEquals(1, store.openTasks()); label("Complete task"); long id = store.entries().get(0).id;
-        home(); label("0 / 1"); label("Send invoice").performClick();
+        home(); label("1 open"); label("Send invoice").performClick();
         label("Complete task");
         assertEquals(1, store.openTasks()); label("Complete task").performClick(); home();
         assertEquals(View.GONE,activity.findViewById(android.R.id.content).findViewWithTag("dashboard_next").getVisibility()); assertEquals(0, store.openTasks());
@@ -77,14 +78,14 @@ public class ProductivityTest {
                 .putExtra(Intent.EXTRA_TEXT, "https://example.org/invoice"));
         assertEquals("https://example.org/invoice", editor().getText().toString());
         editor().append("\nReview on Friday"); home();
-        today(); label("Note").performClick();
+        today(); label("+ note").performClick();
         assertEquals("https://example.org/invoice\nReview on Friday", editor().getText().toString());
         label("save").performClick();
         assertEquals("https://example.org/invoice\nReview on Friday", store.entries().get(0).text);
         assertEquals("", store.draft("note", 0));
     }
     @Test public void rotationKeepsEditedTextAndIdentity() {
-        long id = store.save(0, "note", "Original"); today(); activity.findViewById(android.R.id.content).findViewWithTag("note_open_"+id).performClick();
+        long id = store.save(0, "note", "Original"); today(); activity.findViewById(android.R.id.content).findViewWithTag("workspace_tab_notes").performClick();activity.findViewById(android.R.id.content).findViewWithTag("note_open_"+id).performClick();label("Edit").performClick();
         editor().setText("Edited\nSecond line");
         controller.recreate(); activity = controller.get();
         assertEquals("Edited\nSecond line", editor().getText().toString());
@@ -94,9 +95,9 @@ public class ProductivityTest {
     }
     @Test public void switchingCaptureTypesDoesNotOverwriteOtherDrafts() {
         today(); label("+ Task").performClick(); editor().setText("Unfinished task"); home();
-        today(); label("Note").performClick(); editor().setText("Unfinished note"); home();
+        today(); label("+ note").performClick(); editor().setText("Unfinished note"); home();
         today(); label("+ Task").performClick(); assertEquals("Unfinished task", editor().getText().toString());
-        home(); today(); label("Note").performClick(); assertEquals("Unfinished note", editor().getText().toString());
+        home(); today(); label("+ note").performClick(); assertEquals("Unfinished note", editor().getText().toString());
     }
     @Test public void focusAndSchedulingUsePocketAppsWithTheTaskTitle() {
         long id = store.save(0, "task", "Write proposal"); today(); SettingsTestActions.choose(activity,"Focus timer");
@@ -105,7 +106,7 @@ public class ProductivityTest {
         assertEquals(ClockActivity.class.getName(), timer.getComponent().getClassName());
         assertEquals(1500, timer.getIntExtra("seconds", 0));
         assertEquals("Focus: Write proposal", timer.getStringExtra("title"));
-        activity.onBackPressed(); activity.findViewById(android.R.id.content).findViewWithTag("task_open_" + id).performLongClick();
+        activity.onBackPressed();activity.findViewById(android.R.id.content).findViewWithTag("workspace_tab_tasks").performClick(); activity.findViewById(android.R.id.content).findViewWithTag("task_open_" + id).performLongClick();
         AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
         android.widget.ListAdapter choices=dialog.getListView().getAdapter();int schedule=-1;
         for(int i=0;i<choices.getCount();i++)if("Schedule reminder".equals(choices.getItem(i).toString()))schedule=i;
@@ -133,9 +134,10 @@ public class ProductivityTest {
         label("all").performClick();
         EditText search = activity.findViewById(android.R.id.content).findViewWithTag("app_search");
         search.setText("2252"); AppIndexTest.settle(activity); label("Calculator");
-        assertNull(find(activity.getWindow().getDecorView(), "Calendar"));
+        View results = activity.findViewById(android.R.id.content).findViewWithTag("app_results");
+        assertNull(find(results, "Calendar"));
         search.setText("2253"); AppIndexTest.settle(activity); label("Calendar");
-        assertNull(find(activity.getWindow().getDecorView(), "Calculator"));
+        assertNull(find(activity.findViewById(android.R.id.content).findViewWithTag("app_results"), "Calculator"));
     }
     @Test public void exportUsesTheSystemPickerAndWritesMarkdownSource() throws Exception {
         store.save(0, "task", "Book train"); store.save(0, "note", "Köln · 18:42");
@@ -156,7 +158,7 @@ public class ProductivityTest {
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     public void nativeOrganizerRendersWithSampleData() throws Exception {
         long id = store.save(0, "task", "Finish draft"); store.save(0, "task", "Book train");
-        store.save(0, "note", "Platform 4 · 18:42"); today();
+        store.save(0, "note", "Platform 4 · 18:42"); today();activity.findViewById(android.R.id.content).findViewWithTag("workspace_tab_tasks").performClick();
         View root = activity.findViewById(android.R.id.content);
         root.measure(View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(720, View.MeasureSpec.EXACTLY));

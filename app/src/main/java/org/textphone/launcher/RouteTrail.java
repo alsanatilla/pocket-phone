@@ -14,7 +14,7 @@ final class RouteTrail {
         }
         String key() {
             if ("capture".equals(page)||"note_preview".equals(page)) return page+":"+kind+":"+id;
-            if ("task_detail".equals(page)) return page+":"+id;
+            if ("task_detail".equals(page)||"thought_detail".equals(page)) return page+":"+id;
             if ("assign".equals(page)) return page+":"+assigning;
             return page;
         }

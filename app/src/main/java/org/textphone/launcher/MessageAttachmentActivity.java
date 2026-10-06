@@ -22,7 +22,7 @@ public final class MessageAttachmentActivity extends PocketActivity {
         if (!nativePart && !localPart) { body.addView(label("Attachment unavailable", 14, GRAY)); return; }
         if (mime == null) try { mime = getContentResolver().getType(uri); } catch (SecurityException e) { body.addView(label("Android blocked attachment access.", 14, GRAY)); return; }
         if (mime == null) mime = "application/octet-stream";
-        action("Share attachment", () -> { Intent share = new Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        action("share attachment", () -> { Intent share = new Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             share.setClipData(android.content.ClipData.newRawUri("attachment", uri)); startActivity(Intent.createChooser(share, "Share attachment")); });
         if (mime.startsWith("image/")) load(() -> FilesActivity.decode(uri, this), value -> { if (current != generation) { if (value != null) value.recycle(); return; } image(value); },
                 error -> { if (current == generation) message("Attachment unavailable. Try again."); }, value -> { if (value != null) value.recycle(); });
@@ -37,13 +37,13 @@ public final class MessageAttachmentActivity extends PocketActivity {
                 }
             }
         }, value -> { if (current != generation) { ((Bitmap)value[0]).recycle(); return; } int count = (int)value[1]; image((Bitmap)value[0]); body.addView(label("Page " + (page + 1) + " / " + count, 13, GRAY));
-            keys(new String[]{"Previous", "Next"}, () -> { if (page > 0) { page--; render(); } }, () -> { if (page + 1 < count) { page++; render(); } }); },
+            softKeys(new String[]{"previous", "next"}, -1, () -> { if (page > 0) { page--; render(); } }, () -> { if (page + 1 < count) { page++; render(); } }); },
                 error -> { if (current == generation) message("PDF unavailable. Try again."); }, value -> ((Bitmap)value[0]).recycle());
         else if (mime.startsWith("text/")) load(() -> { ByteArrayOutputStream text = new ByteArrayOutputStream(); try (InputStream input = getContentResolver().openInputStream(uri)) {
             if (input == null) throw new java.io.IOException(); byte[] buffer = new byte[8192]; int n; while ((n = input.read(buffer)) != -1) { if (text.size() + n > 256 * 1024) throw new java.io.IOException(); text.write(buffer, 0, n); }
             return java.nio.charset.StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(text.toByteArray())).toString(); }
         }, text -> { if (current != generation) return; android.widget.TextView view = label(text, 16, WHITE); view.setTextIsSelectable(true); body.addView(view); });
-        else action("Open with", () -> startActivity(Intent.createChooser(new Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Open attachment")));
+        else action("open with", () -> startActivity(Intent.createChooser(new Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Open attachment")));
     }
     private void image(Bitmap image) { if (image == null) { message("Attachment unavailable"); return; } bitmap = image; ImageView view = new ImageView(this); view.setAdjustViewBounds(true); view.setImageBitmap(image); body.addView(view); }
     private void releaseBitmap() { if (bitmap != null) { releaseVisualHistory(); bitmap.recycle(); bitmap = null; } }

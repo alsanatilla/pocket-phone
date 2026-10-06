@@ -7,6 +7,7 @@ local.properties
 .cxx/
 .externalNativeBuild/
 .DS_Store
+.playwright-mcp/
 
 # Private signing material and credentials
 *.jks

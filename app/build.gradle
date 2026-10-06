@@ -11,8 +11,8 @@ android {
         // Native chat cancellation uses CompletableFuture, available from Android 7.
         minSdk 24
         targetSdk 35
-        versionCode 25
-        versionName '0.5.20'
+        versionCode 28
+        versionName '0.6.0'
     }
 
     buildTypes {
@@ -54,7 +54,7 @@ android {
 }
 
 dependencies {
-    // Only for Drive authorization (cloud sync is opt-in). Drive itself is called over plain HTTPS.
+    // Drive is an optional transport for Pocket's local workspace, not an app data provider.
     implementation 'com.google.android.gms:play-services-auth:21.3.0'
     // Claude chat and reading journal pages (opt-in, the user's own API key).
     implementation 'com.anthropic:anthropic-java:2.34.0'

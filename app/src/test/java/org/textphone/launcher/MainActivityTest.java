@@ -55,7 +55,7 @@ public class MainActivityTest {
     private TextView label(String label) {
         List<TextView> views = new ArrayList<>();
         collect(activity.getWindow().getDecorView(), views);
-        for (TextView text : views) if (label.contentEquals(text.getText())) return text;
+        for (TextView text : views) if (label.equalsIgnoreCase(text.getText().toString())) return text;
         throw new AssertionError("Missing text: " + label);
     }
 
@@ -63,7 +63,7 @@ public class MainActivityTest {
 
     @Test public void homeHasTheNineReferenceShortcutsAndSoftKeys() {
         for (String label : new String[]{"smart txt", "whatsapp", "dumb txt", "contacts",
-                "call history", "settings", "maps", "camera", "rides", "notifs", "select", "all"}) {
+                "call history", "settings", "maps", "camera", "rides", "capture", "today", "pip", "all"}) {
             assertNotNull(label(label));
         }
         assertTrue(((View) label("smart txt").getParent()).isSelected());
@@ -79,7 +79,7 @@ public class MainActivityTest {
     }
 
     @Test public void notificationsStayOptionalAndGiveAnEnableAction() {
-        label("notifs").performClick();
+        org.robolectric.util.ReflectionHelpers.<View>getField(activity,"notificationCount").performClick();
         assertNotNull(activity.findViewById(android.R.id.content).findViewWithTag("app_settings"));
         activity.onBackPressed();
         assertNotNull(label("smart txt"));
@@ -90,12 +90,12 @@ public class MainActivityTest {
         shortcut("smart txt");
         assertNotNull(label("Choose an installed app for this shortcut."));
         label("Use default").performClick();
-        assertNotNull(label("select"));
+        assertNotNull(label("capture"));
     }
 
     @Test public void homeIntentAlwaysReturnsToTheGrid() {
         shortcut("settings");
-        assertNotNull(label("Use as home screen"));
+        assertNotNull(label("home screen"));
         activity.onNewIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));
         assertNotNull(label("smart txt"));
         activity.onBackPressed();
@@ -116,18 +116,18 @@ public class MainActivityTest {
         ((View) label("Colour").getParent()).performClick();
         assertEquals(1, activity.getSharedPreferences("text_phone", 0).getInt("accent", -1));
         activity.onBackPressed();
-        assertEquals(0xFF9BE564, label("select").getCurrentTextColor());
+        assertEquals(0xFF9BE564, label("capture").getCurrentTextColor());
     }
 
     @Test public void allAppsReturnsToTheScreenThatOpenedIt() {
         label("all").performClick();
-        assertNotNull(label("All apps"));
+        assertNotNull(label("apps"));
         activity.onBackPressed();
         assertNotNull(label("smart txt"));
         shortcut("settings");
-        label("All apps").performClick();
+        NavigationLifecycleTest.navigate(activity,"apps");
         activity.onBackPressed();
-        assertNotNull(label("Use as home screen"));
+        assertNotNull(label("home screen"));
     }
 
     @Test

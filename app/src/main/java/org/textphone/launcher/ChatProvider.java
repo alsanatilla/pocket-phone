@@ -34,7 +34,7 @@ final class ChatProvider {
             identity = provider + "|" + this.baseUrl + "|" + this.model;
         }
 
-        String name() { return "anthropic".equals(provider) ? "Claude" : "Assistant"; }
+        String name() { return "anthropic".equals(provider) ? "Anthropic" : "API provider"; }
 
         void validate() {
             if (model.isEmpty() || model.length() > 120 || !model.matches("[A-Za-z0-9][A-Za-z0-9._/:@-]*"))

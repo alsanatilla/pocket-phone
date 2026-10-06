@@ -12,41 +12,47 @@ import java.util.Locale;
 
 /** Quiet phone view: scores first, their inputs on tap, with independent COROS browser sign-in. */
 public final class MovementActivity extends PocketActivity {
-    private CorosRepository repository; private boolean busy, visible, settings; private int selected = -1;
+    private CorosRepository repository; private boolean busy, visible, settings, direct; private int selected = -1;
     private final Runnable claim = this::completeLogin;
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state); repository = CorosRepository.get(this);
-        if (state != null) { selected = state.getInt("score", -1); settings = state.getBoolean("settings"); }
-        int chosen = getIntent().getIntExtra("score", -1); if (state == null && chosen >= 0 && chosen < 3) selected = chosen;
+        if (state != null) { selected = state.getInt("score", -1); settings = state.getBoolean("settings"); direct = state.getBoolean("direct"); }
+        // A reading tapped on Home opens straight into its detail; Back then returns Home, not to an overview never seen.
+        int chosen = getIntent().getIntExtra("score", -1); if (state == null && chosen >= 0 && chosen < 3) { selected = chosen; direct = true; }
         render();
+    }
+    @Override protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent); setIntent(intent);
+        int chosen = intent.getIntExtra("score", -1); if (chosen < 0 || chosen >= 3) return;
+        selected = chosen; settings = false; direct = true; render();
     }
     @Override protected void onResume() {
         super.onResume(); visible = true;
         if (repository.pending()) completeLogin(); else if (repository.connected()) refresh(false);
     }
     @Override protected void onPause() { visible = false; ui.removeCallbacks(claim); super.onPause(); }
-    @Override protected void onSaveInstanceState(Bundle state) { state.putInt("score", selected); state.putBoolean("settings", settings); super.onSaveInstanceState(state); }
-    @Override protected boolean hasInternalBack() { return settings || selected >= 0; }
-    @Override public void onBackPressed() { if (settings || selected >= 0) { back(() -> { settings = false; selected = -1; render(); }); } else super.onBackPressed(); }
+    @Override protected void onSaveInstanceState(Bundle state) { state.putInt("score", selected); state.putBoolean("settings", settings); state.putBoolean("direct", direct); super.onSaveInstanceState(state); }
+    @Override protected boolean hasInternalBack() { return settings || selected >= 0 && !direct; }
+    @Override public void onBackPressed() { if (hasInternalBack()) { back(() -> { if (settings) settings = false; else selected = -1; render(); }); } else super.onBackPressed(); }
     private void render() {
         screen(settings ? "movement settings" : "movement", settings ? "movement-settings" : "movement");
         if (settings) {
-            action("Open COROS", () -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://training.coros.com/"))));
-            if (repository.connected() || repository.pending()) action("Disconnect COROS", () -> confirm("Disconnect COROS on this phone?", () -> {
+            action("open COROS", () -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://training.coros.com/"))));
+            if (repository.connected() || repository.pending()) action("disconnect COROS", () -> confirm("Disconnect COROS on this phone?", () -> {
                 if (busy) { message("Wait for movement to finish refreshing."); return; }
                 busy = true;
                 load(() -> { repository.disconnect(); return true; }, done -> { busy = false; settings = false; selected = -1; render(); }, error -> { busy = false; message(error.getMessage()); });
             }));
-            action("Open web movement", () -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(CloudSync.WEB + "#/movement"))));
+            action("open web movement", () -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(CloudSync.WEB + "#/movement"))));
             return;
         }
         appSettings(() -> { settings = true; render(); });
         if (!repository.connected()) {
             body.addView(label(repository.pending() ? "Waiting for COROS sign-in" : "COROS", 22, WHITE));
             if (repository.pending()) {
-                action("Check sign-in", this::completeLogin).setTag("coros_check");
-                action("Start again", this::connect);
-            } else action("Connect COROS", this::connect).setTag("coros_connect");
+                action("check sign-in", this::completeLogin).setTag("coros_check");
+                action("start again", this::connect);
+            } else action("connect COROS", this::connect).setTag("coros_connect");
             body.addView(label("Sign in in your browser, then return to Pocket.", PocketDesign.SMALL, GRAY));
             return;
         }
@@ -70,7 +76,7 @@ public final class MovementActivity extends PocketActivity {
                 body.addView(label(Scores.conditionLine(scores.conditioning.status), PocketDesign.BODY, WHITE));
                 body.addView(label(String.format(Locale.getDefault(), "7-day load %.1f · 42-day load %.1f", scores.conditioning.acute, scores.conditioning.chronic), PocketDesign.SMALL, GRAY));
             }
-            if (selected >= 0) action("How it's calculated", () -> new android.app.AlertDialog.Builder(this).setTitle("Pocket score estimates")
+            if (selected >= 0) action("how it's calculated", () -> new android.app.AlertDialog.Builder(this).setTitle("Pocket score estimates")
                     .setMessage("Recovery compares HRV, resting heart rate and sleep with your recent readings. Strain estimates effort from workout heart rate and other steps. Conditioning follows 42 days of workout load. These are Pocket's estimates, using COROS readings; they are not Bevel or COROS scores. Maximum heart rate is estimated from age. Missing readings reduce the inputs available.")
                     .setPositiveButton("Close", null).show());
             if (!snapshot.activities.isEmpty()) {

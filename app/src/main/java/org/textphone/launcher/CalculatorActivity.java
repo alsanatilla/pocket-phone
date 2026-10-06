@@ -27,7 +27,7 @@ public final class CalculatorActivity extends PocketActivity {
         for (int r = 0; r < cells.length; r += 4) { LinearLayout row = row();
             for (int c = 0; c < 4; c++) { String key = cells[r + c]; row.addView(button(key, () -> press(key)), new LinearLayout.LayoutParams(0, dp(56), 1)); } body.addView(row); }
         android.widget.Button equals = action("=", this::equalsValue); equals.setTag("calculator_equals"); PocketDesign.primary(equals);
-        keys(new String[]{"history","copy"},this::history,()->{String value=expression.getText().toString();if(value.trim().isEmpty()){message("Enter a calculation first.");return;}android.content.ClipboardManager clipboard=getSystemService(android.content.ClipboardManager.class);if(clipboard!=null){clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Calculation",value));message("Copied.");}});
+        softKeys(new String[]{"history","copy"},-1,this::history,()->{String value=expression.getText().toString();if(value.trim().isEmpty()){message("Enter a calculation first.");return;}android.content.ClipboardManager clipboard=getSystemService(android.content.ClipboardManager.class);if(clipboard!=null){clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Calculation",value));message("Copied.");}});
     }
     private void history(){try { JSONArray items = new JSONArray(getPreferences(0).getString("history", "[]"));
             if(items.length()==0){message("No calculations yet.");return;}

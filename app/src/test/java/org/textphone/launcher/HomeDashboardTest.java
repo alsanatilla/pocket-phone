@@ -55,6 +55,9 @@ public class HomeDashboardTest {
             save(root,800,"pocket-dashboard.png");
             root.findViewWithTag("dashboard_movement_0").performClick(); Intent movement=Shadows.shadowOf(a).getNextStartedActivity();
             assertEquals(MovementActivity.class.getName(),movement.getComponent().getClassName());assertEquals(0,movement.getIntExtra("score",-1));
+            // Home never converts an undecided thought into a task.
+            assertEquals(1,ParkingStore.open(context).size());assertEquals(task,planner.nextTask().id);
+            assertEquals("Call the insurance",((TextView)root.findViewWithTag("dashboard_next")).getText().toString());
             root.findViewWithTag("dashboard_next").performClick(); assertEquals(task,ReflectionHelpers.<Long>getField(a,"captureId").longValue()); assertNotNull(PocketAppsTest.find(a.findViewById(android.R.id.content),"Complete task"));
             a.onBackPressed(); layout(a,800); a.findViewById(android.R.id.content).findViewWithTag("dashboard_note").performClick();
             assertEquals(note,ReflectionHelpers.<Long>getField(a,"captureId").longValue());
@@ -68,7 +71,7 @@ public class HomeDashboardTest {
         // Keep this screen disconnected so an obsolete fixture never initiates a live request.
         context.getSharedPreferences("pocket_coros_auth",0).edit().clear().commit();
         ActivityController<MainActivity> c=Robolectric.buildActivity(MainActivity.class).setup();
-        try{View root=layout(c.get(),640);assertEquals(View.GONE,root.findViewWithTag("dashboard_next").getVisibility());assertEquals(View.GONE,root.findViewWithTag("dashboard_note").getVisibility());assertEquals(View.GONE,root.findViewWithTag("dashboard_thought").getVisibility());assertEquals(View.GONE,root.findViewWithTag("dashboard_plan").getVisibility());assertNotNull(root.findViewWithTag("dashboard_movement_connect"));assertTrue(y(root.findViewWithTag("home_footer"))+root.findViewWithTag("home_footer").getHeight()<=640);save(root,640,"pocket-dashboard-quiet.png");}finally{c.pause().stop().destroy();}
+        try{View root=layout(c.get(),640);assertEquals(View.GONE,root.findViewWithTag("dashboard_next").getVisibility());assertEquals(View.GONE,root.findViewWithTag("dashboard_note").getVisibility());assertEquals(View.GONE,root.findViewWithTag("dashboard_plan").getVisibility());assertNotNull(root.findViewWithTag("dashboard_movement_connect"));assertTrue(y(root.findViewWithTag("home_footer"))+root.findViewWithTag("home_footer").getHeight()<=640);save(root,640,"pocket-dashboard-quiet.png");}finally{c.pause().stop().destroy();}
     }
     @Test public void unpinnedCustomGroupRemainsReachableUnderAll() throws Exception {
         if(!context.getResources().getBoolean(R.bool.pocket_rom)) return;

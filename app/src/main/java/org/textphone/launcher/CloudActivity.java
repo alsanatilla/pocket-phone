@@ -20,21 +20,20 @@ public final class CloudActivity extends PocketActivity {
     @Override protected void onCloudSynced() { render(); }
 
     private void render() {
-        screen("cloud sync");
+        screen("storage & devices");
         boolean on = CloudSync.enabled(this);
         long ok = CloudSync.prefs(this).getLong("last_ok", 0); String error = CloudSync.prefs(this).getString("last_error", "");
         String status = syncing ? "Syncing…" : !on ? "Off" : ok == 0 ? "On · waiting for the first sync" : "On · last synced " + DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(new Date(ok));
         body.addView(label(status, PocketDesign.BODY, on ? PocketDesign.accent(this) : WHITE));
         if (!error.isEmpty()) body.addView(label(error, PocketDesign.SMALL, PocketDesign.WARNING));
-        body.addView(label("Tasks, notes, Parking Lot, Receipt, Dice lists and journal page photos sync to a hidden Pocket folder in your Google Drive. "
-                + "Task reminders, drafts, messages and contacts stay on this phone.", PocketDesign.SMALL, GRAY));
-        if (!on) action("Turn on with Google", this::authorize).setTag("cloud_on");
+        section("Drive");body.addView(label("Thoughts · Tasks · Notes · Paper · Activity · Dice", PocketDesign.SMALL, GRAY));
+        if (!on) action("turn on with Google", this::authorize).setTag("cloud_on");
         else {
             android.widget.Button sync = action(syncing ? "Syncing…" : "Sync now", this::syncNow); sync.setTag("cloud_sync"); sync.setEnabled(!syncing);
-            action("Sign in again", this::authorize);
-            action("Turn off", () -> confirm("Turn off cloud sync? The copy in Drive stays.", () -> { CloudSync.disable(this); render(); })).setTag("cloud_off");
+            action("sign in again", this::authorize);
+            action("turn off", () -> confirm("Turn off cloud sync? The copy in Drive stays.", () -> { CloudSync.disable(this); render(); })).setTag("cloud_off");
         }
-        action("Open on the web\n" + CloudSync.WEB, () -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(CloudSync.WEB)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
+        action("open on the web\n" + CloudSync.WEB, () -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(CloudSync.WEB)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
     }
     private void authorize() {
         message("Opening Google…");

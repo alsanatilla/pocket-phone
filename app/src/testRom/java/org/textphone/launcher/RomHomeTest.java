@@ -48,7 +48,7 @@ public class RomHomeTest {
     @After public void stop() { controller.pause().stop().destroy(); }
 
     private TextView find(View view, String text) {
-        if (view instanceof TextView && text.contentEquals(((TextView) view).getText())) return (TextView) view;
+        if (view instanceof TextView && text.equalsIgnoreCase(((TextView) view).getText().toString())) return (TextView) view;
         if (view instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) view;
             for (int i = 0; i < group.getChildCount(); i++) {
@@ -71,17 +71,17 @@ public class RomHomeTest {
         home();
         View tile=activity.findViewById(android.R.id.content).findViewWithTag("tile_"+text);
         if(tile!=null) tile.performClick();
-        else { label("all").performClick(); activity.findViewById(android.R.id.content).findViewWithTag("all_shortcut_"+text).performClick(); }
+        else { label("all").performClick();if("settings".equals(text))activity.findViewById(android.R.id.content).findViewWithTag("app_settings").performClick();else if("today".equals(text))label("today").performClick();else activity.findViewById(android.R.id.content).findViewWithTag("pocket_app_"+PocketApps.label(text)).performClick(); }
     }
 
     @Test public void essentialsGridHasNoMissingOptionalAppTiles() {
         assertTrue(activity.getResources().getBoolean(R.bool.pocket_rom));
-        for (String text : new String[]{"phone", "messages", "camera", "notifs", "select", "all"}) label(text);
+        for (String text : new String[]{"phone", "messages", "camera", "capture", "today", "pip", "all"}) label(text);
         assertNull(find(activity.getWindow().getDecorView(), "whatsapp"));
-        assertTrue(((View) label("phone").getParent()).isSelected());
+        assertTrue(activity.findViewById(android.R.id.content).findViewWithTag("tile_phone").isSelected());
         label("all").performClick();
-        for(String text:new String[]{"contacts","clock","calculator","files","today","settings"})
-            assertNotNull(activity.findViewById(android.R.id.content).findViewWithTag("all_shortcut_"+text));
+        for(String text:new String[]{"contacts","clock","calculator","photos","today","thoughts","tasks","notes","calendar","paper"})
+            assertNotNull(activity.findViewById(android.R.id.content).findViewWithTag("pocket_app_"+text));
     }
     @Test public void phoneMessagesAndCameraOpenPocketApps() {
         shortcut("phone");
@@ -111,14 +111,14 @@ public class RomHomeTest {
     }
     @Test public void navigationAndHomeReturnWorkInTheRomGrid() {
         activity.onKeyDown(KeyEvent.KEYCODE_DPAD_RIGHT, new KeyEvent(0, KeyEvent.KEYCODE_DPAD_RIGHT));
-        assertTrue(((View) label("messages").getParent()).isSelected());
+        assertTrue(activity.findViewById(android.R.id.content).findViewWithTag("tile_messages").isSelected());
         shortcut("settings");
-        label("Use as home screen");
+        label("home screen");
         home();
         label("phone");
         activity.onBackPressed();
         assertFalse(activity.isFinishing());
-        assertTrue(((View) label("phone").getParent()).performLongClick());
+        assertTrue(activity.findViewById(android.R.id.content).findViewWithTag("tile_phone").performLongClick());
         org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog().dismiss();
         assertTrue(((View) label("camera").getParent()).performLongClick());
         Shadows.shadowOf(org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog()).clickOnItem(0);
@@ -126,21 +126,21 @@ public class RomHomeTest {
     }
     @Test public void dashboardCaptureKeepsSeparateDraftsAndFocusUsesClock() {
         assertEquals(View.GONE, activity.findViewById(android.R.id.content).findViewWithTag("dashboard_next").getVisibility());
-        label("+ task").performClick();
+        label("capture").performClick();Shadows.shadowOf(org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog()).clickOnItem(1);
         EditText editor = activity.findViewById(android.R.id.content).findViewWithTag("capture_editor");
         editor.setText("Write proposal");
         home();
-        label("+ note").performClick();
+        label("capture").performClick();Shadows.shadowOf(org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog()).clickOnItem(2);
         editor = activity.findViewById(android.R.id.content).findViewWithTag("capture_editor");
         assertEquals("", editor.getText().toString());
         editor.setText("Meeting notes");
         home();
-        label("+ task").performClick();
+        label("capture").performClick();Shadows.shadowOf(org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog()).clickOnItem(1);
         editor = activity.findViewById(android.R.id.content).findViewWithTag("capture_editor");
         assertEquals("Write proposal", editor.getText().toString());
         label("save").performClick();
         home();
-        label("0 / 1"); label("Write proposal");
+        label("1 open"); label("Write proposal");
         label("focus").performClick(); label("Focus · 25 min").performClick();
         Intent timer = Shadows.shadowOf(activity).getNextStartedActivity();
         assertEquals(ClockActivity.class.getName(), timer.getComponent().getClassName());
@@ -166,7 +166,7 @@ public class RomHomeTest {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         alarms.setAlarmClock(new AlarmManager.AlarmClockInfo(tomorrow.getTimeInMillis(), show), fire);
         home();
-        label("0 / 2"); label("Finish draft");
+        label("2 open"); label("Finish draft");
         shortcut("clock");
         assertEquals(ClockActivity.class.getName(), Shadows.shadowOf(activity).getNextStartedActivity().getComponent().getClassName());
         home();
@@ -174,9 +174,10 @@ public class RomHomeTest {
         root.measure(View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(720, View.MeasureSpec.EXACTLY));
         root.layout(0, 0, 360, 720);
-        for (String text : new String[]{"phone", "messages", "camera", "0 / 2", "Finish draft",
-                "+ task", "+ note", "focus"}) {
-            TextView tile = label(text);
+        for (String text : new String[]{"phone", "messages", "camera", "2 open", "Finish draft",
+                "+ thought", "today", "focus"}) {
+            View tagged = activity.findViewById(android.R.id.content).findViewWithTag("tile_label_" + text);
+            TextView tile = tagged instanceof TextView ? (TextView) tagged : label(text);
             int[] position = new int[2]; tile.getLocationInWindow(position);
             assertTrue(tile.getWidth() > 0 && tile.getHeight() > 0);
             assertTrue(text + " fits", position[1] >= 28 && position[1] + tile.getHeight() < 680);
@@ -208,8 +209,8 @@ public class RomHomeTest {
         root.layout(0, 0, 360, 720);
         TextView next = root.findViewWithTag("dashboard_next");
         assertEquals(1, next.getMaxLines());
-        for (String text : new String[]{"notifs", "select", "all"}) {
-            TextView key = label(text); int[] position = new int[2]; key.getLocationInWindow(position);
+        for (String text : new String[]{"capture", "today", "pip", "all"}) {
+            TextView key = root.findViewWithTag("home_"+text); int[] position = new int[2]; key.getLocationInWindow(position);
             assertTrue(text + " remains visible", position[1] >= 0 && position[1] + key.getHeight() <= 720);
             assertTrue(text + " touch target", key.getHeight() >= 48);
         }

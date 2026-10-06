@@ -52,7 +52,7 @@ public class CameraAlbumTest {
         ActivityController<FilesActivity> controller=Robolectric.buildActivity(FilesActivity.class).setup();try{FilesActivity activity=controller.get();settle(activity);
             assertNull(PocketAppsTest.find(activity.body,"Choose folder"));assertNull(PocketAppsTest.find(activity.body,"Open file"));assertNull(Shadows.shadowOf(activity).getLastRequestedPermission());
             android.widget.TextView photo=findContaining(activity.body,"DSC_capture.JPG");assertNotNull(photo);assertNull(findContaining(activity.body,"DSC_foreign.JPG"));photo.performClick();settle(activity);
-            Bitmap shown=ReflectionHelpers.getField(activity,"bitmap");assertNotNull(shown);assertEquals(20,shown.getWidth());assertEquals(10,shown.getHeight());assertNotNull(PocketAppsTest.find(activity.root,"Share photo"));
+            Bitmap shown=ReflectionHelpers.getField(activity,"bitmap");assertNotNull(shown);assertEquals(20,shown.getWidth());assertEquals(10,shown.getHeight());assertNotNull(PocketAppsTest.find(activity.root,"share"));
         }finally{controller.pause().stop().destroy();}
     }
     @Test public void arbitraryImagesCannotBeOpenedByPassingAnIntent()throws Exception{
@@ -71,7 +71,7 @@ public class CameraAlbumTest {
     }
     @Test public void deletedPhotosDisappearOnRefresh()throws Exception{
         Uri camera=capture();ActivityController<FilesActivity> controller=Robolectric.buildActivity(FilesActivity.class).setup();try{FilesActivity activity=controller.get();settle(activity);
-            c.getContentResolver().delete(camera,null,null);PocketAppsTest.find(activity.body,"Refresh").performClick();settle(activity);
+            c.getContentResolver().delete(camera,null,null);PocketAppsTest.find(activity.root,"Refresh").performClick();settle(activity);
             assertNotNull(PocketAppsTest.find(activity.body,"No Pocket photos yet. Take a picture with Pocket Camera and it will appear here."));
         }finally{controller.pause().stop().destroy();}
     }
@@ -84,7 +84,7 @@ public class CameraAlbumTest {
         try{FilesActivity activity=controller.get();settle(activity);assertFalse(activity.root.findViewWithTag("photo_previous").isEnabled());assertTrue(activity.root.findViewWithTag("photo_next").isEnabled());activity.root.findViewWithTag("photo_next").performClick();settle(activity);
             assertEquals(first,ReflectionHelpers.getField(activity,"opened"));assertFalse(activity.root.findViewWithTag("photo_next").isEnabled());assertTrue(activity.root.findViewWithTag("photo_previous").isEnabled());
             controller.recreate();activity=controller.get();settle(activity);assertEquals(first,ReflectionHelpers.getField(activity,"opened"));activity.root.findViewWithTag("photo_previous").performClick();settle(activity);assertEquals(second,ReflectionHelpers.getField(activity,"opened"));
-            PocketAppsTest.find(activity.root,"Share photo").performClick();Intent chooser=Shadows.shadowOf(activity).getNextStartedActivity();Intent send=chooser.getParcelableExtra(Intent.EXTRA_INTENT);assertEquals(second,send.getParcelableExtra(Intent.EXTRA_STREAM));assertEquals(second,send.getClipData().getItemAt(0).getUri());assertTrue((send.getFlags()&Intent.FLAG_GRANT_READ_URI_PERMISSION)!=0);
+            PocketAppsTest.find(activity.root,"share").performClick();Intent chooser=Shadows.shadowOf(activity).getNextStartedActivity();Intent send=chooser.getParcelableExtra(Intent.EXTRA_INTENT);assertEquals(second,send.getParcelableExtra(Intent.EXTRA_STREAM));assertEquals(second,send.getClipData().getItemAt(0).getUri());assertTrue((send.getFlags()&Intent.FLAG_GRANT_READ_URI_PERMISSION)!=0);
         }finally{controller.pause().stop().destroy();}
     }
     static void settle(PocketActivity activity)throws Exception{ExecutorService worker=ReflectionHelpers.getField(activity,"worker");for(int i=0;i<4;i++){worker.submit(()->{}).get(5,TimeUnit.SECONDS);Shadows.shadowOf(Looper.getMainLooper()).idle();}}

@@ -49,10 +49,10 @@ public class CloudSyncFlowTest {
             FakeSync.fail=false;activity.root.findViewWithTag("cloud_sync").performClick();await(activity);assertEquals(2,FakeSync.calls);assertFalse(CloudSync.prefs(context).contains("last_error"));
         }finally{controller.pause().stop().destroy();}
     }
-    @Test public void cancelledGoogleResultDoesNotEnableSyncAndErrorsNameTheFailure() {
+    @Test public void missingGoogleResultDoesNotEnableSyncAndErrorsNameTheFailure() {
         CloudSync.prefs(context).edit().putBoolean("enabled",false).commit();
         ActivityController<CloudActivity> controller=Robolectric.buildActivity(CloudActivity.class).setup();
-        try{CloudActivity activity=controller.get();activity.onActivityResult(731,android.app.Activity.RESULT_CANCELED,null);assertFalse(CloudSync.enabled(context));assertEquals("Google sign-in was cancelled.",CloudSync.prefs(context).getString("last_error",""));}finally{controller.pause().stop().destroy();}
+        try{CloudActivity activity=controller.get();activity.onActivityResult(731,android.app.Activity.RESULT_CANCELED,null);assertFalse(CloudSync.enabled(context));assertTrue(CloudSync.prefs(context).getString("last_error","").startsWith("Google returned without completing sign-in."));}finally{controller.pause().stop().destroy();}
         assertTrue(CloudSync.explain(new ApiException(new Status(CommonStatusCodes.DEVELOPER_ERROR))).contains("code 10"));
         assertEquals("No connection to Google (code 7).",CloudSync.explain(new ApiException(new Status(CommonStatusCodes.NETWORK_ERROR))));
     }

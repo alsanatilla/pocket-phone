@@ -59,7 +59,7 @@ public final class PhoneActivity extends PocketActivity {
         }, this::call);
         callControl = (android.widget.Button) controls.getChildAt(2);
         PocketDesign.primary(callControl);
-        keys(new String[]{"history", "contacts"}, this::callHistory, () -> startActivity(new Intent(this, ContactsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
+        softKeys(new String[]{"history", "contacts"}, -1, this::callHistory, () -> startActivity(new Intent(this, ContactsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
         appSettings(this::phoneSettings);
         if (!PocketCalls.calls().isEmpty()) action("current call", () -> startActivity(new Intent(this, InCallActivity.class)));
     }
@@ -117,7 +117,7 @@ public final class PhoneActivity extends PocketActivity {
     private void callHistory() { cancelCall(); history = true; screen("call history");
         if (!permitted(Manifest.permission.READ_CALL_LOG)) {
             body.addView(label("Read recent incoming, outgoing and missed numbers from Android's call history. No audio recording.", 14, GRAY));
-            action("Allow call history", () -> permissions(this::callHistory, Manifest.permission.READ_CALL_LOG)); return; }
+            action("allow call history", () -> permissions(this::callHistory, Manifest.permission.READ_CALL_LOG)); return; }
         loadPage(() -> { List<String[]> rows = new ArrayList<>(); try (Cursor c = getContentResolver().query(CallLog.Calls.CONTENT_URI,
                 new String[]{"number", "name", "date", "type"}, null, null, "date DESC")) {
             if (c != null) while (c.moveToNext() && rows.size() < 100) rows.add(new String[]{c.getString(0), c.getString(1),

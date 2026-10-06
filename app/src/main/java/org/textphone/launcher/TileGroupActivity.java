@@ -95,7 +95,7 @@ public final class TileGroupActivity extends PocketActivity {
     }
     private void addPocket() {
         List<String> ids = new ArrayList<>();
-        for (String id : PocketApps.IDS) { boolean present = false; for (DashboardTiles.Member m : tiles.members(slot)) present |= id.equals(m.pocket); if (!present) ids.add(id); }
+        for (String id : PocketApps.CHOICES) { boolean present = false; for (DashboardTiles.Member m : tiles.members(slot)) present |= id.equals(m.pocket); if (!present) ids.add(id); }
         if (ids.isEmpty()) { message("Every Pocket app is already in this group."); return; }
         String[] names = ids.toArray(new String[0]);
         new AlertDialog.Builder(this).setTitle("Pocket app").setItems(names, (d, which) -> {

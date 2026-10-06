@@ -1,5 +1,7 @@
 # Daily productivity audit — Pocket 0.5.14
 
+Historical audit. Current behavior and the connected app map are in [WORKFLOW.md](WORKFLOW.md) and [APP-STATUS.md](APP-STATUS.md); 0.6.0 retains separate Thoughts and uses a local Pocket calendar.
+
 The 0.5.14 release adds tile groups, Parking Lot and linked note thoughts, Dice, Receipt, Journal, and optional Drive sync with a web workstation. These extend capture and cross-device notes; they do not replace task recurrence, unified search, full backup/restore or real handset validation in the audit below. Drive authorization and journal transcription require the user's account setup and remain unverified against live services in this build.
 
 Pocket is a launcher with native companion apps on Nothing OS. It is not a compiled system ROM. This audit reviews code and automated Android checks; no Nothing Phone (3a) is attached.

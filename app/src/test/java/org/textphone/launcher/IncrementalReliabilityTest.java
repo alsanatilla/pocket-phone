@@ -156,7 +156,7 @@ public class IncrementalReliabilityTest {
     @Test public void sharingTextWhileTheNoteIsAlreadyOpenUpdatesTheVisibleEditor() {
         ActivityController<MainActivity> controller = today(); MainActivity a = controller.get();
         try {
-            PocketAppsTest.find(a.findViewById(android.R.id.content), "Note").performClick(); editor(a).setText("Existing draft");
+            PocketAppsTest.find(a.findViewById(android.R.id.content), "+ note").performClick(); editor(a).setText("Existing draft");
             controller.newIntent(new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "Shared text"));
             assertEquals("Existing draft\n\nShared text", editor(a).getText().toString());
         } finally { controller.pause().stop().destroy(); }
@@ -169,12 +169,7 @@ public class IncrementalReliabilityTest {
         assertEquals(42, current.google); assertTrue(current.syncPending);
         AgendaStore.syncResult(context, current.copy(), true); assertFalse(AgendaStore.find(context, e.id).syncPending);
     }
-    @Test public void aCalendarRetryFindsItsOwnPreviouslyInsertedAppointment() {
-        SavingProvider provider = provider("com.android.calendar"); context.getSharedPreferences("pocket_agenda", 0).edit().putLong("google_calendar", 7).commit();
-        AgendaStore.Event e = new AgendaStore.Event(); e.id = 100; e.title = "Review"; e.when = System.currentTimeMillis();
-        assertTrue(CalendarBridge.write(context, e)); e.google = 0; e.calendar = 0; assertTrue(CalendarBridge.write(context, e));
-        assertEquals(1, provider.inserts); assertEquals(1, provider.updates); assertEquals(42, e.google);
-    }
+    @Test public void aCalendarRetryCannotWriteAGoogleEvent(){SavingProvider provider=provider("com.android.calendar");context.getSharedPreferences("pocket_agenda",0).edit().putLong("google_calendar",7).commit();AgendaStore.Event e=new AgendaStore.Event();e.title="Review";e.when=System.currentTimeMillis();AgendaStore.save(context,e);AgendaSync.sync(context,e.copy());AgendaSync.sync(context,e.copy());assertEquals(1,AgendaStore.list(context).size());assertEquals(0,provider.inserts);assertEquals(0,provider.updates);assertEquals(0,AgendaStore.find(context,e.id).google);}
     @Test public void repeatingAContactSaveWithTheSameEditorTokenUpdatesOneNativeContact() throws Exception {
         SavingProvider provider = provider("com.android.contacts");
         assertEquals(42, ContactBook.save(context.getContentResolver(), 0, "Ada", "+49305550100", "ada@example.test", "editor-token"));

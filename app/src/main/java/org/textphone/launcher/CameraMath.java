@@ -40,9 +40,24 @@ final class CameraMath {
     }
 
     static Size outputSize(int width, int height, CameraProfile profile, int rotation) {
-        Rect crop = cropFourThree(width, height);
-        float scale = Math.min(1f, Math.min((float) profile.width / crop.width(),
-                (float) profile.height / crop.height()));
+        return outputSize(width, height, profile, CameraFormat.DEFAULT, rotation);
+    }
+
+    /** The central crop with long/short ratio {@code ratio}, cut from the frame's own orientation. */
+    static Rect crop(int width, int height, float ratio) {
+        if (width <= 0 || height <= 0 || ratio < 1) throw new IllegalArgumentException("Invalid image size");
+        boolean landscape = width >= height; int along = landscape ? width : height, across = landscape ? height : width;
+        int keepLong = Math.min(along, Math.max(1, Math.round(across * ratio)));
+        int keepShort = Math.min(across, Math.max(1, Math.round(keepLong / ratio)));
+        int w = landscape ? keepLong : keepShort, h = landscape ? keepShort : keepLong;
+        return new Rect((width - w) / 2, (height - h) / 2, (width - w) / 2 + w, (height - h) / 2 + h);
+    }
+
+    /** Output pixels for a format: its crop scaled down to the camera frame's cut at that size, never up. */
+    static Size outputSize(int width, int height, CameraProfile profile, CameraFormat format, int rotation) {
+        Rect crop = format.aspect == CameraFormat.Aspect.FOUR_THREE ? cropFourThree(width, height) : crop(width, height, format.aspect.ratio);
+        int[] frame = CameraFormat.frame(format.longEdge(profile), format.aspect);
+        float scale = Math.min(1f, (float) Math.max(frame[0], frame[1]) / Math.max(crop.width(), crop.height()));
         int w = Math.max(1, Math.round(crop.width() * scale));
         int h = Math.max(1, Math.round(crop.height() * scale));
         return rotation % 180 == 0 ? new Size(w, h) : new Size(h, w);

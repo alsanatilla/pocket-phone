@@ -70,20 +70,26 @@ public class CloudAndJournalReleaseTest {
         assertEquals("task", planner.entries().get(0).kind);
     }
 
-    @Test public void existingThoughtLinesParkOnceAndClearedLinesStayClearedOnSave() throws Exception {
+    @Test public void thoughtLinesBecomeOneLinkedTaskAndStayHandledOnSave() throws Exception {
         String text = "# Calls\n>> Call Sam @tomorrow";
         long id = planner.save(0, "note", text);
         assertEquals(1, NoteThoughts.parkNew(c, planner, id, text, text));
         String uid = NoteSync.uid(planner, id);
         long thought = NoteThoughts.id(uid, NoteThoughts.key("Call Sam"));
         assertEquals(uid, ParkingStore.find(c, thought).note);
+        assertEquals(ParkingStore.PARKED, ParkingStore.find(c, thought).state);
+        assertEquals(1,planner.entries().size());
+        long promoted=ParkingStore.promote(c,thought);assertEquals(promoted,ParkingStore.promote(c,thought));
+        assertEquals(ParkingStore.TASK,ParkingStore.find(c,thought).state);
+        PlannerStore.Entry task = null; for (PlannerStore.Entry e : planner.entries()) if ("task".equals(e.kind)) task = e;
+        assertEquals("Call Sam", task.text); assertEquals(id, task.source.note); assertTrue(task.due.isEmpty());
         assertEquals(0, NoteThoughts.parkNew(c, planner, id, text, text));
-        ParkingStore.close(c, thought, ParkingStore.CLEARED);
+        planner.toggle(task.id);
         assertEquals(0, NoteThoughts.parkNew(c, planner, id, text, text));
-        assertEquals(ParkingStore.CLEARED, ParkingStore.find(c, thought).state);
+        assertEquals(2, planner.entries().size());
         assertEquals(text, planner.find(id).text);
-        assertTrue(NoteThoughts.annotate(c, planner, id, text).contains("cleared"));
-        assertEquals(1, ReceiptTape.count(ReceiptTape.lines(c, System.currentTimeMillis()), ReceiptTape.PARK));
+        assertTrue(NoteThoughts.annotate(c, planner, id, text).contains("task done"));
+        assertEquals(1, ReceiptTape.count(ReceiptTape.lines(c, System.currentTimeMillis()), ReceiptTape.TASK));
     }
 
     @Test public void parkingMergeKeepsTheLaterCloseAndNewCaptureIdsStayDistinct() throws Exception {
@@ -152,8 +158,12 @@ public class CloudAndJournalReleaseTest {
         assertTrue(note.text.contains("- [ ] Send invoice"));
         assertTrue(note.text.contains(">> Send invoice @16:30"));
         assertEquals("- [ ] Send invoice", page.getJSONArray("lines").getJSONObject(0).getString("note_line"));
-        assertEquals(1, ParkingStore.open(c).size());
-        assertEquals(page.getString("note"), ParkingStore.open(c).get(0).note);
+        // A page captures an undecided thought; the user chooses whether it becomes an action.
+        assertEquals(1,ParkingStore.open(c).size());
+        assertTrue(ParkingStore.open(c).get(0).due>0);
+        ParkingStore.promote(c,ParkingStore.open(c).get(0).id);
+        PlannerStore.Entry task = null; for (PlannerStore.Entry e : planner.entries()) if ("task".equals(e.kind)) task = e;
+        assertEquals("Send invoice", task.text); assertEquals(note.id, task.source.note);
         assertFalse(ClaudeKey.present(c));
         assertFalse(CloudSync.enabled(c));
         JournalStore.delete(c, "test-page");

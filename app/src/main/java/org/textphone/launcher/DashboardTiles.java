@@ -35,7 +35,7 @@ final class DashboardTiles {
         if (!custom.isEmpty()) return custom;
         if (group(slot)) return "group";
         String app = app(slot);
-        if (app == null) return PocketApps.known(pocket(slot)) ? pocket(slot) : slot;
+        if (app == null) return PocketApps.known(pocket(slot)) ? PocketApps.label(pocket(slot)) : slot;
         String label = preferences.getString("shortcut_app_label_" + slot, "");
         // Old installations may only have a package binding. Show its name until the worker resolves it.
         return label.isEmpty() ? app.substring(app.lastIndexOf('.') + 1) : label;

@@ -31,7 +31,7 @@ public final class ContactsActivity extends PocketActivity {
         }
         EditText query = input("Search names", InputType.TYPE_CLASS_TEXT); query.setTag("contact_search"); query.setText(searchText); query.setSelection(query.length());
         action("+ contact", () -> permissions(() -> beginEdit(0, new ContactBook.Detail()), Manifest.permission.WRITE_CONTACTS));
-        ContactDraft.Value draft=ContactDraft.read(this);if(draft!=null)action("Continue draft",()->permissions(()->resumeDraft(draft),Manifest.permission.WRITE_CONTACTS));
+        ContactDraft.Value draft=ContactDraft.read(this);if(draft!=null)action("continue draft",()->permissions(()->resumeDraft(draft),Manifest.permission.WRITE_CONTACTS));
         LinearLayout list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL); body.addView(list);
         Runnable search = () -> { int current = ++generation; String term = query.getText().toString().trim(); loadPage(() -> current == generation ? ContactBook.list(getContentResolver(), term) : java.util.Collections.<ContactBook.Person>emptyList(), values -> {
             if (current != generation || detail) return; list.removeAllViews();
@@ -49,7 +49,7 @@ public final class ContactsActivity extends PocketActivity {
         if (current != generation || !detail) return;
         body.removeAllViews(); body.addView(label(person.name, 22, WHITE));
         for (String number : person.numbers) { body.addView(label(number, 18, WHITE));
-            keys(new String[]{"call", "message"}, () -> startActivity(new Intent(this, PhoneActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("number", number)),
+            commands(body, new String[]{"call", "message"}, 0, () -> startActivity(new Intent(this, PhoneActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("number", number)),
                     () -> startActivity(new Intent(this, MessagesActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("address", number))); }
         if (!person.email.isEmpty()) {android.widget.TextView email=label(person.email,15,GRAY);email.setTextIsSelectable(true);body.addView(email);}
         action("edit", () -> permissions(() -> beginEdit(id, person), Manifest.permission.WRITE_CONTACTS));
@@ -73,7 +73,7 @@ public final class ContactsActivity extends PocketActivity {
                 if (n.equals(name.getText().toString()) && p.equals(phone.getText().toString()) && e.equals(email.getText().toString())) {ContactDraft.clear(this,token);listing();}
                 else message("Saved the tapped version. Your newer edits are still here.");
             }); });
-        action("Discard draft",()->confirm("Discard this contact draft?",()->{ContactDraft.clear(this,editToken);editing=false;if(id==0)back(this::listing);else back(()->show(id));}));
+        action("discard draft",()->confirm("Discard this contact draft?",()->{ContactDraft.clear(this,editToken);editing=false;if(id==0)back(this::listing);else back(()->show(id));}));
     }
     private void keepDraft(){if(!editing||editName==null)return;String name=editName.getText().toString(),phone=editPhone.getText().toString(),email=editEmail.getText().toString();
         if(editingId==0&&name.isEmpty()&&phone.isEmpty()&&email.isEmpty())return;

@@ -37,7 +37,7 @@ public class CompactCameraActivityTest {
     @After public void cleanup() { controller.pause().stop().destroy(); }
     private View tagged(String tag) { View found=activity.findViewById(android.R.id.content).findViewWithTag(tag);if(found==null){SettingsTestActions.open(activity);found=ShadowAlertDialog.getLatestAlertDialog().findViewById(android.R.id.content).findViewWithTag(tag);}return found; }
     private TextView find(View view, String value) {
-        if (view instanceof TextView && value.contentEquals(((TextView) view).getText())) return (TextView) view;
+        if (view instanceof TextView && value.equalsIgnoreCase(((TextView) view).getText().toString())) return (TextView) view;
         if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup)view).getChildCount(); i++) {
             TextView result = find(((ViewGroup)view).getChildAt(i), value); if (result != null) return result;
         }
@@ -78,9 +78,9 @@ public class CompactCameraActivityTest {
         activity.ready(new CameraEngine.Info(true, false, false, true, 270, live, capture,
                 new Range<>(-6, 6), new Rational(1, 3)));
         TextView flash = (TextView) tagged("camera_flash");
-        assertEquals("FLASH —", flash.getText().toString()); assertFalse(flash.isEnabled());
+        assertEquals("flash —", flash.getText().toString()); assertFalse(flash.isEnabled());
         activity.ready(new CameraEngine.Info(false, true, true, true, 90, live, capture,
                 new Range<>(-6, 6), new Rational(1, 3)));
-        assertEquals("FLASH AUTO", flash.getText().toString());
+        assertEquals("flash auto", flash.getText().toString());
     }
 }

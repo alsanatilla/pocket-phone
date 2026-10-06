@@ -18,9 +18,9 @@ public final class ChatsActivity extends PocketActivity {
     @Override protected void onStart(){super.onStart();IntentFilter f=new IntentFilter(PhoneNotifications.ACTION_UPDATED);if(Build.VERSION.SDK_INT>=33)registerReceiver(changes,f,Context.RECEIVER_NOT_EXPORTED);else registerReceiver(changes,f);registered=true;}
     @Override protected void onResume(){super.onResume();NotificationAccess.connect(this);refresh();}
     @Override protected void onStop(){if(registered){unregisterReceiver(changes);registered=false;}super.onStop();}
-    private void render(){screen("Messages");messages=new LinearLayout(this);messages.setOrientation(LinearLayout.VERTICAL);messages.setTag("chat_feed");body.addView(messages,new LinearLayout.LayoutParams(-1,-2));
-        LinearLayout commands=row();commands.setTag("chat_commands");android.widget.Button sms=button("SMS inbox",()->startActivity(new Intent(this,MessagesActivity.class)));sms.setMinHeight(dp(56));sms.setTag("chat_sms");commands.addView(sms,new LinearLayout.LayoutParams(0,-2,1));
-        android.widget.Button apps=button("Apps",this::messagingApps);apps.setMinHeight(dp(56));apps.setTag("chat_apps");commands.addView(apps,new LinearLayout.LayoutParams(0,-2,1));root.addView(commands,new LinearLayout.LayoutParams(-1,-2));
+    private void render(){screen("messages");messages=new LinearLayout(this);messages.setOrientation(LinearLayout.VERTICAL);messages.setTag("chat_feed");body.addView(messages,new LinearLayout.LayoutParams(-1,-2));
+        LinearLayout commands=softKeys(new String[]{"sms inbox","apps"},-1,()->startActivity(new Intent(this,MessagesActivity.class)),this::messagingApps);commands.setTag("chat_commands");
+        commands.getChildAt(0).setTag("chat_sms");commands.getChildAt(1).setTag("chat_apps");
         appSettings(()->startActivity(new Intent(this,NotificationSetupActivity.class)));refresh();}
     private void messagingApps(){String[] names={"WhatsApp","WhatsApp Business","Signal","Telegram"},packages={"com.whatsapp","com.whatsapp.w4b","org.thoughtcrime.securesms","org.telegram.messenger"};java.util.List<String> labels=new java.util.ArrayList<>();java.util.List<Intent> intents=new java.util.ArrayList<>();
         for(int i=0;i<names.length;i++){Intent launch=getPackageManager().getLaunchIntentForPackage(packages[i]);if(launch!=null){labels.add(names[i]);intents.add(launch);}}

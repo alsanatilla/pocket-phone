@@ -11,8 +11,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Thoughts written inside a note: a line "&gt;&gt; call Sam @tomorrow" parks "call Sam" in the Parking Lot.
- * The note text is never rewritten; the Parking item keeps the link. Mirrors docs/js/store.js.
+ * A line "&gt;&gt; call Sam @tomorrow" captures an undecided thought to revisit tomorrow.
+ * The note stays intact. Stable ids match the web; making a task is a separate, explicit choice.
  */
 final class NoteThoughts {
     static final Pattern LINE = Pattern.compile("^[ \\t]*>>[ \\t]+(.+?)(?:[ \\t]+@(1h|tonight|tomorrow|tmrw|nextweek|\\d{1,2}[:.]\\d{2}))?[ \\t]*$", Pattern.CASE_INSENSITIVE);
@@ -30,7 +30,7 @@ final class NoteThoughts {
     }
     static String key(String text) { return text.trim().replaceAll("[ \\t]+", " ").toLowerCase(Locale.ROOT); }
     private static String delay(String tag) {
-        if (tag == null) return "1 hour";
+        if (tag == null) return "none";
         switch (tag.toLowerCase(Locale.ROOT)) { case "tonight": return "tonight"; case "tomorrow": case "tmrw": return "tomorrow"; case "nextweek": return "next week"; default: return tag.matches("\\d{1,2}[:.]\\d{2}") ? tag : "1 hour"; }
     }
     /** FNV-1a over "uid\nkey", in a range no timestamp id reaches. Same on the web. */
@@ -56,33 +56,44 @@ final class NoteThoughts {
         List<Thought> added = new ArrayList<>();
         for (Thought t : current) { Integer n = old.get(t.key); if (n != null && n > 0) old.put(t.key, n - 1); else added.add(t); }
         if (added.isEmpty()) return 0;
-        int parked = 0; long now = System.currentTimeMillis();
-        for (Thought t : added) {
-            ParkingStore.Item item = ParkingStore.parkFromNote(c, id(uid, t.key), t.text, ParkingStore.when(t.delay, now), uid);
-            if (item != null) { parked++; ReceiptTape.log(c, ReceiptTape.PARK, item.text); }
-        }
-        if (parked > 0) ParkingReceiver.arm(c);
-        return parked;
+        long now = System.currentTimeMillis();
+        for (Thought t : added) ParkingStore.parkFromNote(c, id(uid, t.key), t.text, "none".equals(t.delay) ? 0 : ParkingStore.when(t.delay, now), uid);
+        ParkingReceiver.arm(c);
+        return added.size();
+    }
+    /** A note's first non-empty line without its heading marker or thought time. */
+    static String title(PlannerStore.Entry note) {
+        for (String line : note.text.split("\n")) if (!line.trim().isEmpty())
+            return line.replaceFirst("^\\s*(#+|>>)\\s*", "").replaceFirst("(?i)\\s+@(1h|tonight|tomorrow|tmrw|nextweek|\\d{1,2}[:.]\\d{2})\\s*$", "").trim();
+        return "note";
+    }
+    /** The task a thought line became, if it is still on this phone. */
+    private static PlannerStore.Entry task(PlannerStore store, long thought) {
+        String token = ParkingStore.token(thought);
+        try { for (PlannerStore.Entry e : store.entries()) if (e.source != null && token.equals(e.source.token)) return e; }
+        catch (IllegalStateException unreadable) { return null; }
+        return null;
     }
 
     /** Preview only: each thought line shows what happened to it in the Parking Lot. */
     static String annotate(Context c, PlannerStore store, long noteId, String text) {
         String uid = noteId == 0 ? null : NoteSync.existingUid(store, noteId);
-        StringBuilder out = new StringBuilder(); long now = System.currentTimeMillis();
+        StringBuilder out = new StringBuilder();
         for (String line : text.split("\n", -1)) {
             Matcher m = LINE.matcher(line.replace("\r", ""));
             if (!m.matches() || m.group(1).trim().isEmpty()) { out.append(line).append('\n'); continue; }
-            ParkingStore.Item item = uid == null ? null : ParkingStore.find(c, id(uid, key(m.group(1))));
-            out.append("> **»** ").append(m.group(1).trim()).append("  _· ").append(status(item, now)).append("_\n");
+            long thought = uid == null ? 0 : id(uid, key(m.group(1)));
+            ParkingStore.Item item = uid == null ? null : ParkingStore.find(c, thought);
+            out.append("> **»** ").append(m.group(1).trim()).append("  _· ").append(status(item, item == null ? null : task(store, thought))).append("_\n");
         }
         return out.length() > 0 ? out.substring(0, out.length() - 1) : "";
     }
-    static String status(ParkingStore.Item item, long now) {
-        if (item == null) return "not parked yet";
+    static String status(ParkingStore.Item item, PlannerStore.Entry task) {
+        if (item == null) return "saved to thoughts";
         if (ParkingStore.CLEARED.equals(item.state)) return "cleared";
         if (ParkingStore.KILLED.equals(item.state)) return "let go";
-        if (ParkingStore.TASK.equals(item.state)) return "moved to Today";
-        return item.back(now) ? "back now" : "back " + ParkingActivity.relative(item.due, now);
+        if (task != null) return task.done ? "task done" : "task";
+        return ParkingStore.TASK.equals(item.state) ? "task removed" : item.due == 0 ? "thought" : "parked for review";
     }
     private NoteThoughts() { }
 }

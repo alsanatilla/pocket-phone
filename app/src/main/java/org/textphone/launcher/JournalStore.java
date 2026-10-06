@@ -121,7 +121,7 @@ final class JournalStore {
             JSONArray local = new JSONArray(prefs(c).getString("pages", "[]"));
             JSONArray merged = SyncMerge.byId(local, remote == null ? null : remote.optJSONArray("pages"), "uid", "updated");
             List<JSONObject> kept = new ArrayList<>(); long now = System.currentTimeMillis();
-            for (int i = 0; i < merged.length(); i++) { JSONObject p = merged.getJSONObject(i); if (!p.optBoolean("deleted") || now - p.optLong("updated") <= KEEP_DELETED) kept.add(p); }
+            for (int i = 0; i < merged.length(); i++) { JSONObject p = merged.getJSONObject(i); kept.add(p); }
             write(c, kept);
             JSONArray out = new JSONArray(); for (JSONObject p : kept) out.put(p);
             return new JSONObject().put("v", 1).put("pages", out);

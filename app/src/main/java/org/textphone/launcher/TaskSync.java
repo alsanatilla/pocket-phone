@@ -76,13 +76,13 @@ final class TaskSync {
                 JSONObject source = new JSONObject().put("kind", e.source.kind).put("name", e.source.name).put("text", e.source.text);
                 PlannerStore.Entry note = store.find(e.source.note);
                 if ("note".equals(e.source.kind) && note != null && "note".equals(note.kind)) source.put("note_uid", NoteSync.uid(store, note.id));
-                task.put("source", source);
+                source.put("token",e.source.token); task.put("source", source);
             }
             out.put(task);
         }
         JSONObject markers = new JSONObject(p.getString("task_tombstones", "{}")), kept = new JSONObject(); long now = System.currentTimeMillis();
         for (Iterator<String> it = markers.keys(); it.hasNext();) {
-            String uid = it.next(); long updated = markers.getLong(uid); if (now - updated > KEEP_DELETED) continue;
+            String uid = it.next(); long updated = markers.getLong(uid);
             kept.put(uid, updated); out.put(new JSONObject().put("uid", uid).put("updated", updated).put("deleted", true));
         }
         p.edit().putString("task_tombstones", kept.toString()).apply(); return out;
@@ -115,7 +115,7 @@ final class TaskSync {
         if (value == null) return null;
         PlannerStore.Entry note = NoteSync.byUid(store, value.optString("note_uid"));
         return TaskSource.read(new JSONObject().put("kind", value.optString("kind")).put("name", value.optString("name"))
-                .put("text", value.optString("text")).put("note", note == null ? 0 : note.id));
+                .put("text", value.optString("text")).put("token",value.optString("token")).put("note", note == null ? 0 : note.id));
     }
     private TaskSync() { }
 }

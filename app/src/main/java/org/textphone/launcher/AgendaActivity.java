@@ -18,7 +18,7 @@ import android.view.View;
 import java.util.Calendar;
 
 public final class AgendaActivity extends PocketActivity {
-    private boolean editing; private int generation;
+    private boolean editing, direct; private int generation;
     private Calendar selected; private EditText title; private CheckBox remind; private int durationMinutes = 60;
     private Button saveControl;
     private boolean showPast;
@@ -34,41 +34,33 @@ public final class AgendaActivity extends PocketActivity {
         else if (state == null && getIntent().hasExtra("title")) { AgendaStore.Event e = new AgendaStore.Event(); e.title = getIntent().getStringExtra("title"); e.task = getIntent().getLongExtra("task", 0); e.when = System.currentTimeMillis() + 3600000; editor(e); }
         else if(state == null && getIntent().getLongExtra("appointment_id",0)>0){AgendaStore.Event e=AgendaStore.find(this,getIntent().getLongExtra("appointment_id",0));if(e!=null)editor(e);else listing();}
         else listing();
+        // Opened straight into one appointment from elsewhere: Back returns there instead of to the timeline.
+        direct = state != null ? state.getBoolean("direct") : editing;
         if(getIntent().getBooleanExtra("app_settings",false))ui.post(this::agendaSettings);
     }
     private AgendaStore.Event current;
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); if (intent.hasExtra("title")) {
         AgendaStore.Event event = new AgendaStore.Event(); event.title = intent.getStringExtra("title"); event.task = intent.getLongExtra("task", 0); event.when = System.currentTimeMillis() + 3600000; editor(event);
-    } else if(intent.getLongExtra("appointment_id",0)>0){AgendaStore.Event event=AgendaStore.find(this,intent.getLongExtra("appointment_id",0));if(event!=null)editor(event);else listing();}else if (!editing) listing();if(intent.getBooleanExtra("app_settings",false))agendaSettings(); }
+    } else if(intent.getLongExtra("appointment_id",0)>0){AgendaStore.Event event=AgendaStore.find(this,intent.getLongExtra("appointment_id",0));if(event!=null)editor(event);else listing();}else if (!editing) listing();if(intent.hasExtra("title")||intent.getLongExtra("appointment_id",0)>0)direct=editing;if(intent.getBooleanExtra("app_settings",false))agendaSettings(); }
     private String formatted() { return java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(selected.getTime()); }
-    private void listing() { editing = false; title=null;generation++; screen("Agenda");android.widget.TextView heading=root.findViewWithTag("page_heading");heading.setTypeface(android.graphics.Typeface.MONOSPACE,android.graphics.Typeface.BOLD);heading.setTextSize(PocketDesign.typeSize(this,14));
+    private void listing() { editing = false; direct = false; title=null;generation++; screen("agenda");
         AgendaDraft.Value storedDraft=AgendaDraft.read(this);
         if(storedDraft!=null&&storedDraft.event.id!=0){AgendaStore.Event saved=AgendaStore.find(this,storedDraft.event.id);
             if(saved!=null&&saved.title.equals(storedDraft.event.title.trim())&&saved.when/60000==storedDraft.event.when/60000&&saved.minutes==storedDraft.event.minutes&&(saved.alarm!=0)==storedDraft.remind){AgendaDraft.clear(this,storedDraft.event.id);storedDraft=null;}}
         final AgendaDraft.Value draft=storedDraft;
-        LinearLayout filters=keys(new String[]{"Upcoming","Past"},()->{showPast=false;listing();},()->{showPast=true;listing();});filters.getChildAt(showPast?1:0).setSelected(true);filters.setTag("agenda_filters");body.removeView(filters);root.addView(filters,1,new LinearLayout.LayoutParams(-1,-2));
+        LinearLayout filters=tabs(new String[]{"upcoming","past"},showPast?1:0,()->{showPast=false;listing();},()->{showPast=true;listing();});filters.setTag("agenda_filters");body.removeView(filters);root.addView(filters,1,new LinearLayout.LayoutParams(-1,-2));
         LinearLayout timeline=new LinearLayout(this);timeline.setOrientation(LinearLayout.VERTICAL);timeline.setTag("agenda_timeline");body.addView(timeline,new LinearLayout.LayoutParams(-1,-2));
         java.util.List<AgendaStore.Event> events=AgendaStore.list(this);java.util.List<Row> rows=new java.util.ArrayList<>();
-        for(AgendaStore.Event e:events)rows.add(new Row(e.when,e.end(),e.title,(e.alarm!=0?"Reminder · ":"")+(e.syncPending?"Calendar sync pending":e.google!=0?"Google Calendar":"Local"),e.id,false,()->editor(e)));
+        for(AgendaStore.Event e:events)rows.add(new Row(e.when,e.end(),e.title,(e.alarm!=0?"Reminder · ":"")+"Pocket calendar",e.id,false,()->editor(e)));
         renderTimeline(timeline,rows);
         appSettings(this::agendaSettings);
-        LinearLayout actions=row();actions.setTag("agenda_actions");
-        android.widget.Button add=button("+ appointment",this::newAppointment);add.setMinHeight(dp(56));actions.addView(add,new LinearLayout.LayoutParams(0,-2,1));
-        if(draft!=null){android.widget.Button resume=button("Continue draft",()->{editor(draft.event);remind.setChecked(draft.remind);});resume.setMinHeight(dp(56));resume.setTag("agenda_continue_draft");resume.setContentDescription("Continue draft · "+(draft.event.title.isEmpty()?"Untitled":draft.event.title));actions.addView(resume,new LinearLayout.LayoutParams(0,-2,1));}
-        root.addView(actions,new LinearLayout.LayoutParams(-1,-2));
-        if (CalendarBridge.selected(this) != 0 && permitted(Manifest.permission.READ_CALENDAR)) { int currentPage = generation;
-            loadPage(() -> CalendarBridge.timeline(this,showPast), external -> { if (editing || generation != currentPage) return;
-                for (CalendarBridge.Event e : external) { AgendaStore.Event own=null;for(AgendaStore.Event local:events)if(local.google==e.id)own=local;
-                    long begin=e.allDay?CalendarBridge.localAllDay(e.begin):e.begin,end=e.allDay?CalendarBridge.localAllDay(e.end):e.end;
-                    if(own==null)rows.add(new Row(begin,end,e.title,"Google Calendar",-e.id,e.allDay,()->showCalendarEvent(e)));
-                    else if(!own.syncPending&&(own.when!=e.begin||own.end()!=e.end||e.allDay||!own.title.equals(e.title))){final long localId=own.id;for(int i=rows.size()-1;i>=0;i--)if(rows.get(i).id==localId)rows.remove(i);
-                        rows.add(new Row(begin,end,e.title,"Changed in calendar",-e.id,e.allDay,()->showCalendarEvent(e)));} }
-                renderTimeline(timeline,rows);
-            });
-        }
+        LinearLayout actions=draft==null?softKeys(new String[]{"+ appointment"},0,this::newAppointment)
+                :softKeys(new String[]{"+ appointment","continue draft"},0,this::newAppointment,()->{editor(draft.event);remind.setChecked(draft.remind);});
+        actions.setTag("agenda_actions");
+        if(draft!=null){View resume=actions.getChildAt(1);resume.setTag("agenda_continue_draft");resume.setContentDescription("Continue draft · "+(draft.event.title.isEmpty()?"Untitled":draft.event.title));}
     }
     private void newAppointment(){AgendaDraft.Value draft=AgendaDraft.read(this);if(draft!=null&&draft.event.id==0){editor(draft.event);remind.setChecked(draft.remind);return;}AgendaStore.Event event=new AgendaStore.Event();event.when=System.currentTimeMillis()+3600000;event.title="";editor(event);}
-    private void agendaSettings(){new android.app.AlertDialog.Builder(this).setTitle("Agenda settings").setItems(new String[]{CalendarBridge.selected(this)==0?"Connect Google Calendar":"Google Calendar options"},(dialog,index)->permissions(this::googleOptions,Manifest.permission.READ_CALENDAR,Manifest.permission.WRITE_CALENDAR)).setNegativeButton("Close",null).show();}
+    private void agendaSettings(){new android.app.AlertDialog.Builder(this).setTitle("Pocket calendar").setMessage("Appointments save on this device first. Connect your other devices in Storage & devices.").setPositiveButton("Storage & devices",(dialog,index)->startActivity(new Intent(this,CloudActivity.class))).setNegativeButton("Close",null).show();}
     private void renderTimeline(LinearLayout target,java.util.List<Row> rows) {
         target.removeAllViews();java.util.Collections.sort(rows,(a,b)->showPast?Long.compare(b.when,a.when):Long.compare(a.when,b.when));
         Calendar midnight=Calendar.getInstance();midnight.set(Calendar.HOUR_OF_DAY,0);midnight.set(Calendar.MINUTE,0);midnight.set(Calendar.SECOND,0);midnight.set(Calendar.MILLISECOND,0);
@@ -76,7 +68,7 @@ public final class AgendaActivity extends PocketActivity {
         String day="";int count=0;for(Row entry:rows){if(showPast?entry.end>today:entry.end<=today)continue;count++;
             String date=new java.text.SimpleDateFormat("EEE d MMM yyyy",java.util.Locale.getDefault()).format(new java.util.Date(entry.when));
             String key=entry.when>=today&&entry.when<tomorrow?"Today · "+date:entry.when>=tomorrow&&entry.when<afterTomorrow?"Tomorrow · "+date:date;
-            if(!key.equals(day)){TextView group=label(key,12,WHITE);group.setTypeface(android.graphics.Typeface.MONOSPACE,android.graphics.Typeface.BOLD);group.setPadding(0,dp(day.isEmpty()?4:16),0,dp(4));if(Build.VERSION.SDK_INT>=28)group.setAccessibilityHeading(true);target.addView(group);day=key;}
+            if(!key.equals(day)){TextView group=label(key,12,WHITE);PocketDesign.section(group,day.isEmpty());target.addView(group);day=key;}
             LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.TOP);LinearLayout time=new LinearLayout(this);time.setOrientation(LinearLayout.VERTICAL);time.setPadding(0,dp(12),dp(12),dp(12));
             boolean use24=getSharedPreferences("text_phone",0).getBoolean("twenty_four_hour",android.text.format.DateFormat.is24HourFormat(this));
             time.addView(ReadableRows.text(this,entry.allDay?"All day":new java.text.SimpleDateFormat(use24?"HH:mm":"h:mm",java.util.Locale.getDefault()).format(new java.util.Date(entry.when)),entry.allDay?12:18,WHITE));
@@ -91,22 +83,7 @@ public final class AgendaActivity extends PocketActivity {
         }
         if(count==0)target.addView(label(showPast?"No past appointments":"No upcoming appointments",16,GRAY));
     }
-    private void showCalendarEvent(CalendarBridge.Event e) {
-        editing=true;current=null;title=null;generation++;screen("Calendar event");body.addView(label(e.title,22,WHITE));body.addView(label(e.allDay?"All day · "+java.text.DateFormat.getDateInstance().format(new java.util.Date(CalendarBridge.localAllDay(e.begin))):java.text.DateFormat.getDateTimeInstance().format(new java.util.Date(e.begin))+"\nUntil "+java.text.DateFormat.getDateTimeInstance().format(new java.util.Date(e.end)),16,GRAY));
-        action("Open in calendar",()->startActivity(new Intent(Intent.ACTION_VIEW,android.content.ContentUris.withAppendedId(android.provider.CalendarContract.Events.CONTENT_URI,e.id))));
-        Button add=action("add to tasks",()->{});add.setOnClickListener(v->{try{new PlannerStore(getSharedPreferences("pocket_planner",0)).save(0,"task",e.title);add.setEnabled(false);message("Task added.");}catch(IllegalArgumentException|IllegalStateException error){message(error.getMessage());}});
-    }
-    private void googleOptions() { loadPage(() -> CalendarBridge.calendars(this), calendars -> {
-        if (calendars.isEmpty()) { message("No writable Google calendar on this phone. Enable account calendar sync in Android settings."); return; }
-        String[] options = new String[calendars.size() + 2]; for (int i = 0; i < calendars.size(); i++) options[i] = calendars.get(i).name;
-        options[calendars.size()] = "Sync Pocket appointments"; options[calendars.size() + 1] = "Disconnect";
-        new android.app.AlertDialog.Builder(this).setTitle("Google Calendar").setItems(options, (d,i) -> {
-            if (i < calendars.size()) { getSharedPreferences("pocket_agenda", 0).edit().putLong("google_calendar", calendars.get(i).id).apply(); listing(); }
-            else if (i == calendars.size()) loadPage(() -> { boolean all = true; for (AgendaStore.Event e : AgendaStore.list(this)) all &= AgendaSync.sync(this, e); return all; }, done -> { listing(); message(done ? "Saved to the phone's Google calendar. Android handles sync." : "Some appointments are still pending."); });
-            else { getSharedPreferences("pocket_agenda", 0).edit().remove("google_calendar").apply(); listing(); }
-        }).setNegativeButton("Cancel", null).show();
-    }); }
-    private void editor(AgendaStore.Event e) { editing = true; generation++; current = e.copy(); durationMinutes=e.minutes; screen("Appointment", "appointment:"+e.id); selected = Calendar.getInstance(); selected.setTimeInMillis(e.when); selected.set(Calendar.SECOND, 0); selected.set(Calendar.MILLISECOND, 0);
+    private void editor(AgendaStore.Event e) { editing = true; generation++; current = e.copy(); durationMinutes=e.minutes; screen("appointment", "appointment:"+e.id); selected = Calendar.getInstance(); selected.setTimeInMillis(e.when); selected.set(Calendar.SECOND, 0); selected.set(Calendar.MILLISECOND, 0);
         title = input("Title", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES); title.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(500)}); title.setText(e.title); title.setTag("appointment_title");
         Button date = action(formatted(), () -> new DatePickerDialog(this, (p, y, m, d) -> {
             selected.set(Calendar.YEAR, y); selected.set(Calendar.MONTH, m); selected.set(Calendar.DAY_OF_MONTH, d); updateDate();
@@ -117,7 +94,7 @@ public final class AgendaActivity extends PocketActivity {
         saveControl = action("save", this::save);
         PocketDesign.primary(saveControl);
         if (e.task != 0) action("open tasks", () -> startActivity(new Intent(this, OrganizerActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("pocket_task",e.task)));
-        if (e.id != 0) action("delete", () -> confirm(e.google == 0 ? "Delete this appointment?" : "Delete here and from Google Calendar?", () -> load(() -> {
+        if (e.id != 0) action("delete", () -> confirm("Delete this appointment?", () -> load(() -> {
             AgendaSync.delete(this, e.id);AgendaDraft.clear(this,e.id);return true;
         }, ignored -> listing())));
     }
@@ -137,7 +114,7 @@ public final class AgendaActivity extends PocketActivity {
         if (!saveControl.isEnabled()) return;
         if (current.id == 0) current.id = AgendaStore.reserveId(this);
         AgendaStore.Event snapshot = current.copy(); snapshot.title = value; snapshot.when = selected.getTimeInMillis(); snapshot.minutes=durationMinutes;
-        boolean reminder = remind.isChecked(); snapshot.syncPending = CalendarBridge.selected(this) != 0;
+        boolean reminder = remind.isChecked(); snapshot.syncPending = false;
         android.content.Context application = getApplicationContext();
         loadAction(saveControl, () -> {
             synchronized (AgendaStore.class) {
@@ -154,14 +131,14 @@ public final class AgendaActivity extends PocketActivity {
                 throw failure;
             }
             if (!reminder && previous != null) { ClockStore.delete(application, previous.id); AlarmScheduler.cancel(application, previous.id); }
-            if (snapshot.syncPending) AgendaSync.enqueue(application, snapshot);
+            CloudSync.changed(application);
             return snapshot;
             }
         }, saved -> {
             current = saved;
             if (value.equals(title.getText().toString().trim()) && saved.when == selected.getTimeInMillis() && saved.minutes==durationMinutes && reminder == remind.isChecked()) {
                 AgendaDraft.clear(this,saved.id);AgendaDraft.clear(this,0);
-                listing(); message(saved.syncPending ? "Saved locally. Calendar write queued; use Sync Pocket appointments if it stays pending." : "Saved.");
+                if(direct)finish();else{listing();message("Saved.");}
             } else message("Saved the tapped version. Your newer edits are still here.");
         });
     }
@@ -171,9 +148,9 @@ public final class AgendaActivity extends PocketActivity {
         AgendaStore.Event draft=current.copy();draft.title=text;draft.when=selected.getTimeInMillis();draft.minutes=durationMinutes;AgendaDraft.save(this,draft,remind.isChecked());}
     @Override protected void onResume(){super.onResume();if(!editing)listing();}
     @Override protected void onPause(){keepDraft();super.onPause();}
-    @Override protected void onSaveInstanceState(Bundle out) {out.putBoolean("show_past",showPast); out.putBoolean("editing", editing && current != null && title != null); if (editing && current != null && title != null) { out.putLong("id", current.id); out.putLong("task", current.task); out.putLong("alarm", current.alarm);
+    @Override protected void onSaveInstanceState(Bundle out) {out.putBoolean("show_past",showPast); out.putBoolean("direct", direct); out.putBoolean("editing", editing && current != null && title != null); if (editing && current != null && title != null) { out.putLong("id", current.id); out.putLong("task", current.task); out.putLong("alarm", current.alarm);
         out.putLong("google", current.google); out.putLong("calendar", current.calendar);
         out.putLong("when", selected.getTimeInMillis()); out.putInt("minutes",durationMinutes); out.putString("title", title.getText().toString()); out.putBoolean("remind", remind.isChecked()); } super.onSaveInstanceState(out); }
-    @Override protected boolean hasInternalBack() { return editing; }
-    @Override public void onBackPressed() { if (editing) {keepDraft();back(this::listing);} else super.onBackPressed(); }
+    @Override protected boolean hasInternalBack() { return editing && !direct; }
+    @Override public void onBackPressed() { if (editing) keepDraft(); if (editing && !direct) back(this::listing); else super.onBackPressed(); }
 }

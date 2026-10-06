@@ -22,9 +22,13 @@ import android.text.style.RelativeSizeSpan;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
-/** Pocket's shared native visual language. No custom gesture or navigation layer. */
+/**
+ * Pocket's shared native visual language. No custom gesture or navigation layer.
+ * Header, section, row, tab, item command and soft key are the only chrome patterns; see DESIGN.md.
+ */
 final class PocketDesign {
     static final int BLACK = Color.BLACK, WHITE = Color.WHITE;
     static final int LINE = 0xFF303438, MUTED = 0xFFAAAAAA;
@@ -114,6 +118,73 @@ final class PocketDesign {
     static Drawable tile(Context c, boolean selected) {
         int accent = accent(c); return new RippleDrawable(ColorStateList.valueOf(selected ? 0x22000000 : 0x33FFFFFF),
                 shape(c, selected ? accent : BLACK, Color.TRANSPARENT), shape(c, WHITE, Color.TRANSPARENT));
+    }
+
+    // ── Shared components. Every app builds its chrome from these, so pages scan the same way. ──
+
+    /** Page title: centered pixel type. Titles and other chrome are lowercase; content keeps its own case. */
+    static void title(TextView view) {
+        text(view, SECTION, WHITE); view.setTypeface(PocketFonts.pixel(view.getContext()));
+        view.setGravity(Gravity.CENTER); view.setMaxLines(1); view.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        if (Build.VERSION.SDK_INT >= 28) view.setAccessibilityHeading(true);
+    }
+    /** Section label: small bold uppercase in the supporting colour, with the larger gap above it. */
+    static void section(TextView view, boolean first) {
+        Context c = view.getContext(); text(view, META, MUTED); view.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        view.setAllCaps(true); view.setLetterSpacing(.08f); view.setPadding(0, dp(c, first ? 8 : 24), 0, dp(c, 8));
+        if (Build.VERSION.SDK_INT >= 28) view.setAccessibilityHeading(true);
+    }
+    /** Bottom soft key. Like a keypad phone: the first key sits left, the last right, any middle key centered. */
+    static void softKey(TextView view, int index, int count, boolean primary) {
+        Context c = view.getContext(); text(view, SMALL, WHITE); quiet(view, primary ? accent(c) : WHITE);
+        view.setMinHeight(dp(c, ROW)); view.setMinimumHeight(dp(c, ROW)); view.setPadding(dp(c, 8), dp(c, 12), dp(c, 8), dp(c, 12));
+        int horizontal = count > 1 && index == 0 ? Gravity.START : count > 1 && index == count - 1 ? Gravity.END : Gravity.CENTER_HORIZONTAL;
+        view.setGravity(horizontal | Gravity.CENTER_VERTICAL); view.setMaxLines(1); view.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    }
+    /** Soft keys share the width equally; the outer keys' text lines up with the page edges. */
+    static LinearLayout.LayoutParams softKeyCell(Context c, int index, int count) {
+        LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(0, -2, 1);
+        if (count > 1 && index == 0) cell.leftMargin = -dp(c, 8);
+        if (count > 1 && index == count - 1) cell.rightMargin = -dp(c, 8);
+        return cell;
+    }
+    /** View switch inside a page: muted labels, the selected one in accent above a short accent bar. */
+    static void tab(TextView view, boolean selected) {
+        Context c = view.getContext(); text(view, SMALL, WHITE); view.setGravity(Gravity.CENTER);
+        view.setMinHeight(dp(c, HEADER)); view.setMinimumHeight(dp(c, HEADER)); view.setPadding(dp(c, 4), dp(c, 8), dp(c, 4), dp(c, 8));
+        view.setTextColor(new ColorStateList(new int[][]{{-android.R.attr.state_enabled}, {android.R.attr.state_selected}, {}},
+                new int[]{DISABLED, accent(c), MUTED}));
+        view.setTypeface(Typeface.MONOSPACE, selected ? Typeface.BOLD : Typeface.NORMAL);
+        StateListDrawable states = new StateListDrawable();
+        states.addState(new int[]{android.R.attr.state_selected}, new Bar(c, accent(c), 2));
+        states.addState(new int[]{android.R.attr.state_focused}, new Bar(c, WHITE, 1));
+        states.addState(new int[]{}, shape(c, BLACK, Color.TRANSPARENT));
+        view.setBackground(new RippleDrawable(ColorStateList.valueOf((accent(c) & 0x00FFFFFF) | 0x33000000), states, shape(c, WHITE, Color.TRANSPARENT)));
+        view.setStateListAnimator(null); view.setAllCaps(false); view.setFocusable(true); view.setSelected(selected);
+    }
+    /** Commands that belong to one item: compact text buttons whose first label lines up with the item text. */
+    static void command(TextView view, boolean primary) {
+        Context c = view.getContext(); text(view, SMALL, WHITE); quiet(view, primary ? accent(c) : WHITE);
+        // Commands act on content (reply, delete, complete), so they keep the full 56 dp row height.
+        view.setMinWidth(dp(c, ROW)); view.setMinimumWidth(dp(c, ROW)); view.setMinHeight(dp(c, ROW)); view.setMinimumHeight(dp(c, ROW));
+        view.setPadding(dp(c, 8), dp(c, 8), dp(c, 8), dp(c, 8)); view.setGravity(Gravity.CENTER); view.setMaxLines(1);
+    }
+    static LinearLayout.LayoutParams commandCell(Context c, boolean first) {
+        LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(-2, -2); cell.leftMargin = first ? -dp(c, 8) : dp(c, 8); return cell;
+    }
+    /** Three-column rows on Home (readings, quick actions and tiles) share these cells, so their centres line up. */
+    static LinearLayout.LayoutParams column(Context c) {
+        LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(0, -2, 1); cell.leftMargin = cell.rightMargin = dp(c, 4); return cell;
+    }
+    /** An accent bar along the bottom edge: the selected tab. */
+    private static final class Bar extends Drawable {
+        private final Paint paint = new Paint(); private final int height, inset; private int alpha = 255;
+        Bar(Context c, int color, int dp) { paint.setColor(color); height = Math.max(1, dp(c, dp)); inset = dp(c, 12); }
+        public void draw(Canvas canvas) { paint.setAlpha(alpha); android.graphics.Rect b = getBounds(); int side = Math.min(inset, b.width() / 4);
+            canvas.drawRect(b.left + side, b.bottom - height, b.right - side, b.bottom, paint); }
+        public void setAlpha(int value) { alpha = value; invalidateSelf(); }
+        public void setColorFilter(ColorFilter filter) { paint.setColorFilter(filter); invalidateSelf(); }
+        @SuppressWarnings("deprecation") public int getOpacity() { return PixelFormat.TRANSLUCENT; }
     }
     /** A single active focus/selection mark; never used as an idle decorative divider. */
     private static final class Rule extends Drawable {

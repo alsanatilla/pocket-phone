@@ -72,11 +72,7 @@ final class PocketChatTools {
                         + "The truncated field indicates missing text. Drafts and tasks are excluded.",
                         schema(json("id", id), new JSONArray().put("id"))));
             }
-            if (enabled(context, THOUGHTS))
-                result.add(new Definition("search_thoughts", "Search open parked thoughts, newest first. "
-                        + "All query words must match. Closed thoughts are excluded; an empty query lists recent open thoughts.",
-                        schema(json("query", stringProperty("Words to find; empty lists recent thoughts.", 200),
-                                "limit", integerProperty("Maximum matching thoughts to return.", 1, 8, 8)), new JSONArray())));
+            // Parked thoughts became tasks (0.5.21). Tasks stay outside chat access, so no thoughts tool is offered.
             if (enabled(context, COROS))
                 result.add(new Definition("coros_summary", "Read COROS data already cached on this phone for the last 1–30 calendar days "
                         + "(default 7). Includes recent activities, daily HRV, resting heart rate, sleep and steps when available. "

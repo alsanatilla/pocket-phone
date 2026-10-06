@@ -48,7 +48,7 @@ public class OrganizerActivityTest {
     }
     @Test public void noteWritingAreaGrowsWithTheWindowWithoutLosingTheDraftOrSelection() {
         ActivityController<MainActivity> controller=today(); try {
-            MainActivity activity=controller.get(); click(activity,"Note"); PageMotion motion=ReflectionHelpers.getField(activity,"motion"); motion.settle();
+            MainActivity activity=controller.get(); click(activity,"+ note"); PageMotion motion=ReflectionHelpers.getField(activity,"motion"); motion.settle();
             EditText editor=root(activity).findViewWithTag("capture_editor"); editor.setText("# Travel\n- Train"); editor.setSelection(4);
             layout(motion.host(),360,720); int firstHeight=editor.getHeight();
             View actions=motion.host().findViewWithTag("note_actions"); ScrollView viewport=(ScrollView)motion.host().getChildAt(0);
@@ -61,7 +61,7 @@ public class OrganizerActivityTest {
     }
     @Test public void noteControlsRemainReachableInAShortWindow() {
         ActivityController<MainActivity> controller=today(); try {
-            MainActivity activity=controller.get(); click(activity,"Note"); PageMotion motion=ReflectionHelpers.getField(activity,"motion"); motion.settle();
+            MainActivity activity=controller.get(); click(activity,"+ note"); PageMotion motion=ReflectionHelpers.getField(activity,"motion"); motion.settle();
             EditText editor=root(activity).findViewWithTag("capture_editor"); editor.setText("Draft while the keyboard is open"); editor.setSelection(8);
             layout(motion.host(),360,220); ScrollView viewport=(ScrollView)motion.host().getChildAt(0);
             assertTrue(editor.getHeight()>0); assertTrue(viewport.getChildAt(0).getHeight()>viewport.getHeight());
@@ -81,17 +81,19 @@ public class OrganizerActivityTest {
             AlertDialog dialog=ShadowAlertDialog.getLatestAlertDialog(); dialog.getListView().performItemClick(null,0,0);
             click(activity,"save"); PlannerStore.Entry task=store().entries().get(0);
             assertEquals(PlannerDates.today(),task.due); assertTrue(task.important); assertEquals(1,task.completedSteps());
+            // Saving a new task returns to Today (0.5.21); its details open from the list.
+            assertEquals("task_detail",ReflectionHelpers.getField(activity,"screen"));assertEquals(task.id,(long)ReflectionHelpers.getField(activity,"captureId"));
             assertNotNull(PocketAppsTest.find(root(activity),"Steps · 1/2")); root(activity).findViewWithTag("task_step_0").performClick();
             assertEquals(2,store().find(task.id).completedSteps()); assertFalse(store().find(task.id).done);
             click(activity,"Complete task"); assertTrue(store().find(task.id).done); assertEquals(2,store().find(task.id).completedSteps());
-            activity.onBackPressed(); root(activity).findViewWithTag("task_filter_Done").performClick();
+            activity.onBackPressed();root(activity).findViewWithTag("workspace_tab_tasks").performClick(); root(activity).findViewWithTag("task_filter_Done").performClick();
             root(activity).findViewWithTag("task_open_"+task.id).performClick(); assertTrue(store().find(task.id).done);
             click(activity,"Reopen task"); assertFalse(store().find(task.id).done); assertTrue(store().find(task.id).important);
         } finally { controller.pause().stop().destroy(); }
     }
     @Test public void clearingANoteThroughFormatNeedsConfirmationAndPreservesItsSavedEntry() {
         long id=store().save(0,"note","Saved note"); ActivityController<MainActivity> controller=today();
-        try { MainActivity activity=controller.get(); click(activity,"Saved note");
+        try { MainActivity activity=controller.get();root(activity).findViewWithTag("workspace_tab_notes").performClick(); click(activity,"Saved note");click(activity,"Edit");
             EditText editor=root(activity).findViewWithTag("capture_editor"); editor.setText("A newer draft");
             chooseFormat(activity,"Clear draft"); AlertDialog confirmation=ShadowAlertDialog.getLatestAlertDialog();
             assertEquals("A newer draft",editor.getText().toString());
@@ -108,11 +110,11 @@ public class OrganizerActivityTest {
     @Test public void filtersAndSearchFindRealTaskAndNoteTextIncludingSteps() {
         PlannerStore store=store(); long due=store.saveTask(0,"Due task",PlannerDates.today(),false,"Passport");
         long later=store.saveTask(0,"Later task","9999-01-01",true,""); long anytime=store.save(0,"task","Anytime task"); store.save(0,"note","# Travel note\nPlatform 4");
-        ActivityController<MainActivity> controller=today();try { MainActivity activity=controller.get();root(activity).findViewWithTag("task_filter_Today").performClick();
+        ActivityController<MainActivity> controller=today();try { MainActivity activity=controller.get();root(activity).findViewWithTag("workspace_tab_tasks").performClick();root(activity).findViewWithTag("task_filter_Today").performClick();
             assertNotNull(root(activity).findViewWithTag("task_open_"+due)); assertNull(root(activity).findViewWithTag("task_open_"+later));assertNull(root(activity).findViewWithTag("task_open_"+anytime));
             root(activity).findViewWithTag("task_filter_Later").performClick();assertNotNull(root(activity).findViewWithTag("task_open_"+later));assertNull(root(activity).findViewWithTag("task_open_"+due));
             root(activity).findViewWithTag("task_filter_Open").performClick(); OrganizerSearchTestActions.find(activity,"passport");
-            assertNotNull(root(activity).findViewWithTag("task_open_"+due));assertNull(root(activity).findViewWithTag("task_open_"+anytime));
+            assertNotNull(root(activity).findViewWithTag("search_entry_"+due));assertNull(root(activity).findViewWithTag("search_entry_"+anytime));
             OrganizerSearchTestActions.find(activity,"platform");assertNotNull(CameraAlbumTest.findContaining(root(activity),"Travel note"));
         } finally { controller.pause().stop().destroy(); }
     }
@@ -124,12 +126,12 @@ public class OrganizerActivityTest {
         Bundle state=new Bundle();first.pause().saveInstanceState(state).stop().destroy();
         ActivityController<MainActivity> second=Robolectric.buildActivity(MainActivity.class).create(state).start().restoreInstanceState(state).resume().visible();
         try { activity=second.get();assertEquals("Unsaved title",((EditText)root(activity).findViewWithTag("capture_editor")).getText().toString());
-            assertEquals("Unsaved step",((EditText)root(activity).findViewWithTag("task_steps_editor")).getText().toString());assertNotNull(PocketAppsTest.find(root(activity),"! Important · on"));
+            assertEquals("Unsaved step",((EditText)root(activity).findViewWithTag("task_steps_editor")).getText().toString());assertNotNull(PocketAppsTest.find(root(activity),"important · on"));
             assertEquals("Saved",store().find(id).text);assertFalse(store().find(id).important);click(activity,"save");assertEquals("Unsaved title",store().find(id).text);
         } finally { second.pause().stop().destroy(); }
     }
     @Test public void wheelProducesPortableMarkdownAndMarkwonPreviewsItWithoutChangingTheDraft() {
-        ActivityController<MainActivity> controller=today();try { MainActivity activity=controller.get();click(activity,"Note");
+        ActivityController<MainActivity> controller=today();try { MainActivity activity=controller.get();click(activity,"+ note");
             MarkdownEditor editor=(MarkdownEditor)root(activity).findViewWithTag("capture_editor");editor.setText("Trip\nTrain");editor.setSelection(4);
             chooseWheel(activity,"heading");assertEquals("# Trip\nTrain",editor.getText().toString());
             chooseWheel(activity,"heading");assertEquals("## Trip\nTrain",editor.getText().toString());

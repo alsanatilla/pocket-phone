@@ -29,10 +29,10 @@ public final class JournalActivity extends PocketActivity {
 
     private void render() {
         screen("journal"); appSettings(this::settings);
-        keys(new String[]{"photo", "import"}, this::photo, this::importPhoto).setTag("journal_add");
-        if (!ClaudeKey.present(this)) body.addView(label("Add your Claude API key in Settings to read pages. Photos are kept and read once a key is set.", PocketDesign.SMALL, PocketDesign.WARNING));
+        softKeys(new String[]{"photo", "import"}, 0, this::photo, this::importPhoto).setTag("journal_add");
+        if (!ClaudeKey.present(this)) action("set API key", this::enterKey);
         List<JSONObject> pages = JournalStore.visible(this);
-        if (pages.isEmpty()) { body.addView(label("No pages yet. Photograph a journal page: Pocket keeps the photo and turns it into a note.", PocketDesign.SMALL, GRAY)); return; }
+        if (pages.isEmpty()) { body.addView(label("No pages yet.", PocketDesign.SMALL, GRAY)); return; }
         body.addView(label("PAGES [" + pages.size() + "]", PocketDesign.META, GRAY));
         for (JSONObject page : pages) {
             String uid = page.optString("uid");

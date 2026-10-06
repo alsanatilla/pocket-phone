@@ -15,7 +15,7 @@ public final class DeviceSettingsActivity extends PocketActivity {
     @Override protected void onCreate(Bundle state) { super.onCreate(state); screen("device settings");
         action("Wi-Fi / mobile data", () -> startActivity(new Intent(Build.VERSION.SDK_INT >= 29 ? Settings.Panel.ACTION_INTERNET_CONNECTIVITY : Settings.ACTION_WIRELESS_SETTINGS)));
         action("Bluetooth", () -> startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)));
-        action("Permissions", () -> startActivity(new Intent(this, PermissionsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
+        action("permissions", () -> startActivity(new Intent(this, PermissionsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
         body.addView(label("Brightness", 17, WHITE)); SeekBar brightness = new SeekBar(this); brightness.setMax(255); brightness.setMinimumHeight(dp(PocketDesign.CONTROL));
         brightness.setProgress(Settings.System.getInt(getContentResolver(), Settings.System.SCREEN_BRIGHTNESS, 128)); body.addView(brightness);
         brightness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -30,17 +30,17 @@ public final class DeviceSettingsActivity extends PocketActivity {
         });
         AudioManager audio = getSystemService(AudioManager.class);
         if (audio != null) { volume("Ringtone", AudioManager.STREAM_RING, audio); volume("Media", AudioManager.STREAM_MUSIC, audio); volume("Alarms", AudioManager.STREAM_ALARM, audio); }
-        action("Do not disturb", () -> { NotificationManager manager = getSystemService(NotificationManager.class);
+        action("do not disturb", () -> { NotificationManager manager = getSystemService(NotificationManager.class);
             if (!manager.isNotificationPolicyAccessGranted()) startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS));
             else { manager.setInterruptionFilter(manager.getCurrentInterruptionFilter() == NotificationManager.INTERRUPTION_FILTER_ALL ? NotificationManager.INTERRUPTION_FILTER_PRIORITY : NotificationManager.INTERRUPTION_FILTER_ALL); message("Do not disturb changed."); }
         });
-        action("Default phone / SMS apps", () -> startActivity(new Intent(Build.VERSION.SDK_INT >= 24 ? Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS : Settings.ACTION_SETTINGS)));
-        action("Alarm permissions", () -> { if (Build.VERSION.SDK_INT >= 31) startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:" + getPackageName()))); else message("Exact alarms are available."); });
-        if (Build.VERSION.SDK_INT >= 34) action("Incoming call / alarm screen", () -> startActivity(new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:" + getPackageName()))));
-        if (Build.VERSION.SDK_INT >= 33) action("Allow Pocket alerts", () -> permissions(() -> message("Alerts enabled."), Manifest.permission.POST_NOTIFICATIONS));
-        action("Lock / security", () -> startActivity(new Intent(Settings.ACTION_SECURITY_SETTINGS)));
-        action("About Pocket", () -> message("Pocket 0.5.13 · local apps · Android system services"));
-        action("Open source licenses", this::licenses);
+        action("default phone / SMS apps", () -> startActivity(new Intent(Build.VERSION.SDK_INT >= 24 ? Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS : Settings.ACTION_SETTINGS)));
+        action("alarm permissions", () -> { if (Build.VERSION.SDK_INT >= 31) startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:" + getPackageName()))); else message("Exact alarms are available."); });
+        if (Build.VERSION.SDK_INT >= 34) action("incoming call / alarm screen", () -> startActivity(new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:" + getPackageName()))));
+        if (Build.VERSION.SDK_INT >= 33) action("allow Pocket alerts", () -> permissions(() -> message("Alerts enabled."), Manifest.permission.POST_NOTIFICATIONS));
+        action("lock / security", () -> startActivity(new Intent(Settings.ACTION_SECURITY_SETTINGS)));
+        action("about Pocket", () -> { String version; try { version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (android.content.pm.PackageManager.NameNotFoundException unavailable) { version = ""; } message("Pocket " + version + " · local apps · Android system services"); });
+        action("open source licenses", this::licenses);
     }
     private void licenses() {
         String[] names = {"Pocket · MIT", "VT323 · Open Font License", "Markwon · Apache 2.0", "commonmark-java · BSD", "AndroidX annotations · Apache 2.0", "Anthropic SDK · MIT", "Network dependency notices"};

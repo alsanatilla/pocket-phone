@@ -51,8 +51,8 @@ public final class DiceActivity extends PocketActivity implements SensorEventLis
 
     private void render() {
         screen("dice"); appSettings(this::settings);
-        LinearLayout modes = keys(new String[]{"dice", "d20", "coin", "pick"}, () -> mode("dice"), () -> mode("d20"), () -> mode("coin"), () -> mode("pick"));
-        for (int i = 0; i < MODES.length; i++) { modes.getChildAt(i).setSelected(MODES[i].equals(mode())); modes.getChildAt(i).setTag("dice_mode_" + MODES[i]); }
+        LinearLayout modes = tabs(new String[]{"dice", "d20", "coin", "pick"}, java.util.Arrays.asList(MODES).indexOf(mode()), () -> mode("dice"), () -> mode("d20"), () -> mode("coin"), () -> mode("pick"));
+        for (int i = 0; i < MODES.length; i++) modes.getChildAt(i).setTag("dice_mode_" + MODES[i]);
         result = label(prefs().getString("last_face", "?"), "pick".equals(mode()) ? PocketDesign.TITLE : PocketDesign.DISPLAY, WHITE);
         result.setTypeface(PocketFonts.pixel(this)); result.setGravity(Gravity.CENTER); result.setMinHeight(dp(140)); result.setMaxLines(3);
         result.setTag("dice_result"); body.addView(result, new LinearLayout.LayoutParams(-1, -2));

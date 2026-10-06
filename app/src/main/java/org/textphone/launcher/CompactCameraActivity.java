@@ -46,7 +46,8 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
     private FocusOverlay focus;
     private CameraEngine engine;
     private CameraEngine.Info info;
-    private CameraProfile profile;private LinearLayout cameraOptions;private AlertDialog cameraSettingsDialog;
+    private CameraProfile profile;private CameraFormat format;private LinearLayout cameraOptions;private AlertDialog cameraSettingsDialog;
+    private Button sizeButton, aspectButton, qualityButton;
     private SharedPreferences preferences;
     private TextView quality, iso, status, message, ev;
     private Button profileButton, switchButton, flashButton, minus, plus, shutter, allow, settings;
@@ -64,6 +65,7 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
         ACCENT = PocketDesign.accent(this);
         preferences = getSharedPreferences("pocket_camera", MODE_PRIVATE);
         profile = CameraProfile.fromName(preferences.getString("profile", CameraProfile.CYBER.name()));
+        format = CameraFormat.read(preferences);
         String last = preferences.getString("last_photo", null);
         if (last != null) lastPhoto = Uri.parse(last);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -159,24 +161,19 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
         root.addView(header);
 
         cameraOptions=new LinearLayout(this);cameraOptions.setOrientation(LinearLayout.VERTICAL);cameraOptions.setPadding(dp(16),dp(8),dp(16),dp(8));
-        LinearLayout selector = new LinearLayout(this); selector.setGravity(Gravity.CENTER_VERTICAL);
-        profileButton = button(profile.label + "  v", 16, this::chooseProfile);
-        profileButton.setTag("camera_profile"); profileButton.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        PocketDesign.quiet(profileButton, ACCENT);
-        selector.addView(profileButton, new LinearLayout.LayoutParams(0, dp(56), 1));
-        quality = text("JPEG", 11, SECONDARY); quality.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        selector.addView(quality, new LinearLayout.LayoutParams(-2, dp(48))); cameraOptions.addView(selector);
+        quality = text("", 14, SECONDARY); quality.setTag("camera_output"); quality.setMinHeight(dp(48)); quality.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        cameraOptions.addView(quality);
 
         FrameLayout finder = new FrameLayout(this); finder.setTag("camera_finder"); finder.setBackgroundColor(0xFF080808);
         preview = new CameraPreview(this); preview.setTag("camera_preview");
         preview.setContentDescription("Camera viewfinder. Tap to focus and meter exposure.");
         finder.addView(preview, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
-        focus = new FocusOverlay(this);
+        focus = new FocusOverlay(this); focus.frame(preview);
         finder.addView(focus, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
         preview.addOnLayoutChangeListener((view, l, t, r, b, oldL, oldT, oldR, oldB) -> {
             FrameLayout.LayoutParams layout = (FrameLayout.LayoutParams) focus.getLayoutParams();
             if (layout.width != r - l || layout.height != b - t) {
-                layout.width = r - l; layout.height = b - t; focus.setLayoutParams(layout);
+                layout.width = r - l; layout.height = b - t; focus.setLayoutParams(layout); focus.invalidate();
             }
         });
         preview.setOnTouchListener((view, event) -> {
@@ -206,6 +203,18 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
         LinearLayout.LayoutParams settingLayout = new LinearLayout.LayoutParams(dp(200), dp(52)); settingLayout.topMargin = dp(8); prompt.addView(settings, settingLayout);
         finder.addView(prompt, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
         root.addView(finder, new LinearLayout.LayoutParams(-1, 0, 1));
+        focus.aspect(format.aspect.ratio);
+
+        // The camera's menu on screen, like the old cameras' OSD: profile, image size, aspect and JPEG quality.
+        LinearLayout osd = new LinearLayout(this); osd.setTag("camera_osd"); osd.setGravity(Gravity.CENTER_VERTICAL);
+        profileButton = button(profile.label, 14, this::chooseProfile); profileButton.setTag("camera_profile");
+        sizeButton = button("", 14, this::chooseSize); sizeButton.setTag("camera_size");
+        aspectButton = button("", 14, this::chooseAspect); aspectButton.setTag("camera_aspect");
+        qualityButton = button("", 14, this::chooseQuality); qualityButton.setTag("camera_quality");
+        Button[] menu = {profileButton, sizeButton, aspectButton, qualityButton};
+        // 48 dp keeps the viewfinder large; these are settings, not commands on content.
+        for (int i = 0; i < menu.length; i++) { PocketDesign.command(menu[i], i == 0); menu[i].setMinHeight(dp(48)); menu[i].setMinimumHeight(dp(48)); menu[i].setMinWidth(dp(48)); menu[i].setMinimumWidth(dp(48)); osd.addView(menu[i], PocketDesign.commandCell(this, i == 0)); }
+        root.addView(osd, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout metadata = new LinearLayout(this); metadata.setGravity(Gravity.CENTER_VERTICAL);
         iso = text("ISO —", 11, SECONDARY);
@@ -217,7 +226,7 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
         metadata.addView(status, new LinearLayout.LayoutParams(0, -2, 1)); root.addView(metadata);
 
         LinearLayout exposure = new LinearLayout(this); exposure.setGravity(Gravity.CENTER_VERTICAL);
-        flashButton = button("FLASH AUTO", 13, this::cycleFlash); flashButton.setTag("camera_flash");
+        flashButton = button("flash auto", 14, this::cycleFlash); flashButton.setTag("camera_flash");
         exposure.addView(flashButton, new LinearLayout.LayoutParams(0, dp(48), 1));
         minus = button("−", 22, () -> changeExposure(-1)); minus.setContentDescription("Reduce exposure");
         exposure.addView(minus, new LinearLayout.LayoutParams(dp(48), dp(48)));
@@ -240,7 +249,7 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
         shutter.setTextSize(PocketDesign.typeSize(this, PocketDesign.TITLE));
         center.addView(shutter, new LinearLayout.LayoutParams(dp(112), dp(56)));
         actions.addView(center, new LinearLayout.LayoutParams(0, dp(64), 1));
-        Button settings=button("Settings",14,this::cameraSettings);settings.setTag("app_settings");PocketDesign.quiet(settings,SECONDARY);actions.addView(settings,new LinearLayout.LayoutParams(dp(96),dp(56))); root.addView(actions);
+        Button settings=button("settings",14,this::cameraSettings);settings.setTag("app_settings");PocketDesign.quiet(settings,SECONDARY);actions.addView(settings,new LinearLayout.LayoutParams(dp(96),dp(56))); root.addView(actions);
     }
     private void cameraSettings(){if(cameraOptions.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)cameraOptions.getParent()).removeView(cameraOptions);cameraSettingsDialog=new AlertDialog.Builder(this).setTitle("Camera settings").setView(cameraOptions).setPositiveButton("Close",null).create();cameraSettingsDialog.show();}
 
@@ -274,13 +283,55 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
                     refreshControls(); dialog.dismiss();
                 }).setNegativeButton("Cancel", null).show();
     }
+    /** The saved photo's pixels: the format's crop of the actual capture size, or of the profile's frame before the camera opens. */
+    private Size outputSize() {
+        int width = info == null ? profile.width : info.capture.getWidth(), height = info == null ? profile.height : info.capture.getHeight();
+        return CameraMath.outputSize(width, height, profile, format, 0);
+    }
+    private void chooseSize() {
+        if (engine != null && engine.busy()) return;
+        int[] sizes = CameraFormat.sizes(profile); String[] labels = new String[sizes.length]; int chosen = 0;
+        int capture = info == null ? profile.width : Math.max(info.capture.getWidth(), info.capture.getHeight());
+        for (int i = 0; i < sizes.length; i++) {
+            int edge = Math.min(sizes[i], capture);
+            int[] size = CameraFormat.frame(edge, format.aspect);
+            labels[i] = CameraFormat.megapixels(size[0], size[1]) + " · " + size[0] + " × " + size[1] + (i == 0 ? " · largest" : "");
+            if (format.longEdge(profile) == sizes[i]) chosen = i;
+        }
+        new AlertDialog.Builder(this).setTitle("Image size").setSingleChoiceItems(labels, chosen, (dialog, which) -> {
+            format = format.size(which == 0 ? 0 : sizes[which]); format.write(preferences); refreshControls(); dialog.dismiss();
+        }).setNegativeButton("Cancel", null).show();
+    }
+    private void chooseAspect() {
+        if (engine != null && engine.busy()) return;
+        CameraFormat.Aspect[] aspects = CameraFormat.Aspect.values(); String[] labels = new String[aspects.length];
+        String[] notes = {"full sensor", "like 35 mm film", "wide, crops top and bottom", "square, crops the sides"};
+        for (int i = 0; i < aspects.length; i++) labels[i] = aspects[i].label + " · " + notes[i];
+        new AlertDialog.Builder(this).setTitle("Aspect").setSingleChoiceItems(labels, format.aspect.ordinal(), (dialog, which) -> {
+            format = format.aspect(aspects[which]); format.write(preferences); refreshControls(); dialog.dismiss();
+        }).setNegativeButton("Cancel", null).show();
+    }
+    private void chooseQuality() {
+        if (engine != null && engine.busy()) return;
+        CameraFormat.Quality[] qualities = CameraFormat.Quality.values(); String[] labels = new String[qualities.length];
+        String[] notes = {"least compression", "smaller files", "visible JPEG blocks"};
+        for (int i = 0; i < qualities.length; i++) labels[i] = qualities[i].label + " · JPEG " + qualities[i].jpeg(profile) + " · " + notes[i];
+        new AlertDialog.Builder(this).setTitle("JPEG quality").setSingleChoiceItems(labels, format.quality.ordinal(), (dialog, which) -> {
+            format = format.quality(qualities[which]); format.write(preferences); refreshControls(); dialog.dismiss();
+        }).setNegativeButton("Cancel", null).show();
+    }
     private void refreshControls() {
-        profileButton.setText(getString(R.string.camera_profile_label, profile.label));
-        Size output = info == null ? new Size(profile.width, profile.height)
-                : CameraMath.outputSize(info.capture.getWidth(), info.capture.getHeight(), profile, 0);
-        quality.setText(String.format(Locale.getDefault(), "%.1fM JPEG", output.getWidth() * output.getHeight() / 1_000_000f));
+        profileButton.setText(profile.label);
+        profileButton.setContentDescription("Camera profile, " + profile.label + " · " + profile.family);
+        Size output = outputSize();
+        sizeButton.setText(CameraFormat.megapixels(output.getWidth(), output.getHeight()));
+        sizeButton.setContentDescription("Image size, " + output.getWidth() + " by " + output.getHeight() + " pixels");
+        aspectButton.setText(format.aspect.label); aspectButton.setContentDescription("Aspect, " + format.aspect.label);
+        qualityButton.setText(format.quality.label); qualityButton.setContentDescription("JPEG quality, " + format.quality.label);
+        quality.setText(String.format(Locale.ROOT, "%d × %d · JPEG %d", output.getWidth(), output.getHeight(), format.quality.jpeg(profile)));
+        focus.aspect(format.aspect.ratio);
         CameraEngine.Flash mode = engine == null ? flashPreference() : engine.flash();
-        flashButton.setText(info != null && !info.flash ? "FLASH —" : "FLASH " + mode.name());
+        flashButton.setText(info != null && !info.flash ? "flash —" : "flash " + mode.name().toLowerCase(Locale.ROOT));
         flashButton.setContentDescription(info != null && !info.flash ? "Flash unavailable on this camera"
                 : "Flash " + mode.name().toLowerCase(Locale.ROOT));
         float step = info == null ? 1f / 3 : info.evStep.floatValue();
@@ -290,7 +341,8 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
         plus.setEnabled(active && info != null && engine.exposure() < info.evRange.getUpper());
         flashButton.setEnabled(active && info != null && info.flash);
         switchButton.setEnabled(active && info != null && info.switchable);
-        shutter.setEnabled(active); profileButton.setEnabled(engine == null || !engine.busy());
+        shutter.setEnabled(active); boolean idle = engine == null || !engine.busy();
+        profileButton.setEnabled(idle); sizeButton.setEnabled(idle); aspectButton.setEnabled(idle); qualityButton.setEnabled(idle);
         gallery.setEnabled(lastPhoto != null);
     }
     private void cycleFlash() {
@@ -313,10 +365,10 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
             requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, STORAGE_PERMISSION); return;
         }
         shutter.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-        engine.capture(profile, deviceOrientation); setBusy(true);
+        engine.capture(profile, format, deviceOrientation); setBusy(true);
     }
     private void setBusy(boolean busy) {
-        shutter.setEnabled(!busy); profileButton.setEnabled(!busy);
+        shutter.setEnabled(!busy); profileButton.setEnabled(!busy); sizeButton.setEnabled(!busy); aspectButton.setEnabled(!busy); qualityButton.setEnabled(!busy);
         switchButton.setEnabled(!busy && info != null && info.switchable);
         flashButton.setEnabled(!busy && info != null && info.flash);
         minus.setEnabled(!busy && info != null && engine.exposure() > info.evRange.getLower());

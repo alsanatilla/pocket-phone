@@ -48,7 +48,7 @@ public final class JournalPageActivity extends PocketActivity {
         String note = page.optString("note", "");
         PlannerStore planner = new PlannerStore(getSharedPreferences("pocket_planner", 0));
         PlannerStore.Entry entry = NoteSync.byUid(planner, note);
-        keys(new String[]{"open note", "read again", "delete"},
+        commands(body, new String[]{"open note", "read again", "delete"}, 0,
                 () -> { if (entry == null) message("The note appears once the page is read."); else startActivity(new Intent(this, OrganizerActivity.class).putExtra("pocket_note", entry.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); },
                 () -> confirm("Read the page again? The note's text is replaced by the new reading.", () -> {
                     JournalStore.update(this, uid, p -> p.put("state", JournalStore.WAITING).put("error", "")); JournalJob.schedule(this); render(); message("Reading again once online."); }),

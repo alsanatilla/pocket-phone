@@ -37,7 +37,8 @@ public class PocketAppsTest {
         Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE, Manifest.permission.POST_NOTIFICATIONS);
         ShadowAlarmManager.setCanScheduleExactAlarms(true);
     }
-    static TextView find(View view, String text) { if (view instanceof TextView && text.contentEquals(((TextView)view).getText())) return (TextView)view;
+    static TextView find(View view, String text) { // Chrome labels are lowercase by design; tests name controls without depending on letter case.
+        if (view instanceof TextView && text.equalsIgnoreCase(((TextView)view).getText().toString())) return (TextView)view;
         if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup)view).getChildCount(); i++) { TextView result = find(((ViewGroup)view).getChildAt(i), text); if (result != null) return result; } return null; }
     private static void click(PocketActivity activity, String text) { TextView view = find(activity.getWindow().getDecorView(), text); assertNotNull(text, view); view.performClick(); }
     @Test public void nativeDialpadDoesNotCallUntilTheUserPressesCall() {
@@ -60,8 +61,8 @@ public class PocketAppsTest {
             ClockStore.Entry timer = ClockStore.entries(context).get(0); assertEquals("Focus: Draft", timer.title); assertEquals("timer", timer.kind);
             ShadowAlarmManager.ScheduledAlarm alarm = Shadows.shadowOf(context.getSystemService(AlarmManager.class)).peekNextScheduledAlarm();
             assertEquals(AlarmManager.ELAPSED_REALTIME_WAKEUP, alarm.type); assertTrue(alarm.allowWhileIdle); assertEquals(timer.elapsed, alarm.triggerAtTime);
-            click(controller.get(), "pause / off"); assertFalse(ClockStore.find(context, timer.id).enabled); assertTrue(Shadows.shadowOf(context.getSystemService(AlarmManager.class)).getScheduledAlarms().isEmpty());
-            click(controller.get(), "resume / on"); assertTrue(ClockStore.find(context, timer.id).enabled);
+            click(controller.get(), "pause"); assertFalse(ClockStore.find(context, timer.id).enabled); assertTrue(Shadows.shadowOf(context.getSystemService(AlarmManager.class)).getScheduledAlarms().isEmpty());
+            click(controller.get(), "resume"); assertTrue(ClockStore.find(context, timer.id).enabled);
         } finally { controller.pause().stop().destroy(); }
     }
     @Test @Config(sdk = 35) public void deniedExactAlarmPermissionNeverCreatesASilentTimer() {

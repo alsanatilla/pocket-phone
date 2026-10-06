@@ -22,7 +22,7 @@ import android.widget.LinearLayout;
 import java.util.List;
 
 public final class MessagesActivity extends PocketActivity {
-    private String address = ""; private long thread; private boolean composing; private int generation;
+    private String address = ""; private long thread; private boolean composing, direct; private int generation;
     private EditText recipient, text; private LinearLayout messages; private boolean started, observing, receiverRegistered, resumedOnce;
     private Button sendControl; private PendingSend pendingSend, restoredSend; private android.app.AlertDialog simChoice;
     private LinearLayout inboxRows; private List<MessageBook.Message> inboxValues;
@@ -42,6 +42,8 @@ public final class MessagesActivity extends PocketActivity {
         if (getIntent().getData() != null) { String uriAddress = getIntent().getData().getSchemeSpecificPart(); int query = uriAddress.indexOf('?'); address = query < 0 ? uriAddress : uriAddress.substring(0, query); }
         if (state != null) { address = state.getString("address", ""); thread = state.getLong("thread"); composing = state.getBoolean("composing"); }
         if (!address.isEmpty() || composing || getIntent().hasExtra("sms_body")) compose(address, thread); else inbox();
+        // A conversation started from Contacts, Phone or a share returns there on Back.
+        direct = state != null ? state.getBoolean("direct") : composing;
     }
     @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag") // API 33+ uses NOT_EXPORTED; older Android requires the legacy overload.
     @Override protected void onStart() { super.onStart(); started = true; observeIfAllowed();
@@ -60,7 +62,7 @@ public final class MessagesActivity extends PocketActivity {
         sharedBody(intent);
         if (intent.hasExtra("address") || intent.getData() != null || intent.hasExtra("sms_body")) { String to = intent.getStringExtra("address");
             if (to == null && intent.getData() != null) { to = intent.getData().getSchemeSpecificPart(); int q = to.indexOf('?'); if (q >= 0) to = to.substring(0, q); }
-            compose(to, 0);
+            compose(to, 0); direct = true;
         } else if (!composing) inbox();
     }
     private void sharedBody(Intent intent) {
@@ -82,8 +84,8 @@ public final class MessagesActivity extends PocketActivity {
         else if(index==2){if(Build.VERSION.SDK_INT>=33)permissions(()->message("Alerts allowed."),Manifest.permission.POST_NOTIFICATIONS);else NotificationAccess.appInfo(this);}else NotificationAccess.appInfo(this);}).setNegativeButton("Close",null).show();}
     private void inbox() {
         if (!composing && inboxRows != null && isDefault(this) && permitted(Manifest.permission.READ_SMS)) { refreshInbox(); return; }
-        cancelPreparation(); draft(); composing = false; screen("messages");appSettings(this::smsSettings); recipient = text = null; messages = null; sendControl = null; restoredSend = null; inboxRows = null; generation++; if (!access()) return;
-        keys(new String[]{"+ message", "Refresh"}, () -> compose("", 0), this::refreshInbox);
+        cancelPreparation(); draft(); composing = false; direct = false; screen("sms");appSettings(this::smsSettings); recipient = text = null; messages = null; sendControl = null; restoredSend = null; inboxRows = null; generation++; if (!access()) return;
+        softKeys(new String[]{"+ message", "refresh"}, 0, () -> compose("", 0), this::refreshInbox);
         inboxRows = new LinearLayout(this); inboxRows.setOrientation(LinearLayout.VERTICAL); body.addView(inboxRows);
         if (inboxValues != null) fillInbox(inboxValues); else inboxRows.addView(label("Loading messages…", 13, GRAY)); refreshInbox();
 
@@ -96,7 +98,7 @@ public final class MessagesActivity extends PocketActivity {
             if (!sameConversations(inboxValues, list)) fillInbox(list); inboxValues = list;
         }, error -> { if (current != generation || composing) return; inboxValues = null; inboxRows.removeAllViews(); releaseVisualHistory();
             inboxRows.addView(label(error instanceof SecurityException ? "Android blocked message access." : "Could not read Android's message store. Tap Refresh to retry.", 14, GRAY));
-            inboxRows.addView(button("Open app info", () -> NotificationAccess.appInfo(this)), new LinearLayout.LayoutParams(-1, dp(56))); });
+            inboxRows.addView(button("open app info", () -> NotificationAccess.appInfo(this)), new LinearLayout.LayoutParams(-1, dp(56))); });
     }
     private void fillInbox(List<MessageBook.Message> values) {
         inboxRows.removeAllViews(); if (values.isEmpty()) inboxRows.addView(label("No saved SMS/MMS. RCS conversations stay in their current app.", 14, GRAY));
@@ -213,7 +215,8 @@ public final class MessagesActivity extends PocketActivity {
     @Override protected void onActivityResult(int request, int result, Intent data) { super.onActivityResult(request, result, data); if (request == 502) {
         if (result == RESULT_OK && isDefault(this) && !permitted(Manifest.permission.READ_SMS)) permissions(this::refreshAccess, Manifest.permission.READ_SMS);
         else refreshAccess(); } }
-    @Override protected void onSaveInstanceState(Bundle out) { draft(); out.putString("address", address); out.putLong("thread", thread); out.putBoolean("composing", composing); super.onSaveInstanceState(out); }
-    @Override protected boolean hasInternalBack() { return composing; }
-    @Override public void onBackPressed() { if (composing) back(this::inbox); else super.onBackPressed(); }
+    @Override protected void onSaveInstanceState(Bundle out) { draft(); out.putString("address", address); out.putLong("thread", thread); out.putBoolean("composing", composing); out.putBoolean("direct", direct); super.onSaveInstanceState(out); }
+    @Override protected boolean hasInternalBack() { return composing && !direct; }
+    // Leaving a conversation releases a send still waiting for permission, exactly as returning to the inbox does.
+    @Override public void onBackPressed() { if (hasInternalBack()) back(this::inbox); else { if (composing) { cancelPreparation(); draft(); } super.onBackPressed(); } }
 }

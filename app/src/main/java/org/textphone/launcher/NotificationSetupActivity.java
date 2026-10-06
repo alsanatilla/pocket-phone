@@ -25,18 +25,18 @@ public final class NotificationSetupActivity extends PocketActivity {
         body.addView(label(allowed ? PhoneNotifications.connected() ? "Connected to Android" : "Access allowed · waiting for Android" : "Notification access is off", 17, WHITE));
         body.addView(label("To show other apps' notifications in Pocket, Android must allow its notification reader. This can include bank notices and codes.", 13, GRAY));
         action(allowed ? "Open notification access" : "Enable notification access", () -> NotificationAccess.settings(this));
-        action("Refresh connection", () -> { NotificationAccess.connect(this); render(); });
+        action("refresh connection", () -> { NotificationAccess.connect(this); render(); });
         body.addView(label("WhatsApp keeps receiving messages through its installed app. Pocket can show active messages and reply when WhatsApp offers that action; earlier conversations stay in WhatsApp.",16,GRAY));
         if(getPackageManager().getLaunchIntentForPackage("com.whatsapp")!=null)action("WhatsApp notification settings",()->{
             if(Build.VERSION.SDK_INT>=26)startActivity(new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE,"com.whatsapp"));
             else startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,android.net.Uri.parse("package:com.whatsapp")));});
         body.addView(label("Android says Restricted setting?", 17, WHITE));
         body.addView(label("Open app info → ⋮ → Allow restricted settings, if available. Then return here and enable notification access. Android requires you to approve it; Pocket cannot turn it on itself.", 13, GRAY));
-        action("Open app info", () -> NotificationAccess.appInfo(this));
+        action("open app info", () -> NotificationAccess.appInfo(this));
         body.addView(label("Allow notifications is different: it lets Pocket post its own alerts. It does not unlock the reader.", 13, GRAY));
         if (allowed && PhoneNotifications.connected()) {
-            action("Show test notification", () -> { if (Build.VERSION.SDK_INT >= 33) permissions(this::test, Manifest.permission.POST_NOTIFICATIONS); else test(); });
-            action("View notifications", () -> startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("pocket_screen", "notifications")));
+            action("show test notification", () -> { if (Build.VERSION.SDK_INT >= 33) permissions(this::test, Manifest.permission.POST_NOTIFICATIONS); else test(); });
+            action("view notifications", () -> startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("pocket_screen", "notifications")));
         }
         body.addView(label("Only active notifications appear. Dismissed notices are not stored; Android may hide protected content.", 13, GRAY));
     }

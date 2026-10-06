@@ -95,6 +95,11 @@ public class MainActivity extends Activity {
     private EditText captureStepsEditor;
     private String captureKind = "note", captureText = "", appQuery = "";
     private String captureDue = "", captureSteps = "", taskFilter = "Open", organizerQuery = "";
+    private String workspaceTab = "today";
+    private LinearLayout workspaceTabs;
+    private LinearLayout pocketAppResults;
+    private long captureReview;
+    private String workspaceSearchQuery="";
     private boolean captureImportant;
     private int captureSelectionStart = -1, captureSelectionEnd = -1;
     private long captureId;
@@ -120,7 +125,7 @@ public class MainActivity extends Activity {
     private final List<PhoneIcon> homeIcons = new ArrayList<>();
     private final List<TextView> homeLabels = new ArrayList<>();
     private final List<Integer> homeSlotIndices = new ArrayList<>();
-    private TextView thoughtText, noteText;
+    private TextView noteText;
     private final List<TextView> movementValues = new ArrayList<>(), movementStates = new ArrayList<>();
     private boolean movementLoading;
     private long homeNoteId;
@@ -165,7 +170,7 @@ public class MainActivity extends Activity {
 
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
-            if (CloudSync.ACTION_SYNCED.equals(intent.getAction())) { if ("today".equals(screen) || "task_detail".equals(screen)) render(); else if ("home".equals(screen)) { homePlanRefresh = true; requestHomeRefresh(false); } return; }
+            if (CloudSync.ACTION_SYNCED.equals(intent.getAction())) { if ("today".equals(screen) || "task_detail".equals(screen) || "thought_detail".equals(screen) || "search".equals(screen)) render(); else if ("home".equals(screen)) { homePlanRefresh = true; requestHomeRefresh(false); } return; }
             if (CorosRepository.ACTION_UPDATED.equals(intent.getAction())) { if ("home".equals(screen)) { homeRebuild |= romProfile && CorosRepository.get(MainActivity.this).connected() != (movementValues.size() == 3); requestHomeRefresh(false); } return; }
             if ("home".equals(screen)) requestHomeRefresh(false);
             else if ("notifications".equals(screen)
@@ -195,6 +200,7 @@ public class MainActivity extends Activity {
         romProfile = getResources().getBoolean(R.bool.pocket_rom);
         shortcuts = romProfile ? ROM_SHORTCUTS : SHORTCUTS;
         planner = new PlannerStore(getSharedPreferences("pocket_planner", MODE_PRIVATE));
+        ParkingReceiver.arm(this);
         preferences = getSharedPreferences("text_phone", MODE_PRIVATE);
         tiles = new DashboardTiles(preferences);
         pixelTypeface = PocketFonts.pixel(this);
@@ -229,6 +235,9 @@ public class MainActivity extends Activity {
             appQuery = savedInstanceState.getString("app_query", "");
             taskFilter = savedInstanceState.getString("task_filter", "Open");
             organizerQuery = savedInstanceState.getString("organizer_query", "");focusTitle=savedInstanceState.getString("focus_title","");
+            workspaceTab = savedInstanceState.getString("workspace_tab", "today");
+            captureReview = savedInstanceState.getLong("capture_review", 0);
+            workspaceSearchQuery=savedInstanceState.getString("workspace_search_query","");
             captureDue = savedInstanceState.getString("capture_due", "");
             captureSteps = savedInstanceState.getString("capture_steps", "");
             captureImportant = savedInstanceState.getBoolean("capture_important");
@@ -237,6 +246,8 @@ public class MainActivity extends Activity {
         }
         if ("assign".equals(screen) && assigningShortcut == null) screen = "home";
         if (savedInstanceState == null && "today".equals(getIntent().getStringExtra("pocket_screen"))) screen = "today";
+        if (savedInstanceState == null && getIntent().hasExtra("workspace_tab")) { workspaceTab = getIntent().getStringExtra("workspace_tab"); screen = "today"; }
+        if (!java.util.Arrays.asList("today", "thoughts", "tasks", "notes").contains(workspaceTab)) workspaceTab = "today";
         if (savedInstanceState == null && "notifications".equals(getIntent().getStringExtra("pocket_screen"))) screen = "notifications";
         if (savedInstanceState == null && !workspace() && "settings".equals(getIntent().getStringExtra("pocket_screen"))) screen = "settings";
         if (!workspace() && Intent.ACTION_MAIN.equals(getIntent().getAction()) && getIntent().hasCategory(Intent.CATEGORY_HOME)
@@ -244,6 +255,7 @@ public class MainActivity extends Activity {
         if (!validScreen(screen)) screen = "home";
         long task=getIntent().getLongExtra("pocket_task",0);if(savedInstanceState==null&&task>0){captureId=task;captureKind="task";screen="task_detail";if(trail.peek()==null)trail.push(new RouteTrail.Route("today",0,"note",null,"home",""));}
         long note=getIntent().getLongExtra("pocket_note",0);PlannerStore.Entry linked=note>0?planner.find(note):null;if(savedInstanceState==null&&linked!=null){captureId=note;captureKind="note";captureText=planner.hasDraft("note",note)?planner.draft("note",note):linked.text;screen="note_preview";if(trail.peek()==null)trail.push(new RouteTrail.Route("today",0,"note",null,"home",""));}
+        long thought=getIntent().getLongExtra("pocket_thought",0);if(savedInstanceState==null&&thought>0&&ParkingStore.find(this,thought)!=null){captureId=thought;captureKind="thought";workspaceTab="thoughts";screen="thought_detail";if(trail.peek()==null)trail.push(new RouteTrail.Route("today",0,"note",null,"home",""));}
         setupTorch();
         render();
         if (savedInstanceState == null) receiveSharedText(getIntent());
@@ -291,12 +303,14 @@ public class MainActivity extends Activity {
                 PlannerStore.TaskDraft metadata = planner.taskDraft(captureId, saved); captureDue = metadata.due; captureImportant = metadata.important; captureSteps = metadata.steps;
                 int start = captureStepsEditor.getSelectionStart(), end = captureStepsEditor.getSelectionEnd(); captureStepsEditor.setText(captureSteps);
                 captureStepsEditor.setSelection(Math.min(Math.max(0, start), captureSteps.length()), Math.min(Math.max(0, end), captureSteps.length()));
-                ((TextView)content.findViewWithTag("task_due")).setText("Due · " + PlannerDates.label(captureDue));
-                ((TextView)content.findViewWithTag("task_important")).setText(captureImportant ? "! Important · on" : "Important · off");
+                ((TextView)content.findViewWithTag("task_due")).setText(dueLabel(captureDue));
+                ((TextView)content.findViewWithTag("task_important")).setText(importantLabel(captureImportant));
             }
         }
         stoppedDraft = null;
-        if("today".equals(screen)||"task_detail".equals(screen))render();else if(planHost!=null && !"home".equals(screen))refreshDayPlan();
+        // Rebuilding a page while Android animates the window back in drops frames; only rebuild what changed.
+        if(("today".equals(screen)||"task_detail".equals(screen)||"thought_detail".equals(screen)||"search".equals(screen))&&!organizerState().equals(renderedOrganizer))render();
+        else if(planHost!=null && !"home".equals(screen))refreshDayPlan();
         NotificationAccess.connect(this);
         if ("home".equals(screen)) requestHomeRefresh(true);
         else if ("settings".equals(screen)) updateHomeStatus();
@@ -347,6 +361,7 @@ public class MainActivity extends Activity {
         state.putString("app_query", appQuery);
         state.putString("task_filter", taskFilter);
         state.putString("organizer_query", organizerQuery);state.putString("focus_title",focusTitle);
+        state.putString("workspace_tab", workspaceTab); state.putLong("capture_review", captureReview);state.putString("workspace_search_query",workspaceSearchQuery);
         state.putString("capture_due", captureDue);
         state.putString("capture_steps", captureSteps);
         state.putBoolean("capture_important", captureImportant);
@@ -371,8 +386,10 @@ public class MainActivity extends Activity {
         }
         claude.close();
         setIntent(intent);
+        if (intent.hasExtra("workspace_tab")) { selectWorkspace(intent.getStringExtra("workspace_tab")); return; }
         if(intent.getLongExtra("pocket_task",0)>0){captureKind="task";openTask(intent.getLongExtra("pocket_task",0));return;}
         if(intent.getLongExtra("pocket_note",0)>0){openNote(intent.getLongExtra("pocket_note",0));return;}
+        if(intent.getLongExtra("pocket_thought",0)>0){openThought(intent.getLongExtra("pocket_thought",0));return;}
         if (receiveSharedText(intent)) return;
         if ("today".equals(intent.getStringExtra("pocket_screen"))) { navigate("today"); return; }
         if ("notifications".equals(intent.getStringExtra("pocket_screen"))) { navigate("notifications"); return; }
@@ -397,7 +414,7 @@ public class MainActivity extends Activity {
         if ("apps".equals(screen)) return appsReturnTo;
         if ("note_preview".equals(screen)) return "capture";
         if ("capture".equals(screen)) return "task".equals(captureKind) && captureId != 0 ? "task_detail" : "today";
-        if ("focus".equals(screen) || "task_detail".equals(screen)) return "today";
+        if ("focus".equals(screen) || "task_detail".equals(screen) || "thought_detail".equals(screen) || "search".equals(screen)) return "today";
         return "home";
     }
     private String backPageKey() { return trail.peek()!=null ? trail.peek().key() : pageKey(backDestination()); }
@@ -406,6 +423,7 @@ public class MainActivity extends Activity {
         if ("capture".equals(screen)||"note_preview".equals(screen)) {
             PlannerStore.Entry entry=captureId==0?null:planner.find(captureId);
             captureText=planner.hasDraft(captureKind,captureId)?planner.draft(captureKind,captureId):entry==null?"":entry.text;
+            if ("thought".equals(captureKind)) { ParkingStore.Item thought = ParkingStore.find(this, captureId); if (!planner.hasDraft(captureKind,captureId)) captureText = thought == null ? "" : thought.text; captureReview = thought == null ? 0 : thought.due; }
             if ("task".equals(captureKind)) {PlannerStore.TaskDraft metadata=planner.taskDraft(captureId,entry);captureDue=metadata.due;captureSteps=metadata.steps;captureImportant=metadata.important;}
         }
     }
@@ -414,6 +432,8 @@ public class MainActivity extends Activity {
         RouteTrail.Route parent=trail.pop();if(parent==null)return;
         restoreRoute(parent);motion.back(this::render);
     }
+    /** After saving or deleting, go back where the user came from; the fallback applies only without a trail. */
+    private void leave(String fallback) { if (trail.peek() != null) returnToPrevious(); else finishPage(fallback); }
     private void finishPage(String destination) {
         RouteTrail.Route parent=trail.take(pageKey(destination));
         if(parent!=null)restoreRoute(parent);else screen=destination;
@@ -422,6 +442,7 @@ public class MainActivity extends Activity {
     private String pageKey(String page) {
         if ("capture".equals(page) || "note_preview".equals(page)) return page + ":" + captureKind + ":" + captureId;
         if ("task_detail".equals(page)) return page + ":" + captureId;
+        if ("thought_detail".equals(page)) return page + ":" + captureId;
         if ("assign".equals(page)) return page + ":" + assigningShortcut;
         return page;
     }
@@ -456,7 +477,7 @@ public class MainActivity extends Activity {
                 || "settings".equals(value) || "apps".equals(value)
                 || "notifications".equals(value) || "assign".equals(value)
                 || "today".equals(value) || "capture".equals(value) || "focus".equals(value)
-                || "task_detail".equals(value) || "note_preview".equals(value);
+                || "task_detail".equals(value) || "thought_detail".equals(value) || "search".equals(value) || "note_preview".equals(value);
     }
 
     private int accent() {
@@ -490,7 +511,7 @@ public class MainActivity extends Activity {
         if (!destination.equals(screen) && getCurrentFocus() instanceof EditText) hideKeyboard(getCurrentFocus());
         if (!destination.equals(screen)) appQuery = "";
         if ("apps".equals(destination) && !"apps".equals(screen)) appsReturnTo = screen;
-        if("focus".equals(destination))focusTitle="today".equals(screen)?todayFocusTitle:"";
+        if("focus".equals(destination)){PlannerStore.Entry source="task_detail".equals(screen)?planner.find(captureId):null;focusTitle=source!=null?source.text:"today".equals(screen)?todayFocusTitle:"";}
         screen = destination;
         if (backwards) motion.back(this::render); else render();
     }
@@ -505,7 +526,7 @@ public class MainActivity extends Activity {
         notificationCount = null;
         homeDay = homeHint = null;
         nextTaskText = taskCountText = null;
-        thoughtText = noteText = null; homeNoteId = 0; movementValues.clear(); movementStates.clear(); homeSlotIndices.clear();
+        noteText = null; homeNoteId = 0; movementValues.clear(); movementStates.clear(); homeSlotIndices.clear();
         captureEditor = null;
         captureStepsEditor = null;planHost=null;todayFilters=todayActions=null;todayDate=null;todayFocusTitle="";planRequest++;
         homeTiles.clear();
@@ -550,6 +571,8 @@ public class MainActivity extends Activity {
             case "today": renderToday(); break;
             case "capture": renderCapture(); break;
             case "task_detail": renderTaskDetail(); break;
+            case "thought_detail": renderThoughtDetail(); break;
+            case "search": renderWorkspaceSearch(); break;
             case "note_preview": renderNotePreview(); break;
             case "focus": renderFocus(); break;
             default: renderHome(); break;
@@ -565,11 +588,19 @@ public class MainActivity extends Activity {
                 view.setPadding(dp(horizontal)+left,dp(4)+top,dp(horizontal)+right,dp(4)+bottom);return insets.consumeSystemWindowInsets();});
             View header=content.findViewWithTag("page_header");content.removeView(header);
             shell.addView(header,new LinearLayout.LayoutParams(-1,-2));
-            if(todayPage){content.removeView(todayDate);shell.addView(todayDate,new LinearLayout.LayoutParams(-1,-2));}
+            if(todayPage){content.removeView(todayDate);shell.addView(todayDate,new LinearLayout.LayoutParams(-1,-2));content.removeView(workspaceTabs);shell.addView(workspaceTabs,new LinearLayout.LayoutParams(-1,-2));}
             viewport.setPadding(0,0,0,0);viewport.setOnApplyWindowInsetsListener(null);viewport.setTag(todayPage?"today_scroll":"task_editor_scroll");
             shell.addView(viewport,new LinearLayout.LayoutParams(-1,0,1));if(todayPage)shell.addView(todayActions,new LinearLayout.LayoutParams(-1,-2));page=shell;
         }
         motion.show(page, pageKey(screen)); if (appRowsReady || !"apps".equals(screen) && !"assign".equals(screen)) motion.dataReady(); page.requestApplyInsets();if(planHost!=null)refreshDayPlan();
+        renderedOrganizer = "today".equals(screen) || "task_detail".equals(screen) || "thought_detail".equals(screen) || "search".equals(screen) ? organizerState() : "";
+    }
+    private String renderedOrganizer = "";
+    /** Everything the Today and task pages show that can change while another app is in front. */
+    private String organizerState() {
+        return screen + ":" + captureId + ":" + workspaceTab + ":" + planner.tasksRevision() + ":" + planner.notesRevision() + ":" + getSharedPreferences("pocket_parking",0).getString("items","[]").hashCode() + ":" + PlannerDates.today() + ":" + taskFilter + ":" + organizerQuery
+                + ":" + ClockStore.prefs(this).getString("entries", "").hashCode() + ":" + planner.preferences().getLong("next_task", 0)
+                + ":" + planner.hasDraft("task", captureId);
     }
 
     private TextView text(String label, float sp, int color) {
@@ -662,21 +693,42 @@ public class MainActivity extends Activity {
     }
 
     private void heading(String title, String backTo) {
-        heading(title, backTo, "Home", () -> navigate("home"), false);
+        heading(title, backTo, "home", () -> navigate("home"), false);
     }
 
+    /** The same header as every Pocket app: back, lowercase pixel title, one contextual action. */
     private void heading(String title, String backTo, String rightLabel, Runnable rightAction, boolean commit) {
         LinearLayout header = new LinearLayout(this);header.setTag("page_header"); header.setGravity(Gravity.CENTER_VERTICAL); PocketDesign.header(header);
-        TextView previous = text("Back", 14, SECONDARY); PocketDesign.headerControl(previous, SECONDARY); previous.setGravity(Gravity.CENTER);
+        TextView previous = text("back", 14, SECONDARY); PocketDesign.headerControl(previous, SECONDARY); previous.setGravity(Gravity.CENTER);
         previous.setTag("navigation_back");previous.setOnClickListener(v -> onBackPressed()); header.addView(previous, new LinearLayout.LayoutParams(PocketDesign.headerWidth(previous,64), PocketDesign.headerHeight(this)));
         TextView heading = text(title, 24, PRIMARY);
-        heading.setTag("page_heading");
-        heading.setTypeface(pixelTypeface); heading.setGravity(Gravity.CENTER); heading.setMaxLines(1); heading.setEllipsize(TextUtils.TruncateAt.END);
-        if (Build.VERSION.SDK_INT >= 28) heading.setAccessibilityHeading(true);
+        heading.setTag("page_heading"); PocketDesign.title(heading);
         header.addView(heading, new LinearLayout.LayoutParams(0, PocketDesign.headerHeight(this), 1));
         TextView right = text(rightLabel, 14, commit ? accent() : SECONDARY); PocketDesign.headerControl(right, commit ? accent() : SECONDARY); right.setGravity(Gravity.CENTER);
-        right.setOnClickListener(v -> rightAction.run());if("Settings".equals(rightLabel))right.setTag("app_settings"); header.addView(right, new LinearLayout.LayoutParams(PocketDesign.headerWidth(right,rightLabel.length()>5?96:64), PocketDesign.headerHeight(this)));
+        right.setOnClickListener(v -> rightAction.run());if("settings".equalsIgnoreCase(rightLabel))right.setTag("app_settings"); header.addView(right, new LinearLayout.LayoutParams(PocketDesign.headerWidth(right,rightLabel.length()>5?96:64), PocketDesign.headerHeight(this)));
         content.addView(header); gap(4);
+    }
+    /** A group label, the same in every app. */
+    private TextView section(LinearLayout host, String label, boolean first) {
+        TextView view = text(label, 12, SECONDARY); PocketDesign.section(view, first); host.addView(view); return view;
+    }
+    /** Page-level commands pinned to the bottom of a page. */
+    private LinearLayout softKeys(String tag, String[] names, String[] tags, int primary, Runnable... actions) {
+        LinearLayout bar = new LinearLayout(this); bar.setTag(tag);
+        for (int i = 0; i < names.length; i++) {
+            TextView key = actionInto(bar, names[i], 14, PRIMARY, actions[i]); PocketDesign.softKey(key, i, names.length, i == primary);
+            if (tags != null) key.setTag(tags[i]); key.setLayoutParams(PocketDesign.softKeyCell(this, i, names.length));
+        }
+        return bar;
+    }
+    /** Commands for the item above them, starting at the content edge. */
+    private LinearLayout commands(LinearLayout host, String tag, String[] names, String[] tags, int primary, Runnable... actions) {
+        LinearLayout line = new LinearLayout(this); line.setTag(tag);
+        for (int i = 0; i < names.length; i++) {
+            TextView command = actionInto(line, names[i], 14, PRIMARY, actions[i]); PocketDesign.command(command, i == primary);
+            if (tags != null) command.setTag(tags[i]); command.setLayoutParams(PocketDesign.commandCell(this, i == 0));
+        }
+        host.addView(line, new LinearLayout.LayoutParams(-1, -2)); return line;
     }
 
     private void renderHome() {
@@ -719,6 +771,7 @@ public class MainActivity extends Activity {
         homeDay.setTypeface(Typeface.MONOSPACE);
         homeDay.setLetterSpacing(.08f);
         content.addView(homeDay);
+        if(romProfile&&!HomeChoice.active(this))action("use Pocket as home",14,accent(),this::chooseHome).setTag("home_setup");
         gap(romProfile ? 12 : 16);
         if (romProfile) renderDashboardAgenda();
 
@@ -797,115 +850,121 @@ public class MainActivity extends Activity {
         LinearLayout footer = new LinearLayout(this);
         footer.setTag("home_footer");
         footer.setOrientation(LinearLayout.HORIZONTAL);
-        String[] names = {"notifs", "chat", "select", "all"};
+        String[] names = {"capture", "today", "pip", "all"};
         for (int i = 0; i < names.length; i++) {
             int item = i;
             TextView link = text(names[i], 14, accent());
             link.setTag("home_" + names[i]);
-            PocketDesign.quiet(link, accent());
-            link.setGravity(i == 0 ? Gravity.START | Gravity.CENTER_VERTICAL
-                    : i == names.length - 1 ? Gravity.END | Gravity.CENTER_VERTICAL : Gravity.CENTER);
-            link.setMinHeight(dp(56));
-            link.setPadding(dp(8), dp(12), dp(8), dp(12));
+            // Home keeps the classic accent soft keys; elsewhere only a commit key uses accent.
+            PocketDesign.softKey(link, i, names.length, true);
             link.setFocusable(true);
             link.setOnClickListener(v -> {
-                if (item == 0) navigate("notifications");
-                else if (item == 1) openChat();
-                else if (item == 2) openShortcut(selectedShortcut);
+                if (item == 0) captureMenu();
+                else if (item == 1) openPocket(OrganizerActivity.class);
+                else if (item == 2) openChat();
                 else navigate("apps");
             });
-            footer.addView(link, new LinearLayout.LayoutParams(0, -2, 1));
+            footer.addView(link, PocketDesign.softKeyCell(this, i, names.length));
         }
         PocketDesign.header(footer); content.addView(footer);
         selectShortcut(selectedShortcut);
         updateHome();
     }
 
+    /**
+     * Home reads top to bottom as now → next → body → act: up to two appointments, the next task and the latest note
+     * share one list with a fixed time/kind column; the health readings, quick actions and tiles then share one
+     * three-column grid, so every centre lines up.
+     */
     private void renderDashboardAgenda() {
-        LinearLayout agenda = new LinearLayout(this); agenda.setOrientation(LinearLayout.VERTICAL);
-        agenda.setPadding(0, dp(4), 0, dp(4));
+        LinearLayout agenda = new LinearLayout(this); agenda.setOrientation(LinearLayout.VERTICAL); agenda.setTag("dashboard_agenda");
         planHost=new LinearLayout(this);planHost.setOrientation(LinearLayout.VERTICAL);planHost.setTag("dashboard_plan");homePlan=true;agenda.addView(planHost);
-        LinearLayout taskRow = new LinearLayout(this); taskRow.setGravity(Gravity.CENTER_VERTICAL);
-        taskCountText = text("", 11, accent());
-        taskCountText.setLetterSpacing(.06f);
-        nextTaskText = actionInto(taskRow, "", 15, PRIMARY, () -> {
+        LinearLayout taskRow = dashboardRow(agenda, "task", accent(), () -> {
             try {
                 if (planner.nextTask() == null) openCapture("task", 0, "");
                 else openTask(planner.nextTask().id);
             } catch (IllegalStateException error) { showFeedback("Organizer data unavailable"); }
         });
-        nextTaskText.setTag("dashboard_next");
-        PocketDesign.quiet(nextTaskText, PRIMARY); nextTaskText.setMinHeight(dp(52));
-        nextTaskText.setPadding(0, dp(6), 0, dp(6));
-        nextTaskText.setSingleLine(true);
-        nextTaskText.setEllipsize(TextUtils.TruncateAt.END);
-        nextTaskText.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
-        taskCountText.setPadding(dp(8), 0, 0, 0); taskRow.addView(taskCountText, new LinearLayout.LayoutParams(-2, -2));
-        agenda.addView(taskRow);
-        renderDashboardMovement(agenda);
-        thoughtText = dashboardLine(agenda, "dashboard_thought", () -> openPocket(ParkingActivity.class));
-        noteText = dashboardLine(agenda, "dashboard_note", () -> { if (homeNoteId > 0) openNote(homeNoteId); });
-        content.addView(agenda); gap(4);
+        nextTaskText = (TextView) taskRow.getChildAt(1); nextTaskText.setTag("dashboard_next");
+        taskCountText = text("", 12, SECONDARY); taskCountText.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        taskCountText.setPadding(dp(8), 0, 0, 0); taskCountText.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        taskRow.addView(taskCountText, new LinearLayout.LayoutParams(-2, -2));
+        noteText = (TextView) dashboardRow(agenda, "note", SECONDARY, () -> { if (homeNoteId > 0) openNote(homeNoteId); }).getChildAt(1);
+        noteText.setTag("dashboard_note");
+        content.addView(agenda); gap(8);
+        renderDashboardMovement(content);
 
-        LinearLayout quick = new LinearLayout(this);
+        LinearLayout quick = new LinearLayout(this); quick.setTag("dashboard_quick");
         quick.setOrientation(LinearLayout.HORIZONTAL);
-        String[] labels = {"+ task", "+ note", "focus"};
+        String[] labels = {"+ thought", "today", "focus"};
         for (int i = 0; i < labels.length; i++) {
             int item = i;
             TextView link = actionInto(quick, labels[i], 14, accent(), () -> {
-                if (item == 0) openCapture("task", 0, "");
-                else if (item == 1) openCapture("note", 0, "");
+                if (item == 0) openThoughtCapture(0);
+                else if (item == 1) openPocket(OrganizerActivity.class);
                 else navigate("focus");
             });
             link.setTag("dashboard_quick_" + i);
             PocketDesign.control(link);
             PocketDesign.quiet(link, accent());
-            LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(0, -2, 1); if (i > 0) cell.leftMargin = dp(4); link.setLayoutParams(cell);
+            link.setLayoutParams(PocketDesign.column(this));
         }
         content.addView(quick);
-        gap(8);
+        gap(4);
     }
 
-    private TextView dashboardLine(LinearLayout host, String tag, Runnable open) {
-        TextView line = actionInto(host, "", 14, PRIMARY, open); line.setTag(tag);
-        PocketDesign.quiet(line, PRIMARY); line.setMinHeight(dp(52)); line.setPadding(0, dp(8), 0, dp(8));
-        line.setSingleLine(true); line.setEllipsize(TextUtils.TruncateAt.END); line.setVisibility(View.GONE); return line;
+    /** Width of the dashboard's time/kind column: wide enough for a 12-hour time at the current text size. */
+    private int dashboardColumn() {
+        TextView probe = text("10:30PM", 12, SECONDARY); return Math.round(probe.getPaint().measureText("10:30PM")) + dp(12);
+    }
+    /** One dashboard list line: a short label in the time column, then the title. The whole line is the target. */
+    private LinearLayout dashboardRow(LinearLayout host, String kind, int kindColor, Runnable open) {
+        LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL); row.setMinimumHeight(dp(48));
+        row.setFocusable(true); row.setClickable(true); PocketDesign.list(row); row.setVisibility(View.GONE);
+        row.setOnClickListener(v -> { launchOrigin = v; try { open.run(); } finally { launchOrigin = null; } });
+        TextView label = text(kind, 12, kindColor); label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        row.addView(label, new LinearLayout.LayoutParams(dashboardColumn(), -2));
+        TextView title = text("", 14, PRIMARY); title.setSingleLine(true); title.setEllipsize(TextUtils.TruncateAt.END);
+        title.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        // Tests and accessibility services may click the title itself; it opens the same thing as the line.
+        title.setOnClickListener(v -> row.performClick()); title.setBackground(null);
+        row.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        host.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        return row;
+    }
+    private static void showRow(TextView title, boolean visible, String description) {
+        View row = (View) title.getParent(); title.setVisibility(visible ? View.VISIBLE : View.GONE);
+        row.setVisibility(visible ? View.VISIBLE : View.GONE); if (description != null) row.setContentDescription(description);
     }
     private void updateDashboardSources(List<PlannerStore.Entry> entries) {
-        if (thoughtText == null) return;
-        long now = System.currentTimeMillis(); List<ParkingStore.Item> parked = ParkingStore.open(this);
-        ParkingStore.Item due = null; int returning = 0;
-        for (ParkingStore.Item item : parked) if (item.back(now)) { if (due == null) due = item; returning++; }
-        thoughtText.setVisibility(due == null ? View.GONE : View.VISIBLE);
-        thoughtText.setText(due == null ? "" : "› " + due.text + (returning > 1 ? " · +" + (returning - 1) : " · back now"));
-        thoughtText.setTextColor(accent());
-        if (due != null) thoughtText.setContentDescription("Returning thought: " + due.text + ". " + returning + " thoughts back. Open Parking Lot.");
+        if (noteText == null) return;
         PlannerStore.Entry latest = null; long edited = 0;
         for (PlannerStore.Entry entry : entries) if ("note".equals(entry.kind) && (latest == null || planner.noteUpdated(entry) > edited)) { latest = entry; edited = planner.noteUpdated(entry); }
         homeNoteId = latest == null ? 0 : latest.id;
-        noteText.setVisibility(latest == null ? View.GONE : View.VISIBLE);
-        noteText.setText(latest == null ? "" : "› " + ParkingActivity.noteTitle(latest));
-        if (latest != null) noteText.setContentDescription("Latest note: " + ParkingActivity.noteTitle(latest) + ". Open note.");
+        noteText.setText(latest == null ? "" : NoteThoughts.title(latest));
+        showRow(noteText, latest != null, latest == null ? null : "Latest note: " + NoteThoughts.title(latest) + ". Open note.");
     }
     private void renderDashboardMovement(LinearLayout host) {
         CorosRepository repository = CorosRepository.get(this);
         if (!repository.connected()) {
-            TextView connect = dashboardLine(host, "dashboard_movement_connect", () -> openPocket(MovementActivity.class));
-            connect.setText("movement · connect COROS"); connect.setTextColor(SECONDARY); connect.setVisibility(View.VISIBLE); return;
+            LinearLayout connect = dashboardRow((LinearLayout) content.findViewWithTag("dashboard_agenda"), "move", SECONDARY, () -> openPocket(MovementActivity.class));
+            connect.setTag("dashboard_movement_connect"); TextView title = (TextView) connect.getChildAt(1);
+            title.setText("connect COROS"); title.setTextColor(SECONDARY); showRow(title, true, "Movement. Connect COROS."); return;
         }
         LinearLayout row = new LinearLayout(this); row.setTag("dashboard_movement");
         String[] names = {"recovery", "strain", "condition"};
         for (int i = 0; i < names.length; i++) {
-            int score = i; LinearLayout cell = new LinearLayout(this); cell.setOrientation(LinearLayout.VERTICAL);
-            cell.setPadding(0, dp(8), dp(4), dp(8)); cell.setMinimumHeight(dp(84)); cell.setFocusable(true); PocketDesign.list(cell);
-            TextView name = text(names[i], 10, SECONDARY), value = text("—", 25, PRIMARY), state = text("", 10, SECONDARY);
-            value.setTypeface(pixelTypeface); cell.addView(name); cell.addView(value); cell.addView(state);
+            int score = i; LinearLayout cell = new LinearLayout(this); cell.setOrientation(LinearLayout.VERTICAL); cell.setGravity(Gravity.CENTER_HORIZONTAL);
+            cell.setPadding(0, dp(8), 0, dp(8)); cell.setMinimumHeight(dp(84)); cell.setFocusable(true); PocketDesign.list(cell);
+            TextView name = text(names[i], 12, SECONDARY), value = text("—", 25, PRIMARY), state = text("", 12, SECONDARY);
+            value.setTypeface(pixelTypeface);
+            for (TextView line : new TextView[]{name, value, state}) { line.setGravity(Gravity.CENTER); line.setSingleLine(true); line.setEllipsize(TextUtils.TruncateAt.END); cell.addView(line); }
             cell.setTag("dashboard_movement_" + i); movementValues.add(value); movementStates.add(state);
             for (int j = 0; j < cell.getChildCount(); j++) cell.getChildAt(j).setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             cell.setOnClickListener(v -> startActivity(new Intent(this, MovementActivity.class).putExtra("score", score).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
-            row.addView(cell, new LinearLayout.LayoutParams(0, -2, 1));
+            row.addView(cell, PocketDesign.column(this));
         }
-        host.addView(row); updateMovement();
+        host.addView(row, new LinearLayout.LayoutParams(-1, -2)); updateMovement();
     }
     private void updateMovement() {
         if (movementValues.size() != 3) return;
@@ -933,10 +992,10 @@ public class MainActivity extends Activity {
         boolean current = item.when <= plan.now && item.end > plan.now;
         boolean soon = current || item.when - plan.now <= 30 * 60_000;
         String time = item.allDay ? "all day" : new SimpleDateFormat(twentyFourHour() ? "HH:mm" : "h:mma", Locale.getDefault()).format(new Date(item.when));
-        LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL); row.setMinimumHeight(dp(52)); row.setTag("dashboard_event_" + item.id); PocketDesign.list(row); row.setFocusable(true);
-        TextView when = text(time, 12, soon ? accent() : SECONDARY); when.setPadding(0, 0, dp(8), 0);
+        LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL); row.setMinimumHeight(dp(48)); row.setTag("dashboard_event_" + item.id); PocketDesign.list(row); row.setFocusable(true);
+        TextView when = text(time, 12, soon ? accent() : SECONDARY);
         TextView title = text(item.title, 14, PRIMARY); title.setSingleLine(true); title.setEllipsize(TextUtils.TruncateAt.END);
-        row.addView(when, new LinearLayout.LayoutParams(-2, -2)); row.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        row.addView(when, new LinearLayout.LayoutParams(dashboardColumn(), -2)); row.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         row.setContentDescription(time + ", " + item.title + (current ? ", now" : "") + ". Open calendar.");
         when.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO); title.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         row.setOnClickListener(v -> { if (item.external) startActivity(new Intent(Intent.ACTION_VIEW, android.content.ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, item.id)));
@@ -1055,7 +1114,7 @@ public class MainActivity extends Activity {
     private void refreshTiles() { if ("home".equals(screen)) { render(); refreshTileLabels(); } }
     private void choosePocketApp(String slot) {
         List<String> labels = new ArrayList<>(); List<Runnable> actions = new ArrayList<>();
-        for (String id : PocketApps.IDS) { labels.add(id); actions.add(() -> { tiles.usePocket(slot, id); refreshTiles(); }); }
+        for (String id : PocketApps.CHOICES) { labels.add(id); actions.add(() -> { tiles.usePocket(slot, id); refreshTiles(); }); }
         choose("Pocket app", labels, actions);
     }
     private void moveTile(String slot) {
@@ -1147,7 +1206,6 @@ public class MainActivity extends Activity {
 
     private void renderAppPicker() {
         heading(assigningShortcut, "home");
-        content.addView(text("Choose an installed app for this shortcut.", 16, SECONDARY));
         gap(16);
         action("Use default", 20, accent(), () -> {
             tiles.reset(assigningShortcut);
@@ -1263,22 +1321,19 @@ public class MainActivity extends Activity {
                 int count = 0, done = 0;
                 for (PlannerStore.Entry entry : entries) if ("task".equals(entry.kind)) { if (entry.done) done++; else count++; }
                 if (romProfile) {
-                    taskCountText.setText(done + " / " + (done + count));
-                    taskCountText.setContentDescription(done + " completed, " + count + " open tasks");
-                    nextTaskText.setVisibility(next == null ? View.GONE : View.VISIBLE);
-                    taskCountText.setVisibility(next == null ? View.GONE : View.VISIBLE);
+                    taskCountText.setText(count + " open");
                     nextTaskText.setText(next == null ? "No open tasks" : next.text);
-                    nextTaskText.setContentDescription(next == null ? "No open tasks. Add a task."
-                            : "Next task: " + next.text + ". Open Today.");
+                    showRow(nextTaskText, next != null, next == null ? "No open tasks. Add a task."
+                            : "Next task: " + next.text + ". " + count + " open, " + done + " completed. Open task.");
                 } else {
                     nextTaskText.setVisibility(next == null ? View.GONE : View.VISIBLE);
                     nextTaskText.setText(next == null ? "" : "next [" + count + "]  " + next.text);
                 }
             } catch (IllegalStateException error) {
-                if (taskCountText != null) taskCountText.setText(R.string.dashboard_next);
-                nextTaskText.setVisibility(View.VISIBLE);
+                if (taskCountText != null) taskCountText.setText("");
                 nextTaskText.setText(R.string.organizer_unavailable);
-                nextTaskText.setContentDescription(getString(R.string.organizer_unavailable));
+                if (romProfile) showRow(nextTaskText, true, getString(R.string.organizer_unavailable));
+                else { nextTaskText.setVisibility(View.VISIBLE); nextTaskText.setContentDescription(getString(R.string.organizer_unavailable)); }
             }
         }
         String sms = Telephony.Sms.getDefaultSmsPackage(this);
@@ -1342,70 +1397,102 @@ public class MainActivity extends Activity {
     }
 
     private void renderTools() {
-        heading("Tools", "home");
-        action("Today", 20, accent(), () -> navigate("today"));
-        action("Chat", 20, PRIMARY, this::openChat);
-        action("Alarm", 20, PRIMARY, () -> openPocket(ClockActivity.class));
-        action("Calendar", 20, PRIMARY, () -> openPocket(AgendaActivity.class));
-        action("Camera", 20, PRIMARY, this::openCamera);
-        action("Calculator", 20, PRIMARY, () -> openPocket(CalculatorActivity.class));
-        if (romProfile) for (String id : new String[]{"contacts", "files", "dice", "parking", "receipt", "journal", "movement"})
-            action(PocketApps.label(id), 20, PRIMARY, () -> openPocketApp(id));
+        heading("tools", "home");
+        section(content, "plan & think", true);
+        // Today always opens its own task, the same as its tile, so Back behaves the same from both.
+        action("today", 18, PRIMARY, () -> openPocket(OrganizerActivity.class));
+        action("thoughts", 18, PRIMARY, () -> selectWorkspace("thoughts"));
+        action("tasks", 18, PRIMARY, () -> selectWorkspace("tasks"));
+        action("notes", 18, PRIMARY, () -> selectWorkspace("notes"));
+        action("pip", 18, PRIMARY, this::openChat);
+        action("clock", 18, PRIMARY, () -> openPocket(ClockActivity.class));
+        action("calendar", 18, PRIMARY, () -> openPocket(AgendaActivity.class));
+        section(content, "capture & keep", false);
+        action("camera", 18, PRIMARY, this::openCamera);
+        action("photos",18,PRIMARY,()->openPocket(FilesActivity.class));
+        action("paper",18,PRIMARY,()->openPocket(JournalActivity.class));
+        section(content,"extras",false);
+        action("calculator", 18, PRIMARY, () -> openPocket(CalculatorActivity.class));
+        action("dice",18,PRIMARY,()->openPocket(DiceActivity.class));
+        section(content, "phone", false);
         if (preferences.getBoolean("show_maps", true)) {
-            action("Maps", 20, PRIMARY, () -> launch("Maps", new Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0"))));
+            action("maps", 18, PRIMARY, () -> launch("Maps", new Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0"))));
         }
         if (torchCamera != null) {
-            torchValue = valueAction("Flashlight", torchOn ? "On" : "Off", this::toggleTorch);
+            torchValue = valueAction("flashlight", torchOn ? "on" : "off", this::toggleTorch);
         } else {
-            valueAction("Flashlight", "Unavailable", () -> showFeedback("This phone has no available flashlight."));
+            valueAction("flashlight", "unavailable", () -> showFeedback("This phone has no available flashlight."));
         }
         flexibleSpace();
         addFeedback();
     }
 
     private void renderSettings() {
-        heading("Settings", "home");
-        valueAction("Text size", preferences.getBoolean("large_text", false) ? "Large" : "Standard", () -> {
+        heading("settings", "home");
+        section(content, "display", true);
+        valueAction("text size", preferences.getBoolean("large_text", false) ? "large" : "standard", () -> {
             preferences.edit().putBoolean("large_text", !preferences.getBoolean("large_text", false)).apply();
             render();
         });
-        valueAction("Colour", ACCENT_NAMES[Math.max(0, Math.min(3, preferences.getInt("accent", 0)))], () -> {
+        valueAction("colour", ACCENT_NAMES[Math.max(0, Math.min(3, preferences.getInt("accent", 0)))].toLowerCase(Locale.ROOT), () -> {
             preferences.edit().putInt("accent", (preferences.getInt("accent", 0) + 1) % ACCENTS.length).apply();
             render();
         });
-        valueAction("Clock", twentyFourHour() ? "24-hour" : "12-hour", () -> {
+        valueAction("clock", twentyFourHour() ? "24-hour" : "12-hour", () -> {
             preferences.edit().putBoolean("twenty_four_hour", !twentyFourHour()).apply();
             render();
         });
-        valueAction("Motion", preferences.getBoolean("reduce_motion", false) ? "Off" : "Android", () -> {
+        valueAction("motion", preferences.getBoolean("reduce_motion", false) ? "off" : "on", () -> {
             preferences.edit().putBoolean("reduce_motion", !preferences.getBoolean("reduce_motion", false)).apply(); render();
         });
-        gap(16);
-        homeStatus = valueAction("Use as home screen", "", this::chooseHome);
+        section(content, "phone", false);
+        homeStatus = valueAction("home screen", "", this::chooseHome);
         homeStatus.setTag("home_default_status"); updateHomeStatus();
-        action("Tools", 18, PRIMARY, () -> navigate("tools"));
-        action("All apps", 18, PRIMARY, () -> navigate("apps"));
-        action("Phone settings", 18, PRIMARY, () -> openPocket(DeviceSettingsActivity.class));
-        action("Permissions", 18, PRIMARY, () -> openPocket(PermissionsActivity.class));
-        if (romProfile) action("Cloud sync", 18, PRIMARY, () -> openPocket(CloudActivity.class));
-        if (romProfile) action("Movement · COROS", 18, PRIMARY, () -> openPocket(MovementActivity.class));
+        action("phone settings", 18, PRIMARY, () -> openPocket(DeviceSettingsActivity.class));
+        action("permissions", 18, PRIMARY, () -> openPocket(PermissionsActivity.class));
+        action("activity log",18,PRIMARY,()->openPocket(ReceiptActivity.class));
+        section(content,"connections",false);
+        if (romProfile) action("storage & devices", 18, PRIMARY, () -> openPocket(CloudActivity.class));
+        if (romProfile) action("movement · COROS", 18, PRIMARY, () -> openPocket(MovementActivity.class));
         flexibleSpace();
         addFeedback();
-        TextView version = text("Pocket Phone 0.5.15\nHold a shortcut to change its app or name.", 13, SECONDARY);
+        TextView version = text("Pocket Phone " + versionName() + "\nHold a shortcut to change its app or name.", 12, SECONDARY);
         version.setPadding(0, dp(16), 0, dp(16));
         content.addView(version);
     }
+    private String versionName() {
+        try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; }
+        catch (PackageManager.NameNotFoundException | RuntimeException unavailable) { return ""; }
+    }
 
     private void renderApps() {
-        heading("All apps", appsReturnTo);
-        action("Tools", 18, accent(), () -> navigate("tools"));
-        action("Settings", 18, accent(), () -> navigate("settings"));
-        if (romProfile) for (int i = 0; i < shortcuts.length; i++) {
-            if (i == 0 || i == 1 || i == 4) continue;
-            int slot = i; action(tiles.label(shortcuts[i]), 16, PRIMARY, () -> openShortcut(slot)).setTag("all_shortcut_" + shortcuts[i]);
-        }
+        heading("apps", appsReturnTo,"settings",()->navigate("settings"),false);
+        pocketAppResults = new LinearLayout(this);pocketAppResults.setOrientation(LinearLayout.VERTICAL);pocketAppResults.setTag("pocket_apps");content.addView(pocketAppResults);
+        renderPocketApps();
+        section(content, "installed", false);
         addInstalledApps(false);
+        View search=content.findViewWithTag("app_search");content.removeView(search);content.addView(search,1);
         addFeedback();
+    }
+    private void renderPocketApps() {
+        if(pocketAppResults==null)return;pocketAppResults.removeAllViews();
+        boolean customHeading=false;
+        for(int i=0;i<shortcuts.length;i++){
+            String slot=shortcuts[i];
+            if(!tiles.group(slot)&&tiles.app(slot)==null&&tiles.pocket(slot).equals(slot)&&!preferences.contains("shortcut_name_"+slot))continue;
+            if(!AppSearch.matches(tiles.label(slot),appQuery))continue;
+            if(!customHeading){section(pocketAppResults,"your shortcuts",true);customHeading=true;}
+            int index=i;TextView row=actionInto(pocketAppResults,tiles.label(slot),18,PRIMARY,()->openShortcut(index));
+            row.setTag("all_shortcut_"+slot);row.setOnLongClickListener(v->{editShortcut(slot);return true;});
+        }
+        String[][] groups={{"communicate","phone","messages","contacts"},{"plan & think","today","thoughts","tasks","notes","calendar","clock","pip"},{"capture & keep","camera","photos","paper"},{"extras","calculator","dice","movement"}};
+        for(String[] group:groups){boolean heading=false;for(int i=1;i<group.length;i++){String name=group[i];if(!AppSearch.matches(name,appQuery))continue;
+            if(!heading){section(pocketAppResults,group[0],pocketAppResults.getChildCount()==0);heading=true;}
+            actionInto(pocketAppResults,name,18,PRIMARY,()->{
+                if("thoughts".equals(name)||"tasks".equals(name)||"notes".equals(name))selectWorkspace(name);
+                else if("calendar".equals(name))openPocket(AgendaActivity.class);else if("photos".equals(name))openPocket(FilesActivity.class);else if("paper".equals(name))openPocket(JournalActivity.class);else if("pip".equals(name))openChat();else openPocketApp(name);
+            }).setTag("pocket_app_"+name);
+        }}
     }
 
     private void addInstalledApps(boolean assign) {
@@ -1423,6 +1510,7 @@ public class MainActivity extends Activity {
         content.addView(results, new LinearLayout.LayoutParams(-1, -2));
         Runnable filter = () -> {
             if (page != pageGeneration || destroyed) return;
+            if(!assign)renderPocketApps();
             int filtered = ++filterGeneration; results.removeAllViews();
             if (installedApps == null) { results.addView(text("Loading apps…", 16, SECONDARY)); ensureAppIndex(); return; }
             List<InstalledApps.Entry> matches = new ArrayList<>(); for (InstalledApps.Entry entry : installedApps) if (AppSearch.matches(entry.label, appQuery)) matches.add(entry);
@@ -1479,15 +1567,15 @@ public class MainActivity extends Activity {
     private void captureNoteTask(){persistDraft();if(captureText.trim().isEmpty()){showFeedback("Write a note first.");return;}startActivity(TaskCaptureActivity.intent(this,TaskSource.note(captureId,captureText)));}
     private void captureDrafts(){List<CaptureDrafts.Draft> drafts=CaptureDrafts.list(this);if(drafts.isEmpty()){showFeedback("No task drafts.");return;}String[] names=new String[drafts.size()];for(int i=0;i<names.length;i++)names[i]=drafts.get(i).title.isEmpty()?drafts.get(i).source.name:drafts.get(i).title;
         new AlertDialog.Builder(this).setTitle("Task drafts").setItems(names,(dialog,index)->{CaptureDrafts.Draft draft=drafts.get(index);new AlertDialog.Builder(this).setTitle(names[index]).setItems(new String[]{"Continue","Discard"},(choice,which)->{if(which==0)startActivity(new Intent(this,TaskCaptureActivity.class).putExtra("draft_key",draft.key));else new AlertDialog.Builder(this).setTitle("Discard this task draft?").setNegativeButton("Keep",null).setPositiveButton("Discard",(confirm,button)->{CaptureDrafts.clear(this,draft.key,draft.token);render();}).show();}).show();}).setNegativeButton("Cancel",null).show();}
-    private void organizerSettings(){new AlertDialog.Builder(this).setTitle("Today settings").setItems(new String[]{"Share tasks and notes","Export Markdown","Task drafts","Calendar settings","Focus timer","Cloud sync"},(dialog,index)->{
+    private void organizerSettings(){new AlertDialog.Builder(this).setTitle("Workspace settings").setItems(new String[]{"Share tasks and notes","Export Markdown","Task drafts","Calendar","Focus timer","Storage & devices"},(dialog,index)->{
         if(index==0)launch("Share",Intent.createChooser(new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,planner.exportText()),"Share tasks and notes"));
         else if(index==1){try{startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("text/markdown").putExtra(Intent.EXTRA_TITLE,"pocket-notes.md"),EXPORT_REQUEST);}catch(ActivityNotFoundException|SecurityException e){showFeedback("Files is unavailable.");}}
         else if(index==2)captureDrafts();else if(index==4)navigate("focus");else if(index==5)openPocket(CloudActivity.class);else startActivity(new Intent(this,AgendaActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("app_settings",true));}).setNegativeButton("Close",null).show();}
-    private void openTaskSource(TaskSource source){if(source.kind.equals("note")&&source.note>0){PlannerStore.Entry note=planner.find(source.note);if(note!=null){openCapture("note",note.id,note.text);return;}}
+    private void openTaskSource(TaskSource source){if(source.token.startsWith("thought:")){try{long thought=Long.parseLong(source.token.substring(8));if(ParkingStore.find(this,thought)!=null){openThought(thought);return;}}catch(NumberFormatException ignored){}}if(source.kind.equals("note")&&source.note>0){PlannerStore.Entry note=planner.find(source.note);if(note!=null){openCapture("note",note.id,note.text);return;}}
         if(source.kind.equals("message")){NoticeFeed.Item notice=NoticeFeed.find(source.ref);if(NotificationAccess.allowed(this)&&notice!=null&&notice.identity().equals(source.identity)){try{NoticeActions.open(this,notice);return;}catch(android.app.PendingIntent.CanceledException|RuntimeException expired){}}Intent app=getPackageManager().getLaunchIntentForPackage(source.pkg);if(app!=null){startActivity(app);return;}}
         String link=source.kind.equals("shared")?source.link():"";if(!link.isEmpty()){startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse(link)));return;}
         TextView context=text(source.text,16,PRIMARY);context.setTextIsSelectable(true);ScrollView scroll=new ScrollView(this);scroll.setPadding(dp(16),dp(8),dp(16),dp(8));scroll.addView(context);new AlertDialog.Builder(this).setTitle(source.name).setView(scroll).setPositiveButton("Close",null).show();}
-    private void refreshDayPlan(){if(planHost==null||destroyed)return;if(homePlan&&homeGesture.pending()){homePlanRefresh=true;requestHomeRefresh(false);return;}int request=++planRequest,page=pageGeneration;boolean home=homePlan;LinearLayout target=planHost;long selected=CalendarBridge.selected(this);android.content.Context app=getApplicationContext();
+    private void refreshDayPlan(){if(planHost==null||destroyed||(!homePlan&&!"today".equals(workspaceTab)))return;if(homePlan&&homeGesture.pending()){homePlanRefresh=true;requestHomeRefresh(false);return;}int request=++planRequest,page=pageGeneration;boolean home=homePlan;LinearLayout target=planHost;long selected=CalendarBridge.selected(this);android.content.Context app=getApplicationContext();
         try{drawDayPlan(target,DayPlan.local(app,System.currentTimeMillis()),home);}catch(IllegalStateException failure){return;}
         appWorker.submit(()->{DayPlan.Result plan;try{plan=DayPlan.read(app,System.currentTimeMillis());}catch(RuntimeException unavailable){return;}appUi.post(()->{if(destroyed||!appVisible||page!=pageGeneration||request!=planRequest||target!=planHost||selected!=CalendarBridge.selected(this))return;if(home&&homeGesture.pending()){homePlanRefresh=true;requestHomeRefresh(false);return;}drawDayPlan(target,plan,home);motion.dataReady();});});}
     private void drawDayPlan(LinearLayout target,DayPlan.Result plan,boolean home){
@@ -1518,30 +1606,144 @@ public class MainActivity extends Activity {
     private float todaySize(float sp){return sp*(preferences.getBoolean("large_text",false)?1.15f:1f);}
     private TextView todayText(String value,float sp,int color,boolean bold){TextView view=text(value,sp,color);view.setTextSize(todaySize(sp));view.setTypeface(Typeface.MONOSPACE,bold?Typeface.BOLD:Typeface.NORMAL);return view;}
     private void renderToday() {
-        heading("Today", "home","Settings",this::organizerSettings,false);
-        TextView heading=content.findViewWithTag("page_heading");heading.setTypeface(Typeface.MONOSPACE,Typeface.BOLD);heading.setTextSize(todaySize(14));
+        heading(workspaceTab, "home","settings",this::organizerSettings,false);
         todayDate=todayText(new SimpleDateFormat("EEE · d MMM",Locale.getDefault()).format(new Date()),12,SECONDARY,false);todayDate.setTag("today_date");todayDate.setGravity(Gravity.CENTER);todayDate.setPadding(0,0,0,dp(4));content.addView(todayDate);
+        workspaceTabs = new LinearLayout(this); workspaceTabs.setTag("workspace_tabs");
+        for (String tab : new String[]{"today", "thoughts", "tasks", "notes"}) {
+            TextView link = actionInto(workspaceTabs, tab, 14, SECONDARY, () -> selectWorkspace(tab));
+            link.setTag("workspace_tab_" + tab); PocketDesign.tab(link, tab.equals(workspaceTab));
+            link.setContentDescription(tab + (tab.equals(workspaceTab) ? ", selected" : "")); link.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));
+        }
+        content.addView(workspaceTabs);
+        if ("thoughts".equals(workspaceTab)) { renderThoughts(content); workspaceBottom("+ new", () -> openThoughtCapture(0)); addFeedback(); return; }
+        if ("notes".equals(workspaceTab)) { renderWorkspaceNotes(content); workspaceBottom("+ note", () -> openCapture("note",0,"")); addFeedback(); return; }
+        boolean daily = "today".equals(workspaceTab);
         planHost=new LinearLayout(this);planHost.setOrientation(LinearLayout.VERTICAL);planHost.setTag("today_plan");homePlan=false;content.addView(planHost);
-        LinearLayout commands=new LinearLayout(this);commands.setTag("today_commands");
-        String[] names={"+ Task","Note","Focus"};Runnable[] callbacks={()->openCapture("task",0,""),()->openCapture("note",0,""),()->navigate("focus")};
-        for(int i=0;i<names.length;i++){TextView key=actionInto(commands,names[i],14,PRIMARY,callbacks[i]);PocketDesign.control(key);if(i==0){key.setTextColor(PocketDesign.colors(this,accent()));key.setTypeface(Typeface.MONOSPACE,Typeface.BOLD);}key.setGravity(Gravity.CENTER);key.setMinHeight(dp(56));key.setTag(new String[]{"today_add_task","today_add_note","today_focus"}[i]);key.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));}content.addView(commands);
-        TextView tasksTitle=todayText("TASKS",14,PRIMARY,true);tasksTitle.setPadding(0,dp(12),0,dp(4));tasksTitle.setTag("today_tasks_heading");content.addView(tasksTitle);
+        if (!daily) planHost.setVisibility(View.GONE);
+        if (daily) {
+            int ready = ParkingStore.backCount(this, System.currentTimeMillis());
+            if (ready > 0) action(ready + (ready == 1 ? " thought to revisit" : " thoughts to revisit"),14,accent(),()->selectWorkspace("thoughts")).setTag("today_thought_review");
+            resumeWriting();
+        }
+        if(daily)commands(content,"today_commands",new String[]{"+ task","+ note","focus"},new String[]{"today_add_task","today_add_note","today_focus"},0,
+                ()->openCapture("task",0,""),()->openCapture("note",0,""),()->navigate("focus"));
+        section(content,"tasks",false).setTag("today_tasks_heading");
         todayFilters=new LinearLayout(this);todayFilters.setTag("today_filters");
         for(String name:new String[]{"Open","Today","Later","Done"}){
-            TextView filter=actionInto(todayFilters,name,14,name.equals(taskFilter)?accent():SECONDARY,()->{taskFilter=name;render();});
-            filter.setTag("task_filter_"+name);filter.setGravity(Gravity.CENTER);PocketDesign.control(filter);filter.setMinHeight(dp(48));
-            filter.setContentDescription(name+" tasks"+(name.equals(taskFilter)?", selected":""));filter.setSelected(name.equals(taskFilter));
-            filter.setTypeface(Typeface.MONOSPACE,name.equals(taskFilter)?Typeface.BOLD:Typeface.NORMAL);
-            LinearLayout.LayoutParams cell=new LinearLayout.LayoutParams(0,-2,1);if(todayFilters.getChildCount()>1)cell.leftMargin=dp(4);filter.setLayoutParams(cell);
+            TextView filter=actionInto(todayFilters,name.toLowerCase(Locale.ROOT),14,SECONDARY,()->{taskFilter=name;workspaceTab="tasks";render();});
+            filter.setTag("task_filter_"+name);PocketDesign.tab(filter,name.equals(daily ? "Today" : taskFilter));
+            filter.setContentDescription(name+" tasks"+(name.equals(taskFilter)?", selected":""));
+            filter.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));
         }
-        content.addView(todayFilters);
-        if(!organizerQuery.trim().isEmpty()){TextView query=action("Search · "+organizerQuery,14,accent(),this::searchOrganizer);query.setTag("organizer_query");query.setMaxLines(1);query.setEllipsize(TextUtils.TruncateAt.END);}
+        if(!daily)content.addView(todayFilters);
+        if(!organizerQuery.trim().isEmpty()){TextView query=action("search · "+organizerQuery,14,accent(),this::searchOrganizer);query.setTag("organizer_query");query.setMaxLines(1);query.setEllipsize(TextUtils.TruncateAt.END);}
         LinearLayout taskResults=new LinearLayout(this);taskResults.setOrientation(LinearLayout.VERTICAL);taskResults.setTag("today_tasks");content.addView(taskResults);
         LinearLayout noteResults=new LinearLayout(this);noteResults.setOrientation(LinearLayout.VERTICAL);noteResults.setTag("today_notes");content.addView(noteResults);renderOrganizerLists(taskResults,noteResults);
-        todayActions=new LinearLayout(this);todayActions.setTag("today_actions");
-        String[] footer={"Search","Calendar","Chat"};Runnable[] actions={this::searchOrganizer,()->openPocket(AgendaActivity.class),this::openChat};
-        for(int i=0;i<footer.length;i++){TextView key=actionInto(todayActions,footer[i],14,SECONDARY,actions[i]);PocketDesign.control(key);key.setGravity(Gravity.CENTER);key.setMinHeight(dp(56));key.setTag(new String[]{"today_search","today_calendar","today_chat"}[i]);key.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));}
+        noteResults.setVisibility(View.GONE);
+        if(daily){action("all tasks",14,SECONDARY,()->selectWorkspace("tasks")).setTag("today_all_tasks");
+            section(content,"review",false);action("done tasks",14,SECONDARY,()->{taskFilter="Done";selectWorkspace("tasks");});action("today's activity",14,SECONDARY,()->openPocket(ReceiptActivity.class));}
+        workspaceBottom(daily ? "capture" : "+ task", daily ? this::captureMenu : () -> openCapture("task",0,""));
         addFeedback();
+    }
+    private void workspaceBottom(String label, Runnable capture) {
+        todayActions = softKeys("today_actions",new String[]{label,"search","calendar","pip"},new String[]{"workspace_capture","today_search","today_calendar","today_chat"},0,
+                capture,()->navigate("search"),()->openPocket(AgendaActivity.class),this::openChat);
+    }
+    private void selectWorkspace(String tab) {
+        if (!java.util.Arrays.asList("today","thoughts","tasks","notes").contains(tab)) return;
+        persistDraft(); workspaceTab = tab; organizerQuery = "";
+        if ("today".equals(screen)) { motion.settle(); render(); } else navigate("today");
+    }
+    private void captureMenu() {
+        new AlertDialog.Builder(this).setTitle("Capture").setItems(new String[]{"Thought","Task","Note","Appointment"},(dialog,index)->{
+            if(index==0)openThoughtCapture(0);else if(index==1)openCapture("task",0,"");else if(index==2)openCapture("note",0,"");else startActivity(new Intent(this,AgendaActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("title",""));
+        }).show();
+    }
+    private void resumeWriting() {
+        List<String> kinds = new ArrayList<>(); for(String kind:new String[]{"thought","task","note"})if(!planner.draft(kind,0).trim().isEmpty())kinds.add(kind);
+        if(!kinds.isEmpty())action("continue writing · "+String.join(", ",kinds),14,SECONDARY,()->new AlertDialog.Builder(this).setTitle("Continue writing").setItems(kinds.toArray(new String[0]),(dialog,index)->{
+            String kind=kinds.get(index);if("thought".equals(kind))openThoughtCapture(0);else openCapture(kind,0,"");
+        }).show()).setTag("workspace_resume");
+    }
+    private void renderWorkspaceNotes(LinearLayout host) {
+        commands(host,"notes_capture",new String[]{"+ note","+ paper page"},new String[]{"notes_new","notes_paper"},0,()->openCapture("note",0,""),()->openPocket(JournalActivity.class));
+        List<PlannerStore.Entry> notes = new ArrayList<>();for(PlannerStore.Entry entry:planner.entries())if("note".equals(entry.kind))notes.add(entry);
+        Collections.sort(notes,(a,b)->planner.notePinned(a.id)!=planner.notePinned(b.id)?(planner.notePinned(a.id)?-1:1):Long.compare(planner.noteUpdated(b),planner.noteUpdated(a)));
+        section(host,"notes · "+notes.size(),true);
+        if(notes.isEmpty())host.addView(text("No notes yet.",16,SECONDARY));
+        for(PlannerStore.Entry entry:notes){String[] excerpt=ReadableRows.excerpt(entry.text);
+            LinearLayout row=ReadableRows.item(this,excerpt[0],(planner.notePinned(entry.id)?"Pinned · ":"")+excerpt[1],SECONDARY,"note_open_"+entry.id,()->openNote(entry.id));
+            row.setOnLongClickListener(v->{entryMenu(entry);return true;});host.addView(row);
+        }
+    }
+    private void renderThoughts(LinearLayout host) {
+        List<ParkingStore.Item> items = ParkingStore.open(this); section(host,"thoughts · "+items.size(),true);
+        if(items.isEmpty())host.addView(text("No thoughts yet.",16,SECONDARY));
+        long now=System.currentTimeMillis();for(ParkingStore.Item item:items){
+            String meta=item.due==0?"Undecided":item.back(now)?"Ready to revisit":"Revisit · "+java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT,java.text.DateFormat.SHORT).format(new Date(item.due));
+            if(!item.note.isEmpty())meta+=" · from a note";
+            host.addView(ReadableRows.item(this,item.text,meta,item.back(now)?accent():SECONDARY,"thought_open_"+item.id,()->openThought(item.id)));
+        }
+        List<ParkingStore.Item> handled=new ArrayList<>();for(ParkingStore.Item item:ParkingStore.items(this))if(!item.open())handled.add(item);
+        if(!handled.isEmpty())actionInto(host,"handled thoughts · "+handled.size(),14,SECONDARY,()->{
+            String[] labels=new String[handled.size()];for(int i=0;i<labels.length;i++)labels[i]=handled.get(i).text;
+            new AlertDialog.Builder(this).setTitle("Handled thoughts").setItems(labels,(dialog,index)->openThought(handled.get(index).id)).show();
+        });
+    }
+    private void openThought(long id) { persistDraft();captureEditor=null;captureStepsEditor=null;captureId=id;captureKind="thought";navigate("thought_detail"); }
+    private void openThoughtCapture(long id) {
+        persistDraft();ParkingStore.Item item=id==0?null:ParkingStore.find(this,id);captureKind="thought";captureId=id;
+        captureText=planner.hasDraft("thought",id)?planner.draft("thought",id):item==null?"":item.text;
+        captureReview=getSharedPreferences("pocket_planner",0).getLong("draft_thought_review_"+id,item==null?0:item.due);
+        captureEditor=null;captureStepsEditor=null;captureSelectionStart=captureSelectionEnd=-1;
+        if("capture".equals(screen))render();else navigate("capture");
+    }
+    private void renderThoughtDetail() {
+        heading("thought","today");ParkingStore.Item item=ParkingStore.find(this,captureId);
+        if(item==null){content.addView(text("This thought was removed.",16,SECONDARY));return;}
+        content.addView(text(item.text,20,PRIMARY));long linked=ParkingStore.task(this,item.id);
+        if(!item.open()){
+            content.addView(text(ParkingStore.TASK.equals(item.state)?"Made into a task":"Let go",14,SECONDARY));
+            if(linked!=0)action("open task",18,accent(),()->openTask(linked));return;
+        }
+        commands(content,"thought_commands",new String[]{"make task","edit"},new String[]{"thought_promote","thought_edit"},0,
+                ()->plannerAction(()->openTask(ParkingStore.promote(this,item.id))),()->openThoughtCapture(item.id));
+        valueAction("revisit",item.due==0?"when I choose":java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT,java.text.DateFormat.SHORT).format(new Date(item.due)),()->chooseThoughtReview(item.due,value->{ParkingStore.repark(this,item.id,value);ParkingReceiver.arm(this);render();})).setTag("thought_review");
+        PlannerStore.Entry note=NoteSync.byUid(planner,item.note);if(note!=null)action("from note · "+NoteThoughts.title(note),16,SECONDARY,()->openNote(note.id));
+        action("let go",14,SECONDARY,()->new AlertDialog.Builder(this).setTitle("Let this thought go?").setNegativeButton("Keep",null).setPositiveButton("Let go",(d,w)->{ParkingStore.close(this,item.id,ParkingStore.KILLED);ParkingReceiver.arm(this);leave("today");}).show());
+        addFeedback();
+    }
+    private void chooseThoughtReview(long initial, java.util.function.LongConsumer result) {
+        new AlertDialog.Builder(this).setTitle("Revisit this thought").setItems(new String[]{"When I choose","Tomorrow morning","Next week","Choose date and time"},(dialog,index)->{
+            if(index==0)result.accept(0);else if(index<3)result.accept(ParkingStore.when(index==1?"tomorrow":"next week",System.currentTimeMillis()));
+            else ReminderPicker.show(this,initial>System.currentTimeMillis()?initial:System.currentTimeMillis()+3600000,result::accept);
+        }).show();
+    }
+    private void renderThoughtCapture() {
+        heading(captureId==0?"new thought":"edit thought","thought_detail","save",this::saveThought,true);
+        captureEditor=new EditText(this);PocketDesign.input(captureEditor);captureEditor.setTag("capture_editor");captureEditor.setHint("What's on your mind?");captureEditor.setMinLines(4);
+        captureEditor.setFilters(new InputFilter[]{new InputFilter.LengthFilter(PlannerStore.TASK_LIMIT)});captureEditor.setText(captureText);content.addView(captureEditor);
+        watchDraft(captureEditor);
+        valueAction("revisit",captureReview==0?"when I choose":java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT,java.text.DateFormat.SHORT).format(new Date(captureReview)),()->chooseThoughtReview(captureReview,value->{persistDraft();captureReview=value;planner.preferences().edit().putLong("draft_thought_review_"+captureId,value).apply();render();}));
+        addFeedback();
+    }
+    private void saveThought() { plannerAction(()->{
+        long old=captureId;String value=captureEditor.getText().toString();
+        if(old==0)ParkingStore.park(this,value,captureReview);else{ParkingStore.edit(this,old,value);ParkingStore.repark(this,old,captureReview);}
+        planner.clearDraft("thought",old);planner.preferences().edit().remove("draft_thought_review_"+old).apply();ParkingReceiver.arm(this);
+        hideKeyboard(captureEditor);captureEditor=null;captureText="";leave(workspace()?"today":"home");showFeedback("Thought saved.");
+    }); }
+    private void renderWorkspaceSearch() {
+        heading("search","today");EditText search=new EditText(this);PocketDesign.input(search);search.setSingleLine(true);search.setTag("workspace_search");search.setHint("Thoughts, tasks, notes and appointments");search.setText(workspaceSearchQuery);content.addView(search);
+        LinearLayout results=new LinearLayout(this);results.setOrientation(LinearLayout.VERTICAL);results.setTag("workspace_search_results");content.addView(results);
+        Runnable find=()->{workspaceSearchQuery=search.getText().toString();results.removeAllViews();String query=workspaceSearchQuery.trim().toLowerCase(Locale.ROOT);
+            if(query.isEmpty()){results.addView(text("Find a thought, an action, a note or time you set aside.",16,SECONDARY));return;}int count=0;
+            for(ParkingStore.Item item:ParkingStore.open(this))if(item.text.toLowerCase(Locale.ROOT).contains(query)){results.addView(ReadableRows.item(this,item.text,"Thought",SECONDARY,"search_thought_"+item.id,()->openThought(item.id)));count++;}
+            for(PlannerStore.Entry entry:planner.entries()){String haystack=entry.text+"\n"+PlannerStore.stepsText(entry.steps)+(entry.source==null?"":"\n"+entry.source.text);
+                if(haystack.toLowerCase(Locale.ROOT).contains(query)){results.addView(ReadableRows.item(this,ReadableRows.excerpt(entry.text)[0],"task".equals(entry.kind)?(entry.done?"Task · done":"Task"):"Note",SECONDARY,"search_entry_"+entry.id,()->{if("task".equals(entry.kind))openTask(entry.id);else openNote(entry.id);}));count++;}}
+            for(AgendaStore.Event event:AgendaStore.list(this))if(event.title.toLowerCase(Locale.ROOT).contains(query)){results.addView(ReadableRows.item(this,event.title,"Appointment · "+java.text.DateFormat.getDateTimeInstance().format(new Date(event.when)),SECONDARY,"search_appointment_"+event.id,()->startActivity(new Intent(this,AgendaActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("appointment_id",event.id))));count++;}
+            if(count==0)results.addView(text("Nothing found.",16,SECONDARY));
+        };search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){find.run();}public void afterTextChanged(Editable e){}});find.run();addFeedback();
     }
     private void searchOrganizer(){
         int page=pageGeneration;EditText search=new EditText(this);search.setTag("organizer_search");search.setTextColor(PRIMARY);search.setHintTextColor(SECONDARY);search.setTextSize(16);search.setTypeface(Typeface.MONOSPACE);search.setSingleLine(true);search.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);search.setMinHeight(dp(48));search.setHint("> Find tasks or notes");search.setText(organizerQuery);PocketDesign.input(search);
@@ -1557,34 +1759,35 @@ public class MainActivity extends Activity {
             List<PlannerStore.Entry> entries = planner.entries(), matches = new ArrayList<>();
             Collections.sort(entries,(a,b)->Boolean.compare("note".equals(b.kind)&&planner.notePinned(b.id),"note".equals(a.kind)&&planner.notePinned(a.id)));
             String query = organizerQuery.trim().toLowerCase(Locale.getDefault()), today = PlannerDates.today();
+            String filter = "today".equals(workspaceTab) ? "Today" : taskFilter;
             int noteCount = 0;
             long pinned=getSharedPreferences("pocket_planner",0).getLong("next_task",0);
             for (PlannerStore.Entry entry : entries) {
                 String searchable = entry.text + "\n" + PlannerStore.stepsText(entry.steps);
                 if (!searchable.toLowerCase(Locale.getDefault()).contains(query)) continue;
                 if ("note".equals(entry.kind)) {
-                    if(noteCount++==0){TextView title=todayText("NOTES",12,PRIMARY,true);title.setPadding(0,dp(24),0,dp(8));notes.addView(title);}
+                    if (!"notes".equals(workspaceTab)) continue;
+                    if(noteCount++==0)section(notes,"notes",false);
                     String[] excerpt=ReadableRows.excerpt(entry.text);
                     if(planner.notePinned(entry.id))excerpt[1]="Pinned"+(excerpt[1].isEmpty()?"":" · "+excerpt[1]);
                     LinearLayout row=ReadableRows.item(this,excerpt[0],excerpt[1],SECONDARY,"note_open_"+entry.id,()->openCapture("note",entry.id,entry.text));
-                    ((TextView)row.getChildAt(0)).setTextSize(todaySize(17));if(row.getChildCount()>1)((TextView)row.getChildAt(1)).setTextSize(todaySize(12));
                     row.setOnLongClickListener(v -> { entryMenu(entry); return true; });notes.addView(row,new LinearLayout.LayoutParams(-1,-2));continue;
                 }
-                if (!"task".equals(entry.kind) || entry.done != "Done".equals(taskFilter)) continue;
-                if ("Today".equals(taskFilter) && entry.id!=pinned && (entry.due.isEmpty() || entry.due.compareTo(today) > 0)) continue;
-                if ("Later".equals(taskFilter) && (entry.due.isEmpty() || entry.due.compareTo(today) <= 0)) continue;
+                if (!"task".equals(entry.kind) || entry.done != "Done".equals(filter)) continue;
+                if ("Today".equals(filter) && entry.id!=pinned && (entry.due.isEmpty() || entry.due.compareTo(today) > 0)) continue;
+                if ("Later".equals(filter) && (entry.due.isEmpty() || entry.due.compareTo(today) <= 0)) continue;
                 matches.add(entry);
             }
             Collections.sort(matches,(a,b)->a.id==b.id?0:a.id==pinned?-1:b.id==pinned?1:PlannerStore.compareTasks(a,b));
             java.util.Set<String> groups=new java.util.HashSet<>();for(PlannerStore.Entry entry:matches)groups.add(taskGroup(entry,pinned,today));
             String lastGroup = "";
             TextView taskHeading = content.findViewWithTag("today_tasks_heading");
-            taskHeading.setText("TASKS · " + matches.size() + " " + taskFilter.toLowerCase(Locale.getDefault()));
+            taskHeading.setText("tasks · " + matches.size() + " " + filter.toLowerCase(Locale.getDefault()));
             for (PlannerStore.Entry entry : matches) {
                 String group=taskGroup(entry,pinned,today);
                 if (groups.size()>1&&!group.equals(lastGroup)) {
-                    TextView label = todayText(group.toUpperCase(Locale.getDefault()),14,group.equals("Overdue")?AMBER:SECONDARY,true);
-                    label.setPadding(0, dp(lastGroup.isEmpty()?4:12), 0, dp(4)); tasks.addView(label); lastGroup = group;
+                    TextView label = section(tasks, group, true); if (group.equals("Overdue")) label.setTextColor(AMBER);
+                    label.setPadding(0, dp(lastGroup.isEmpty()?8:16), 0, dp(4)); lastGroup = group;
                 }
                 LinearLayout line = new LinearLayout(this); line.setGravity(Gravity.CENTER_VERTICAL);
                 android.widget.CheckBox check = taskCheckbox(entry.done, "task_check_" + entry.id, (entry.done ? "Reopen " : "Complete ") + entry.text,
@@ -1596,18 +1799,16 @@ public class MainActivity extends Activity {
                 if (!entry.steps.isEmpty()) details += " · " + entry.completedSteps() + "/" + entry.steps.size() + " steps";
                 int metadataColor=!entry.due.isEmpty()&&entry.due.compareTo(today)<0&&!entry.done?AMBER:isNext?accent():SECONDARY;
                 LinearLayout item=ReadableRows.item(this,entry.text,details,metadataColor,"task_open_"+entry.id,()->openTask(entry.id));
-                TextView title=(TextView)item.getChildAt(0),meta=(TextView)item.getChildAt(1);
-                title.setTypeface(Typeface.create("sans-serif",Typeface.NORMAL));title.setTextSize(todaySize(20));
-                meta.setTypeface(Typeface.create("sans-serif",Typeface.NORMAL));meta.setTextSize(todaySize(14));
+                TextView title=(TextView)item.getChildAt(0);
                 if(entry.done){title.setTextColor(SECONDARY);title.setPaintFlags(title.getPaintFlags()|android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);}
-                item.setPadding(dp(4),dp(12),0,dp(12));
+                item.setPadding(dp(4),dp(8),0,dp(8));
                 item.setOnLongClickListener(v -> { taskQuickActions(entry.id); return true; });line.addView(item,new LinearLayout.LayoutParams(0,-2,1));
                 TextView more=text("⋮",24,SECONDARY);PocketDesign.control(more);more.setTag("task_more_"+entry.id);
                 more.setContentDescription("Actions for "+entry.text);more.setOnClickListener(v->taskQuickActions(entry.id));
                 line.addView(more,new LinearLayout.LayoutParams(dp(48),-2));tasks.addView(line);
             }
-            if (matches.isEmpty()) tasks.addView(todayText(query.isEmpty()?"No "+taskFilter.toLowerCase(Locale.US)+" tasks":"No matching tasks",14,SECONDARY,false));
-            if(noteCount==0){TextView title=todayText("NOTES",12,PRIMARY,true);title.setPadding(0,dp(24),0,dp(8));notes.addView(title);notes.addView(todayText(query.isEmpty()?"No notes":"No matching notes",14,SECONDARY,false));}
+            if (matches.isEmpty()) tasks.addView(todayText(query.isEmpty()?"No "+filter.toLowerCase(Locale.US)+" tasks":"No matching tasks",14,SECONDARY,false));
+            if(noteCount==0){section(notes,"notes",false);notes.addView(todayText(query.isEmpty()?"No notes":"No matching notes",14,SECONDARY,false));}
 
         } catch (IllegalStateException | IllegalArgumentException error) { tasks.addView(text(error.getMessage(), 16, AMBER)); }
     }
@@ -1650,7 +1851,7 @@ public class MainActivity extends Activity {
     }
     private void deleteTask(long id) {
         new AlertDialog.Builder(this).setTitle("Delete task?").setNegativeButton("Cancel",null).setPositiveButton("Delete",(dialog,button)->plannerAction(()->{
-            TaskReminders.delete(this,id);planner.clearDraft("task",id);if("task_detail".equals(screen))finishPage("today");else render();
+            TaskReminders.delete(this,id);planner.clearDraft("task",id);if("task_detail".equals(screen))leave("today");else render();
         })).show();
     }
     private void addTaskStep(long id) {
@@ -1669,25 +1870,19 @@ public class MainActivity extends Activity {
     }
 
     private void renderTaskDetail() {
-        heading("Task", "today");
+        heading("task", "today");
         PlannerStore.Entry entry;
         try { entry = planner.find(captureId); }
         catch (IllegalStateException error) { content.addView(text(error.getMessage(), 16, AMBER)); return; }
         if (entry == null) { content.addView(text("This task was removed.", 16, SECONDARY)); return; }
-        TextView title=text(entry.text,24,entry.done?SECONDARY:PRIMARY);title.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));
-        title.setPadding(0,dp(12),0,dp(12));title.setTag("task_detail_title");content.addView(title);
-        LinearLayout commands=new LinearLayout(this);commands.setTag("task_detail_commands");
-        TextView complete=actionInto(commands,entry.done?"Reopen task":"Complete task",16,accent(),()->plannerAction(()->{TaskReminders.toggle(this,entry.id);render();}));
-        PocketDesign.primary(complete);complete.setTag("task_complete");complete.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));
-        TextView edit=actionInto(commands,"Edit task",16,PRIMARY,()->openCapture("task",entry.id,entry.text));
-        PocketDesign.control(edit);edit.setMinHeight(dp(56));edit.setTag("task_edit");edit.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));content.addView(commands);
-        LinearLayout properties=new LinearLayout(this);properties.setTag("task_detail_properties");
-        TextView due=actionInto(properties,"Due · "+taskDateLabel(entry.due),14,PRIMARY,()->chooseTaskDate(entry.due,value->plannerAction(()->{planner.setDue(entry.id,value);render();})));
-        PocketDesign.control(due);due.setTag("task_detail_due");due.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));
-        TextView priority=actionInto(properties,"Important",14,PRIMARY,()->plannerAction(()->{planner.toggleImportant(entry.id);render();}));
-        PocketDesign.control(priority);priority.setSelected(entry.important);priority.setTag("task_detail_important");priority.setContentDescription("Important, "+(entry.important?"on":"off"));priority.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));content.addView(properties);
-        gap(8);
-        content.addView(text("Steps · " + entry.completedSteps() + "/" + entry.steps.size(), 15, SECONDARY));
+        TextView title=text(entry.text,20,entry.done?SECONDARY:PRIMARY);title.setTypeface(Typeface.MONOSPACE,Typeface.BOLD);
+        title.setPadding(0,dp(8),0,dp(4));title.setTag("task_detail_title");content.addView(title);
+        boolean chosen=planner.preferences().getLong("next_task",0)==entry.id;
+        String status=(entry.done?"Done":chosen?"Next":"Open")+(entry.important?" · Important":"")+" · "+taskDateLabel(entry.due);
+        TextView meta=text(status,14,!entry.due.isEmpty()&&entry.due.compareTo(PlannerDates.today())<0&&!entry.done?AMBER:SECONDARY);meta.setPadding(0,0,0,dp(4));content.addView(meta);
+        commands(content,"task_detail_commands",new String[]{entry.done?"reopen task":"complete task","edit task","focus"},new String[]{"task_complete","task_edit","task_focus"},0,
+                ()->plannerAction(()->{TaskReminders.toggle(this,entry.id);render();}),()->openCapture("task",entry.id,entry.text),()->navigate("focus"));
+        section(content,"steps · " + entry.completedSteps() + "/" + entry.steps.size(),false);
         for (int i = 0; i < entry.steps.size(); i++) {
             int index = i; PlannerStore.Step step = entry.steps.get(i);
             Runnable toggle=()->plannerAction(()->{planner.toggleStep(entry.id,index);render();});
@@ -1695,21 +1890,28 @@ public class MainActivity extends Activity {
             row.setContentDescription((step.done?"Completed step, ":"Step, ")+step.text);row.setOnClickListener(v->toggle.run());
             android.widget.CheckBox check=taskCheckbox(step.done,"task_step_check_"+i,(step.done?"Reopen ":"Complete ")+step.text,toggle);
             check.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);row.addView(check,new LinearLayout.LayoutParams(dp(48),-2));
-            TextView name=text(step.text,18,step.done?SECONDARY:PRIMARY);name.setTypeface(Typeface.create("sans-serif",Typeface.NORMAL));name.setPadding(dp(4),dp(12),0,dp(12));
+            TextView name=text(step.text,16,step.done?SECONDARY:PRIMARY);name.setPadding(dp(4),dp(12),0,dp(12));
             if(step.done)name.setPaintFlags(name.getPaintFlags()|android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
             name.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);row.addView(name,new LinearLayout.LayoutParams(0,-2,1));content.addView(row);
         }
-        action("+ Add step",16,accent(),()->addTaskStep(entry.id)).setTag("task_add_step");
-        if (!planner.draft("task", entry.id).isEmpty()) content.addView(text("Unsaved edit", 14, SECONDARY));
+        commands(content,"task_step_commands",new String[]{"+ add step"},new String[]{"task_add_step"},0,()->addTaskStep(entry.id));
+        section(content,"details",false);
+        valueAction("due",taskDateLabel(entry.due).toLowerCase(Locale.getDefault()),()->chooseTaskDate(entry.due,value->plannerAction(()->{planner.setDue(entry.id,value);render();})))
+                .setTag("task_detail_due");
+        valueAction("important",entry.important?"on":"off",()->plannerAction(()->{planner.toggleImportant(entry.id);render();})).setTag("task_detail_important");
         if (!entry.done) {
-            boolean chosen=planner.preferences().getLong("next_task",0)==entry.id;
-            TextView next=action(chosen?"Next task · remove":"Make next",16,chosen?accent():PRIMARY,()->plannerAction(()->{planner.makeNext(chosen?0:entry.id);render();}));next.setTag("task_detail_next");
-            action("Focus · 25 min", 16, PRIMARY, () -> startActivity(new Intent(this, ClockActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            valueAction("next task",chosen?"yes":"no",()->plannerAction(()->{planner.makeNext(chosen?0:entry.id);render();})).setTag("task_detail_next");
+            valueAction("reminder",TaskReminders.find(this,entry.id)==null?"none":TaskReminders.label(this,entry.id).replaceFirst("^Reminder[^·]*· ",""),
+                    ()->startActivity(new Intent(this,TaskReminderActivity.class).putExtra("task",entry.id))).setTag("task_detail_reminder");
+            action("focus · 25 min", 18, PRIMARY, () -> startActivity(new Intent(this, ClockActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     .putExtra("seconds", 1500).putExtra("title", "Focus: " + entry.text.substring(0, Math.min(60, entry.text.length())))));
-            TextView reminder=action(TaskReminders.find(this,entry.id)==null?"Schedule reminder":TaskReminders.label(this,entry.id),16,PRIMARY,()->startActivity(new Intent(this,TaskReminderActivity.class).putExtra("task",entry.id)));reminder.setTag("task_detail_reminder");
         }
-        if(entry.source!=null)action("Source · "+entry.source.name,14,SECONDARY,()->openTaskSource(entry.source));
-        action("Delete task",15,SECONDARY,()->deleteTask(entry.id));
+        if(entry.source!=null)action("source · "+entry.source.name,14,SECONDARY,()->openTaskSource(entry.source)).setTag("task_source");
+        section(content,"time",false);
+        for(AgendaStore.Event event:AgendaStore.list(this))if(event.task==entry.id)action(event.title+" · "+java.text.DateFormat.getDateTimeInstance().format(new Date(event.when)),14,SECONDARY,()->startActivity(new Intent(this,AgendaActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("appointment_id",event.id)));
+        if(!entry.done)action("plan time",14,accent(),()->startActivity(new Intent(this,AgendaActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("title",entry.text).putExtra("task",entry.id))).setTag("task_plan_time");
+        if (!planner.draft("task", entry.id).isEmpty()) content.addView(text("Unsaved edit", 14, SECONDARY));
+        action("delete task",14,SECONDARY,()->deleteTask(entry.id));
         addFeedback();
     }
 
@@ -1725,7 +1927,7 @@ public class MainActivity extends Activity {
             else if("Pin".equals(choice)||"Unpin".equals(choice))plannerAction(()->{planner.pinNote(entry.id,"Pin".equals(choice));render();});
             else new AlertDialog.Builder(this).setTitle("Delete " + (task ? "task" : "note") + "?")
                     .setNegativeButton("Cancel", null).setPositiveButton("Delete", (confirmation, button) ->
-                            plannerAction(() -> { TaskReminders.delete(this,entry.id); planner.clearDraft(entry.kind, entry.id); if("note_preview".equals(screen))finishPage("today");else render(); })).show();
+                            plannerAction(() -> { TaskReminders.delete(this,entry.id); planner.clearDraft(entry.kind, entry.id); if("note_preview".equals(screen)){trail.take(pageKey("capture"));leave("today");}else render(); })).show();
         }).show();
     }
 
@@ -1744,11 +1946,12 @@ public class MainActivity extends Activity {
     }
 
     private void renderCapture() {
+        if ("thought".equals(captureKind)) { renderThoughtCapture(); return; }
         boolean task = "task".equals(captureKind);
         captureEditor = task ? new EditText(this) : new MarkdownEditor(this);
         EditText editorForPage = captureEditor;
         Runnable saveCapture = () -> saveCapture(editorForPage, task);
-        String title = captureId == 0 ? (task ? "Add task" : "Note") : "Edit";
+        String title = captureId == 0 ? (task ? "new task" : "note") : "edit";
         if (task) heading(title, captureId != 0 ? "task_detail" : "today", "save", saveCapture, true);
         else heading(title, "today", "save", saveCapture, true);
         captureEditor.setTag("capture_editor");
@@ -1758,7 +1961,6 @@ public class MainActivity extends Activity {
                 | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         PocketDesign.input(captureEditor);
         if (!task) PocketDesign.editor(captureEditor);
-        else {captureEditor.setTypeface(Typeface.create("sans-serif",Typeface.NORMAL));captureEditor.setTextSize(todaySize(20));}
         captureEditor.setFilters(new InputFilter[]{new InputFilter.LengthFilter(
                 "task".equals(captureKind) ? PlannerStore.TASK_LIMIT : PlannerStore.NOTE_LIMIT)});
         captureEditor.setHint(task ? "Task title" : "Write a note…");
@@ -1770,42 +1972,44 @@ public class MainActivity extends Activity {
         // Fill a tall window; keep the editor's minimum height and scrollable controls in a short one.
         content.addView(captureEditor, new LinearLayout.LayoutParams(-1, -2, task ? 0 : 1));
         if (task) {
-            TextView due = action("Due · " + PlannerDates.label(captureDue), 16, PRIMARY, () -> {});
+            TextView due = action(dueLabel(captureDue), 16, PRIMARY, () -> {});
             due.setTag("task_due"); due.setOnClickListener(v -> chooseTaskDate(captureDue, value -> {
-                captureDue = value; due.setText("Due · " + PlannerDates.label(value)); persistDraft();
+                captureDue = value; due.setText(dueLabel(value)); persistDraft();
             }));
-            TextView important = action(captureImportant ? "! Important · on" : "Important · off", 16, PRIMARY, () -> {});
+            TextView important = action(importantLabel(captureImportant), 16, PRIMARY, () -> {});
             important.setTag("task_important"); important.setOnClickListener(v -> {
-                captureImportant = !captureImportant; important.setText(captureImportant ? "! Important · on" : "Important · off"); persistDraft();
+                captureImportant = !captureImportant; important.setText(importantLabel(captureImportant)); persistDraft();
             });
-            content.addView(text("Checklist", 14, SECONDARY));
+            section(content, "steps", false);
             captureStepsEditor = new EditText(this); captureStepsEditor.setTag("task_steps_editor");
             captureStepsEditor.setTextColor(PRIMARY); captureStepsEditor.setHintTextColor(SECONDARY);
             captureStepsEditor.setTypeface(Typeface.MONOSPACE); captureStepsEditor.setTextSize(16);
             captureStepsEditor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
             PocketDesign.input(captureStepsEditor); captureStepsEditor.setGravity(Gravity.TOP);
             captureStepsEditor.setFilters(new InputFilter[]{new InputFilter.LengthFilter(PlannerStore.STEPS_TEXT_LIMIT)});
-            captureStepsEditor.setTypeface(Typeface.create("sans-serif",Typeface.NORMAL));captureStepsEditor.setTextSize(todaySize(18));
             captureStepsEditor.setHint("One step per line"); captureStepsEditor.setMinLines(3); captureStepsEditor.setMaxLines(8);
             captureStepsEditor.setText(captureSteps); content.addView(captureStepsEditor, new LinearLayout.LayoutParams(-1, -2));
         } else {
             gap(16);
-            LinearLayout tools = new LinearLayout(this); tools.setTag("note_actions");
             MarkdownEditor note = (MarkdownEditor) captureEditor;
             note.configureWheel(this::noteFormatMenu);
+            LinearLayout tools = softKeys("note_actions", new String[]{"preview", "task"}, new String[]{"note_preview", "note_task"}, 0,
+                    () -> { persistDraft(); hideKeyboard(captureEditor); navigate("note_preview"); }, this::captureNoteTask);
             NoteFormatControl format = new NoteFormatControl(this, note);
-            format.setTag("note_format_control"); tools.addView(format, new LinearLayout.LayoutParams(0, -2, 1));
-            TextView preview = actionInto(tools, "Preview", 15, accent(), () -> { persistDraft(); hideKeyboard(captureEditor); navigate("note_preview"); });
-            PocketDesign.control(preview); preview.setMinHeight(dp(56)); preview.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
-            TextView make=actionInto(tools,"Task",14,PRIMARY,this::captureNoteTask);PocketDesign.control(make);make.setMinHeight(dp(56));make.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));
+            format.setTag("note_format_control"); PocketDesign.softKey(format, 0, 3, false); format.setTextColor(PocketDesign.colors(this, SECONDARY));
+            tools.addView(format, 0, PocketDesign.softKeyCell(this, 0, 3));
+            PocketDesign.softKey((TextView) tools.getChildAt(1), 1, 3, true); tools.getChildAt(1).setLayoutParams(PocketDesign.softKeyCell(this, 1, 3));
+            PocketDesign.softKey((TextView) tools.getChildAt(2), 2, 3, false); tools.getChildAt(2).setLayoutParams(PocketDesign.softKeyCell(this, 2, 3));
             content.addView(tools);
         }
         if (task) {
-            action("Clear draft", 15, SECONDARY, () -> clearCaptureDraft(editorForPage));
+            action("clear draft", 14, SECONDARY, () -> clearCaptureDraft(editorForPage));
         }
         watchDraft(captureEditor); if (captureStepsEditor != null) watchDraft(captureStepsEditor);
         addFeedback();
     }
+    private static String dueLabel(String due) { return "due · " + PlannerDates.label(due).toLowerCase(Locale.getDefault()); }
+    private static String importantLabel(boolean on) { return on ? "important · on" : "important · off"; }
 
     /** Opens a note's preview, for example from a thought in the Parking Lot. */
     private void openNote(long id) {
@@ -1819,17 +2023,18 @@ public class MainActivity extends Activity {
     private void saveCapture(EditText editorForPage, boolean task) {
         if (captureEditor != editorForPage || !"capture".equals(screen)) return;
         plannerAction(() -> {
-            long saved;
+            long saved; boolean created = captureId == 0; String notice = created ? (task ? "Task added." : "Note saved.") : "";
             if (task) {saved = planner.saveTask(captureId, captureEditor.getText().toString(), captureDue, captureImportant, captureStepsEditor.getText().toString());if(captureId!=0)TaskReminders.rename(this,saved,captureEditor.getText().toString().trim());}
             else { PlannerStore.Entry before = captureId == 0 ? null : planner.find(captureId); String text = captureEditor.getText().toString();
                 saved = planner.save(captureId, captureKind, text);
-                if ("note".equals(captureKind)) { int parked = NoteThoughts.parkNew(this, planner, saved, before == null ? "" : before.text, text); if (parked > 0) showFeedback(parked == 1 ? "1 thought parked." : parked + " thoughts parked."); } }
+                if ("note".equals(captureKind)) { int added = NoteThoughts.parkNew(this, planner, saved, before == null ? "" : before.text, text); if (added > 0) notice = added == 1 ? "1 thought saved from this note." : added + " thoughts saved from this note."; } }
             planner.clearDraft(captureKind, captureId);
             hideKeyboard(captureEditor); captureEditor = null; captureStepsEditor = null; captureText = "";
             captureId = saved; captureSelectionStart = captureSelectionEnd = -1;
-            if(task)finishPage("task_detail");
-            else if(trail.peek()!=null){restoreRoute(trail.pop());motion.back(this::render);}
-            else finishPage(workspace()?"today":"home");
+            // A saved action opens its next decisions: plan time, start Focus, or complete it.
+            if (task) finishPage("task_detail");
+            else leave(workspace() ? "today" : "home");
+            if (!notice.isEmpty()) showFeedback(notice);
         });
     }
 
@@ -1886,7 +2091,7 @@ public class MainActivity extends Activity {
     private void dismissNoteWheel() { if (captureEditor instanceof MarkdownEditor) ((MarkdownEditor) captureEditor).dismissWheel(); }
 
     private void renderNotePreview() {
-        heading("Preview", "capture");
+        heading("preview", "capture");
         TextView preview = text("", PocketDesign.BODY, PRIMARY); preview.setTag("note_markdown_preview"); preview.setTextIsSelectable(true);
         preview.setGravity(Gravity.TOP | Gravity.START); preview.setMinHeight(dp(120));
         io.noties.markwon.Markwon.builder(this)
@@ -1900,20 +2105,17 @@ public class MainActivity extends Activity {
                 .usePlugin(io.noties.markwon.ext.strikethrough.StrikethroughPlugin.create())
                 .build().setMarkdown(preview, "note".equals(captureKind) ? NoteThoughts.annotate(this, planner, captureId, captureText) : captureText);
         content.addView(preview, new LinearLayout.LayoutParams(-1, -2, 1)); gap(16);
-        LinearLayout tools = new LinearLayout(this); tools.setTag("preview_actions");
-        TextView edit = actionInto(tools, "Edit", 14, accent(), () -> navigate("capture"));
-        TextView share = actionInto(tools, "Share", 14, PRIMARY, () -> launch("Share", Intent.createChooser(new Intent(Intent.ACTION_SEND)
-                .setType("text/plain").putExtra(Intent.EXTRA_TEXT, captureText), "Share note")));
-        TextView make=actionInto(tools,"Task",14,PRIMARY,this::captureNoteTask);
-        TextView more=actionInto(tools,"More",14,SECONDARY,()->{if(captureId==0)showFeedback("Save this note to pin it.");else{PlannerStore.Entry note=planner.find(captureId);if(note!=null)entryMenu(note);else showFeedback("This note was removed.");}});
+        Runnable share = () -> launch("Share", Intent.createChooser(new Intent(Intent.ACTION_SEND)
+                .setType("text/plain").putExtra(Intent.EXTRA_TEXT, captureText), "Share note"));
+        Runnable more = () -> { if (captureId == 0) showFeedback("Save this note to pin it."); else { PlannerStore.Entry note = planner.find(captureId); if (note != null) entryMenu(note); else showFeedback("This note was removed."); } };
         // A note read from a journal page shows the handwriting behind it.
         String noteUid = captureId == 0 ? null : NoteSync.existingUid(planner, captureId);
         org.json.JSONObject page = JournalStore.forNote(this, noteUid);
-        if (page != null) { String pageUid = page.optString("uid"); actionInto(tools, "Paper", 14, PRIMARY, () -> openPocket(JournalPageActivity.class, pageUid)).setTag("note_paper"); }
-        for (TextView control : page == null ? new TextView[]{edit, share,make,more} : new TextView[]{edit, share, make, more, tools.findViewWithTag("note_paper")}) {
-            PocketDesign.control(control); PocketDesign.quiet(control, control == edit ? accent() : PRIMARY);
-            control.setMinHeight(dp(56)); control.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
-        }
+        LinearLayout tools;
+        if (page == null) tools = softKeys("preview_actions", new String[]{"edit", "share", "task", "more"}, null, 0, () -> navigate("capture"), share, this::captureNoteTask, more);
+        else { String pageUid = page.optString("uid");
+            tools = softKeys("preview_actions", new String[]{"edit", "share", "task", "paper", "more"}, new String[]{"note_edit", "note_share", "note_task", "note_paper", "note_more"}, 0,
+                    () -> navigate("capture"), share, this::captureNoteTask, () -> openPocket(JournalPageActivity.class, pageUid), more); }
         content.addView(tools);
         addFeedback();
     }
@@ -1960,15 +2162,16 @@ public class MainActivity extends Activity {
     }
 
     private void renderFocus() {
-        heading("Focus", "today");
+        heading("focus", "today");
         PlannerStore.Entry next;
         try { next = planner.nextTask(); }
         catch (IllegalStateException error) { next = null; }
         if(!focusTitle.isEmpty())content.addView(text(focusTitle,18,PRIMARY));else if (next != null) content.addView(text(next.text, 16, PRIMARY));
-        action("Focus · 25 min", 18, accent(), () -> startFocusTimer(25, "Focus"));
-        action("Focus · 50 min", 18, PRIMARY, () -> startFocusTimer(50, "Focus"));
-        action("Break · 5 min", 18, PRIMARY, () -> startFocusTimer(5, "Break"));
-        action("Timer controls", 16, SECONDARY, () -> openPocket(ClockActivity.class));
+        section(content, "timers", false);
+        action("focus · 25 min", 18, accent(), () -> startFocusTimer(25, "Focus"));
+        action("focus · 50 min", 18, PRIMARY, () -> startFocusTimer(50, "Focus"));
+        action("break · 5 min", 18, PRIMARY, () -> startFocusTimer(5, "Break"));
+        action("timer controls", 14, SECONDARY, () -> openPocket(ClockActivity.class));
         addFeedback();
     }
 
@@ -1999,7 +2202,7 @@ public class MainActivity extends Activity {
     }
 
     private void renderNotifications() {
-        heading("Notifications", "home","Settings",()->startActivity(new Intent(this,NotificationSetupActivity.class)),false);
+        heading("notifications", "home","settings",()->startActivity(new Intent(this,NotificationSetupActivity.class)),false);
         if (!NotificationAccess.allowed(this) || !PhoneNotifications.connected()) {
             content.addView(text(NotificationAccess.allowed(this) ? "Access allowed. Waiting for Android to connect the notification reader." : "Notification access is off. Enable it to show other apps' current notices here.", 16, SECONDARY));
 
@@ -2050,7 +2253,7 @@ public class MainActivity extends Activity {
 
     private void updateHomeStatus() {
         if (homeStatus == null) return;
-        String state = HomeChoice.active(this) ? "Active" : "Choose Pocket";
+        String state = HomeChoice.active(this) ? "active" : "choose pocket";
         homeStatus.setText(state); ((View) homeStatus.getParent()).setContentDescription("Use as home screen, " + state);
     }
 
@@ -2097,7 +2300,7 @@ public class MainActivity extends Activity {
 
     private void updateTorchLabel() {
         if (torchValue == null) return;
-        torchValue.setText(torchOn ? "On" : "Off");
+        torchValue.setText(torchOn ? "on" : "off");
         ((View) torchValue.getParent()).setContentDescription("Flashlight, " + (torchOn ? "On" : "Off"));
     }
 

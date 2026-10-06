@@ -107,6 +107,8 @@ final class CloudSync {
                     upload(c, token, name, merged.toString());
                 }
                 pageImages(c, token);
+                // A synced idea stays undecided. Only a user action can promote it to a task.
+                ParkingReceiver.arm(c);
                 // Pages added on the web wait here for this phone to read them.
                 if (JournalStore.unread(c)) JournalJob.schedule(c);
             } catch (JSONException error) { throw new IOException("A synced file is damaged.", error); }

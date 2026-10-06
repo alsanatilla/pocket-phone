@@ -40,7 +40,7 @@ final class NoteSync {
                         if (!text.equals(mine.text)) store.save(mine.id, "note", text);
                         apply(store, p, mine.id, note, updated);
                     }
-                } catch (IllegalArgumentException full) { /* Organizer full or note removed meanwhile: the next sync tries again. */ }
+                } catch (IllegalArgumentException full) { throw new JSONException(full.getMessage()); }
             }
             return new JSONObject().put("v", 1).put("notes", local(store));
         } }
@@ -63,7 +63,7 @@ final class NoteSync {
         JSONObject tombstones = new JSONObject(p.getString("note_tombstones", "{}")), kept = new JSONObject(); long now = System.currentTimeMillis();
         for (Iterator<String> it = tombstones.keys(); it.hasNext(); ) {
             String uid = it.next(); long when = tombstones.optLong(uid);
-            if (now - when > KEEP_DELETED) continue;
+
             kept.put(uid, when); out.put(new JSONObject().put("uid", uid).put("text", "").put("deleted", true).put("updated", when));
         }
         p.edit().putString("note_tombstones", kept.toString()).apply();

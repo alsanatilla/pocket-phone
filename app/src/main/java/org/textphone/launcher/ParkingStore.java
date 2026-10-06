@@ -9,7 +9,10 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-/** Half-formed thoughts with a short fuse. Every item comes back until it is cleared, moved to Today or let go. */
+/**
+ * Undecided thoughts. A review time brings an idea back; only an explicit promotion commits it to a task.
+ * The historic file and ids stay intact, including thoughts already converted by older releases.
+ */
 final class ParkingStore {
     static final String PARKED = "parked", CLEARED = "cleared", TASK = "task", KILLED = "killed";
     static final String[] DELAYS = {"1 hour", "tonight", "tomorrow", "next week"};
@@ -20,7 +23,7 @@ final class ParkingStore {
         /** The uid of the note this thought was written in, or empty. */
         String note = "";
         boolean open() { return PARKED.equals(state); }
-        boolean back(long now) { return open() && due <= now; }
+        boolean back(long now) { return open() && due > 0 && due <= now; }
     }
     private static final Object LOCK = new Object();
     private static SharedPreferences prefs(Context c) { return c.getSharedPreferences("pocket_parking", 0); }
@@ -43,7 +46,7 @@ final class ParkingStore {
     /** Open items, the ones already back first, then by when they return. */
     static List<Item> open(Context c) {
         List<Item> open = new ArrayList<>(); for (Item item : items(c)) if (item.open()) open.add(item);
-        java.util.Collections.sort(open, (a, b) -> Long.compare(a.due, b.due)); return open;
+        java.util.Collections.sort(open, (a, b) -> Long.compare(a.due == 0 ? Long.MAX_VALUE : a.due, b.due == 0 ? Long.MAX_VALUE : b.due)); return open;
     }
     static Item find(Context c, long id) { for (Item item : items(c)) if (item.id == id) return item; return null; }
     static int backCount(Context c, long now) { int n = 0; for (Item item : items(c)) if (item.back(now)) n++; return n; }
@@ -54,6 +57,7 @@ final class ParkingStore {
     static Item park(Context c, String text, long due) {
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) throw new IllegalArgumentException("Type the thought first.");
+        if (value.length() > PlannerStore.TASK_LIMIT) throw new IllegalArgumentException("Use up to 500 characters.");
         synchronized (LOCK) {
             List<Item> items = items(c); Item item = new Item(); long now = System.currentTimeMillis();
             item.id = Math.max(now, prefs(c).getLong("last_id", 0) + 1); item.created = item.updated = now; item.due = due; item.text = value;
@@ -86,6 +90,29 @@ final class ParkingStore {
     static Item bringBack(Context c, long id) {
         synchronized (LOCK) { List<Item> items = items(c); Item item = only(items, id); item.due = item.updated = System.currentTimeMillis(); write(c, items, item.due); return item; }
     }
+    static Item edit(Context c, long id, String text) {
+        String value = text == null ? "" : text.trim();
+        if (value.isEmpty() || value.length() > PlannerStore.TASK_LIMIT) throw new IllegalArgumentException("Write a thought, up to 500 characters.");
+        synchronized (LOCK) { List<Item> items = items(c); Item item = only(items, id); item.text = value; item.updated = System.currentTimeMillis(); write(c, items, item.updated); return item; }
+    }
+    static long task(Context c, long thought) {
+        PlannerStore planner = new PlannerStore(c.getSharedPreferences("pocket_planner", 0));
+        for (PlannerStore.Entry entry : planner.entries()) if (entry.source != null && token(thought).equals(entry.source.token)) return entry.id;
+        return 0;
+    }
+    /** Save the task first. Retrying after an interrupted close finds the same task by its source token. */
+    static long promote(Context c, long id) {
+        synchronized (LOCK) {
+            Item item = find(c, id); if (item == null) throw new IllegalStateException("This thought was removed.");
+            long existing = task(c, id); if (existing != 0) { if (item.open()) close(c, id, TASK); return existing; }
+            if (!item.open()) throw new IllegalStateException("This thought has already been handled.");
+            PlannerStore planner = new PlannerStore(c.getSharedPreferences("pocket_planner", 0));
+            PlannerStore.Entry note = NoteSync.byUid(planner, item.note);
+            TaskSource source = (note == null ? TaskSource.shared("Thought", item.text) : TaskSource.note(note.id, note.text)).token(token(id));
+            long task = planner.captureTask(item.text, source); close(c, id, TASK); ParkingReceiver.arm(c);
+            ReceiptTape.log(c, ReceiptTape.TASK, item.text); return task;
+        }
+    }
     static Item close(Context c, long id, String state) {
         synchronized (LOCK) {
             List<Item> items = items(c); Item item = only(items, id); long now = System.currentTimeMillis();
@@ -100,12 +127,12 @@ final class ParkingStore {
     private static void save(Context c, JSONArray array) {
         if (!prefs(c).edit().putString("items", array.toString()).commit()) throw new IllegalStateException("Could not save. Try again.");
     }
-    /** Closed items fall out after a week on every copy, so an old copy cannot bring them back for good. */
+    /** Keep handled records so an old offline copy cannot bring them back. */
     private static JSONArray encode(List<Item> items, long now) {
         JSONArray array = new JSONArray();
         try {
             for (Item item : items) {
-                if (!item.open() && now - item.closed > KEEP_CLOSED) continue;
+                // Keep resolved records: an offline device must not resurrect a handled thought later.
                 array.put(new JSONObject().put("id", item.id).put("text", item.text).put("created", item.created).put("due", item.due)
                         .put("closed", item.closed).put("notches", item.notches).put("state", item.state).put("updated", item.updated).put("note", item.note));
             }
@@ -124,6 +151,16 @@ final class ParkingStore {
             prefs(c).edit().putLong("last_id", last).apply();
             return new JSONObject().put("v", 1).put("items", pruned);
         }
+    }
+
+    /** Compatibility with 0.5.21 callers. Opening or syncing Pocket never commits an idea. */
+    static int absorb(Context c) {
+        return 0;
+    }
+    static String token(long id) { return "thought:" + id; }
+    private static String day(long when) {
+        Calendar at = Calendar.getInstance(); at.setTimeInMillis(when);
+        return PlannerDates.day(at.get(Calendar.YEAR), at.get(Calendar.MONTH), at.get(Calendar.DAY_OF_MONTH));
     }
 
     static long when(String delay, long now) {

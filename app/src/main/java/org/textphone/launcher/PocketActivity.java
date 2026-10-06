@@ -79,9 +79,7 @@ public abstract class PocketActivity extends Activity {
         header = row();header.setTag("page_header");
         Button previous = button("back", this::onBackPressed); previous.setTag("navigation_back"); PocketDesign.headerControl(previous, GRAY);
         header.addView(previous, new LinearLayout.LayoutParams(PocketDesign.headerWidth(previous,64), PocketDesign.headerHeight(this)));
-        TextView name = label(title, PocketDesign.SECTION, WHITE);name.setTag("page_heading"); name.setGravity(Gravity.CENTER); name.setMaxLines(1); name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        name.setTypeface(PocketFonts.pixel(this));
-        if (Build.VERSION.SDK_INT >= 28) name.setAccessibilityHeading(true);
+        TextView name = label(title, PocketDesign.SECTION, WHITE);name.setTag("page_heading"); PocketDesign.title(name);
         header.addView(name, new LinearLayout.LayoutParams(0, PocketDesign.headerHeight(this), 1));
         Button home = button("home", () -> { startActivity(new Intent(this, MainActivity.class)
                 .setAction(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK)); }); PocketDesign.headerControl(home, GRAY);headerRight=home;
@@ -98,7 +96,29 @@ public abstract class PocketActivity extends Activity {
     }
     protected LinearLayout row() { LinearLayout view = new LinearLayout(this); view.setGravity(Gravity.CENTER_VERTICAL); return view; }
     protected Button headerAction(String label,Runnable action,boolean commit){header.removeView(headerRight);headerRight=button(label,action);PocketDesign.headerControl(headerRight,commit?PocketDesign.accent(this):GRAY);headerRight.setTag("app_settings".equals(label)?label:"header_action");header.addView(headerRight,new LinearLayout.LayoutParams(PocketDesign.headerWidth(headerRight,label.length()>5?96:64),PocketDesign.headerHeight(this)));return headerRight;}
-    protected void appSettings(Runnable action){Button settings=headerAction("Settings",action,false);settings.setTag("app_settings");settings.setContentDescription("App settings");}
+    protected void appSettings(Runnable action){Button settings=headerAction("settings",action,false);settings.setTag("app_settings");settings.setContentDescription("App settings");}
+    /** A group label in the page body. */
+    protected TextView section(String text) {
+        TextView view = label(text, PocketDesign.META, GRAY); PocketDesign.section(view, body.getChildCount() == 0); body.addView(view); return view;
+    }
+    /** Switches between views of the same page. */
+    protected LinearLayout tabs(String[] names, int selected, Runnable... actions) {
+        LinearLayout line = row();
+        for (int i = 0; i < names.length; i++) { Button tab = button(names[i], actions[i]); PocketDesign.tab(tab, i == selected); line.addView(tab, new LinearLayout.LayoutParams(0, -2, 1)); }
+        LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2); layout.bottomMargin = dp(8); body.addView(line, layout); return line;
+    }
+    /** Page-level commands fixed at the bottom, below feedback. {@code primary} is -1 when none is a commit. */
+    protected LinearLayout softKeys(String[] names, int primary, Runnable... actions) {
+        LinearLayout bar = row(); bar.setTag("soft_keys");
+        for (int i = 0; i < names.length; i++) { Button key = button(names[i], actions[i]); PocketDesign.softKey(key, i, names.length, i == primary); bar.addView(key, PocketDesign.softKeyCell(this, i, names.length)); }
+        root.addView(bar, new LinearLayout.LayoutParams(-1, -2)); return bar;
+    }
+    /** Commands for the item directly above them. */
+    protected LinearLayout commands(LinearLayout host, String[] names, int primary, Runnable... actions) {
+        LinearLayout line = row();
+        for (int i = 0; i < names.length; i++) { Button command = button(names[i], actions[i]); PocketDesign.command(command, i == primary); line.addView(command, PocketDesign.commandCell(this, i == 0)); }
+        host.addView(line, new LinearLayout.LayoutParams(-1, -2)); return line;
+    }
     protected TextView label(String text, int size, int color) {
         TextView view = new TextView(this); view.setText(text); PocketDesign.text(view, size, color);
         view.setPadding(0, dp(8), 0, dp(8)); return view;
@@ -184,6 +204,8 @@ public abstract class PocketActivity extends Activity {
     }
     protected void confirm(String title, Runnable action) { new AlertDialog.Builder(this).setTitle(title)
             .setNegativeButton("Cancel", null).setPositiveButton("Confirm", (d, w) -> action.run()).show(); }
+    /** A page that is leaving accepts no late results: a permission answer or read tied to it can no longer act. */
+    @Override public void finish() { pageGeneration++; super.finish(); }
     protected boolean hasInternalBack() { return false; }
     protected String backPageKey(String rootPage) { return rootPage; }
     protected void back(Runnable action) { motion.back(action); }

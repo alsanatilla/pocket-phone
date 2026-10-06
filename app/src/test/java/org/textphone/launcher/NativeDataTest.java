@@ -39,16 +39,7 @@ public class NativeDataTest {
         assertEquals(0,provider.deletes);assertEquals(3,provider.updated.size());assertEquals("101",provider.selections.get(1));
         assertEquals("+49305550200",provider.updated.get(1).getAsString("data1"));
     }
-    @Test public void calendarSyncIsExplicitAndUsesExistingAndroidCalendarStorage() {
-        AgendaStore.Event event=new AgendaStore.Event();event.title="Review draft";event.when=System.currentTimeMillis()+3600000;
-        assertTrue(CalendarBridge.write(context,event));assertTrue(provider.inserted.isEmpty());
-        context.getSharedPreferences("pocket_agenda",0).edit().putLong("google_calendar",7).commit();
-        assertTrue(CalendarBridge.write(context,event));assertEquals(42,event.google);assertEquals(7,event.calendar);
-        ContentValues values=provider.inserted.get(0);assertEquals(Long.valueOf(7),values.getAsLong(CalendarContract.Events.CALENDAR_ID));
-        assertEquals("Review draft",values.getAsString(CalendarContract.Events.TITLE));assertEquals(Long.valueOf(event.when),values.getAsLong(CalendarContract.Events.DTSTART));
-        context.getSharedPreferences("pocket_agenda",0).edit().remove("google_calendar").commit();event.title="Offline change";
-        assertTrue(CalendarBridge.write(context,event));assertTrue(provider.updated.isEmpty());
-    }
+    @Test public void calendarStaysLocalEvenWithALegacyGoogleSelection(){AgendaStore.Event event=new AgendaStore.Event();event.title="Review draft";event.when=System.currentTimeMillis()+3600000;context.getSharedPreferences("pocket_agenda",0).edit().putLong("google_calendar",7).commit();assertTrue(CalendarBridge.write(context,event));AgendaStore.save(context,event);assertEquals(0,event.google);assertEquals(0,event.calendar);assertEquals("Review draft",AgendaStore.find(context,event.id).title);assertTrue(provider.inserted.isEmpty());assertTrue(provider.updated.isEmpty());assertEquals(0,provider.deletes);}
     @Test public void attachmentProviderCannotExposeOtherPrivateFiles() {
         for(String value:new String[]{"content://org.textphone.launcher.mms/../secret.p12","content://org.textphone.launcher.mms/a/b.pdu","content://other.app/key.pdu"}) {
             try {MmsFiles.file(context,Uri.parse(value));fail(value);}catch(IllegalArgumentException expected){assertNotNull(expected.getMessage());}

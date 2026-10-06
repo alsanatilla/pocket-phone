@@ -70,9 +70,19 @@ public class MessageComposerTest {
             assertEquals(Telephony.Sms.MESSAGE_TYPE_OUTBOX, result.getInt(2));
         }
     }
-    @Test public void backDuringSendingKeepsTheInboxOpenAndCannotQueueADuplicate() throws Exception {
+    // A conversation opened with an address returns to where it came from on Back (0.5.21), and the send still finishes once.
+    @Test public void backDuringSendingReturnsToItsOriginAndCannotQueueADuplicate() throws Exception {
         startBlockedSend(); assertFalse(send().isEnabled()); send().performClick(); controller.get().onBackPressed(); completeSend();
-        assertNotNull(PocketAppsTest.find(controller.get().body, "+ message")); assertEquals(1, store.inserts); assertEquals("", saved(NUMBER));
+        assertTrue(controller.get().isFinishing()); assertEquals(1, store.inserts); assertEquals("", saved(NUMBER));
+    }
+    @Test public void aConversationStartedFromTheInboxReturnsToTheInbox() throws Exception {
+        ActivityController<MessagesActivity> inbox = Robolectric.buildActivity(MessagesActivity.class, new Intent(context, MessagesActivity.class)).setup();
+        try {
+            MessagesActivity a = inbox.get(); CameraAlbumTest.settle(a);
+            PocketAppsTest.find(a.root, "+ message").performClick(); assertNotNull(a.body.findViewWithTag("message_body"));
+            a.onBackPressed(); CameraAlbumTest.settle(a);
+            assertFalse(a.isFinishing()); assertNotNull(PocketAppsTest.find(a.root, "+ message"));
+        } finally { inbox.pause().stop().destroy(); }
     }
     @Test public void aNewlyTypedDraftSurvivesTheEarlierSendAndAnActivityRestart() throws Exception {
         startBlockedSend(); message().setText("Next message"); controller.pause().stop(); completeSend();
@@ -85,8 +95,7 @@ public class MessageComposerTest {
         startBlockedSend(); controller.newIntent(new Intent(context, MessagesActivity.class).putExtra("address", OTHER)); completeSend();
         assertEquals(OTHER, recipient().getText().toString()); assertEquals("Other person's draft", message().getText().toString());
         assertEquals("Other person's draft", saved(OTHER)); assertEquals("", saved(NUMBER));
-        controller.get().onBackPressed(); PocketAppsTest.find(controller.get().body, "+ message").performClick();
-        assertEquals("", recipient().getText().toString());
+        controller.get().onBackPressed(); assertTrue(controller.get().isFinishing());
     }
     @Test public void reopeningTheSendingConversationDoesNotRestoreASentMessageAsADraft() throws Exception {
         startBlockedSend(); controller.get().onBackPressed();
@@ -122,7 +131,7 @@ public class MessageComposerTest {
         Shadows.shadowOf(RuntimeEnvironment.getApplication()).denyPermissions(Manifest.permission.SEND_SMS); message().setText("Unsent"); send().performClick(); controller.get().onBackPressed();
         Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(Manifest.permission.SEND_SMS);
         controller.get().onRequestPermissionsResult(410, new String[]{Manifest.permission.SEND_SMS}, new int[]{PackageManager.PERMISSION_GRANTED}); CameraAlbumTest.settle(controller.get());
-        assertEquals(0, store.inserts); assertEquals("Unsent", saved(NUMBER)); assertNotNull(PocketAppsTest.find(controller.get().body, "+ message"));
+        assertEquals(0, store.inserts); assertEquals("Unsent", saved(NUMBER)); assertTrue(controller.get().isFinishing());
     }
     @Test public void textChangedDuringAPermissionRequestRequiresAnotherExplicitSend() throws Exception {
         Shadows.shadowOf(RuntimeEnvironment.getApplication()).denyPermissions(Manifest.permission.SEND_SMS); message().setText("Earlier text"); send().performClick(); message().setText("Revised text");

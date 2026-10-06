@@ -18,6 +18,7 @@ public final class ParkingReceiver extends BroadcastReceiver {
     static final String ACTION_DUE = "org.textphone.launcher.PARKING_DUE";
     private static final int NOTICE = 9301;
 
+    /** An optional review time invites a decision; it never creates a task. */
     @Override public void onReceive(Context context, Intent intent) {
         if (ACTION_DUE.equals(intent.getAction())) notice(context);
         arm(context);
@@ -41,14 +42,13 @@ public final class ParkingReceiver extends BroadcastReceiver {
         for (ParkingStore.Item item : open) if (item.back(now + 60_000)) { back++; if (first == null) first = item; }
         if (first == null) { manager.cancel(NOTICE); return; }
         if (Build.VERSION.SDK_INT >= 33 && c.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return;
-        if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(new NotificationChannel("pocket_parking", "Parking lot", NotificationManager.IMPORTANCE_DEFAULT));
+        if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(new NotificationChannel("pocket_parking", "Thought review", NotificationManager.IMPORTANCE_DEFAULT));
         PendingIntent show = PendingIntent.getActivity(c, 0, new Intent(c, ParkingActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        String heckle = ParkingStore.heckle(first, now);
         Notification.Builder builder = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(c, "pocket_parking") : new Notification.Builder(c);
         manager.notify(NOTICE, builder.setSmallIcon(R.drawable.ic_launcher)
-                .setContentTitle(back == 1 ? "Back from the parking lot" : back + " things are back from the parking lot")
-                .setContentText(heckle.isEmpty() ? first.text : first.text + " · " + heckle)
+                .setContentTitle(back == 1 ? "A thought to revisit" : back + " thoughts to revisit")
+                .setContentText(first.text)
                 .setCategory(Notification.CATEGORY_REMINDER).setVisibility(Notification.VISIBILITY_PRIVATE)
                 .setContentIntent(show).setAutoCancel(true).build());
     }

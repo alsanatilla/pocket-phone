@@ -16,7 +16,7 @@ public final class RingingActivity extends PocketActivity {
         body.addView(label(getIntent().getStringExtra("title") == null ? "Alarm" : getIntent().getStringExtra("title"), 26, WHITE));
         android.widget.LinearLayout controls = keys(new String[]{"stop", "+5 min"}, () -> command("STOP"), () -> command("SNOOZE"));
         PocketDesign.primary((android.widget.TextView)controls.getChildAt(0));
-        ClockStore.Entry record=ClockStore.find(this,getIntent().getLongExtra("id",0));if(record!=null&&record.task>0)action("Open task",()->{android.app.KeyguardManager keyguard=getSystemService(android.app.KeyguardManager.class);if(keyguard!=null&&keyguard.isDeviceLocked()){message("Unlock the phone to open the task.");return;}startActivity(new Intent(this,OrganizerActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("pocket_task",record.task));});
+        ClockStore.Entry record=ClockStore.find(this,getIntent().getLongExtra("id",0));if(record!=null&&record.task>0)action("open task",()->{android.app.KeyguardManager keyguard=getSystemService(android.app.KeyguardManager.class);if(keyguard!=null&&keyguard.isDeviceLocked()){message("Unlock the phone to open the task.");return;}startActivity(new Intent(this,OrganizerActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("pocket_task",record.task));});
     }
     private void command(String command) {
         if ("SNOOZE".equals(command) && !AlarmScheduler.allowed(this)) { message("Snooze needs exact-alarm access. The alarm is still ringing; you can stop it."); return; }

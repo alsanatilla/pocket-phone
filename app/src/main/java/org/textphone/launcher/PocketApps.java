@@ -2,14 +2,22 @@ package org.textphone.launcher;
 
 import android.app.Activity;
 
-/** Pocket's own apps that a dashboard tile or tile group can open. Ids are stored, so never rename one. */
+/**
+ * Pocket's own apps that a dashboard tile or tile group can open. Ids are stored, so never rename one.
+ * Stored ids stay stable while visible labels describe each app's role in the workspace.
+ */
 final class PocketApps {
     static final String[] IDS = {"phone", "messages", "contacts", "clock", "camera", "calculator",
             "files", "today", "settings", "dice", "parking", "receipt", "journal", "movement"};
+    /** What a tile or group can be set to. */
+    static final String[] CHOICES = {"phone", "messages", "contacts", "clock", "camera", "calculator",
+            "files", "today", "settings", "dice", "parking", "receipt", "journal", "movement"};
+    /** Pocket apps listed in Tools after the everyday ones. */
+    static final String[] TOOLS = {"contacts", "files", "dice", "receipt", "journal", "movement"};
     static final int GROUP_ICON = 14, APP_ICON = 18;
 
     static boolean known(String id) { for (String value : IDS) if (value.equals(id)) return true; return false; }
-    static String label(String id) { return known(id) ? id : "app"; }
+    static String label(String id) { return "parking".equals(id) ? "thoughts" : "files".equals(id) ? "photos" : "journal".equals(id) ? "paper" : "receipt".equals(id) ? "activity" : known(id) ? id : "app"; }
     static int icon(String id) {
         switch (id == null ? "" : id) {
             case "phone": return 9;
@@ -22,7 +30,7 @@ final class PocketApps {
             case "today": return 13;
             case "settings": return 5;
             case "dice": return 15;
-            case "parking": return 16;
+            case "parking": return 13;
             case "receipt": return 17;
             case "journal": return 19;
             case "movement": return 13;

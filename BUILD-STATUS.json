@@ -1,54 +1,94 @@
 {
-  "component": "Pocket Phone native Android launcher/apps",
-  "version_name": "0.5.20",
-  "version_code": 25,
+  "component": "Pocket Phone Android launcher/apps and browser workspace",
+  "version_name": "0.6.0",
+  "version_code": 28,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-05T20:57:10.2615790Z",
-  "build": "assembleRom passed; tests and lint not run at user request",
+  "checked_at_utc": "2026-10-06T08:44:40.577Z",
+  "build": "Final assembleRom passed. Test suite skipped at the user's request. APK signing assigned to another agent.",
   "commands": [
-    "./gradlew.bat :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
+    "./gradlew.bat -I app/build/tmp/release-output.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
   ],
-  "android_checks": {
-    "status": "Not run for this version at user request"
+  "build_environment": {
+    "java": "17.0.20.1+1",
+    "android_sdk": 35,
+    "output_directory": "app/build/release-060-final",
+    "note": "A temporary Gradle init script set a fresh build directory after Windows locked an older classes.dex. The standard assembleRom command builds the same sources."
   },
-  "web_checks": {
-    "status": "Not run; no web implementation changes"
+  "final_test_suite": {
+    "status": "Skipped",
+    "reason": "Explicit user instruction"
   },
-  "lint": {
-    "status": "Not run at user request"
+  "prior_checks_before_final_chat_ui": {
+    "android_rom": {
+      "tests": 511,
+      "failures": 0,
+      "skipped": 0
+    },
+    "android_debug": {
+      "tests": 506,
+      "failures": 0,
+      "skipped": 0
+    },
+    "web_node": {
+      "tests": 32,
+      "failures": 0
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 80
+    },
+    "note": "These earlier results precede the final chat context, animation and copy changes; they are not final-build test results."
   },
-  "paid_api_requests": 0,
+  "web_manual_checks": {
+    "origin": "Isolated localhost:8881 preview, Drive disconnected",
+    "final_ui": "390px mobile and 1280px desktop layouts: no horizontal overflow; composer targets 44px; animated loading canvas changes frames during a held fake SSE request; final unnecessary chat helper copy removed.",
+    "earlier_flow": "Note to pip attachment to streamed fixture answer to explicitly selected task; separate-chat drafts, Stop and Retry without duplicated turns; escaped HTML/link handling.",
+    "asset_version": "20261006-workspace3",
+    "provider_requests": "Local fake SSE responses only for agent checks; no agent-paid provider request"
+  },
+  "live_preview_incidents": {
+    "drive": "An earlier shared preview connected to Drive during manual checking. Its sample task was tombstoned and the remote deletion verified. Handled markers and append-only Activity records may remain. Later fixtures use an isolated disconnected origin.",
+    "chat": "The user independently tried a provider in the shared preview. A fixture temporarily replaced that tab's key; the fake key and sample reply were removed, fetch restored, and the user was informed to re-enter their key. User conversation history was retained."
+  },
+  "agent_paid_api_requests": 0,
   "apk": {
-    "file": "app/build/outputs/apk/rom/app-rom-unsigned.apk",
-    "bytes": 8875356,
-    "sha256": "89b3218f816f8e64bbfe91104c098926482aede168f4390d100ccc9379e7ae98",
+    "file": "app/build/release-060-final/outputs/apk/rom/app-rom-unsigned.apk",
+    "release_asset": "pocket-phone-0.6.0-unsigned.apk",
+    "bytes": 8904448,
+    "sha256": "fbbccc497bb765a1b4a0d20255f2045460028e1a84c135bf8cdb8f5ebd81c609",
     "signed": false,
     "installable_update": false,
-    "existing_release_key_available": false
+    "signing": "Left unsigned for the other release agent, as explicitly requested"
   },
-  "changes_in_this_build": [
-    "Home, Today and Tools left swipes can start across content with a shorter threshold; system edges and text editors are excluded",
-    "Gesture observation precedes child dispatch, so scroll interception cannot suppress a clear horizontal chat swipe",
-    "Claude schemas use explicit SDK builders and arguments unwrap into Android JSON values without reflective conversion",
-    "Empty-argument Claude tools receive a canonical input object before the SDK accumulator completes their blocks",
-    "Chat shows enabled Notes, Thoughts and COROS grants and opens Pocket access with one tap; grants still default off",
-    "Compatible-provider tool follow-ups retain bounded streamed reasoning fields during the current reply only",
-    "Compatible tool identifiers/names may arrive in fragments; terminal streams without DONE and usage-only events are accepted",
-    "Chat failures identify their stage and HTTP, JSON, SDK or Android linkage type without displaying keys or data",
-    "Token limits, read budgets, access grants and no-automatic-retry behavior remain; no new Android permissions"
+  "changes": [
+    "Shared capture/decide/plan/act/review flow through Home, Today, Thoughts, Tasks and Notes; purpose-grouped app directory",
+    "Thoughts stay separate until explicit task promotion; stable source tokens preserve chosen actions across phone and web",
+    "Task details link exact-task Focus, local Calendar reservations and Activity completion; drafts and source Back routes persist",
+    "Pocket Calendar uses local storage without Google Calendar provider permissions; optional Drive transport retains six shared collections",
+    "Browser Pip with conversation navigation, Markdown streaming, separate reasoning, context cards and bottom composer; Pocket design on phone and web",
+    "Explicit Thought/Task/Note snapshots accompany chat messages; keep note, park thought, make task and copy actions",
+    "Matching pixel mascot waves, walks, juggles, reads and hops; animation pauses with reduced motion and hidden/detached views",
+    "Unnecessary inline helpers removed from workspace, capture and chat screens",
+    "Earlier camera rendering and format/aspect/JPEG options, centered Home readings and shared motion/design controls retained"
+  ],
+  "sync_collections": [
+    "Thoughts",
+    "Tasks",
+    "Notes",
+    "Paper",
+    "Activity",
+    "Dice lists"
   ],
   "known_limits": [
-    "The reported Claude failure has not been reproduced on the phone; live tool execution and swipes remain unverified, and the user's exact error text is pending",
-    "Compatible reasoning continuation is transient within one reply; provider-specific protocols outside supported chat-completions fields may still need adaptation",
-    "Live Google authorization has not been run; the Google Cloud project needs an Android OAuth client matching the installed APK's package and certificate alongside its web client",
-    "Nothing OS must send the optional AOSP contract for icon-targeted Home animations; support and visual result have not been checked on the handset",
-    "Android and Nothing OS still own Recents and full task animations; this APK cannot replace their overview service",
-    "A real visible matching Home icon is required; groups, hidden icons, other Android users and unmapped apps retain the OS fallback",
-    "Tests, lint, handset gestures and paid provider APIs were not run at user request",
-    "This local build is unsigned; the existing release key has not been loaded, so no installable incremental update was produced"
+    "The release APK is unsigned; another agent handles signing before installation.",
+    "Final test suite skipped at the user's request; final lint not run.",
+    "Nothing Phone (3a) gestures, animation smoothness, camera frames, cellular delivery and live account synchronization remain unverified.",
+    "Android/Nothing OS controls Recents and Home gestures; no full custom ROM was built.",
+    "Pip chats stay local to each device, outside Drive; browser data removal or app uninstall removes local conversations.",
+    "Compatible browser API endpoints must support CORS; native Pocket tool lookups are not offered in the browser.",
+    "Camera tuning used existing phone JPEGs rather than real Pocket YUV captures and may need handset retuning."
   ],
-  "previews": [],
   "full_custom_rom_compiled": false
 }

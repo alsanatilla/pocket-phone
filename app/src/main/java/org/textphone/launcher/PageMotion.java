@@ -13,9 +13,16 @@ import android.widget.ScrollView;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Short native property transitions; no touch handlers, screenshots or gesture exclusions. */
+/**
+ * Short native property transitions; no touch handlers, screenshots or gesture exclusions.
+ * Pages move along one horizontal axis: forward enters from the right, Back from the left. The old page
+ * fades out first and the new one follows a moment later, so building the new page never stalls a visible frame.
+ * Animated pages draw through a hardware layer, so fading them does not redraw their whole tree each frame.
+ */
 final class PageMotion {
     private static final PathInterpolator EASE = new PathInterpolator(.2f, 0, 0, 1);
+    private static final PathInterpolator EXIT = new PathInterpolator(.4f, 0, 1, 1), ENTER = new PathInterpolator(0, 0, .2f, 1);
+    static final long EXIT_MS = 90, ENTER_DELAY_MS = 60, ENTER_MS = 210, SHIFT_DP = 24;
     private final Activity activity;
     private final FrameLayout host;
     private final Map<String, View> previews = new LinkedHashMap<>();
@@ -42,7 +49,8 @@ final class PageMotion {
     }
     private float dp(float value) { return value * activity.getResources().getDisplayMetrics().density; }
     private static void reset(View view) {
-        if (view == null) return; view.animate().cancel(); view.setAlpha(1); view.setTranslationX(0); view.setTranslationY(0); view.setScaleX(1); view.setScaleY(1);
+        if (view == null) return; view.animate().cancel(); view.animate().setStartDelay(0);
+        view.setAlpha(1); view.setTranslationX(0); view.setTranslationY(0); view.setScaleX(1); view.setScaleY(1);
     }
     private void cache(String name, View view) {
         if (name == null || view == null || name.equals(key)) return;
@@ -80,13 +88,20 @@ final class PageMotion {
         boolean animate = !instant && previous != null && !destination.equals(previousKey) && enabled(activity) && host.isLaidOut();
         if (animate) {
             outgoing = previous; outgoingKey = previousKey; host.getOverlay().add(previous);
-            long duration = fromGesture ? Math.max(70, Math.round(160 * (1 - progress))) : back ? 160 : 180;
-            if (!fromGesture) { next.setAlpha(.9f); next.setTranslationX(dp(back ? -12 : 16)); }
-            next.animate().alpha(1).translationX(0).scaleX(1).scaleY(1).setDuration(duration).setInterpolator(EASE).start();
-            float exit = fromGesture ? edge * Math.max(host.getWidth(), dp(240)) : dp(back ? 36 : -12);
-            previous.animate().alpha(0).translationX(exit).setDuration(duration).setInterpolator(EASE).withEndAction(() -> {
-                if (outgoing == previous) finishOutgoing();
-            }).start();
+            if (fromGesture) {
+                // The finger already moved the page; finish the same motion instead of starting a new one.
+                long duration = Math.max(80, Math.round(200 * (1 - progress)));
+                next.animate().alpha(1).translationX(0).scaleX(1).scaleY(1).setDuration(duration).setInterpolator(EASE).start();
+                previous.animate().alpha(0).translationX(edge * Math.max(host.getWidth(), dp(240))).setDuration(duration).setInterpolator(EASE)
+                        .withLayer().withEndAction(() -> { if (outgoing == previous) finishOutgoing(); }).start();
+            } else {
+                float direction = back ? 1 : -1;
+                next.setAlpha(0); next.setTranslationX(-direction * dp(SHIFT_DP));
+                next.animate().alpha(1).translationX(0).scaleX(1).scaleY(1).setStartDelay(ENTER_DELAY_MS).setDuration(ENTER_MS)
+                        .setInterpolator(ENTER).withLayer().withEndAction(() -> next.animate().setStartDelay(0)).start();
+                previous.animate().alpha(0).translationX(direction * dp(SHIFT_DP)).setDuration(EXIT_MS).setInterpolator(EXIT)
+                        .withLayer().withEndAction(() -> { if (outgoing == previous) finishOutgoing(); }).start();
+            }
         } else { cache(previousKey, previous); reset(next); }
         gesture = false; committing = false; progress = 0; back = false;
     }
@@ -104,20 +119,21 @@ final class PageMotion {
             };
             peekContainer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
             peekContainer.addView(peek, new FrameLayout.LayoutParams(-1, -1)); host.addView(peekContainer, 0, new FrameLayout.LayoutParams(-1, -1));
-            peek.setAlpha(.9f); peek.setTranslationX(-edge * dp(8));
+            // The parent stays opaque under the moving page; only transforms change per frame.
+            peek.setAlpha(1); peek.setTranslationX(-edge * dp(SHIFT_DP));
         }
     }
     void progressBack(float value) {
         if (!gesture || current == null) return; progress = Math.max(0, Math.min(1, value));
         current.setTranslationX(edge * progress * Math.max(host.getWidth(), dp(240)) * .22f);
-        current.setScaleX(1 - .025f * progress); current.setScaleY(1 - .025f * progress); current.setAlpha(1);
-        if (peek != null) { peek.setAlpha(.9f + .1f * progress); peek.setTranslationX(-edge * dp(8) * (1 - progress)); }
+        current.setScaleX(1 - .04f * progress); current.setScaleY(1 - .04f * progress); current.setAlpha(1);
+        if (peek != null) peek.setTranslationX(-edge * dp(SHIFT_DP) * (1 - progress));
     }
     void cancelBack() {
         if (!gesture) return; gesture = false; progress = 0;
         View target = current;
         if (!enabled(activity)) { reset(target); finishPeek(); return; }
-        target.animate().translationX(0).scaleX(1).scaleY(1).alpha(1).setDuration(140).setInterpolator(EASE).withEndAction(() -> {
+        target.animate().translationX(0).scaleX(1).scaleY(1).alpha(1).setStartDelay(0).setDuration(160).setInterpolator(EASE).withEndAction(() -> {
             if (current == target && !gesture) finishPeek();
         }).start();
     }

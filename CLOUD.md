@@ -1,17 +1,17 @@
 # Cloud sync and Pocket on the web
 
-Cloud sync is **off by default**. When you turn it on in Settings → Cloud sync, Pocket copies these to a hidden app folder (`appDataFolder`) in your own Google Drive:
+Cloud sync is **off by default**. When you turn it on in Settings → Storage & devices, Pocket copies these to a hidden app folder (`appDataFolder`) in your own Google Drive:
 
 | File | Contents |
 |---|---|
-| `parking.json` | Parking Lot items, open and closed in the last 7 days |
+| `parking.json` | Undecided thoughts, optional review times, source-note links and handled records. Making a task is explicit on both phone and web. |
 | `receipt.json` | Receipt lines of the last 30 days |
 | `dice.json` | The Dice pick list |
-| `notes.json` | Notes from Today, with pins; deleted notes stay as markers for 30 days |
-| `tasks.json` | Task titles, completion, due dates, importance, checklist progress, chosen next task and selected source text; deletion markers last 30 days |
+| `notes.json` | Workspace notes with pins; deleted notes remain as markers for offline devices |
+| `tasks.json` | Task titles, completion, due dates, importance, checklist progress, chosen next task and selected source text; deletion markers remain for offline devices |
 | `journal.json` + `page-<uid>.jpg` | Journal pages: the photo, its transcript lines with their position on the photo, and the linked note |
 
-Task reminders, editor drafts, notification handles, messages, contacts, calls and Pocket Camera album photos stay on the phone. Only the source text explicitly selected when creating a task is included with it. Journal page photos are included when cloud sync is enabled. The hidden folder is only visible to Pocket's own Google Cloud project; it does not show up in Drive.
+Calendar appointments, timers, task reminders, editor drafts, notification handles, messages, contacts, calls and Pocket Camera album photos stay on the phone. Only the source text explicitly selected when creating a task is included with it. Journal page photos are included when cloud sync is enabled. The hidden folder is only visible to Pocket's own Google Cloud project; it does not show up in Drive.
 
 Every local change asks Android for a sync job that waits for any network, so edits made offline upload once the phone is online again. A periodic job also picks up web edits every hour, and opening a Pocket app syncs at most every two minutes. This is why the APK now declares `INTERNET` and `ACCESS_NETWORK_STATE`. With cloud sync off, no Drive sync is scheduled. Journal transcription is a separate optional network feature, enabled by entering an Anthropic key in Journal settings.
 
@@ -25,7 +25,7 @@ The phone uses COROS's public-client PKCE and browser login-session flow, as shi
 
 Recovery, Strain and Conditioning are Pocket estimates, based on the formulas in `Scores.java` and `docs/js/scores.js`. They are not Bevel or COROS scores. Tap a score to see its inputs and calculation note. Disconnect removes the phone's tokens, pending login and cached readings.
 
-The web page in [`docs/`](docs/) is a workstation for Parking Lot, notes, Receipt and Dice in Pocket's terminal style: numbered tool tabs, two-column layouts on wide windows and one column on phones. It keeps its own copy in the browser, works offline, and uploads waiting edits when it is online and connected.
+The web page in [`docs/`](docs/) is a workstation for Thoughts, notes, Receipt and Dice in Pocket's terminal style: numbered tool tabs, two-column layouts on wide windows and one column on phones. It keeps its own copy in the browser, works offline, and uploads waiting edits when it is online and connected.
 
 ## Photo zines on the web
 
@@ -39,12 +39,12 @@ Books and their photo copies save automatically in this browser's IndexedDB, wit
 
 Both sides use the same rule (`SyncMerge.java` and `docs/js/store.js`):
 
-- Parking items: per `id`, the copy with the later `updated` wins. Closed items older than 7 days are dropped on every copy.
+- Parking items: per `id`, the copy with the later `updated` wins. Handled records remain so a long-offline copy cannot revive them.
 - Receipt lines never change, so a day is the union of both copies by line id `i`. Days older than 30 days are dropped.
 - Dice list: the later `updated` wins.
 - Notes: per `uid`, the later `updated` wins; a deletion is a note with `deleted: true` and also wins if it is newer. The phone keeps its own small note ids and maps them to the random `uid`.
-- Tasks: the same `uid`/`updated` rule, including completion and checklist steps. Titles, due dates, importance and source snapshots travel together. The chosen next task has a separate timestamp and portable task `uid`. Local drafts and live source handles are retained. Downloading a completed/deleted task cancels its local reminders; importing or reopening a task never creates an alarm. The browser preserves the task document; the task interface is native on the phone.
-- Thoughts in notes: a note line starting with `>>` (optionally ending in `@1h`, `@tonight`, `@tomorrow` or `@nextweek`) parks a Parking item that keeps the note's `uid` in `note`. Its id is `9000000000000000 + FNV-1a("uid
+- Tasks: the same `uid`/`updated` rule, including completion and checklist steps. Titles, due dates, importance and source snapshots travel together. The chosen next task has a separate timestamp and portable task `uid`. Local drafts and live source handles are retained. Downloading a completed/deleted task cancels its local reminders; importing or reopening a task never creates an alarm. Phone and web both edit tasks. Source tokens keep the explicit thought-to-task transition idempotent across devices.
+- Thoughts in notes: a note line starting with `>>` (optionally ending in `@1h`, `@tonight`, `@tomorrow` or `@nextweek`) parks a Parking item that keeps the note's `uid` in `note`. Without a tag it stays undecided with no review alarm; a tag sets an optional review time. Making a task is a separate choice. Its id is `9000000000000000 + FNV-1a("uid
 line")` on both sides, so the phone and the web create the same item. A new line parks when the note is saved on the phone, or once the cursor leaves the line on the web. The note text is never rewritten; the previews show each thought's state.
 - If a file exists twice, both sides use the one created first.
 
@@ -72,6 +72,10 @@ The Android app needs no client id in code: Google matches the package name and 
 A **Web application** OAuth client is sufficient for the browser, but the phone also needs an **Android** OAuth client in the same project. Keep the web client and add the Android client with package `org.textphone.launcher` and the installed APK's signing SHA-1. For the signed 0.5.14 and 0.5.17 releases, it is `57:65:1E:77:42:D1:7A:A1:2A:F0:E1:C8:23:BD:5F:73:75:9E:9D:BF`. A build signed with a different key needs its own matching client. See [Google's Android authorization setup](https://developer.android.com/identity/authorization).
 
 Version 0.5.19 reads Google's returned authorization status even when Android reports a cancelled activity. Code 10 shows the installed certificate fingerprint and identifies an OAuth registration mismatch; code 16 or a missing result means authorization did not finish and does not establish that the user cancelled. Pocket enables sync only after Google returns an access token and grants its Drive app-data scope.
+
+## Local chat storage
+
+Version 0.6.0 keeps Drive as the sync layer for the existing shared collections. Pip's conversations, drafts, reasoning summaries and attached source snapshots use private SQLite on the phone and local browser storage on the web. Chats and keys are excluded from Drive; native chats are excluded from Android backups. Notes, Thoughts and Tasks explicitly kept from replies use their existing shared collections. The prior single-chat JSON file is imported and retained until the database copy is verified. Queued writes remain readable during chat switching; a provider request waits for its own user message to be saved. Starting a new chat retains the old one. See [PIP.md](PIP.md) for the storage decision and browser behavior.
 
 ## Local preview
 

@@ -1,15 +1,16 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
-import * as drive from "./drive.js?v=20261005-tasks1";
-import * as reader from "./reader.js?v=20261005-tasks1";
-import * as zines from "./zines.js?v=20261005-tasks1";
-import * as movement from "./movement.js?v=20261005-tasks1";
-import * as coros from "./coros.js?v=20261005-tasks1";
-import { syncNow, describe, onStatus, status } from "./sync.js?v=20261005-tasks1";
-import { parking, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261005-tasks1";
+import * as drive from "./drive.js?v=20261006-workspace3";
+import * as reader from "./reader.js?v=20261006-workspace3";
+import * as pip from "./pip.js?v=20261006-workspace3";
+import * as zines from "./zines.js?v=20261006-workspace3";
+import * as movement from "./movement.js?v=20261006-workspace3";
+import * as coros from "./coros.js?v=20261006-workspace3";
+import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-workspace3";
+import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-workspace3";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-const TOOLS = ["parking", "notes", "receipt", "dice", "zines", "movement"];
+const TOOLS = ["today", "thoughts", "tasks", "notes", "apps"];
 let content = null, notice = null, parkingDraft = "";
 
 // ── DOM helpers ──
@@ -38,15 +39,17 @@ function shell() {
   content = h("main", { class: "content" }); notice = h("div", { class: "notice", role: "status" });
   root.replaceChildren(
     h("header", { class: "bar" },
-      h("span", { class: "brand", text: "pocket" }),
-      h("nav", { class: "tabs", "aria-label": "Tools" }, tabs),
+      h("button", { class: "brand", onclick: () => go("/today"), title: "Today", text: "pocket" }),
+      h("nav", { class: "tabs", "aria-label": "Workspace" }, tabs),
+      h("button", { class: "pip-entry", id: "pip-entry", onclick: () => go("/pip"), text: "pip" }),
       h("button", { class: "status", id: "sync-status", onclick: () => go("/sync"), title: "Sync settings" }, describe())),
     content, notice);
 }
 /** Clears the work area for one tool; toolbar actions sit at its top right. */
 function view(tool, actions = []) {
-  zines.leave(); shell(); closeDialog(); say("");
-  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool; tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
+  zines.leave(); pip.leave(); shell(); closeDialog(); say("");
+  const pipEntry = document.getElementById("pip-entry"); pipEntry.classList.toggle("selected", tool === "pip"); pipEntry.setAttribute("aria-current", tool === "pip" ? "page" : "false");
+  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "movement", "sync"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
   const activeTab = document.querySelector(".tab.active"), tabs = activeTab?.parentElement;
   if (tabs) tabs.scrollLeft = activeTab.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - activeTab.clientWidth) / 2;
   document.title = tool === "sync" ? "pocket · sync" : "pocket · " + tool;
@@ -73,57 +76,108 @@ function dialog(title, body, actions) {
   });
 }
 const choose = (title, options) => dialog(title, h("div", {}, options.map((label, i) => rowButton(label, "", () => closeDialog(i)))), [["cancel", null]]);
-function ask(title, { value = "", placeholder = "", multiline = false, ok = "save", password = false, hint = "" } = {}) {
-  const field = multiline ? h("textarea", { placeholder }) : h("input", { type: password ? "password" : "text", placeholder, ...(password ? {} : { maxlength: 120 }) });
+function ask(title, { value = "", placeholder = "", multiline = false, ok = "save", password = false, hint = "", limit = 120 } = {}) {
+  const field = multiline ? h("textarea", { placeholder }) : h("input", { type: password ? "password" : "text", placeholder, ...(password ? {} : { maxlength: limit }) });
   field.value = value;
   if (!multiline) field.addEventListener("keydown", event => { if (event.key === "Enter") closeDialog(field.value); });
   return dialog(title, hint ? h("div", {}, h("p", { class: "small muted", text: hint }), field) : field, [["cancel", null], [ok, () => field.value]]);
 }
 const confirmBox = (title, ok) => dialog(title, null, [["cancel", false], [ok, true]]);
+const pipHelpers = { h, go, say, ask, choose, dialog, closeDialog, confirm: confirmBox, markdown };
+function thinkWithPip(kind, uid, title, text, href) { guard(() => go("/pip/" + pip.withContext({ kind, uid: String(uid), title, text, href })))(); }
 
-// ── Parking Lot: capture and what's back on the left, everything still parked on the right. ──
-function parkingView() {
-  const body = view("parking");
-  const field = h("input", { placeholder: "park a thought…", maxlength: 200, "aria-label": "Thought to park", oninput: e => { parkingDraft = e.target.value; } });
-  field.value = parkingDraft;
-  field.addEventListener("keydown", async event => { if (event.key === "Enter") { const i = await choose("Back in", DELAYS); if (i != null) park(DELAYS[i]); } });
-  const park = delay => guard(() => {
-    const due = when(delay), item = parking.park(field.value, due);
-    receipt.log(KIND.PARK, item.text); parkingDraft = ""; parkingView(); say("Parked until " + relative(due) + ".");
-  })();
-  const now = Date.now(), open = parking.open(now), back = open.filter(i => i.due <= now), waiting = open.filter(i => i.due > now);
-  const left = [field, h("div", { class: "meta muted", text: "back in · or press enter" }),
-    keys(["1h", () => park("1 hour")], ["tonight", () => park("tonight")], ["tmrw", () => park("tomorrow")], ["next wk", () => park("next week")]),
-    section(`BACK NOW [${back.length}]`, back.length ? "accent" : "muted"),
-    back.length ? null : h("p", { class: "small muted", text: "Nothing is back yet." })];
-  for (const item of back) {
-    const nag = heckle(item, now), age = daysOld(item, now);
-    left.push(h("div", { class: "thought", text: item.text }),
-      h("div", { class: "meta muted", text: `${meter(item.notches)}  parked ${item.notches + 1}× · first ${age === 0 ? "today" : age + "d ago"}` }),
-      nag ? h("div", { class: "meta warn", text: nag }) : null,
-      source(item) ? h("button", { class: "source", onclick: () => go("/notes/" + item.note) }, "from note · " + noteTitle(source(item))) : null,
-      keys(["clear", () => clear(item)], ["park", () => repark(item)], ["let go", () => letGo(item)]));
-  }
-  const right = [section(`PARKED [${waiting.length}]`), waiting.length ? null : h("p", { class: "small muted", text: "Nothing waiting." })];
-  for (const item of waiting) right.push(rowButton(item.text, "back " + relative(item.due, now) + (item.notches ? "  " + meter(item.notches) : "") + (source(item) ? "  · " + noteTitle(source(item)) : ""), async () => {
-    const i = await choose(item.text, source(item) ? ["Bring back now", "Clear", "Let go", "Open note"] : ["Bring back now", "Clear", "Let go"]);
-    if (i === 0) guard(() => { parking.bringBack(item.id); parkingView(); })(); else if (i === 1) clear(item); else if (i === 2) letGo(item); else if (i === 3) go("/notes/" + item.note);
-  }));
-  right.push(h("p", { class: "meta muted", text: "Move to Today and the comeback notifications are on the phone." }));
-  split(body, left, right);
-  if (!parkingDraft) field.focus({ preventScroll: true });
+// The workspace follows the same decisions as the phone: capture, choose an action, do it, review.
+const source = item => item.note ? notes.get(item.note) : null;
+const thoughtMeta = item => !item.due ? "Undecided" : item.due <= Date.now() ? "Ready to revisit" : "Revisit " + relative(item.due);
+const taskMeta = task => [task.done ? "Done" : task.due ? (task.due < taskDay() ? "Overdue · " : "") + task.due : "No date", task.important ? "Important" : "", task.steps?.length ? task.steps.filter(s => s.done).length + "/" + task.steps.length + " steps" : ""].filter(Boolean).join(" · ");
+function workspaceTitle(body, title, meta = "") { add(body, h("h1", { class: "workspace-title", text: title }), title === "today" && meta ? h("p", { class: "small muted", text: meta }) : null); }
+async function capture() {
+  const choice = await choose("Capture", ["Thought", "Task", "Note"]);
+  if(choice === 0)go("/thoughts"); else if(choice === 1)go("/tasks/new"); else if(choice === 2)go("/notes/new");
 }
-/** The note a thought was written in, if this browser has it. */
-const source = item => (item.note ? notes.get(item.note) : null);
-const clear = item => guard(() => { parking.close(item.id, "cleared"); receipt.log(KIND.CLEAR, item.text); parkingView(); say("Cleared. Nice."); })();
-const letGo = item => guard(() => { parking.close(item.id, "killed"); receipt.log(KIND.KILL, item.text); parkingView(); say(item.notches >= HECKLE ? "Let go. That was overdue." : "Let go."); })();
-async function repark(item) {
-  const i = await choose("Park again", DELAYS); if (i == null) return;
-  guard(() => {
-    const again = parking.repark(item.id, when(DELAYS[i]));
-    receipt.log(KIND.PARK, `${again.text} (${again.notches + 1}×)`); parkingView();
-    say(again.notches >= HECKLE ? "Parked. Again." : "Parked until " + relative(again.due) + ".");
-  })();
+function todayView() {
+  const body = view("today", [["+ capture", capture], ["search", () => go("/search")], ["pip", () => go("/pip")]]);
+  workspaceTitle(body, "today", new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }));
+  const chosen = load("tasks.json").next?.uid, all = tasks.list(), due = all.filter(t => !t.done && (t.uid === chosen || t.due && t.due <= taskDay()));
+  due.sort((a,b) => Number(b.uid === chosen) - Number(a.uid === chosen));
+  const ready = parking.open().filter(t => t.due > 0 && t.due <= Date.now());
+  const left = [section("DO TODAY"), ...due.map(t => rowButton(t.text, taskMeta(t) + (t.uid === chosen ? " · Chosen next" : ""), () => go("/tasks/" + t.uid)))];
+  if(!due.length)left.push(h("p", { class: "small muted", text: "No tasks for today." }));
+  left.push(keys(["all tasks", () => go("/tasks")], ["+ task", () => go("/tasks/new")]));
+  const right = [section("REVISIT"), ready.length ? rowButton(ready.length + (ready.length === 1 ? " thought is ready" : " thoughts are ready"), "", () => go("/thoughts")) : h("p", { class: "small muted", text: "Nothing to revisit." })];
+  const latest = notes.list()[0];
+  if(latest)right.push(section("PICK UP WHERE YOU LEFT OFF"), rowButton(noteTitle(latest), "Open note", () => go("/notes/" + latest.uid)));
+  right.push(section("REVIEW"), rowButton("Activity", "", () => go("/receipt")));
+  split(body,left,right);
+}
+function parkingView(id) {
+  const body = view("thoughts", [["+ thought", () => { go("/thoughts"); setTimeout(() => document.getElementById("thought-capture")?.focus(), 0); }], ["search", () => go("/search")]]);
+  workspaceTitle(body, "thoughts", "Ideas you haven’t committed to. Make a task when you choose an action.");
+  const item = id ? load("parking.json").items.find(i => String(i.id) === String(id)) : null;
+  if(item) {
+    add(body,rowButton("‹ thoughts", "", () => go("/thoughts")),h("p", { class: "thought", text: item.text }),h("p", { class: "meta muted", text: item.state === "parked" ? thoughtMeta(item) : item.state === "task" ? "Made into a task" : "Let go" }));
+    const linked = tasks.list().find(t => t.source?.token === "thought:" + item.id);
+    if(item.state === "parked")add(body, keys(["make task", guard(() => { const task = tasks.fromThought(item); go("/tasks/" + task.uid); })], ["edit", async () => { const value = await ask("Edit thought", { value: item.text, multiline: true }); if(value?.trim())guard(() => { if(value.trim().length>500)throw new Error("Keep a thought within 500 characters."); parking.update(item.id,t => { t.text=value.trim(); }); parkingView(id); })(); }], ["revisit", () => repark(item)], ["let go", () => letGo(item)]));
+    else if(linked)add(body,rowButton("Open task", linked.text, () => go("/tasks/" + linked.uid)));
+    if(source(item))add(body,rowButton("Source note", noteTitle(source(item)), () => go("/notes/" + item.note)));
+    add(body,rowButton("think with pip", "", () => thinkWithPip("thought", item.id, item.text, item.text, "/thoughts/" + item.id)));
+    return;
+  }
+  const field = h("textarea", { id: "thought-capture", placeholder: "An idea, a question, something to consider…", maxlength: 500, "aria-label": "New thought", oninput: e => { parkingDraft=e.target.value; localStorage.setItem("pocket:thought-draft",parkingDraft); } });
+  field.value = parkingDraft || localStorage.getItem("pocket:thought-draft") || "";
+  const review = h("select", { "aria-label": "Revisit thought" }, h("option", { value: "none", text: "Revisit when I choose" }), DELAYS.map(d => h("option", { value: d, text: "Revisit " + d })));
+  const saveThought = guard(() => { const item = parking.park(field.value,when(review.value)); receipt.log(KIND.PARK,item.text); parkingDraft=""; localStorage.removeItem("pocket:thought-draft"); parkingView(); say("Saved to Thoughts."); });
+  const open = parking.open();
+  split(body,[section("CAPTURE"),field,review,keys(["save thought",saveThought,{class:"accent"}]),rowButton("Handled thoughts", "", async () => { const items=load("parking.json").items.filter(t=>t.state!=="parked").sort((a,b)=>b.updated-a.updated); if(!items.length){say("No handled thoughts yet.");return;} const i=await choose("Handled thoughts",items.map(t=>t.text));if(i!=null)go("/thoughts/"+items[i].id); })],
+    [section("UNDECIDED ["+open.length+"]"),open.length ? open.map(item => rowButton(item.text,thoughtMeta(item)+(source(item)?" · "+noteTitle(source(item)):""),()=>go("/thoughts/"+item.id))) : h("p",{class:"small muted",text:"Nothing parked yet."})]);
+}
+async function letGo(item) { if(await confirmBox("Let this thought go?", "let go"))guard(()=>{parking.close(item.id,"killed");receipt.log(KIND.KILL,item.text);go("/thoughts");})(); }
+async function repark(item) { const choices=["When I choose",...DELAYS];const i=await choose("Revisit thought",choices);if(i==null)return;guard(()=>{parking.repark(item.id,i===0?0:when(choices[i]));parkingView(item.id);})(); }
+let taskFilter = "Open";
+function tasksView(uid) {
+  const task = uid && uid !== "new" ? tasks.get(uid) : null;
+  const body = view("tasks", [["+ task",()=>go("/tasks/new")],["search",()=>go("/search")]]);
+  workspaceTitle(body,"tasks","Actions you’ve chosen. Give them a date or choose what to do next.");
+  if(uid === "new" || task && location.hash.endsWith("/edit")){taskEditor(body,task);return;}
+  if(uid && !task){add(body,rowButton("‹ tasks","",()=>go("/tasks")),h("p",{class:"small muted",text:"This task was removed."}));return;}
+  if(task){
+    add(body,rowButton("‹ tasks","",()=>go("/tasks")),h("p",{class:"thought",text:task.text}),h("p",{class:"meta muted",text:taskMeta(task)}),
+      keys([task.done?"reopen":"complete",guard(()=>{tasks.complete(uid);tasksView(uid);}),{class:"accent"}],["edit",()=>go("/tasks/"+uid+"/edit")],...(!task.done?[["do next",guard(()=>{tasks.next(uid);go("/today");})]]:[])));
+    for(const [i,step] of (task.steps||[]).entries())add(body,rowButton((step.done?"[x] ":"[ ] ")+step.text,"",guard(()=>{tasks.edit(uid,t=>{t.steps[i].done=!t.steps[i].done;});tasksView(uid);})));
+    if(task.source){const context=task.source;const note=context.note_uid?notes.get(context.note_uid):null;const thoughtId=context.token?.startsWith("thought:")?context.token.slice(8):null;
+      if(thoughtId)add(body,rowButton("Source thought","",()=>go("/thoughts/"+thoughtId)));
+      if(note)add(body,rowButton("Source note",noteTitle(note),()=>go("/notes/"+note.uid)));
+      add(body,section("CONTEXT"),h("p",{class:"small muted",style:"white-space:pre-wrap",text:context.text}));}
+    add(body,rowButton("think with pip", "", () => thinkWithPip("task", task.uid, task.text, [task.text,...(task.steps||[]).map(s=>(s.done?"[x] ":"[ ] ")+s.text)].join("\n"), "/tasks/" + uid)),rowButton("delete task","",async()=>{if(await confirmBox("Delete this task on all devices?","delete"))guard(()=>{tasks.remove(uid);go("/tasks");})();}));return;
+  }
+  add(body,keys(...["Open","Today","Later","Done"].map(f=>[f,()=>{taskFilter=f;tasksView();},{class:f===taskFilter?"selected":""}])));
+  const all=tasks.list().filter(t=>t.done===(taskFilter==="Done")&&(taskFilter!=="Today"||t.due&&t.due<=taskDay()||t.uid===load("tasks.json").next?.uid)&&(taskFilter!=="Later"||t.due>taskDay()));
+  add(body,all.length?all.map(t=>rowButton(t.text,taskMeta(t),()=>go("/tasks/"+t.uid))):h("p",{class:"small muted",text:"No tasks in this view."}));
+}
+function taskEditor(body, task) {
+  const draftKey="pocket:task-draft"+(task?":"+task.uid:"");
+  let draft=null;try{draft=JSON.parse(localStorage.getItem(draftKey));}catch{}
+  const current=draft||task||{text:"",due:"",important:false,steps:[]}, title=h("textarea",{maxlength:500,"aria-label":"Task action",placeholder:"What will you do?"});title.value=current.text;
+  const due=h("input",{type:"date","aria-label":"Task date"});due.value=current.due||"";
+  const steps=h("textarea",{"aria-label":"Task steps",placeholder:"Steps, one per line"});steps.value=(current.steps||[]).map(s=>s.text).join("\n");
+  const important=h("input",{type:"checkbox","aria-label":"Important task"});important.checked=Boolean(current.important);
+  const values=()=>({text:title.value.trim(),due:due.value,important:important.checked,steps:steps.value.split("\n").map(s=>s.trim()).filter(Boolean).map(s=>({text:s,done:current.steps?.find(old=>old.text===s)?.done||false}))});
+  const draftSave=()=>localStorage.setItem(draftKey,JSON.stringify(values()));for(const field of [title,due,steps,important])field.addEventListener("input",draftSave);
+  add(body,rowButton("‹ tasks","",()=>go("/tasks")),h("div",{class:"narrow"},section(task?"EDIT ACTION":"NEW ACTION"),title,h("label",{},"Date",due),h("label",{class:"check-label"},important,"Important"),section("STEPS"),steps,
+    keys(["save task",guard(()=>{const value=values();if(!value.text||value.text.length>500)throw new Error("Write an action, up to 500 characters.");if(value.steps.length>32||value.steps.some(s=>s.text.length>160))throw new Error("Use up to 32 steps, each within 160 characters.");const saved=task?tasks.edit(task.uid,t=>Object.assign(t,value)):tasks.create(value.text,null,value);localStorage.removeItem(draftKey);go("/tasks/"+saved.uid);}),{class:"accent"}])));
+}
+function searchView() {
+  const body=view("today",[["‹ today",()=>go("/today")]]),field=h("input",{placeholder:"Find a thought, task or note…","aria-label":"Search workspace"}),results=h("div",{});
+  workspaceTitle(body,"search","Find context and actions in your workspace.");add(body,field,results);
+  const find=()=>{const q=field.value.trim().toLowerCase();results.replaceChildren();if(!q)return;let count=0;
+    const groups=[["THOUGHTS",parking.open(),t=>t.text,t=>go("/thoughts/"+t.id)],["TASKS",tasks.list(),t=>[t.text,...(t.steps||[]).map(s=>s.text),t.source?.text||""].join("\n"),t=>go("/tasks/"+t.uid)],["NOTES",notes.list(),n=>n.text,n=>go("/notes/"+n.uid)]];
+    for(const [name,items,text,open] of groups){const hits=items.filter(t=>text(t).toLowerCase().includes(q));if(hits.length)add(results,section(name));for(const item of hits){count++;add(results,rowButton(name==="NOTES"?noteTitle(item):item.text,"",()=>open(item)));}}
+    if(!count)add(results,h("p",{class:"small muted",text:"Nothing found."}));};field.addEventListener("input",find);field.focus();
+}
+function appsView() {
+  const body=view("apps");workspaceTitle(body,"apps","Supporting tools, each with a place in the workflow.");
+  split(body,[section("THINK"),rowButton("pip","",()=>go("/pip")),section("REVIEW"),rowButton("Activity","",()=>go("/receipt")),section("CREATE & KEEP"),rowButton("Zines","",()=>go("/zines"))],
+    [section("EXTRAS"),rowButton("Dice","",()=>go("/dice")),rowButton("Movement","",()=>go("/movement")),section("SETTINGS"),rowButton("Storage & devices","",()=>go("/sync"))]);
 }
 
 // ── Notes: list on the left, the open note on the right. Saves as you type. ──
@@ -150,11 +204,10 @@ function notesView(uid) {
     const q = noteQuery.trim().toLowerCase(), all = notes.list().filter(n => !q || n.text.toLowerCase().includes(q));
     list.replaceChildren(...(all.length ? all.map(n => rowButton((n.pinned ? "▲ " : "") + noteTitle(n), summary(n),
       () => go("/notes/" + n.uid), { class: "row-button" + (n.uid === current ? " selected" : "") }))
-      : [h("p", { class: "small muted", text: q ? "No note matches." : "No notes yet. Notes from the phone appear here after a sync." })]));
+      : [h("p", { class: "small muted", text: q ? "No note matches." : "No notes yet." })]));
   };
   renderList();
-  split(body, [picker, pages, search, list], editing ? editor(open, renderList) : h("div", { class: "empty" }, h("div", { class: "empty-title", text: "NOTES" }),
-    h("p", { class: "small muted", text: "Pick a note on the left, or start a new one. Drop photos of journal pages here: Claude reads them into notes, on your phone or on demand from a page." })));
+  split(body, [picker, pages, search, list], editing ? editor(open, renderList) : h("div", { class: "empty" }, h("div", { class: "empty-title", text: "NOTES" })));
 }
 /** Scales a photo like the phone does (long edge 2000 px, upright, JPEG) so Drive and the phone get the same kind of file. */
 async function pagePhoto(file) {
@@ -224,7 +277,7 @@ async function readPage(page) {
 /** Asks for the Claude key and keeps it for this tab; returns the key, or null if it was not set. */
 async function askKey() {
   const value = await ask("Claude API key", { placeholder: "sk-ant-…", ok: "save", password: true,
-    hint: "Kept in this tab only, sent straight to Anthropic. Pages are read with Claude Sonnet 5.5, about 1–2¢ each, billed to your Anthropic account." });
+    hint: "Key · this tab" });
   if (value == null) return null;
   try { reader.setKey(value); return value; } catch (error) { say(error.message); return null; }
 }
@@ -233,7 +286,7 @@ function summary(n) {
   const lines = n.text.split("\n").filter(l => l.trim()).slice(1), found = lines.filter(l => thought(l));
   const text = lines.filter(l => !thought(l)).map(l => l.replace(/^\s*(#+|>|[-*+]\s+(\[[ xX]\]\s*)?|\d+[.)])\s*/, "")).join(" ").slice(0, 60);
   const chips = found.slice(0, 3).map(line => {
-    const state = thoughtStatus(n.uid, line), done = /cleared|let go|moved to Today/.test(state);
+    const state = thoughtStatus(n.uid, line), done = /cleared|let go|made into a task/.test(state);
     return h("span", { class: "chip" + (done ? " done" : state === "back now" ? " back" : ""), title: state }, "» " + thought(line).text);
   });
   return [new Date(n.updated).toLocaleDateString([], { day: "2-digit", month: "short" }) + (text ? " · " + text : ""), chips,
@@ -284,17 +337,16 @@ function editor(note, onSaved = () => {}) {
   const toggle = () => { save(true); showPaper(false); previewing = !previewing; area.hidden = previewing; preview.hidden = !previewing; mode.textContent = previewing ? "edit" : "preview"; if (previewing) preview.replaceChildren(markdown(area.value, uid)); else area.focus(); };
   const mode = h("button", { onclick: toggle }, previewing ? "edit" : "preview");
   const bar = h("div", { class: "editor-bar" },
-    h("button", { class: "narrow-only", onclick: () => { save(true); go("/notes"); } }, "‹ notes"), state, h("span", { class: "spacer" }), page ? paperButton : null, mode,
+    h("button", { class: "narrow-only", onclick: () => { save(true); go("/notes"); } }, "‹ notes"), state, h("span", { class: "spacer" }), page ? paperButton : null, mode, h("button", { onclick: async () => { save(true); if(!uid)return; const selected=area.value.substring(area.selectionStart,area.selectionEnd).trim(); const title=await ask("Choose an action from this note", { value:selected||noteTitle(notes.get(uid)), limit:500 }); if(title?.trim())guard(()=>{const n=notes.get(uid);const task=tasks.create(title,{kind:"note",name:noteTitle(n),text:n.text,note_uid:n.uid});go("/tasks/"+task.uid);})(); } }, "make task"),
     h("button", { onclick: () => { save(true); if (!uid) return; const n = notes.get(uid); notes.pin(uid, !n.pinned); notesView(uid); } }, note?.pinned ? "unpin" : "pin"),
+    h("button", { onclick: () => { save(true); if(!uid)return; const n=notes.get(uid),selected=area.value.substring(area.selectionStart,area.selectionEnd).trim(); thinkWithPip("note",n.uid,noteTitle(n),selected||n.text,"/notes/"+n.uid); } }, "pip"),
     h("button", { onclick: async () => { if (!uid) { go("/notes"); return; } if (await confirmBox("Delete this note on all devices?", "delete")) { notes.remove(uid); go("/notes"); say("Deleted."); } } }, "delete"));
   if (!previewing) setTimeout(() => area.focus({ preventScroll: true }), 0);
-  return [bar, area, preview, paperPane, h("div", { class: "meta muted", text: page
-    ? "Read from a journal page. In preview, ▸ unfolds the handwriting of a line; paper shows the whole page."
-    : "Markdown, the same as the phone's notes. A line starting with >> parks a thought; add @tonight, @tomorrow, @nextweek or a time like @16:30." })];
+  return [bar, area, preview, paperPane];
 }
 /** A small Markdown renderer for what the phone's editor writes. Text is escaped before any formatting. */
 function markdown(source, uid = null) {
-  const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
   const inline = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>").replace(/~~([^~]+)~~/g, "<del>$1</del>")
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
@@ -306,7 +358,7 @@ function markdown(source, uid = null) {
   for (const line of source.split("\n")) {
     if (line.startsWith("```")) { if (code === null) { close(); code = []; } else { out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`); code = null; } continue; }
     if (code !== null) { code.push(line); continue; }
-    let m; const t = thought(line);
+    let m; const t = uid ? thought(line) : null;
     if (t) { close(); out.push(`<p class="thought-line"${at(line)}><span class="accent">»</span> ${inline(t.text)} <span class="meta muted">· ${esc(thoughtStatus(uid, line))}</span></p>`); }
     else if ((m = line.match(/^(#{1,3})\s+(.*)/))) { close(); out.push(`<h${m[1].length + 1}${at(line)}>${inline(m[2])}</h${m[1].length + 1}>`); }
     else if ((m = line.match(/^\s*[-*]\s+\[( |x|X)\]\s+(.*)/))) { if (list !== "ul") { close(); out.push('<ul class="tasks">'); list = "ul"; } out.push(`<li${at(line)}>${m[1] === " " ? "[ ]" : "[x]"} ${inline(m[2])}</li>`); }
@@ -461,13 +513,13 @@ function syncView() {
   add(body, h("div", { class: "narrow" },
     h("p", { class: connected ? "accent" : "", text: describe() }),
     status.error ? h("p", { class: "small warn", text: status.error }) : null,
-    h("p", { class: "small muted", text: "Parking Lot, notes, Receipt and Dice lists live in a hidden Pocket folder in your own Google Drive. Edits here save in this browser first and upload when you're online; the phone picks them up on its next sync." }),
+    section("DRIVE"),h("p", { class: "small muted", text: "Thoughts · Tasks · Notes · Paper · Activity · Dice" }),
     drive.configured() ? null : h("p", { class: "small warn", text: "This page has no Google client id yet. Add it to docs/js/config.js (see CLOUD.md)." }),
     connected ? [rowButton("sync now", "", async () => { say("Syncing…"); const ok = await syncNow(); syncView(); say(ok ? "Synced." : describe()); }),
       rowButton("disconnect", "this browser keeps its copy", async () => { await drive.disconnect(); syncView(); })]
       : rowButton("connect google drive", drive.remembered() ? "you were connected before" : "", () => connectFlow(drive.remembered())),
     section("IN THIS BROWSER"),
-    h("p", { class: "small muted", style: "white-space:pre-line", text: `parking   ${parked} open\nnotes     ${notes.list().length}\nreceipt   ${days} day${days === 1 ? "" : "s"}\ndice      ${dice.list().length} on the list` }),
+    h("p", { class: "small muted", style: "white-space:pre-line", text: `thoughts  ${parked} undecided\ntasks     ${tasks.list().filter(t=>!t.done).length} open\nnotes     ${notes.list().length}\nreceipt   ${days} day${days === 1 ? "" : "s"}\ndice      ${dice.list().length} on the list` }),
     rowButton("forget this browser's copy", "", async () => {
       if (await confirmBox("Forget the copy in this browser? Your Drive copy and the phone are not touched.", "forget")) {
         Object.keys(localStorage).filter(k => k.startsWith("pocket:")).forEach(k => localStorage.removeItem(k)); syncView();
@@ -475,9 +527,9 @@ function syncView() {
     }),
     section("CLAUDE"),
     rowButton(reader.hasKey() ? "Claude key · set for this tab (" + reader.hint() + ")" : "set Claude API key",
-      reader.hasKey() ? "used to read journal pages here; kept until this tab closes" : "to read journal pages on the web, without the phone",
+      "",
       () => keySettings()),
-    h("p", { class: "small muted", text: "Reading a journal page here uses Claude Sonnet 5.5, about 1–2¢ per page. The key stays in this tab, is sent only to Anthropic, and the phone keeps its own key separately." })));
+    h("p", { class: "small muted", text: "Key storage · this tab" })));
 }
 /** Sets or forgets the Claude key kept for this tab. */
 async function keySettings() {
@@ -496,9 +548,10 @@ async function connectFlow(quiet) {
 function route() {
   const [, name, arg] = (location.hash.replace(/^#/, "") || "/").split("/");
   if (name === "notes") notesView(arg); else if (name === "receipt") receiptView(arg); else if (name === "dice") diceView(); else if (name === "sync") syncView();
+  else if (name === "pip") pip.mount(view("pip"), arg, pipHelpers);
   else if (name === "zines") zines.mount(view("zines"), arg, { go, say, dialog, confirm: confirmBox });
   else if (name === "movement") movement.mount(view("movement"), { say });
-  else if (name === "parking") parkingView(); else { history.replaceState(null, "", "#/parking"); parkingView(); }
+  else if (name === "thoughts" || name === "parking") parkingView(arg); else if (name === "tasks") tasksView(arg); else if (name === "apps") appsView(); else if (name === "search") searchView(); else if (name === "today") todayView(); else { history.replaceState(null, "", "#/today"); todayView(); }
 }
 addEventListener("hashchange", route);
 let lastState = status.state;
@@ -506,7 +559,7 @@ onStatus(() => {
   const state = document.getElementById("sync-status"); if (state) state.textContent = describe();
   const finished = lastState === "syncing" && status.state === "idle"; lastState = status.state;
   // Merged edits from the phone appear without a reload, unless the user is typing or a dialog is open.
-  if (finished && status.changed && !["#/zines", "#/movement"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea")) { const text = notice?.textContent; route(); say(text); }
+  if (finished && status.changed && !["#/zines", "#/movement", "#/pip"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea")) { const text = notice?.textContent; route(); say(text); }
 });
 addEventListener("keydown", event => {
   if (!dialogHost.hidden) { if (event.key === "Escape") closeDialog(); return; }

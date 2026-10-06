@@ -44,10 +44,14 @@ public class CompactProcessorTest {
         }
         assertEquals(6, signatures.size());
     }
+    /** Pixel-to-pixel noise of a 128-wide frame; vignetting and area contrast vary slowly and barely count. */
     private double variance(int[] pixels) {
-        double total = 0, squared = 0;
-        for (int pixel : pixels) { int g = (pixel >>> 8) & 255; total += g; squared += g * g; }
-        return squared / pixels.length - Math.pow(total / pixels.length, 2);
+        double squared = 0; int pairs = 0;
+        for (int i = 0; i + 1 < pixels.length; i++) {
+            if (i % 128 == 127) continue;
+            int a = (pixels[i] >>> 8) & 255, b = (pixels[i + 1] >>> 8) & 255; squared += (a - b) * (a - b); pairs++;
+        }
+        return squared / pairs / 2;
     }
     @Test public void noiseIncreasesWithSensitivityAndDarknessAndWhiteBalanceDependsOnLighting() {
         int[] dark = new int[128 * 64], bright = new int[dark.length];

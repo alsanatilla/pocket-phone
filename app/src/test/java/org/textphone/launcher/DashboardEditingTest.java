@@ -79,9 +79,9 @@ public class DashboardEditingTest {
         assertSame("Home keeps its visible hierarchy during the system transition",visibleHome,root());
         Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(32));
         assertEquals("Ask",name().getText().toString());
-        menu("Use app name");assertEquals("ChatGPT",name().getText().toString());menu(activity.getResources().getBoolean(R.bool.pocket_rom)?"Reset tile":"Reset shortcut");assertEquals(slot,name().getText().toString());assertFalse(prefs.contains("shortcut_"+slot));
+        menu("Use app name");assertEquals("ChatGPT",name().getText().toString());menu(activity.getResources().getBoolean(R.bool.pocket_rom)?"Reset tile":"Reset shortcut");assertEquals(activity.getResources().getBoolean(R.bool.pocket_rom)?PocketApps.label(slot):slot,name().getText().toString());assertFalse(prefs.contains("shortcut_"+slot));
         assertEquals("Keep my note",planner.find(note).text);
-        if(activity.getResources().getBoolean(R.bool.pocket_rom)) { PocketAppsTest.find(root(),"all").performClick(); assertNotNull(root().findViewWithTag("all_shortcut_settings")); }
+        if(activity.getResources().getBoolean(R.bool.pocket_rom)) { PocketAppsTest.find(root(),"all").performClick(); assertNotNull(root().findViewWithTag("app_settings")); }
         else assertNotNull(root().findViewWithTag("tile_settings"));
     }
     @Test public void oldPackageOnlyBindingsResolveActualNamesWithoutRebuildingHome() throws Exception {

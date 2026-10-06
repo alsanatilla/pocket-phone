@@ -33,7 +33,7 @@ export function mergeById(local = [], remote = [], idKey, updatedKey) {
   }
   return [...merged.values()];
 }
-const pruneParking = (items, now) => items.filter(i => i.state === "parked" || now - (i.closed || 0) <= KEEP_CLOSED);
+const pruneParking = items => items; // Keep handled records so an offline device cannot revive them.
 export const merge = {
   "parking.json": (local, remote, now) => ({ v: 1, items: pruneParking(mergeById(local.items, remote?.items, "id", "updated"), now) }),
   "receipt.json": (local, remote, now) => {
@@ -45,15 +45,15 @@ export const merge = {
     return { v: 1, days };
   },
   "dice.json": (local, remote) => (remote && (remote.updated || 0) > (local.updated || 0) ? { v: 1, list: remote.list || "", updated: remote.updated } : { v: 1, list: local.list || "", updated: local.updated || 0 }),
-  // Deleted notes stay as markers for 30 days so an older copy cannot bring them back.
-  "notes.json": (local, remote, now) => ({ v: 1, notes: mergeById(local.notes, remote?.notes, "uid", "updated").filter(n => !n.deleted || now - (n.updated || 0) <= KEEP_DELETED) }),
-  // Native phone tasks share the Drive folder; the web preserves them without adding another task screen.
+  // Keep deletion markers so a device returning after a long absence cannot revive old records.
+  "notes.json": (local, remote, now) => ({ v: 1, notes: mergeById(local.notes, remote?.notes, "uid", "updated") }),
+  // Tasks use the same records and source links on the phone and the web.
   "tasks.json": (local, remote, now) => ({ v: 1,
-    tasks: mergeById(local.tasks, remote?.tasks, "uid", "updated").filter(t => !t.deleted || now - (t.updated || 0) <= KEEP_DELETED),
+    tasks: mergeById(local.tasks, remote?.tasks, "uid", "updated"),
     next: (remote?.next?.updated || 0) > (local.next?.updated || 0) ? remote.next : (local.next || { uid: "", updated: 0 }),
   }),
   // Journal pages are written by the phone; same rule as JournalStore.merge.
-  "journal.json": (local, remote, now) => ({ v: 1, pages: mergeById(local.pages, remote?.pages, "uid", "updated").filter(p => !p.deleted || now - (p.updated || 0) <= KEEP_DELETED) }),
+  "journal.json": (local, remote, now) => ({ v: 1, pages: mergeById(local.pages, remote?.pages, "uid", "updated") }),
 };
 
 // ── Journal pages: photographed on the phone, read by Claude; each line knows where it sits on the photo. ──
@@ -106,7 +106,7 @@ export const thoughtKey = text => text.trim().replace(/[ \t]+/g, " ").toLowerCas
 export function thought(line) {
   const m = line.replace(/\r/g, "").match(THOUGHT); if (!m || !m[1].trim()) return null;
   const tag = (m[2] || "").toLowerCase();
-  return { text: m[1].trim(), key: thoughtKey(m[1]), delay: THOUGHT_DELAY[tag] || (/^\d{1,2}[:.]\d{2}$/.test(tag) ? tag : "1 hour") };
+  return { text: m[1].trim(), key: thoughtKey(m[1]), delay: THOUGHT_DELAY[tag] || (/^\d{1,2}[:.]\d{2}$/.test(tag) ? tag : tag ? "1 hour" : "none") };
 }
 /** FNV-1a over "uid\nkey", in a range no timestamp id reaches, so the phone and the web create the same item. */
 export function thoughtId(uid, key) {
@@ -128,8 +128,8 @@ export function thoughtStatus(uid, text, now = Date.now()) {
   const t = thought(text); if (!t || !uid) return "not parked yet";
   const item = load("parking.json").items.find(i => String(i.id) === String(thoughtId(uid, t.key)));
   if (!item) return "not parked yet";
-  if (item.state === "cleared") return "cleared"; if (item.state === "killed") return "let go"; if (item.state === "task") return "moved to Today";
-  return item.due <= now ? "back now" : "back " + relative(item.due, now);
+  if (item.state === "cleared") return "cleared"; if (item.state === "killed") return "let go"; if (item.state === "task") return "made into a task";
+  return !item.due ? "saved to thoughts" : item.due <= now ? "ready to revisit" : "revisit " + relative(item.due, now);
 }
 
 /** The phone shows a note's first line as its title. */
@@ -138,23 +138,25 @@ export const noteTitle = note => (note.text.split("\n").find(line => line.trim()
 
 // ── Parking Lot ──
 export const parking = {
-  open(now = Date.now()) { return load("parking.json").items.filter(i => i.state === "parked").sort((a, b) => a.due - b.due); },
+  open(now = Date.now()) { return load("parking.json").items.filter(i => i.state === "parked").sort((a, b) => (a.due || Number.MAX_SAFE_INTEGER) - (b.due || Number.MAX_SAFE_INTEGER) || b.created - a.created); },
   park(text, due) {
     const value = (text || "").trim(); if (!value) throw new Error("Type the thought first.");
     const doc = load("parking.json"), now = Date.now();
-    const item = { id: now * 1000 + Math.floor(Math.random() * 1000), text: value.slice(0, 200), created: now, due, closed: 0, notches: 0, state: "parked", updated: now };
+    if(value.length>500)throw new Error("Keep a thought within 500 characters.");
+    const item = { id: now * 1000 + Math.floor(Math.random() * 1000), text: value, created: now, due: due || 0, closed: 0, notches: 0, state: "parked", updated: now };
     doc.items.push(item); save("parking.json", doc); changed("parking.json"); return item;
   },
   update(id, edit) {
     const doc = load("parking.json"), item = doc.items.find(i => String(i.id) === String(id) && i.state === "parked");
     if (!item) throw new Error("This item was already cleared.");
-    edit(item); item.updated = Date.now(); doc.items = pruneParking(doc.items, item.updated); save("parking.json", doc); changed("parking.json"); return item;
+    edit(item); item.updated = Math.max(Date.now(),item.updated+1); doc.items = pruneParking(doc.items, item.updated); save("parking.json", doc); changed("parking.json"); return item;
   },
   repark(id, due) { return this.update(id, i => { i.due = due; i.notches = (i.notches || 0) + 1; }); },
   bringBack(id) { return this.update(id, i => { i.due = Date.now(); }); },
   close(id, state) { return this.update(id, i => { i.state = state; i.closed = Date.now(); }); },
 };
 export function when(delay, now = Date.now()) {
+  if (delay === "none") return 0;
   const at = new Date(now); at.setSeconds(0, 0);
   // A clock time ("16:30") means the next time the clock shows it: today, or tomorrow once it has passed. Same as ParkingStore.when.
   const time = /^(\d{1,2})[:.](\d{2})$/.exec(delay);
@@ -222,4 +224,30 @@ export const dice = {
   list() { return (load("dice.json").list || "").split("\n").map(s => s.trim()).filter(Boolean); },
   raw() { return load("dice.json").list || ""; },
   setList(text) { save("dice.json", { v: 1, list: text, updated: Date.now() }); changed("dice.json"); },
+};
+
+// Tasks are commitments. Thoughts become tasks only when the user chooses this transition.
+export const taskDay = (at = Date.now()) => { const d = new Date(at); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+export const tasks = {
+  list() { return load("tasks.json").tasks.filter(t => !t.deleted).sort((a,b)=>(a.due||"9999").localeCompare(b.due||"9999") || Number(b.important)-Number(a.important)); },
+  get(uid) { return this.list().find(t => t.uid === uid) || null; },
+  create(text, source = null, fields = {}) {
+    const value = String(text||"").trim(); if(!value || value.length>500)throw new Error("Write an action, up to 500 characters.");
+    if(source?.token){const existing=this.list().find(t=>t.source?.token===source.token);if(existing)return existing;}
+    if(this.list().length+notes.list().length>=250)throw new Error("The workspace is full. Remove an old entry.");
+    const doc=load("tasks.json"), now=Date.now(), task={uid:crypto.randomUUID(),text:value,done:false,due:fields.due||"",important:Boolean(fields.important),steps:fields.steps||[],created:now,updated:now,deleted:false};
+    if(source)task.source=source;doc.tasks.push(task);save("tasks.json",doc);changed("tasks.json");return task;
+  },
+  edit(uid, change) { const doc=load("tasks.json"), item=doc.tasks.find(t=>t.uid===uid&&!t.deleted);if(!item)throw new Error("This task was removed.");change(item);item.updated=Math.max(Date.now(),item.updated+1);save("tasks.json",doc);changed("tasks.json");return item; },
+  complete(uid) { const item=this.edit(uid,t=>{t.done=!t.done;});if(item.done)receipt.log(KIND.DONE,item.text);return item; },
+  remove(uid) { return this.edit(uid,t=>{t.deleted=true;}); },
+  next(uid) { const doc=load("tasks.json");doc.next={uid,updated:Math.max(Date.now(),(doc.next?.updated||0)+1)};save("tasks.json",doc);changed("tasks.json"); },
+  fromThought(item) {
+    const current=load("parking.json").items.find(t=>String(t.id)===String(item.id));if(!current)throw new Error("This thought was removed.");
+    const existing=this.list().find(t=>t.source?.token==="thought:"+current.id);
+    if(existing){if(current.state==="parked")parking.close(current.id,"task");return existing;}
+    if(current.state!=="parked")throw new Error("This thought has already been handled.");
+    const note=current.note?notes.get(current.note):null,source={kind:note?"note":"shared",name:note?noteTitle(note):"Thought",text:note?note.text:current.text,token:"thought:"+current.id};if(note)source.note_uid=note.uid;
+    const task=this.create(current.text,source);parking.close(current.id,"task");receipt.log(KIND.TASK,current.text);return task;
+  },
 };

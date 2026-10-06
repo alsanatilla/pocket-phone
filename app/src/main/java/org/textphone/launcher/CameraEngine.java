@@ -89,12 +89,13 @@ final class CameraEngine {
 
     private static final class Job {
         final CameraProfile profile;
+        final CameraFormat format;
         final int orientation;
         long taken = System.currentTimeMillis();
         long timestamp;
         YuvFrame frame;
         CompactProcessor.Conditions conditions;
-        Job(CameraProfile profile, int orientation) { this.profile = profile; this.orientation = orientation; }
+        Job(CameraProfile profile, CameraFormat format, int orientation) { this.profile = profile; this.format = format; this.orientation = orientation; }
     }
 
     CameraEngine(Context context, CameraPreview preview, Listener listener) {
@@ -319,12 +320,14 @@ final class CameraEngine {
         });
     }
 
-    void capture(CameraProfile profile, int deviceOrientation) {
+    void capture(CameraProfile profile, int deviceOrientation) { capture(profile, CameraFormat.DEFAULT, deviceOrientation); }
+
+    void capture(CameraProfile profile, CameraFormat format, int deviceOrientation) {
         if (!ready || busy) return;
         busy = true;
         handler.post(() -> {
             if (!running || !ready || session == null) { busy = false; return; }
-            job = new Job(profile, CameraMath.orientation(info.sensor, deviceOrientation, info.front));
+            job = new Job(profile, format, CameraMath.orientation(info.sensor, deviceOrientation, info.front));
             Job current = job;
             post(() -> listener.status("Focusing"));
             try {
@@ -444,7 +447,7 @@ final class CameraEngine {
         if (shot.timestamp != 0 && shot.frame.timestamp != shot.timestamp) { shot.frame = null; return; }
         job = null; writing = true; resetPreview();
         post(() -> listener.status("Saving"));
-        PhotoWriter.save(context, shot.frame, shot.profile, shot.orientation, shot.conditions, shot.taken, new PhotoWriter.Callback() {
+        PhotoWriter.save(context, shot.frame, shot.profile, shot.format, shot.orientation, shot.conditions, shot.taken, new PhotoWriter.Callback() {
             @Override public void saved(Uri uri, Bitmap thumbnail) {
                 writing = false; busy = false;
                 if (!released && running) { listener.saved(uri, thumbnail); updateControls(); }
