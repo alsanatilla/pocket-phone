@@ -1,14 +1,14 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
-import * as drive from "./drive.js?v=20261006-gym1";
-import * as reader from "./reader.js?v=20261006-gym1";
-import * as pip from "./pip.js?v=20261006-gym1";
-import { backdrop } from "./pixel-backdrop.js?v=20261006-gym1";
-import * as zines from "./zines.js?v=20261006-gym1";
-import * as movement from "./movement.js?v=20261006-gym1";
-import * as gymView from "./gym.js?v=20261006-gym1";
-import * as coros from "./coros.js?v=20261006-gym1";
-import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-gym1";
-import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-gym1";
+import * as drive from "./drive.js?v=20261006-gym2";
+import * as reader from "./reader.js?v=20261006-gym2";
+import * as pip from "./pip.js?v=20261006-gym2";
+import { backdrop } from "./pixel-backdrop.js?v=20261006-gym2";
+import * as zines from "./zines.js?v=20261006-gym2";
+import * as movement from "./movement.js?v=20261006-gym2";
+import * as gymView from "./gym.js?v=20261006-gym2";
+import * as coros from "./coros.js?v=20261006-gym2";
+import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-gym2";
+import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-gym2";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -95,9 +95,11 @@ const thoughtMeta = item => !item.due ? "Undecided" : item.due <= Date.now() ? "
 const taskMeta = task => [task.done ? "Done" : task.due ? (task.due < taskDay() ? "Overdue · " : "") + task.due : "No date", task.important ? "Important" : "", task.steps?.length ? task.steps.filter(s => s.done).length + "/" + task.steps.length + " steps" : ""].filter(Boolean).join(" · ");
 // Each area has its own header artwork, so a page is recognisable before it is read.
 const SCENE = { today: "sky", thoughts: "stars", tasks: "road", notes: "waves", search: "rings", apps: "tiles", gym: "iron" };
+// Every area header has the same size; the page's actions sit in its top right corner.
 function workspaceTitle(body, title, meta = "", scene = SCENE[title] || SCENE[body.className.match(/tool-(\w+)/)?.[1]] || "sky") {
-  add(body, h("header", { class: "workspace-sky" + (title === "notes" ? " compact" : "") }, backdrop(scene),
-    h("div", { class: "workspace-sky-title" }, h("h1", { class: "workspace-title", text: title }), meta ? h("p", { class: "small muted", text: meta }) : null)));
+  const actions = body.previousElementSibling?.classList.contains("toolbar") ? body.previousElementSibling : null;
+  add(body, h("header", { class: "workspace-sky" }, backdrop(scene),
+    h("div", { class: "workspace-sky-title" }, h("h1", { class: "workspace-title", text: title }), h("p", { class: "small muted", text: meta })), actions));
 }
 async function capture() {
   const choice = await choose("Capture", ["Thought", "Task", "Note"]);

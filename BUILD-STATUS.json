@@ -43,7 +43,7 @@
   },
   "web_manual_checks": {
     "origin": "Isolated localhost:8881 preview, Drive disconnected",
-    "asset_version": "20261006-gym1",
+    "asset_version": "20261006-gym2",
     "status": "Gym tab checked at 1280px and 390px with temporary local workouts (removed afterwards, never marked for sync): logging form, rest timer, last time/best, volume bars, progress, e1RM chart and history. Every area header canvas rendered (sky, stars, road, waves, tiles, rings, iron, terrain). No horizontal overflow at 390px."
   },
   "live_preview_incidents": {

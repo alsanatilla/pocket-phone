@@ -1,5 +1,5 @@
 // Gym: log sets during a workout, then read each lift's estimated best over time. Same records as GymActivity on the phone.
-import { gym, e1rm, kgText, weekStart } from "./store.js?v=20261006-gym1";
+import { gym, e1rm, kgText, weekStart } from "./store.js?v=20261006-gym2";
 
 const day = at => new Date(at).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
 const minutes = ms => { const m = Math.max(0, Math.floor(ms / 60000)); return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m` : `${m} min`; };
@@ -34,6 +34,7 @@ function chart(values, { line: asLine = false, height = 72 } = {}) {
 let current = "";
 export function mount(body, arg, ui) {
   const { h, add, say, section, rowButton, keys, split, confirm, go, title } = ui;
+  body.querySelectorAll(".pixel-backdrop").forEach(canvas => canvas.dispose?.()); body.replaceChildren();
   const [kind, value] = arg ? [arg.slice(0, arg.indexOf(":")), decodeURIComponent(arg.slice(arg.indexOf(":") + 1))] : ["", ""];
   if (kind === "lift") return lift(value);
   if (kind === "w" && gym.get(value)) return workout(gym.get(value));
@@ -59,7 +60,7 @@ export function mount(body, arg, ui) {
         body.querySelector(".gym-log input[type=number]")?.focus();
       } catch (error) { say(error.message); } };
       for (const field of [exercise, kg, reps]) field.addEventListener("keydown", event => { if (event.key === "Enter") log(); });
-      exercise.addEventListener("change", () => { current = exercise.value.trim(); if (current) mount(body, "", ui); });
+      exercise.addEventListener("change", () => { const name = exercise.value.trim(); if (!name) return; try { gym.addExercise(now.id, name); current = name; mount(body, "", ui); } catch (error) { say(error.message); } });
       const rest = h("span", { class: "gym-rest accent" });
       left.push(section("NOW · " + minutes(Date.now() - now.started).toUpperCase()),
         h("div", { class: "gym-log" }, exercise, options, h("label", {}, "kg", kg), h("label", {}, "reps", reps)),

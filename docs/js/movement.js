@@ -1,8 +1,8 @@
 // Movement: a cockpit of COROS readiness, trends, fitness and activities, or an invented sample until COROS is connected.
-import * as coros from "./coros.js?v=20261006-gym1";
-import { svg, ring, meter, stack, dayLine, dayBars, dayPair, trace } from "./movement-charts.js?v=20261006-gym1";
-import { scores } from "./scores.js?v=20261006-gym1";
-import { backdrop } from "./pixel-backdrop.js?v=20261006-gym1";
+import * as coros from "./coros.js?v=20261006-gym2";
+import { svg, ring, meter, stack, dayLine, dayBars, dayPair, trace } from "./movement-charts.js?v=20261006-gym2";
+import { scores } from "./scores.js?v=20261006-gym2";
+import { backdrop } from "./pixel-backdrop.js?v=20261006-gym2";
 
 // A visual concept only. These activities and readings are invented and never read or saved.
 const SAMPLE = [
