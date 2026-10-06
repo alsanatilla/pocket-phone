@@ -26,6 +26,8 @@ The page uses Pocket's standard header, pixel title and headings, monospace body
 
 The loader is the same pixel character on phone and web. It randomly waves, walks, juggles, reads and hops, switching activities between short animation cycles. Both implementations draw the same 32-pixel geometry. It stops callbacks when hidden, paused or detached, and remains still with reduced motion or disabled Android animations.
 
+The chat has the same static pixel glow on phone and web: light behind the composer, three fine rings and a bloom in the top corner. Controls reveal the background, and the conversation centre stays dark. The artwork is cached by size on Android and painted only on resize in the browser; changing chats disconnects the old canvas observer.
+
 ## Browser and shared workflow
 
 The component hierarchy follows [BeautifulUI](https://www.beautifului.dev/): conversation navigation, messages, expandable reasoning, context cards and composer. The implementation and visual styling belong to Pocket: pixel headings, monospace text, accent color and compact controls. No framework or copied component library is required.
@@ -38,4 +40,4 @@ Browser conversations and drafts use local browser storage, outside Drive. Keys 
 
 `PipChatTest` exercises persistence, queued-write races, switching during a reply, retries, interruption recovery, provider identity, migration, deletion, UI controls and loader lifecycle on Android API 24 and 35. `PipStreamingTest` feeds local SSE responses through the Anthropic SDK and compatible adapter, including thinking signatures, duplicate reasoning fields and lookup continuations. These fixtures make no paid API requests. `PipPreviewTest` writes fictional native layout previews to `app/build/screenshots/pocket-22-pip-*.png`.
 
-The final 0.6.0 build skips the test suite at the user's request. Earlier checks and the final APK checksum are recorded separately in `BUILD-STATUS.json`. Browser checks use an isolated origin and fake SSE replies. Handset animation smoothness remains unverified; APK signing is assigned to the release agent.
+The final 0.7.1 build skips the test suite at the user's request. Earlier checks and the final APK checksum are recorded separately in `BUILD-STATUS.json`. Earlier browser checks used an isolated origin and fake SSE replies; this release's browser preview requires authentication, so only the generated glow artwork was inspected. Handset animation smoothness remains unverified; APK signing is assigned to the release agent.

@@ -1,4 +1,4 @@
-# Pocket design system — 0.7.0
+# Pocket design system — 0.7.1
 
 Pocket is a daily Android dashboard and a set of small native apps for the Nothing Phone (3a). Its character comes from black, white monospace text, pixel titles and icons, and labelled soft keys. Its polish comes from every app using the same few patterns, so a page can be scanned without learning it first.
 
@@ -17,6 +17,8 @@ Pocket is a daily Android dashboard and a set of small native apps for the Nothi
 ## Tokens
 
 Each area has an original scene so a page is recognisable before it is read: sky (Home, Today), stars (Thoughts), road (Tasks), waves (Notes, Paper), terrain (Movement), iron (Gym), tiles (Apps) and rings (Search). The bitmaps come from one ordered-dither kernel in `PixelBackdrop.java` and `pixel-backdrop.js`, tinted with Pocket's accent and faded toward black. The left side and lower edge stay quiet and titles carry a dark halo, so text over the artwork stays readable. Text remains native text. The artwork is static, cached by size on Android, and redrawn only on resize in the browser. No background photo, animation loop or external asset is downloaded.
+
+Pip uses the approved full-height glow scene: three fine rings rise behind the composer, light spills from the top-right corner and sparse pixel sparks sit in the light. The conversation centre stays dark. Pip's controls and composer reveal the artwork while retaining the shared focus underline and pressed state. The background has no animation loop; Pip's character continues its existing activities. Browser observers are disconnected on chat replacement and page exit.
 
 | Role | Value | Purpose |
 | --- | --- | --- |

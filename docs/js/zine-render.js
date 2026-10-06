@@ -1,4 +1,4 @@
-import { getPhoto } from "./zine-store.js?v=20261006-gym2";
+import { getPhoto } from "./zine-store.js?v=20261006-glow1";
 
 export const PAGE_WIDTH = 298, PAGE_HEIGHT = 420;
 export const pageCount = book => book.photos.length + 2;

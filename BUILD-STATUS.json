@@ -1,11 +1,11 @@
 {
   "component": "Pocket Phone Android launcher/apps and browser workspace",
-  "version_name": "0.7.0",
-  "version_code": 30,
+  "version_name": "0.7.1",
+  "version_code": 31,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-06T11:45:45.837Z",
+  "checked_at_utc": "2026-10-06T12:13:10.874Z",
   "build": "assembleRom passed. Test suite skipped at the user's request. APK remains unsigned for the release agent.",
   "commands": [
     "./gradlew.bat -I app/build/tmp/release-output.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
@@ -13,7 +13,7 @@
   "build_environment": {
     "java": "17.0.20.1+1",
     "android_sdk": 35,
-    "output_directory": "app/build/release-070",
+    "output_directory": "app/build/release-071",
     "note": "A temporary Gradle init script set a fresh build directory after Windows locked an older classes.dex. The standard assembleRom command builds the same sources."
   },
   "final_test_suite": {
@@ -42,9 +42,10 @@
     "note": "These earlier results precede the final chat context, animation and copy changes; they are not final-build test results."
   },
   "web_manual_checks": {
-    "origin": "Isolated localhost:8881 preview, Drive disconnected",
-    "asset_version": "20261006-gym2",
-    "status": "Gym tab checked at 1280px and 390px with temporary local workouts (removed afterwards, never marked for sync): logging form, rest timer, last time/best, volume bars, progress, e1RM chart and history. Every area header canvas rendered (sky, stars, road, waves, tiles, rings, iron, terrain). No horizontal overflow at 390px."
+    "asset_version": "20261006-glow1",
+    "status": "Generated glow artwork inspected at 412x840 (phone) and 1160x660 (desktop). Changed JavaScript modules passed Node syntax checks. Live browser layout was not inspected: T3 preview_status and preview_open both returned Authentication required.",
+    "handset_rendered": false,
+    "live_browser_rendered": false
   },
   "live_preview_incidents": {
     "drive": "An earlier shared preview connected to Drive during manual checking. Its sample task was tombstoned and the remote deletion verified. Handled markers and append-only Activity records may remain. Later fixtures use an isolated disconnected origin.",
@@ -52,10 +53,10 @@
   },
   "agent_paid_api_requests": 0,
   "apk": {
-    "file": "app/build/release-070/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.7.0-unsigned.apk",
-    "bytes": 8921600,
-    "sha256": "88a3c674754b02423a5d5114cffbddeccd6e8818de98bc5af55aa251a9eeab4f",
+    "file": "app/build/release-071/outputs/apk/rom/app-rom-unsigned.apk",
+    "release_asset": "pocket-phone-0.7.1-unsigned.apk",
+    "bytes": 8921896,
+    "sha256": "b30335bcf0813764ad536b84a5d09e1534b5735d96954e7b880b6aa3241eb3f0",
     "signed": false,
     "installable_update": false,
     "signing": "Left unsigned for the other release agent"
@@ -64,7 +65,7 @@
     "Shared capture/decide/plan/act/review flow through Home, Today, Thoughts, Tasks and Notes; purpose-grouped app directory",
     "Thoughts stay separate until explicit task promotion; stable source tokens preserve chosen actions across phone and web",
     "Task details link exact-task Focus, local Calendar reservations and Activity completion; drafts and source Back routes persist",
-    "Pocket Calendar uses local storage without Google Calendar provider permissions; optional Drive transport retains six shared collections",
+    "Pocket Calendar uses local storage without Google Calendar provider permissions; optional Drive transport retains seven shared collections",
     "Browser Pip with conversation navigation, Markdown streaming, separate reasoning, context cards and bottom composer; Pocket design on phone and web",
     "Explicit Thought/Task/Note snapshots accompany chat messages; keep note, park thought, make task and copy actions",
     "Matching pixel mascot waves, walks, juggles, reads and hops; animation pauses with reduced motion and hidden/detached views",
@@ -88,15 +89,27 @@
     "Pip chats stay local to each device, outside Drive; browser data removal or app uninstall removes local conversations.",
     "Compatible browser API endpoints must support CORS; native Pocket tool lookups are not offered in the browser.",
     "Camera tuning used existing phone JPEGs rather than real Pocket YUV captures and may need handset retuning.",
-    "Gym logging and header artwork have not been checked on a handset; phone layouts were compiled, not rendered."
+    "Gym logging and header artwork have not been checked on a handset; phone layouts were compiled, not rendered.",
+    "The 0.7.1 glow was inspected as generated artwork only. Browser preview requires authentication, and phone/web UI rendering remains unverified for this patch."
   ],
   "full_custom_rom_compiled": false,
-  "previous_release": "v0.6.1",
+  "previous_release": "v0.7.0",
   "changes_in_0_7_0": [
     "Gym on phone (GymActivity) and web (tab 6): workouts, set logging, last time, best, rest timer, e1RM progress per lift, weekly volume and history",
     "gym.json joins Drive sync on both sides; merge per workout by newest edit with deletion markers (GymStore.merge / store.js merge)",
     "Eight dithered header scenes from one shared kernel: sky, stars, road, waves, terrain, iron, tiles, rings, used per area on phone and web",
     "PocketActivity.scene() hook gives Pocket apps a header scene; titles over artwork get a dark halo",
     "Web subtitles replaced by counts; Apps lists Movement and Gym under Body"
+  ],
+  "previous_web_manual_checks": {
+    "origin": "Isolated localhost:8881 preview, Drive disconnected",
+    "asset_version": "20261006-gym2",
+    "status": "Gym tab checked at 1280px and 390px with temporary local workouts (removed afterwards, never marked for sync): logging form, rest timer, last time/best, volume bars, progress, e1RM chart and history. Every area header canvas rendered (sky, stars, road, waves, tiles, rings, iron, terrain). No horizontal overflow at 390px."
+  },
+  "changes_in_0_7_1": [
+    "Approved full-height Pip glow scene on Android and web: three fine rings, light behind the composer, top-right bloom and pixel sparks with a dark reading area",
+    "Pip controls and composer reveal the artwork while keeping shared focus and pressed feedback; text has a dark halo for legibility",
+    "Native bitmap cached by size; web canvas painted only on resize and its observer disconnected on chat replacement and page exit",
+    "Movement and Gym remain separate workspace tabs; web asset version advanced to 20261006-glow1"
   ]
 }

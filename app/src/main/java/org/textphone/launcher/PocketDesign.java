@@ -69,11 +69,14 @@ final class PocketDesign {
         if (stroke != Color.TRANSPARENT) d.setStroke(Math.max(1, dp(c, 1)), stroke); return d;
     }
     private static Drawable interaction(Context c) {
+        return interaction(c, BLACK);
+    }
+    static Drawable interaction(Context c, int fill) {
         int accent = accent(c); StateListDrawable states = new StateListDrawable();
-        states.addState(CONTROL_STATES[0], shape(c, BLACK, Color.TRANSPARENT));
-        states.addState(CONTROL_STATES[1], new Rule(c, BLACK, accent));
-        states.addState(CONTROL_STATES[2], new Rule(c, BLACK, accent));
-        states.addState(CONTROL_STATES[3], shape(c, BLACK, Color.TRANSPARENT));
+        states.addState(CONTROL_STATES[0], shape(c, fill, Color.TRANSPARENT));
+        states.addState(CONTROL_STATES[1], new Rule(c, fill, accent));
+        states.addState(CONTROL_STATES[2], new Rule(c, fill, accent));
+        states.addState(CONTROL_STATES[3], shape(c, fill, Color.TRANSPARENT));
         int ripple = (accent & 0x00FFFFFF) | 0x33000000;
         return new RippleDrawable(ColorStateList.valueOf(ripple), states, shape(c, WHITE, Color.TRANSPARENT));
     }
@@ -105,10 +108,13 @@ final class PocketDesign {
         styled.setSpan(new RelativeSizeSpan(.875f), end + 1, value.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE); view.setText(styled);
     }
     static void input(EditText view) {
+        input(view, BLACK);
+    }
+    static void input(EditText view, int fill) {
         Context c = view.getContext(); text(view, FIELD, WHITE); view.setHintTextColor(MUTED); view.setMinHeight(dp(c, CONTROL));
         view.setPadding(0, dp(c, 12), 0, dp(c, 12));
-        StateListDrawable states = new StateListDrawable(); states.addState(new int[]{android.R.attr.state_focused}, new Rule(c, BLACK, accent(c)));
-        states.addState(new int[]{}, shape(c, BLACK, Color.TRANSPARENT)); view.setBackground(states);
+        StateListDrawable states = new StateListDrawable(); states.addState(new int[]{android.R.attr.state_focused}, new Rule(c, fill, accent(c)));
+        states.addState(new int[]{}, shape(c, fill, Color.TRANSPARENT)); view.setBackground(states);
     }
     static void editor(EditText view) { input(view); view.setBackgroundColor(BLACK); }
     static void header(android.widget.LinearLayout header) { header.setBackgroundColor(BLACK); }

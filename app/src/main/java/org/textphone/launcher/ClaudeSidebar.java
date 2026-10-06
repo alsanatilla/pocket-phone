@@ -944,9 +944,12 @@ final class ClaudeSidebar extends FrameLayout {
         PocketDesign.headerControl(chats, accent); PocketDesign.headerControl(newChat, accent);
         settings.setTextSize(12);
         PocketDesign.command(setup, true); PocketDesign.command(retry, true); PocketDesign.softKey(send, 1, 2, true); send.setMinWidth(dp(72));
-        PocketDesign.input(composer); composer.setTextSize(PocketDesign.typeSize(activity, PocketDesign.BODY)); composer.setGravity(Gravity.TOP | Gravity.START);
+        PocketDesign.input(composer, android.graphics.Color.TRANSPARENT); composer.setTextSize(PocketDesign.typeSize(activity, PocketDesign.BODY)); composer.setGravity(Gravity.TOP | Gravity.START);
+        composer.setShadowLayer(dp(4), 0, 0, PocketDesign.BLACK);
+        glowControls(panel);
         if (markdown == null || accent != themedAccent) {
             themedAccent = accent;
+            panel.setBackground(new PixelBackdrop(activity, accent, 0, PixelBackdrop.GLOW));
             markdown = Markwon.builder(activity).usePlugin(new AbstractMarkwonPlugin() {
                 @Override public void configureTheme(MarkwonTheme.Builder theme) {
                     theme.headingBreakHeight(0).headingTextSizeMultipliers(new float[]{1.4f, 1.25f, 1.125f, 1f, 1f, 1f})
@@ -1012,6 +1015,7 @@ final class ClaudeSidebar extends FrameLayout {
             root.addView(sources, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(state, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(actions, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+            glowControls(root);
         }
         void update(ClaudeChatRepository.Turn turn) {
             this.turn = turn;
@@ -1136,7 +1140,7 @@ final class ClaudeSidebar extends FrameLayout {
         for(int i=0;i<sources.size();i++){
             int index=i;ChatContext source=sources.get(i);LinearLayout row=horizontal();
             Button card=control(source.kind+" · "+source.title,()->showDialog(new AlertDialog.Builder(activity).setTitle(source.title).setMessage(source.text).setPositiveButton("close",null).create()));
-            PocketDesign.command(card,false);card.setTextColor(PocketDesign.accent(activity));card.setTextSize(12);card.setMaxLines(2);card.setEllipsize(android.text.TextUtils.TruncateAt.END);row.addView(card,new LinearLayout.LayoutParams(0,-2,1));
+            PocketDesign.command(card,false);glowControl(card);card.setTextColor(PocketDesign.accent(activity));card.setTextSize(12);card.setMaxLines(2);card.setEllipsize(android.text.TextUtils.TruncateAt.END);row.addView(card,new LinearLayout.LayoutParams(0,-2,1));
             if(removable){Button remove=control("×",()->{repository.removeContext(index);render();});remove.setContentDescription("Remove "+source.title);row.addView(remove,new LinearLayout.LayoutParams(dp(44),dp(44)));}
             target.addView(row,new LinearLayout.LayoutParams(-1,-2));
         }
@@ -1207,10 +1211,19 @@ final class ClaudeSidebar extends FrameLayout {
     }
 
     private int dp(int value) { return PocketDesign.dp(activity, value); }
+    private void glowControl(TextView view) { view.setBackground(PocketDesign.interaction(activity, android.graphics.Color.TRANSPARENT)); }
+    private void glowControls(ViewGroup group) {
+        for (int i=0;i<group.getChildCount();i++) {
+            View child=group.getChildAt(i);
+            if (child instanceof Button) glowControl((Button)child);
+            else if (child instanceof ViewGroup) glowControls((ViewGroup)child);
+        }
+    }
     private LinearLayout horizontal() { LinearLayout row = new LinearLayout(activity); row.setOrientation(LinearLayout.HORIZONTAL); return row; }
-    private TextView label(String value, int size, int color) { TextView view = new TextView(activity); PocketDesign.text(view, size, color); view.setText(value); return view; }
+    private TextView label(String value, int size, int color) { TextView view = new TextView(activity); PocketDesign.text(view, size, color); view.setShadowLayer(dp(4), 0, 0, PocketDesign.BLACK); view.setText(value); return view; }
     private Button control(String value, Runnable action) {
         Button view = new Button(activity); PocketDesign.text(view, 14, PocketDesign.WHITE); PocketDesign.control(view);
-        view.setText(value); view.setOnClickListener(ignored -> { if (!destroyed) action.run(); }); return view;
+        view.setShadowLayer(dp(4), 0, 0, PocketDesign.BLACK);
+        glowControl(view); view.setText(value); view.setOnClickListener(ignored -> { if (!destroyed) action.run(); }); return view;
     }
 }

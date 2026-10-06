@@ -2,6 +2,12 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.7.1 — Pip pixel glow
+
+- Pip's chat and composer now use the approved pixel glow on phone and web: three fine rings rising from the bottom, a top-corner bloom and scattered pixel sparks, with a dark reading area.
+- Pip's controls reveal the artwork while keeping focus and pressed feedback. The background is cached by size and has no animation loop; old browser canvas observers are disconnected when changing chats or leaving Pip.
+- Movement and Gym remain separate workspace tabs. The APK is unsigned for the release agent; the test suite is skipped as requested. Build results and verification limits are in BUILD-STATUS.json.
+
 ## 0.7.0 — Gym and area artwork
 
 - **Gym.** A strength log on phone and web. Start a workout, pick an exercise, and log sets with kg/reps steppers (phone) or fields (web). Last time, your best and a rest timer sit beside the set being logged. Progress shows each lift's best estimated single (Epley e1RM) with its four-week change, an e1RM chart, weekly volume and history. Workouts sync through Drive as `gym.json`; per workout the later edit wins and deletions stay as markers.

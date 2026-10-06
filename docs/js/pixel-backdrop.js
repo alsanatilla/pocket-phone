@@ -1,6 +1,6 @@
 // Original header artwork, one scene per area. The ordered-dither kernel and every scene are shared with PixelBackdrop.java.
 const BAYER = [0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
-export const SCENES = ['sky','stars','road','waves','terrain','iron','tiles','rings'];
+export const SCENES = ['sky','stars','road','waves','terrain','iron','tiles','rings','glow'];
 const clamp = v => Math.max(0, Math.min(1, v));
 const smooth = (a,b,v) => { const t=clamp((v-a)/(b-a)); return t*t*(3-2*t); };
 const fract = v => v-Math.floor(v);
@@ -91,14 +91,24 @@ function rings(x,y,u,v,aspect,width,height) {
   if(dist<.03)light=.66;
   return light;
 }
-const PAINT = { sky, stars, road, waves, terrain, iron, tiles, rings };
+// Pip: a full-page glow. Light rises behind the composer with rings radiating from it, a bloom spills from the top corner and sparks drift in the light; the middle stays black for reading.
+function glow(x,y,u,v,aspect,width,height) {
+  const size=Math.min(width,height), d=Math.hypot((x-width*.72)/size*.6,(y-height*1.08)/size), c=Math.hypot((x-width)/size,(y+height*.02)/size);
+  let light=.42*Math.exp(-d*3)+.26*Math.exp(-c*4.5);
+  for(const [radius,strength] of [[.42,.16],[.66,.11],[.92,.07]])light+=strength*Math.exp(-Math.pow((d-radius)*size/1.6,2));
+  if(hash(Math.floor(x/6)+31,Math.floor(y/6))>.9&&x%6===2&&y%6===2)light+=.04+1.2*light;
+  return Math.max(0,light-.03);
+}
+const PAINT = { sky, stars, road, waves, terrain, iron, tiles, rings, glow };
 
 export function shade(scene,x,y,width,height) {
   const u=(x+.5)/width, v=(y+.5)/height, aspect=width/height;
   let light=(PAINT[scene]||sky)(x,y,u,v,aspect,width,height);
-  light*=1-smooth(.46,.99,v);
-  // Quiet left side keeps clock, title and date legible over the artwork.
-  light*=.3+.7*smooth(.10,.68,u);
+  if(scene!=='glow'){
+    light*=1-smooth(.46,.99,v);
+    // Quiet left side keeps clock, title and date legible over the artwork.
+    light*=.3+.7*smooth(.10,.68,u);
+  }
   const value=clamp(light)*10, base=Math.floor(value);
   return Math.min(7,base+(value-base>(BAYER[(y%4)*4+x%4]+.5)/16?1:0));
 }

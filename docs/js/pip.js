@@ -1,8 +1,9 @@
 // Component structure informed by beautifului.dev: conversation navigation,
 // reply + expandable details, context cards, composer. Pocket owns the visuals.
-import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings, apiKey, setKey, keyName, identity } from "./pip-core.js?v=20261006-gym2";
-import { notes, tasks, parking, noteTitle, receipt, KIND } from "./store.js?v=20261006-gym2";
-import { mascot } from "./pip-pixels.js?v=20261006-gym2";
+import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings, apiKey, setKey, keyName, identity } from "./pip-core.js?v=20261006-glow1";
+import { notes, tasks, parking, noteTitle, receipt, KIND } from "./store.js?v=20261006-glow1";
+import { mascot } from "./pip-pixels.js?v=20261006-glow1";
+import { backdrop } from "./pixel-backdrop.js?v=20261006-glow1";
 
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0;
@@ -20,7 +21,7 @@ const button = (text, run, props = {}) => ui.h("button", { onclick: safely(run),
 const caption = text => ui.h("p", { class: "meta muted", text });
 
 export function leave() {
-  mounted?.root.querySelectorAll(".pip-mascot").forEach(c=>c.dispose?.());
+  mounted?.root.querySelectorAll(".pip-mascot, .pixel-backdrop").forEach(c=>c.dispose?.());
   clearTimeout(paintTimer); clearInterval(phaseTimer); paintTimer = phaseTimer = 0; mounted = null;
 }
 
@@ -144,7 +145,7 @@ function composer(chat) {
 function render() {
   if (!mounted?.root.isConnected) return;
   const chat = store.get(mounted.uid); if (!chat) return;
-  mounted.root.querySelectorAll(".pip-mascot").forEach(c=>c.dispose?.());
+  mounted.root.querySelectorAll(".pip-mascot, .pixel-backdrop").forEach(c=>c.dispose?.());
   clearInterval(phaseTimer); mounted.replies.clear(); mounted.latest = null;
   const thread = ui.h("div", { class: "pip-thread", tabindex: 0, "aria-label": "Conversation" }); mounted.thread = thread;
   if (chat.turns.length) thread.append(...chat.turns.map(turn => replyComponent(turn, chat)));
@@ -155,7 +156,7 @@ function render() {
     button("rename", async () => { const title = await ui.ask("Name this chat", { value: chat.title, limit: 80 }); if (title?.trim()) { store.update(chat.uid, c => { c.title = title.trim(); }); render(); } }),
     button("delete", async () => { if (await ui.confirm("Delete this chat and its draft from this browser?", "delete")) { if (runner.active?.chatId === chat.uid) runner.stop(); store.remove(chat.uid); localStorage.removeItem("pocket:pip-current"); ui.go("/pip"); } }),
     button("API settings", () => apiSettings(chat.config))));
-  const panel = ui.h("div", { class: "pip-panel" }, header, other, thread, progress, composer(chat));
+  const panel = ui.h("div", { class: "pip-panel" }, backdrop("glow"), header, other, thread, progress, composer(chat));
   mounted.root.replaceChildren(ui.h("div", { class: "pip-layout" }, conversationNav(chat), panel));
   requestAnimationFrame(() => { if (mounted?.thread === thread) thread.scrollTop = thread.scrollHeight; });
 }

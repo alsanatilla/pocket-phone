@@ -9,9 +9,9 @@ import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 
-/** Static original header artwork, one scene per area; same ordered-dither kernel and scenes as docs/js/pixel-backdrop.js. */
+/** Static original artwork, one scene per area; same ordered-dither kernel and scenes as docs/js/pixel-backdrop.js. */
 final class PixelBackdrop extends Drawable {
-    static final String SKY = "sky", STARS = "stars", ROAD = "road", WAVES = "waves", TERRAIN = "terrain", IRON = "iron", TILES = "tiles", RINGS = "rings";
+    static final String SKY = "sky", STARS = "stars", ROAD = "road", WAVES = "waves", TERRAIN = "terrain", IRON = "iron", TILES = "tiles", RINGS = "rings", GLOW = "glow";
     private static final int[] BAYER = {0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5};
     private final int height, cell, accent;
     private final String scene;
@@ -120,6 +120,19 @@ final class PixelBackdrop extends Drawable {
         return light;
     }
 
+    /** Pip: a glow behind the composer, three fine rings and a bloom in the top corner. */
+    private static double glow(int x, int y, int width, int height) {
+        double size=Math.min(width,height);
+        double d=Math.hypot((x-width*.72)/size*.6,(y-height*1.08)/size);
+        double c=Math.hypot((x-width)/size,(y+height*.02)/size);
+        double light=.42*Math.exp(-d*3)+.26*Math.exp(-c*4.5);
+        light+=.16*Math.exp(-Math.pow((d-.42)*size/1.6,2));
+        light+=.11*Math.exp(-Math.pow((d-.66)*size/1.6,2));
+        light+=.07*Math.exp(-Math.pow((d-.92)*size/1.6,2));
+        if(hash(x/6+31,y/6)>.9&&x%6==2&&y%6==2)light+=.04+1.2*light;
+        return Math.max(0,light-.03);
+    }
+
     static int shade(int x, int y, int width, int height) { return shade(SKY, x, y, width, height); }
     static int shade(String scene, int x, int y, int width, int height) {
         double u=(x+.5)/width, v=(y+.5)/height, aspect=(double)width/height, light;
@@ -131,11 +144,14 @@ final class PixelBackdrop extends Drawable {
             case IRON: light=iron(x,y,u,v,aspect,width,height); break;
             case TILES: light=tiles(x,y,u,v); break;
             case RINGS: light=rings(u,v,aspect,height); break;
+            case GLOW: light=glow(x,y,width,height); break;
             default: light=sky(u,v,aspect);
         }
-        light*=1-smooth(.46,.99,v);
-        // Quiet left side keeps clock, title and date legible over the artwork.
-        light*=.3+.7*smooth(.10,.68,u);
+        if(!GLOW.equals(scene)){
+            light*=1-smooth(.46,.99,v);
+            // Quiet left side keeps clock, title and date legible over header artwork.
+            light*=.3+.7*smooth(.10,.68,u);
+        }
         double value=clamp(light)*10; int base=(int)Math.floor(value);
         return Math.min(7,base+(value-base>(BAYER[(y%4)*4+x%4]+.5)/16?1:0));
     }
@@ -143,7 +159,7 @@ final class PixelBackdrop extends Drawable {
     @Override public void draw(Canvas canvas) {
         Rect bounds=getBounds();
         if(bounds.width()<=0||bounds.height()<=0)return;
-        int drawHeight=Math.min(height,bounds.height());
+        int drawHeight=GLOW.equals(scene)?bounds.height():Math.min(height,bounds.height());
         int width=Math.max(1,(bounds.width()+cell-1)/cell), high=Math.max(1,(drawHeight+cell-1)/cell);
         if(image==null||columns!=width||rows!=high){
             columns=width;rows=high;int[] pixels=new int[width*high];

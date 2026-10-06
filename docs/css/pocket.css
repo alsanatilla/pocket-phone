@@ -226,7 +226,8 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
 .pip-navigation .row-button { font-size: 14px; min-height: 48px; }
 .pip-navigation input { font-size: 14px; }
 .pip-chat-list { max-height: 58dvh; overflow-y: auto; scrollbar-width: thin; }
-.pip-panel { min-width: 0; display: flex; flex-direction: column; height: calc(100dvh - 136px); min-height: 460px; }
+.pip-panel { position: relative; isolation: isolate; min-width: 0; display: flex; flex-direction: column; height: calc(100dvh - 136px); min-height: 460px; text-shadow: 0 0 2px #000, 0 0 8px #000; }
+.pip-panel button { background-color: transparent; }
 .pip-heading { display: flex; align-items: start; justify-content: space-between; gap: 8px; }
 .pip-heading .workspace-title { margin-bottom: 0; }
 .pip-heading > div:first-child { min-width: 0; }
@@ -252,8 +253,8 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
 .pip-phase:empty { display: none; }
 .pip-reply-actions { display: flex; flex-wrap: wrap; gap: 2px 10px; }
 .pip-reply-actions button { min-height: 44px; font-size: 12px; padding: 8px 0; color: var(--muted); }
-.pip-composer { flex-shrink: 0; background: var(--black); padding: 14px 0 0; }
-.pip-composer textarea { font-size: 16px; min-height: 70px; max-height: 180px; resize: vertical; padding: 8px 0; }
+.pip-composer { flex-shrink: 0; padding: 14px 0 0; }
+.pip-composer textarea { background: transparent; font-size: 16px; min-height: 70px; max-height: 180px; resize: vertical; padding: 8px 0; }
 .pip-composer-actions { display: flex; align-items: center; gap: 8px; }
 .pip-composer-actions button { font-size: 12px; min-height: 44px; }
 .pip-model { margin-left: auto; max-width: 55%; overflow-wrap: anywhere; }

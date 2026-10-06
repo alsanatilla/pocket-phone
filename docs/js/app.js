@@ -1,14 +1,14 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
-import * as drive from "./drive.js?v=20261006-gym2";
-import * as reader from "./reader.js?v=20261006-gym2";
-import * as pip from "./pip.js?v=20261006-gym2";
-import { backdrop } from "./pixel-backdrop.js?v=20261006-gym2";
-import * as zines from "./zines.js?v=20261006-gym2";
-import * as movement from "./movement.js?v=20261006-gym2";
-import * as gymView from "./gym.js?v=20261006-gym2";
-import * as coros from "./coros.js?v=20261006-gym2";
-import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-gym2";
-import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-gym2";
+import * as drive from "./drive.js?v=20261006-glow1";
+import * as reader from "./reader.js?v=20261006-glow1";
+import * as pip from "./pip.js?v=20261006-glow1";
+import { backdrop } from "./pixel-backdrop.js?v=20261006-glow1";
+import * as zines from "./zines.js?v=20261006-glow1";
+import * as movement from "./movement.js?v=20261006-glow1";
+import * as gymView from "./gym.js?v=20261006-glow1";
+import * as coros from "./coros.js?v=20261006-glow1";
+import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-glow1";
+import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-glow1";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
