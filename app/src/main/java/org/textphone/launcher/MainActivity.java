@@ -587,6 +587,7 @@ public class MainActivity extends Activity {
                 else{left=insets.getSystemWindowInsetLeft();top=insets.getSystemWindowInsetTop();right=insets.getSystemWindowInsetRight();bottom=insets.getSystemWindowInsetBottom();}
                 view.setPadding(dp(horizontal)+left,dp(4)+top,dp(horizontal)+right,dp(4)+bottom);return insets.consumeSystemWindowInsets();});
             View header=content.findViewWithTag("page_header");content.removeView(header);
+            if(todayPage&&"today".equals(workspaceTab)){shell.setBackground(new PixelBackdrop(this,accent(),140));header.setBackgroundColor(android.graphics.Color.TRANSPARENT);}
             shell.addView(header,new LinearLayout.LayoutParams(-1,-2));
             if(todayPage){content.removeView(todayDate);shell.addView(todayDate,new LinearLayout.LayoutParams(-1,-2));content.removeView(workspaceTabs);shell.addView(workspaceTabs,new LinearLayout.LayoutParams(-1,-2));}
             viewport.setPadding(0,0,0,0);viewport.setOnApplyWindowInsetsListener(null);viewport.setTag(todayPage?"today_scroll":"task_editor_scroll");
@@ -732,6 +733,7 @@ public class MainActivity extends Activity {
     }
 
     private void renderHome() {
+        content.setBackground(new PixelBackdrop(this,accent(),212));
         LinearLayout status = new LinearLayout(this);
         status.setOrientation(LinearLayout.HORIZONTAL);
         status.setGravity(Gravity.CENTER_VERTICAL);

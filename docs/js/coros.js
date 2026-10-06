@@ -1,6 +1,6 @@
 // COROS through its MCP server, straight from this page: OAuth with PKCE, then JSON-RPC tool calls.
 // Tokens, activities and routes stay in this browser's storage. They never go to Drive or into this public repo.
-import { parseRecords, parseFit, routePath, series, unwrap, pairs, parseLaps, parseRecovery, parseFitness, parseLoad, parseDaily, parseSleep, parseHrv, parseResting, parseDevice, parseProfile } from "./coros-data.js?v=20261006-workspace3";
+import { parseRecords, parseFit, routePath, series, unwrap, pairs, parseLaps, parseRecovery, parseFitness, parseLoad, parseDaily, parseSleep, parseHrv, parseResting, parseDevice, parseProfile } from "./coros-data.js?v=20261006-dither1";
 
 const DISCOVERY = "https://mcp.coros.com/.well-known/openid-configuration", SCOPE = "openid offline_access mcp.tools";
 const SESSION = "pocket:coros", CLIENT = "pocket:coros-client", PENDING = "pocket:coros-login";

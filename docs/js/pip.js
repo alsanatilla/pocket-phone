@@ -1,8 +1,8 @@
 // Component structure informed by beautifului.dev: conversation navigation,
 // reply + expandable details, context cards, composer. Pocket owns the visuals.
-import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings, apiKey, setKey, keyName, identity } from "./pip-core.js?v=20261006-workspace3";
-import { notes, tasks, parking, noteTitle, receipt, KIND } from "./store.js?v=20261006-workspace3";
-import { mascot } from "./pip-pixels.js?v=20261006-workspace3";
+import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings, apiKey, setKey, keyName, identity } from "./pip-core.js?v=20261006-dither1";
+import { notes, tasks, parking, noteTitle, receipt, KIND } from "./store.js?v=20261006-dither1";
+import { mascot } from "./pip-pixels.js?v=20261006-dither1";
 
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0;

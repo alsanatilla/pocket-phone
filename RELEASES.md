@@ -2,6 +2,12 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.6.1 — Dithered headers
+
+- Home and Today add an original pixel sky inspired by the supplied reference, tinted with Pocket's accent and fading into black. Phone and web use the same ordered-dither pattern. Text stays crisp and working lists stay plain.
+- The artwork is static. Android caches its bitmap by size; the browser paints on resize and disconnects its observer when leaving the page. There is no animation loop or external image download.
+- The APK remains unsigned for the release agent. Compilation results are in BUILD-STATUS.json; the test suite is skipped as requested. No data schema, sync scope or task workflow changed.
+
 ## 0.6.0 — A connected personal workspace
 
 - **Workflow.** Home, capture and the Today / Thoughts / Tasks / Notes workspace. Apps has one searchable directory grouped by purpose, retaining custom shortcuts and installed apps.

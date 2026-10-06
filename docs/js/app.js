@@ -1,12 +1,13 @@
 // Pocket workstation: the synced tools on a bigger screen. Pocket's look, not a pretend phone. No framework, no build step.
-import * as drive from "./drive.js?v=20261006-workspace3";
-import * as reader from "./reader.js?v=20261006-workspace3";
-import * as pip from "./pip.js?v=20261006-workspace3";
-import * as zines from "./zines.js?v=20261006-workspace3";
-import * as movement from "./movement.js?v=20261006-workspace3";
-import * as coros from "./coros.js?v=20261006-workspace3";
-import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-workspace3";
-import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-workspace3";
+import * as drive from "./drive.js?v=20261006-dither1";
+import * as reader from "./reader.js?v=20261006-dither1";
+import * as pip from "./pip.js?v=20261006-dither1";
+import { backdrop } from "./pixel-backdrop.js?v=20261006-dither1";
+import * as zines from "./zines.js?v=20261006-dither1";
+import * as movement from "./movement.js?v=20261006-dither1";
+import * as coros from "./coros.js?v=20261006-dither1";
+import { syncNow, describe, onStatus, status } from "./sync.js?v=20261006-dither1";
+import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js?v=20261006-dither1";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -48,6 +49,7 @@ function shell() {
 /** Clears the work area for one tool; toolbar actions sit at its top right. */
 function view(tool, actions = []) {
   zines.leave(); pip.leave(); shell(); closeDialog(); say("");
+  content.querySelectorAll('.pixel-backdrop').forEach(canvas=>canvas.dispose?.());
   const pipEntry = document.getElementById("pip-entry"); pipEntry.classList.toggle("selected", tool === "pip"); pipEntry.setAttribute("aria-current", tool === "pip" ? "page" : "false");
   document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "movement", "sync"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
   const activeTab = document.querySelector(".tab.active"), tabs = activeTab?.parentElement;
@@ -90,7 +92,11 @@ function thinkWithPip(kind, uid, title, text, href) { guard(() => go("/pip/" + p
 const source = item => item.note ? notes.get(item.note) : null;
 const thoughtMeta = item => !item.due ? "Undecided" : item.due <= Date.now() ? "Ready to revisit" : "Revisit " + relative(item.due);
 const taskMeta = task => [task.done ? "Done" : task.due ? (task.due < taskDay() ? "Overdue · " : "") + task.due : "No date", task.important ? "Important" : "", task.steps?.length ? task.steps.filter(s => s.done).length + "/" + task.steps.length + " steps" : ""].filter(Boolean).join(" · ");
-function workspaceTitle(body, title, meta = "") { add(body, h("h1", { class: "workspace-title", text: title }), title === "today" && meta ? h("p", { class: "small muted", text: meta }) : null); }
+function workspaceTitle(body, title, meta = "") {
+  const heading=h("h1", { class: "workspace-title", text: title });
+  if(title==='today')add(body,h('header',{class:'workspace-sky'},backdrop(),h('div',{class:'workspace-sky-title'},heading,meta?h('p',{class:'small muted',text:meta}):null)));
+  else add(body,heading);
+}
 async function capture() {
   const choice = await choose("Capture", ["Thought", "Task", "Note"]);
   if(choice === 0)go("/thoughts"); else if(choice === 1)go("/tasks/new"); else if(choice === 2)go("/notes/new");

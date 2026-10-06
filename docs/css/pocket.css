@@ -36,6 +36,12 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 input:focus, textarea:focus { outline: none; box-shadow: inset 0 -1px 0 var(--accent); }
 select { width: 100%; min-height: 48px; padding: 8px 0; background: var(--black); color: var(--muted); font: 14px var(--mono); border: 0; }
 .workspace-title { font: 42px/1.1 var(--pixel); font-weight: normal; margin: 4px 0 12px; }
+.workspace-sky { position: relative; min-height: 160px; display: flex; align-items: end; padding: 26px 0 20px; isolation: isolate; }
+.pixel-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; image-rendering: pixelated; pointer-events: none; }
+.workspace-sky-title { position: relative; }
+.workspace-sky .workspace-title { margin-bottom: 4px; }
+.workspace-sky p { margin: 0; }
+@media (max-width: 600px) { .workspace-sky { min-height: 140px; } }
 .check-label { display: flex; align-items: center; gap: 12px; }
 .check-label input { width: 20px; min-height: 48px; accent-color: var(--accent); }
 textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
