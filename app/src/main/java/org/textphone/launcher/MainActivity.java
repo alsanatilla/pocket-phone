@@ -432,6 +432,8 @@ public class MainActivity extends Activity {
         persistDraft(); dismissNoteWheel(); motion.settle(); claude.open();
     }
     private boolean showBriefPip(Intent intent) {
+        // Setup's "another provider" opens Pip itself, whose settings hold every provider.
+        if (intent.getBooleanExtra("pocket_open_pip", false)) { intent.removeExtra("pocket_open_pip"); openChat(); return true; }
         String context = intent.getStringExtra("pocket_brief_context");
         if (context == null) return false;
         intent.removeExtra("pocket_brief_context");
@@ -822,7 +824,19 @@ public class MainActivity extends Activity {
         gap(romProfile ? 8 : 16);
         TextView wordmark = text("pocket", 22, accent());
         wordmark.setTypeface(pixelTypeface);
-        content.addView(wordmark);
+        if (SetupActivity.open(this) > 0 && !SetupActivity.hidden(this)) {
+            // Until every connection is made or skipped, the wordmark line points to setup without making Home taller.
+            LinearLayout line = new LinearLayout(this); line.setGravity(Gravity.CENTER_VERTICAL);
+            line.addView(wordmark, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView setup = text("set up " + SetupActivity.doneCount(this) + "/" + SetupActivity.total() + " · " + SetupActivity.next(this) + " ›", 12, accent());
+            setup.setTag("pocket_setup"); setup.setGravity(Gravity.CENTER_VERTICAL | Gravity.END); setup.setPadding(dp(12), 0, 0, 0); PocketDesign.quiet(setup, accent());
+            setup.setContentDescription("Finish setting up Pocket, next " + SetupActivity.next(this) + ". Hold to hide this reminder.");
+            setup.setOnClickListener(v -> openPocket(SetupActivity.class));
+            setup.setOnLongClickListener(v -> { new AlertDialog.Builder(this).setTitle("Hide the setup reminder?").setMessage("Setup stays in settings.")
+                    .setPositiveButton("hide", (dialog, which) -> { SetupActivity.hide(this); render(); }).setNegativeButton("keep", null).show(); return true; });
+            line.addView(setup, new LinearLayout.LayoutParams(-2, -2));
+            content.addView(line);
+        } else content.addView(wordmark);
         gap(2);
         TextView bigClock = text("", PocketDesign.DISPLAY, PRIMARY);
         bigClock.setTypeface(pixelTypeface);
@@ -1516,6 +1530,7 @@ public class MainActivity extends Activity {
         action("permissions", 18, PRIMARY, () -> openPocket(PermissionsActivity.class));
         action("activity log",18,PRIMARY,()->openPocket(ReceiptActivity.class));
         section(content,"connections",false);
+        valueAction("set up pocket", SetupActivity.open(this) == 0 ? "done" : SetupActivity.doneCount(this) + " of " + SetupActivity.total(), () -> openPocket(SetupActivity.class)).setTag("settings_setup");
         if (romProfile) action("storage & devices", 18, PRIMARY, () -> openPocket(CloudActivity.class));
         if (romProfile) action("movement · COROS", 18, PRIMARY, () -> openPocket(MovementActivity.class));
         flexibleSpace();

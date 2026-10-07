@@ -51,7 +51,7 @@ flowchart LR
 | Gym | Strength progress | Start a workout, log sets with last time and your best beside them, then read each lift’s estimated best (e1RM) and weekly volume. Synced with the web. |
 | Calculator / Dice | Small supporting tools | Reach them under Apps → Extras. They do not become competing organizers. |
 | Search | Find an existing record | Notes, Tasks, Thoughts, Paper and Pip share one search on phone and web. Phone appointments and installed apps remain local. Results reopen their record. |
-| Settings | App choices and connections | Home selection, custom shortcuts, permissions and one Pocket account across devices. Passkeys, phone-link codes and revocable device sessions belong here. |
+| Settings | App choices and connections | Home selection, custom shortcuts, permissions and one Pocket account across devices. **Set up Pocket** walks through account, phone, COROS and Pip on one ordered page; Today and Home remind until each step is connected or skipped. Passkeys, phone-link codes and revocable device sessions belong here. |
 
 Apps groups communication, planning/thinking, capture/keeping, body and extras. Custom shortcuts and groups remain accessible above those groups. Installed apps remain searchable, so Pocket can be used as the default launcher while keeping needed external apps.
 

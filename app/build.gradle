@@ -11,8 +11,8 @@ android {
         // Native chat cancellation uses CompletableFuture, available from Android 7.
         minSdk 24
         targetSdk 35
-        versionCode 42
-        versionName '0.15.0'
+        versionCode 43
+        versionName '0.16.0'
     }
 
     buildTypes {

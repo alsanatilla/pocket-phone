@@ -1,9 +1,11 @@
 import { startAuthentication, startRegistration, browserSupportsWebAuthn } from '@simplewebauthn/browser';
 import { activeAccount, switchAccount, importGuestCopy } from './workspace-storage.js';
 
-let user = null, ready = false;
+let user = null, ready = false, isChecked = false;
 export const connected = () => Boolean(user && user.id === activeAccount());
 export const configured = () => ready;
+/** True once Pocket has asked the server whether accounts exist, even when offline. */
+export const checked = () => isChecked;
 export const account = () => user;
 export class Expired extends Error { constructor() { super('Sign in to Pocket again.'); } }
 export async function request(path, options = {}) {
@@ -21,6 +23,7 @@ export async function init() {
     user = session?.user || null;
     if (user && activeAccount() !== user.id) { switchAccount(user.id); location.reload(); }
   } catch (error) { if (!(error instanceof Expired)) throw error; }
+  finally { isChecked = true; }
 }
 const send = (path, body = {}) => request(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 async function finish(user, importCopy) {

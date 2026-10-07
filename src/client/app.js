@@ -20,6 +20,7 @@ import { installRefresh } from "./retro-loading.js";
 import { initExtras, todayTiles, TODAY_CATALOG } from "./extras.js";
 import { agenda, clock as clockStore, mountAgenda, mountClock, startClockRuntime } from "./planner.js";
 import { mountBrief, readBrief, briefEnabled } from './daily-brief.js';
+import * as setup from './setup.js';
 import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
@@ -65,7 +66,7 @@ function view(tool, actions = []) {
   zines.leave(); pip.leave(); shell(); closeDialog(); say("");
   content.querySelectorAll('.pixel-backdrop').forEach(canvas=>canvas.dispose?.());
   const pipEntry = document.getElementById("pip-entry"); pipEntry.classList.toggle("selected", tool === "pip"); pipEntry.setAttribute("aria-current", tool === "pip" ? "page" : "false");
-  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync", "calendar", "clock", "account", "brief"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
+  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync", "calendar", "clock", "account", "brief", "setup"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
   const activeTab = document.querySelector(".tab.active"), tabs = activeTab?.parentElement;
   if (tabs) tabs.scrollLeft = activeTab.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - activeTab.clientWidth) / 2;
   document.title = "pocket · " + (tool === "sync" ? "account" : tool);
@@ -173,9 +174,16 @@ async function editTiles() {
   await dialog("Today tiles", body, [["done", true]]);
   if (location.hash === "#/today" || location.hash === "" || location.hash === "#/") route();
 }
+// Until every connection is made or skipped, Today points to the one setup path.
+function setupBanner(body) {
+  const state = setup.progress(); if (!state.open || setup.hidden()) return;
+  add(body, h('div', { class: 'setup-banner' }, rowButton('finish setting up pocket', state.done + ' of ' + state.total + ' connected · next: ' + state.next, () => go('/setup')),
+    h('button', { class: 'setup-hide', 'aria-label': 'Hide the setup reminder', onclick: () => { setup.hide(); route(); } }, 'hide')));
+}
 function todayView() {
   const body = view("today", [["+ capture", capture], ["tiles", editTiles], ["search", () => go("/search")], ["pip", () => go("/pip")]]);
   workspaceTitle(body, "today", new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }));
+  setupBanner(body);
   const briefHost = h('div', { class: 'today-brief-host' }); add(body, briefHost);
   briefView = mountBrief(briefHost, briefApi, { compact: true });
   add(body, tileGrid());
@@ -305,7 +313,7 @@ function searchView() {
 function appsView() {
   const body=view("apps");workspaceTitle(body,"apps");
   split(body,[section("THINK"),rowButton("pip","",()=>go("/pip")),rowButton("daily brief","",()=>go("/brief")),section("PLAN"),rowButton("Calendar","",()=>go("/calendar")),rowButton("Clock","",()=>go("/clock")),section("REVIEW"),rowButton("Activity","",()=>go("/receipt")),section("CREATE & KEEP"),rowButton("Zines","",()=>go("/zines"))],
-    [section("BODY"),rowButton("Movement","",()=>go("/movement")),rowButton("Gym","",()=>go("/gym")),section("EXTRAS"),rowButton("Dice","",()=>go("/dice")),section("SETTINGS"),rowButton("Account & devices","",()=>go("/sync"))]);
+    [section("BODY"),rowButton("Movement","",()=>go("/movement")),rowButton("Gym","",()=>go("/gym")),section("EXTRAS"),rowButton("Dice","",()=>go("/dice")),section("SETTINGS"),rowButton("Set up Pocket","account · phone · COROS · pip",()=>go("/setup")),rowButton("Account & devices","",()=>go("/sync"))]);
 }
 
 // ── Notes: list on the left, the open note on the right. Saves as you type. ──
@@ -685,7 +693,9 @@ function accountView(code = '', creating = false) {
   workspaceTitle(body, !signed && creating ? 'new account' : 'account', signed ? cloud.account().email : cloud.configured() ? creating ? '' : 'not signed in' : 'this browser only');
   const left = h('div', { class: 'account' }), right = h('div', {});
   split(body, left, right);
-  add(right, section('THIS BROWSER'),
+  const steps = setup.progress();
+  add(right, section('CONNECTIONS'), rowButton('set up pocket', steps.open ? steps.done + ' of ' + steps.total + ' connected · next: ' + steps.next : 'account · phone · COROS · pip', () => go('/setup')),
+    section('THIS BROWSER'),
     signed ? rowButton('import from Drive', '', importDrive) : null,
     rowButton('download backup', '', exportWorkspace), rowButton('restore backup', '', restoreWorkspace),
     rowButton('forget this browser’s copy', '', async () => { if (await confirmBox('Forget this browser’s copy?', 'forget')) { clearWorkspace(); location.reload(); } }),
@@ -694,7 +704,7 @@ function accountView(code = '', creating = false) {
   if (signed) signedInAccount(left); else signedOutAccount(left, creating);
 }
 
-function signedOutAccount(pane, creating = false) {
+function signedOutAccount(pane, creating = false, base = '/account') {
   const passkeys = cloud.passkeysSupported(), usePassword = passwordMode || !passkeys;
   let busy = false;
   const run = async (label, work) => {
@@ -712,7 +722,7 @@ function signedOutAccount(pane, creating = false) {
       field('EMAIL',email),h('button',{type:'submit',class:'account-primary'},keyGlyph(),'create account with passkey')));
     else add(pane,h('button',{class:'account-primary',onclick:()=>run('Waiting for your passkey…',()=>cloud.signInWithPasskey(bring.checked))},keyGlyph(),'sign in with passkey'));
     add(pane,h('button',{class:'account-switch',onclick:()=>{passwordMode=true;route();}},'use a password'),
-      h('button',{class:'account-switch',onclick:()=>go(creating?'/account':'/account/new')},creating?'back to sign in':'create account'));
+      h('button',{class:'account-switch',onclick:()=>go(creating?base:base+'/new')},creating?'back to sign in':'create account'));
     return;
   }
   const password = h('input', { type: 'password', autocomplete: creating ? 'new-password' : 'current-password', minlength: creating ? 12 : null, maxlength: 128, required: true });
@@ -728,7 +738,7 @@ function signedOutAccount(pane, creating = false) {
       if (creating) { passwordMode = false; route(); }
       else run('Waiting for your passkey…', () => cloud.signInWithPasskey(bring.checked));
     } }, creating ? 'create with a passkey' : 'sign in with passkey') : null,
-    h('button',{class:'account-switch',onclick:()=>go(creating?'/account':'/account/new')},creating?'back to sign in':'create account'));
+    h('button',{class:'account-switch',onclick:()=>go(creating?base:base+'/new')},creating?'back to sign in':'create account'));
 }
 
 function signedInAccount(pane) {
@@ -773,7 +783,7 @@ async function linkPhone(value) {
   try {
     await cloud.checkCode(code);
     if (!await confirmBox('Link the phone showing ' + code + ' to this account?', 'link')) { await cloud.denyCode(code).catch(() => {}); return; }
-    await cloud.approveCode(code); route(); say('Phone linked.');
+    await cloud.approveCode(code); setup.phoneLinked(); route(); say('Phone linked.');
   } catch (error) { say(/invalid|expired|not found/i.test(error.message) ? 'That code has expired. Show a new one on the phone.' : error.message); }
 }
 function exportWorkspace() {
@@ -822,6 +832,7 @@ async function keySettings() {
   }
   if (await askKey()) { route(); say("Key set for this tab."); }
 }
+const setupApi = { h, add, go, say, route, workspaceTitle, normalCode, linkPhone, signInForm: signedOutAccount };
 // ── Routing and keys ──
 function route() {
   const [, name, arg] = (location.hash.replace(/^#/, "") || "/").split("/");
@@ -831,6 +842,7 @@ function route() {
   else if (name === "movement") movement.mount(view("movement"), { say });
   else if (name === "calendar") mountAgenda(view("calendar"), plannerApi);
   else if (name === "clock") mountClock(view("clock"), plannerApi);
+  else if (name === "setup") setup.mount(view("setup"), setupApi, arg === "new");
   else if (name === "brief") { const body=view('brief'); workspaceTitle(body,'daily brief'); briefView=mountBrief(body,briefApi); }
   else if (name === "gym") gymView.mount(view("gym"), arg, { h, add, say, section, rowButton, keys, split, go, ask, choose, confirm: confirmBox, title: workspaceTitle });
   else if (name === "thoughts" || name === "parking") parkingView(arg); else if (name === "tasks") tasksView(arg); else if (name === "apps") appsView(); else if (name === "search") searchView(); else if (name === "today") todayView(); else { history.replaceState(null, "", "#/today"); todayView(); }
@@ -856,7 +868,7 @@ addEventListener("keydown", event => {
 });
 
 // A COROS sign-in comes back to this page with ?code=…; finish it before drawing the Movement tab.
-if (coros.returning()) coros.finish().then(() => { route(); say("COROS connected."); }, error => { route(); say(error.message); });
+if (coros.returning()) coros.finish().then(() => { setup.resume(); route(); say("COROS connected."); }, error => { setup.resume(); route(); say(error.message); });
 else route();
 cloud.init().then(() => { if (!document.activeElement?.matches('input, textarea, select')) { if (location.hash === '#/brief') briefView?.refresh(); else route(); } return syncNow(); }).catch(error => say(error.message));
 initExtras();

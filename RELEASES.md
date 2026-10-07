@@ -2,6 +2,13 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.16.0 — One setup path
+
+- **Set up Pocket** replaces four separate setups with one ordered page on phone and web: account, phone link, COROS, then Pip. Each step shows its state (connected, skipped or next) and opens at the first open step. Skips are remembered and can be asked again. Today (browser) and Home (phone) show a small reminder until every step is connected or skipped; it can be hidden, and setup stays under Apps/Settings.
+- Account sign-in or creation happens inline in the browser and returns to the next step after the page reloads. On the phone, “link this phone” and email sign-in open the account screen directly at that action and return to setup once the phone is signed in and synced. The browser’s phone step accepts the phone’s code in place. Starting COROS from setup returns to setup after COROS sign-in, including when it is cancelled. A COROS connection made in the browser shows as connected on the phone.
+- The Pip step offers two presets: OpenRouter’s free router (`openrouter/free`) or a Claude key; other providers remain in Pip’s settings. Keys still never leave the device: encrypted on the phone, kept per tab in the browser. Phone Settings now always lists setup, so the account is reachable on standard (non-ROM) builds without going through Today’s settings.
+- Verified in the browser against an isolated local database with a fictional account: create account, link a phone with a device code, skip/return for COROS, save a Pip key, Today/Apps/Account entries and hiding the reminder. A new Robolectric preview test covers the phone screen’s order, skips, Pip preset and Home/Settings entries; Home still fits its tile grid. Existing failures in `CloudSyncFlowTest` (stale `cloud_sync` tag) and `MainActivityTest.missingSmartMessagingAppOpensTheShortcutPicker` predate this release. The full suite and lint were skipped. No handset was attached. The APK is unsigned for the signing agent.
+
 ## 0.15.0 — Pip’s daily brief
 
 - A compact, source-linked brief appears on phone Home and Today and browser Today, using saved recovery, appointments, tasks, thoughts ready to revisit and gym history. It works offline without an AI key. Recovery shows its sample date or cache age and marks stale readings; it does not prescribe training. Calendar boundaries use the local civil day, including DST and overnight appointments.

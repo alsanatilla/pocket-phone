@@ -1,28 +1,26 @@
 {
   "component": "Pocket Android launcher/apps and Astro browser workspace",
-  "version_name": "0.15.0",
-  "version_code": 42,
+  "version_name": "0.16.0",
+  "version_code": 43,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-07T06:50:12.355Z",
-  "build": "Android assembleRom and Astro production build passed. Dedicated Daily Brief verification passed. Full test suite and lint skipped at the user’s request.",
+  "checked_at_utc": "2026-10-07T10:23:14.200Z",
+  "build": "Android assembleRom and Astro production build passed. Focused setup checks passed. Full test suite and lint skipped at the user’s request.",
   "commands": [
     "npm run build",
-    "./gradlew.bat -I app/build/tmp/release-0150.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain",
-    "node app/build/tmp/daily-brief-verify.mjs",
-    "node app/build/tmp/daily-brief-http-verify.mjs",
-    "./gradlew.bat -I app/build/tmp/release-0150.gradle -I app/build/tmp/brief-ui/verify.gradle :app:verifyDailyBriefUI --console=plain"
+    "./gradlew.bat -I app/build/tmp/release-0160.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain",
+    "./gradlew.bat :app:testDebugUnitTest --tests SetupPreviewTest --tests HomeDashboardTest --tests MainActivityTest --tests CloudSyncFlowTest --tests BackRoutesTest"
   ],
   "build_environment": {
     "java": "17.0.20.1+1",
     "node": "v24.19.0"
   },
   "apk": {
-    "file": "app/build/release-0150/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.15.0-unsigned.apk",
-    "bytes": 10817472,
-    "sha256": "0b09fe5717cb5090e6534ec419c96cec1538fe9e3d9c54e8096abdf9f3fb7d67",
+    "file": "app/build/release-0160/outputs/apk/rom/app-rom-unsigned.apk",
+    "release_asset": "pocket-phone-0.16.0-unsigned.apk",
+    "bytes": 10825476,
+    "sha256": "51d417fe67245c0f33d49fae517d7b701ad1803ebc421e7ffdb6fd45c4ef585c",
     "signed": false,
     "installable_update": false,
     "signing": "Another release agent handles signing"
@@ -31,38 +29,35 @@
     "framework": "Astro server output",
     "hosting": "Vercel",
     "url": "https://pocket-phone.vercel.app/",
-    "release_asset": "pocket-web-0.15.0-source.zip",
-    "offline_worker": "pocket-astro-0150-web",
+    "release_asset": "pocket-web-0.16.0-source.zip",
+    "offline_worker": "pocket-astro-0160-setup",
     "changed": true
   },
   "focused_verification": {
-    "shared": "27 exact Java/JavaScript full-result parity scenarios passed: DST, midnight overlaps, task priorities, recovery freshness, active workouts, malformed records, source links and bounded context. Concurrent daily-brief preference ties converge.",
-    "offline": "Actual browser storage/readBrief fixtures passed for edits, completion, day rollover, reload, per-account isolation and two-way preference merge with zero network requests.",
-    "api": "Isolated local libSQL database: two fictional sessions of one owner sync toggles both ways; a second owner is isolated; older-client omissions preserve preferences; invalid values rejected400, foreign-owner writes409, tombstones resist stale replay.",
-    "browser": "T3 preview at390px and1280px inspected compact/full brief and stale recovery labels. Source task navigation and unsaved editor focus/selection preservation passed. Explicit Think with Pip prepared a new unsent draft preserving a prior draft; mocked provider Send made one request, included brief facts and persisted the streamed reply. No paid provider or production data used.",
-    "native": "Dedicated Robolectric UI fixture:14 passed,0failed across Android SDK24 and35. Home/Today cards, optional tile addition preserving custom layout, full source navigation/deleted-task guard, synced enable switch, strict preference validation, fresh unsent Pip draft preserving old draft and read-only adapter ID preservation.",
-    "handset": "No device attached to adb; physical handset behavior remains unverified.",
-    "fixtures": "Focused temporary harnesses remain under ignored app/build/tmp; the project’s full test suite was not executed."
+    "browser": "Isolated Astro dev server with a local libSQL file and a fictional account: setup page at 1280px and 390px; create account inline and return to the phone step after reload; link a phone with a real device-code from /api/auth/device/code; skip and ask again; COROS return (?coros=error) lands back on setup; OpenRouter key saved and Pip marked ready; Today banner, Apps and Account entries; hiding the reminder. No production data or paid provider used.",
+    "native": "Robolectric SetupPreviewTest: 2 passed, 0 failed. Step order, skips and ask again, link/email sign-in intents into CloudActivity, Pip presets and empty-key guard, finished state, Home reminder beside the wordmark and hiding it. HomeDashboardTest and MainActivityTest tile-fit checks pass with the reminder.",
+    "existing_failures": "CloudSyncFlowTest (looks for a cloud_sync tag the account screen no longer has) and MainActivityTest.missingSmartMessagingAppOpensTheShortcutPicker fail identically on the 0.15.0 code.",
+    "handset": "No device attached to adb; physical handset behavior remains unverified."
   },
   "full_test_suite": {
     "status": "Skipped",
     "reason": "Explicit user instruction; lint also skipped"
   },
   "changes": [
-    "Offline daily brief on phone Home/Today and browser Today with existing PS1 Pip face",
-    "Source-linked recovery, agenda, tasks, ready thoughts and gym facts",
-    "Sample-date/cache-age stale labels and local civil-day boundaries",
-    "Fresh unsent Pip conversation on explicit Ask/Think action",
-    "Synced strict boolean enable setting with concurrent convergence",
-    "Optional Today tile preserving existing custom layouts"
+    "One ordered setup page on phone and web: account, phone link, COROS, Pip",
+    "Remembered skips with ask again; page opens at the first open step",
+    "Inline browser sign-in; phone account screen opens at the chosen action and returns to setup",
+    "COROS sign-in returns to setup; account COROS connection shows on the phone",
+    "Pip presets: OpenRouter free router or Claude key; keys stay per device",
+    "Reminders on browser Today and phone Home, entries in Apps, Account and phone Settings"
   ],
   "known_limits": [
     "APK requires signing before installation.",
     "Physical handset interaction remains unverified.",
-    "The brief reflects locally saved/synced content; missing or stale sources cannot become live readings.",
+    "Browser Pip keys remain per tab by design, so the browser asks again in a new tab.",
     "Existing cloud storage has not gained end-to-end encryption in this release."
   ],
   "physical_handset_checked": false,
   "full_custom_rom_compiled": false,
-  "previous_release": "v0.14.1"
+  "previous_release": "v0.15.0"
 }

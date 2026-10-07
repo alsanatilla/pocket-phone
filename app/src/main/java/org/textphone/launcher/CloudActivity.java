@@ -22,13 +22,19 @@ public final class CloudActivity extends PocketActivity {
     private PocketCloud.Link link;
     private String linkError = "";
     private int linkGeneration, deviceGeneration;
+    /** Opened from setup: start the chosen sign-in once, then return to setup when this phone is signed in. */
+    private String setup; private boolean setupStarted;
     private final Runnable poll = this::pollLink;
 
-    @Override protected void onCreate(Bundle state) { super.onCreate(state); render(); }
+    @Override protected void onCreate(Bundle state) {
+        super.onCreate(state); setup = getIntent().getStringExtra("setup"); setupStarted = state != null; render();
+        if ("password".equals(setup) && !setupStarted && !PocketCloud.saved(this)) { setupStarted = true; pocketSignIn(); }
+    }
     @Override protected void onResume() {
         super.onResume(); foreground = true; int generation = linkGeneration;
         load(() -> PocketCloud.pendingLink(getApplicationContext()), pending -> {
             if (generation != linkGeneration) return; link = pending; linkError = ""; render(); schedulePoll();
+            if (pending == null && "link".equals(setup) && !setupStarted && !PocketCloud.saved(this)) { setupStarted = true; startLink(); }
         }, error -> { if (generation != linkGeneration) return; linkError = reason(error); render(); message(linkError); });
     }
     @Override protected void onPause() { foreground = false; ui.removeCallbacks(poll); super.onPause(); }
@@ -206,6 +212,6 @@ public final class CloudActivity extends PocketActivity {
             android.app.job.JobScheduler jobs = app.getSystemService(android.app.job.JobScheduler.class);
             if (jobs != null) jobs.cancel(CloudSync.JOB_SOON);
             CloudSync.run(app); return true;
-        }, done -> { syncing = false; render(); message("Synced."); }, error -> { syncing = false; failed(error.getMessage()); });
+        }, done -> { syncing = false; if (setup != null && PocketCloud.saved(this)) { finish(); return; } render(); message("Synced."); }, error -> { syncing = false; failed(error.getMessage()); });
     }
 }
