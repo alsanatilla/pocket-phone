@@ -2,6 +2,12 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.14.1 — Add tiles directly on Today
+
+- The phone's Today page now has a visible **+ add tile** action above the grid. Choosing a tile adds it immediately. Adding and saving returns to Today without reopening the management dialog.
+- Hold a tile to move it up, move it down or remove it. **Edit tiles** remains available next to Add. Changes still use the shared Today layout, preserve browser-only tiles and appear when returning to Today after background sync.
+- Android and Astro builds passed; the test suite and lint were skipped as requested. No handset was connected, so native interaction remains unverified on a device. The APK is unsigned for the signing agent.
+
 ## 0.14.0 — OpenRouter that answers, web search everywhere
 
 - **Free OpenRouter models.** With OpenRouter's `openrouter/free` or any `:free` model, pip sends a fallback list (NVIDIA Nemotron 3 Super, Ling 3.0 Flash, then the free router). OpenRouter moves to the next one when a model is rate-limited. The free router alone sometimes picked a safety-classifier model that returned no reply. A busy provider (HTTP 429, 502 or 503) is retried twice before pip gives up. Nothing has been generated at that point, so nothing is charged twice.

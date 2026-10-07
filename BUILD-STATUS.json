@@ -1,35 +1,25 @@
 {
   "component": "Pocket Android launcher/apps and Astro browser workspace",
-  "version_name": "0.14.0",
-  "version_code": 40,
+  "version_name": "0.14.1",
+  "version_code": 41,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-07T05:52:47.385Z",
-  "build": "Astro build and assembleRom passed. Test suite skipped at the user's request. APK unsigned for the release agent.",
+  "checked_at_utc": "2026-10-07T06:20:45.485Z",
+  "build": "Android assembleRom and Astro production build passed. Full test suite and lint skipped at the user’s request.",
   "commands": [
     "npm run build",
-    "./gradlew.bat -I app/build/tmp/release-0140.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom",
-    "npm run db:setup"
+    "./gradlew.bat -I app/build/tmp/release-0141.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
   ],
   "build_environment": {
     "java": "17.0.20.1+1",
-    "node": "v24.19.0",
-    "astro": "7.3.6",
-    "vercel_adapter": "11.0.12",
-    "libsql_client": "0.18.0",
-    "better_auth": "1.7.7",
-    "passkey_plugin": "1.7.7",
-    "simplewebauthn_browser": "13.3.0",
-    "drizzle": "0.45.3",
-    "output_directory": "app/build/release-0140",
-    "note": "An ignored Gradle init script selects a fresh output directory to avoid an earlier Windows file lock."
+    "node": "v24.19.0"
   },
   "apk": {
-    "file": "app/build/release-0140/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.14.0-unsigned.apk",
-    "bytes": 10803788,
-    "sha256": "71933d67928b972bb9d1d14b9caeec1985363b2e7e081edb115470efa15aa9a5",
+    "file": "app/build/release-0141/outputs/apk/rom/app-rom-unsigned.apk",
+    "release_asset": "pocket-phone-0.14.1-unsigned.apk",
+    "bytes": 10804084,
+    "sha256": "1f49b04e190838a90a6b5e1c77402833f41f65a1af93224ac82fa37b4c9a0a02",
     "signed": false,
     "installable_update": false,
     "signing": "Another release agent handles signing"
@@ -38,58 +28,31 @@
     "framework": "Astro server output",
     "hosting": "Vercel",
     "url": "https://pocket-phone.vercel.app/",
-    "static_output": ".vercel/output/static",
-    "server_output": ".vercel/output/functions/_render.func",
-    "release_asset": "pocket-web-0.11.0-source.zip",
-    "root_prerendered": true,
-    "hashed_client_assets": true,
+    "release_asset": "pocket-web-0.14.1-source.zip",
     "offline_worker": "pocket-astro-0140-web",
-    "sign_in_followup": "Email/password is shown first. Passkey sign-in is explicit, and passkey creation is labelled separately. Astro build and 390px/1280px account-screen checks passed; the Android APK is unchanged."
+    "changed": false
   },
   "focused_verification": {
-    "environment": "Isolated file databases, fictional credentials and synthetic accounts; no production records or paid provider requests",
-    "passkey_protocol": "Passed: real synthetic P-256 registration/assertions, user verification, origins, challenge replay, expired contexts, duplicate email, multiple passkeys sharing one owner, atomic last-key guard and session revocation",
-    "phone_protocol": "Passed: claim, approve, redeem and bearer session retain one owner; foreign approvals rejected; codes redeem once; denial and revocation enforced",
-    "private_http": "Passed: ten unauthenticated private routes return 401, foreign account-start Origin returns 403, null/array restore bodies return 400, owner isolation for sync/search/history/restore/photos",
-    "search_and_history": "Passed: complete bounded text, ownership, first-checkpoint preservation, editing coalescing, 60-version cap, recent deletion dates, concurrent backfill/sync and rollback when indexing fails",
-    "browser": "Passed: separate account creation and password sign-in, history restores original text, deleted-note recovery creates a new UID, accent-insensitive Notes/Tasks/Thoughts/Pip matches, newer server matches download before opening and phone-code approval",
-    "layout": "Account checked at 1280px and 390px; no horizontal overflow",
-    "production_database": "Connection, additive schema and FTS5 index setup passed; user records were not read or edited",
-    "sprites": "Contact sheets of all 112 frames inspected; browser playback checked with the real sheets for pip, the pull crouch and the save screen; Android compiled and the APK contains the sheets.",
-    "pull_to_refresh": "Simulated touch drag in a mobile viewport showed Pip crouching, then synced and hid the indicator.",
-    "today_tiles": "Browser add/remove/reorder persisted to the preferences document; the server merged a newer layout over an older one and refused unknown preference ids.",
-    "openrouter": "Live browser run against OpenRouter with openrouter/free and web search on: request carried the three-model fallback list and both web tools; Firecrawl search and scrape returned 200; the answer cited the page. Free-model benchmark: Nemotron 3 Super answered 6/6 with a working tool round trip, Ling 3.0 Flash reliable, the free router alone sometimes returned an empty reply.",
-    "android_web_tools": "Compiled only; not run on a handset."
+    "native": "Independent source review covered visible Add controls, direct picker, duplicate prevention, editing against the latest layout, long press, and resume refresh after synced membership/order changes.",
+    "handset": "No device attached to adb; native interaction was not exercised on a handset."
   },
   "full_test_suite": {
     "status": "Skipped",
     "reason": "Explicit user instruction; lint also skipped"
   },
   "changes": [
-    "One account with separate create/sign-in flows, multiple passkeys, browser-approved native phone codes and revocable sessions",
-    "Shared local/account search across Notes, Tasks, parked Thoughts, Paper and Pip",
-    "Account note history and 30-day deleted-note recovery on phone and web",
-    "Encrypted phone grants and durable sign-out cleanup survive transient failures"
+    "Visible + add tile and edit tiles controls above the native Today grid",
+    "Direct selection adds a tile and returns to Today",
+    "Hold a Today tile to move it up, move it down or remove it",
+    "Tile changes use the current layout and preserve browser-only entries",
+    "Returning to Today detects layouts changed by background sync"
   ],
   "known_limits": [
     "APK requires signing before installation.",
-    "Physical authenticator prompts and handset behavior remain unverified.",
-    "Passkeys belong to their site's domain; development and production accounts are separate.",
-    "Email verification and password-reset mail are not configured.",
-    "Phone workspace remains bound to the first Pocket account.",
-    "Offline server revocations retry on later eligible account activity or sync.",
-    "Provider keys, native communication/calendar records and camera album photos remain on their device.",
-    "Workspace JSON backups exclude photos, chats and zines.",
-    "Compatible chat endpoints need browser CORS and function-tool support. Keyless Firecrawl search is rate-limited; a Firecrawl key raises it.",
-    "The 3D sprites, pull to refresh and Today tiles have not been seen on a handset; phone code is compiled only.",
-    "Firecrawl web tools and the OpenRouter fallback list on the phone are compiled, not run on a handset."
+    "Native interaction remains unverified on a handset.",
+    "This change concerns Today; launcher Home app shortcuts retain their existing behavior."
   ],
-  "agent_paid_api_requests": 0,
   "physical_handset_checked": false,
   "full_custom_rom_compiled": false,
-  "previous_release": "v0.13.0",
-  "changes_in_0_14_0": [
-    "OpenRouter free models and openrouter/free send a three-model fallback list; HTTP 429/502/503 retried twice before any reply",
-    "Web search for OpenAI-compatible providers through Firecrawl (search_web, read_web_page) on phone and browser, with an optional encrypted Firecrawl key"
-  ]
+  "previous_release": "v0.14.0"
 }

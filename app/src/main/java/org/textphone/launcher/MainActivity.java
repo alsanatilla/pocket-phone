@@ -615,7 +615,7 @@ public class MainActivity extends Activity {
     private String organizerState() {
         return screen + ":" + captureId + ":" + workspaceTab + ":" + planner.tasksRevision() + ":" + planner.notesRevision() + ":" + getSharedPreferences("pocket_parking",0).getString("items","[]").hashCode() + ":" + PlannerDates.today() + ":" + taskFilter + ":" + organizerQuery
                 + ":" + ClockStore.prefs(this).getString("entries", "").hashCode() + ":" + planner.preferences().getLong("next_task", 0)
-                + ":" + planner.hasDraft("task", captureId);
+                + ":" + planner.hasDraft("task", captureId) + ":" + TodayTiles.kinds(this);
     }
 
     private TextView text(String label, float sp, int color) {
@@ -1678,6 +1678,8 @@ public class MainActivity extends Activity {
     // ── Today tiles: a synced, editable set of live readings. Tapping one opens its app. ──
     private void renderTodayTiles() {
         LinearLayout host = new LinearLayout(this); host.setOrientation(LinearLayout.VERTICAL); host.setTag("today_tiles");
+        commands(host, "today_tile_commands", new String[]{"+ add tile", "edit tiles"},
+                new String[]{"today_add_tile", "today_edit_tiles"}, 0, this::addTodayTile, this::editTodayTiles);
         List<String> kinds = TodayTiles.visible(this);
         for (int i = 0; i < kinds.size(); i += 2) {
             LinearLayout line = new LinearLayout(this);
@@ -1689,8 +1691,6 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams row = new LinearLayout.LayoutParams(-1, -2); row.bottomMargin = dp(12);
             host.addView(line, row);
         }
-        TextView edit = action(kinds.isEmpty() ? "+ add tiles" : "edit tiles", 14, SECONDARY, this::editTodayTiles); edit.setTag("today_edit_tiles");
-        content.removeView(edit); host.addView(edit);
         content.addView(host);
     }
     private View todayTile(String kind) {
@@ -1701,8 +1701,9 @@ public class MainActivity extends Activity {
         TextView value = text(reading[0], 28, PRIMARY); value.setTypeface(PocketFonts.pixel(this)); value.setSingleLine(true); value.setEllipsize(TextUtils.TruncateAt.END);
         TextView detail = text(reading[1], 12, SECONDARY); detail.setMaxLines(2); detail.setEllipsize(TextUtils.TruncateAt.END);
         for (TextView part : new TextView[]{name, value, detail}) { part.setPadding(0, dp(2), 0, dp(2)); part.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO); tile.addView(part); }
-        tile.setContentDescription(kind + ", " + reading[0] + ", " + reading[1] + ". Open.");
+        tile.setContentDescription(kind + ", " + reading[0] + ", " + reading[1] + ". Open. Hold to edit tile.");
         tile.setOnClickListener(v -> openTodayTile(kind));
+        tile.setOnLongClickListener(v -> { tileMenu(TodayTiles.visible(this), kind); return true; });
         return tile;
     }
     private void openTodayTile(String kind) {
@@ -1727,27 +1728,34 @@ public class MainActivity extends Activity {
         List<String> rows = new ArrayList<>(); if (!missing.isEmpty()) rows.add("+ add a tile"); rows.addAll(kinds);
         if (rows.isEmpty()) return;
         new AlertDialog.Builder(this).setTitle("Today tiles").setItems(rows.toArray(new String[0]), (dialog, which) -> {
-            if (!missing.isEmpty() && which == 0) { addTodayTile(missing); return; }
+            if (!missing.isEmpty() && which == 0) { addTodayTile(); return; }
             tileMenu(kinds, kinds.get(which - (missing.isEmpty() ? 0 : 1)));
         }).setNegativeButton("Done", null).show();
     }
-    private void addTodayTile(List<String> missing) {
+    private void addTodayTile() {
+        List<String> kinds = TodayTiles.visible(this), missing = new ArrayList<>();
+        for (String kind : TodayTiles.CATALOG) if (TodayTiles.onPhone(kind) && !kinds.contains(kind)) missing.add(kind);
+        if (missing.isEmpty()) { showFeedback("All tiles are already added."); return; }
         new AlertDialog.Builder(this).setTitle("Add a tile").setItems(missing.toArray(new String[0]), (dialog, which) -> {
-            List<String> kinds = TodayTiles.visible(this); kinds.add(missing.get(which)); saveTodayTiles(kinds);
-        }).setNegativeButton("Cancel", (dialog, which) -> editTodayTiles()).show();
+            List<String> next = TodayTiles.visible(this); String selected = missing.get(which);
+            if (!next.contains(selected)) next.add(selected); saveTodayTiles(next);
+        }).setNegativeButton("Cancel", null).show();
     }
     private void tileMenu(List<String> kinds, String kind) {
-        int at = kinds.indexOf(kind); List<String> choices = new ArrayList<>();
+        int at = kinds.indexOf(kind); if (at < 0) return; List<String> choices = new ArrayList<>();
         if (at > 0) choices.add("Move up"); if (at < kinds.size() - 1) choices.add("Move down"); choices.add("Remove");
         new AlertDialog.Builder(this).setTitle(kind).setItems(choices.toArray(new String[0]), (dialog, which) -> {
-            List<String> next = new ArrayList<>(kinds); String choice = choices.get(which);
-            if ("Move up".equals(choice)) java.util.Collections.swap(next, at, at - 1); else if ("Move down".equals(choice)) java.util.Collections.swap(next, at, at + 1); else next.remove(kind);
+            List<String> next = TodayTiles.visible(this); int current = next.indexOf(kind); if (current < 0) return;
+            String choice = choices.get(which);
+            if ("Move up".equals(choice)) { if (current > 0) java.util.Collections.swap(next, current, current - 1); }
+            else if ("Move down".equals(choice)) { if (current < next.size() - 1) java.util.Collections.swap(next, current, current + 1); }
+            else next.remove(kind);
             saveTodayTiles(next);
         }).setNegativeButton("Back", (dialog, which) -> editTodayTiles()).show();
     }
     private void saveTodayTiles(List<String> kinds) {
         try { TodayTiles.saveVisible(this, kinds); } catch (RuntimeException error) { showFeedback(error.getMessage() == null ? "Could not save the tiles." : error.getMessage()); return; }
-        persistDraft(); render(); editTodayTiles();
+        persistDraft(); render();
     }
     private void workspaceBottom(String label, Runnable capture) {
         todayActions = softKeys("today_actions",new String[]{label,"search","calendar","pip"},new String[]{"workspace_capture","today_search","today_calendar","today_chat"},0,
