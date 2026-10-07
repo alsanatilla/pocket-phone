@@ -1,38 +1,38 @@
-// Plays the baked loading sprites (src/shared/sprites.js, drawn by tools/sprites). Frames are tinted from the accent colour.
-let data = null, loading = null;
-export const loadSprites = () => data ? Promise.resolve(data) : (loading ||= import('../shared/sprites.js').then(module => (data = module)));
-export const spritesReady = () => data;
+// Plays pip (PS1-style) and the save-screen loader (PS2-style) from the sheets in /sprites, drawn by tools/sprites/ps1.
+import { SPRITE_SIZE, PIP_FRAMES, PIP_STEP_MS, PIP_COLS, SAVE_FRAMES, SAVE_COLS, SAVE_STEP_MS, ACCENTS } from '../shared/sprites.js';
 
-const cache = new Map();
-function palette(accent) {
-  const mul = k => accent.map(c => Math.round(c * k)), mix = k => accent.map(c => Math.round(c + (255 - c) * k));
-  return { o: mul(.16), d: mul(.38), s: mul(.62), a: accent, l: mix(.38), h: mix(.75), G: [85, 88, 92], g: [141, 144, 148], w: [242, 242, 242], k: [5, 5, 5], t: mul(.09), u: mul(.17), Y: [140, 100, 50], y: [255, 191, 105], z: [255, 225, 175] };
-}
-/** "rgb(249, 245, 148)" or "#f9f594" → [249, 245, 148] */
-export function accentOf(element) {
-  const text = getComputedStyle(element).color, found = text.match(/\d+(\.\d+)?/g);
-  return found && found.length >= 3 ? found.slice(0, 3).map(Number) : [0xf9, 0xf5, 0x94];
-}
-/** One frame as an offscreen canvas, tinted and cached. */
-export function frameImage(rle, accent) {
-  const key = accent.join(',') + ':' + rle;
-  let canvas = cache.get(key);
-  if (canvas) return canvas;
-  const size = data.SPRITE_SIZE, colors = palette(accent);
-  canvas = document.createElement('canvas'); canvas.width = canvas.height = size;
-  const context = canvas.getContext('2d'), image = context.createImageData(size, size);
-  let cell = 0;
-  for (const [, count, letter] of rle.matchAll(/(\d+)(\D)/g)) {
-    const rgb = colors[letter];
-    for (let n = Number(count); n > 0; n--, cell++) if (rgb) { image.data[cell * 4] = rgb[0]; image.data[cell * 4 + 1] = rgb[1]; image.data[cell * 4 + 2] = rgb[2]; image.data[cell * 4 + 3] = 255; }
+export const SIZE = SPRITE_SIZE;
+export const ACTIVITIES = 6;   // wave, walk, juggle, read, hop, write
+export const PULL = 6;         // the crouch used while pulling to refresh
+const sheets = new Map();
+
+/** The baked accent closest to the element's current accent colour. */
+export function accentName(element) {
+  const found = getComputedStyle(element).color.match(/\d+(\.\d+)?/g)?.slice(0, 3).map(Number) || [249, 245, 148];
+  let best = 'yellow', distance = Infinity;
+  for (const [name, hex] of Object.entries(ACCENTS)) {
+    const v = parseInt(hex.slice(1), 16), d = (found[0] - (v >> 16 & 255)) ** 2 + (found[1] - (v >> 8 & 255)) ** 2 + (found[2] - (v & 255)) ** 2;
+    if (d < distance) { distance = d; best = name; }
   }
-  context.putImageData(image, 0, 0);
-  if (cache.size > 160) cache.delete(cache.keys().next().value);
-  cache.set(key, canvas);
-  return canvas;
+  return best;
 }
-export const ACTIVITIES = 6; // wave, walk, juggle, read, hop, write; a seventh set (pull) is only used while pulling to refresh
-export const PULL = 6;
-export const STEP_MS = { pip: 110, cart: 70, coin: 80 };
-/** The frames of a sprite family: 'pip' needs an activity, 'cart' and 'coin' do not. */
-export function framesOf(kind, activity = 0) { return kind === 'pip' ? data.PIP[activity] : kind === 'cart' ? data.CART : data.COIN; }
+/** Loads (once) the sheet for a kind and accent; resolves to the image. */
+export function sheet(kind, accent) {
+  const key = kind + '-' + accent;
+  if (!sheets.has(key)) sheets.set(key, new Promise((resolve, reject) => { const image = new Image(); image.decoding = 'async'; image.onload = () => resolve(image); image.onerror = reject; image.src = `/sprites/${key}.png`; }).then(image => (sheets.set(key, image), image)));
+  const value = sheets.get(key);
+  return value instanceof Image ? Promise.resolve(value) : value;
+}
+export const ready = (kind, accent) => { const value = sheets.get(kind + '-' + accent); return value instanceof Image ? value : null; };
+export const frameCount = (kind, activity = 0) => kind === 'save' ? SAVE_FRAMES : PIP_FRAMES[activity];
+export const stepMs = (kind, activity = 0) => kind === 'save' ? SAVE_STEP_MS : PIP_STEP_MS[activity];
+
+/** Draws one frame; returns false while the sheet is still loading. */
+export function drawFrame(context, kind, accent, activity, frame) {
+  const image = ready(kind, accent); if (!image) return false;
+  const index = kind === 'save' ? frame % SAVE_FRAMES : activity * PIP_COLS + frame % PIP_FRAMES[activity], cols = kind === 'save' ? SAVE_COLS : PIP_COLS;
+  context.imageSmoothingEnabled = false;
+  context.clearRect(0, 0, SIZE, SIZE);
+  context.drawImage(image, (index % cols) * SIZE, Math.floor(index / cols) * SIZE, SIZE, SIZE, 0, 0, SIZE, SIZE);
+  return true;
+}

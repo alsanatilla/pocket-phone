@@ -2,6 +2,13 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.13.0 — PlayStation pip
+
+- **pip in 3D.** The 2D sprites are replaced by a low-poly 3D pip rendered with PS1 traits: wobbling vertices, swimming textures, painter-sorted triangles and the console's 15-bit dither. He is a little handheld console with a hand-textured face (glowing eyes, d-pad, buttons) and back (battery cover, screws, label), stubby limbs and a glowing antenna, standing on a small stage. Six keyed activities: wave, walk (across the stage and back), juggle, read (a book with a turning page), hop (squash and stretch) and write (pencil and notepad), plus a crouch while you pull to refresh.
+- **PS2 save screen.** The other sync loader is a memory-card style screen: pip's console body turns slowly over a misty blue glow, mirrored in a glossy floor, with drifting sparks and bloom.
+- Both follow the accent colour: every frame is rendered for Yellow, Green, Blue and White (about 1.8 MB of sprite sheets per platform). Phone and browser use the same sheets from one render script; the browser keeps them for offline use.
+- Astro and Android builds passed; browser playback was checked with the real sheets. The test suite is skipped as requested; the handset was not available. The APK is unsigned for the release agent.
+
 ## 0.12.0 — Detailed sprites, Today tiles and pull to refresh
 
 - **Sprites.** The loaders are redrawn as 48-pixel, lit and dithered sprites. Pip is a handheld console with legs: glass screen with glowing eyes, d-pad and buttons on a control plate, antenna, and six activities (wave, walk, juggle, read, hop, write) plus a crouch for pulling. A cartridge turns in a tiny software 3D renderer (label, ridges, gold pins) and a coin spins with an embossed star. Everything is tinted from the accent colour. One generator (`tools/sprites`) writes identical frames for the phone (`RetroSprites.java`) and the browser (`src/shared/sprites.js`).

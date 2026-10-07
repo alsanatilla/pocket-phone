@@ -1,4 +1,4 @@
-# Pocket design system — 0.12.0
+# Pocket design system — 0.13.0
 
 Pocket is a daily Android dashboard and a set of small native apps for the Nothing Phone (3a). Its character comes from black, white monospace text, pixel titles and icons, and labelled soft keys. Its polish comes from every app using the same few patterns, so a page can be scanned without learning it first.
 
@@ -101,7 +101,7 @@ Header `back` · `camera` · `rear`. Below the viewfinder an on-screen menu like
 
 ## Loaders and sprites
 
-Waiting is shown with 48-pixel sprites, drawn with the same lit, ordered-dither look as the header scenes and tinted from the accent colour. Pip (a handheld console with legs) has six activities; a turning cartridge and a spinning coin join him as loaders for sync and pull to refresh. `tools/sprites/build.mjs` draws every frame and writes the same data for the phone (`RetroSprites.java`) and the browser (`src/shared/sprites.js`). Frames step at about 9–14 per second on purpose, and stop with reduced motion, hidden pages and the Motion setting.
+pip is a low-poly 3D character rendered the way a PlayStation did it: vertices snap to whole pixels, textures are mapped without perspective correction, triangles are painter-sorted, and colour goes through the console's 4×4 dither into 15 bits. His face, controls and back are tiny hand-placed textures. He has six keyed activities (wave, walk, juggle, read, hop, write) and a crouch that follows a pull-to-refresh. The sync loader is a PS2-style memory-card screen: his console body turns slowly over a misty blue glow, mirrored in a glossy floor, with sparks and a soft bloom. `tools/sprites/ps1/build.mjs` renders every frame for each accent colour into sprite sheets used by both the phone (`assets/sprites`) and the browser (`public/sprites`); `src/shared/sprites.js` and `RetroSprites.java` hold the shared frame counts and timing. Animation steps at roughly 9–16 frames per second and stops with reduced motion, hidden pages and the Motion setting.
 
 ## Motion
 

@@ -1,33 +1,31 @@
-import { loadSprites, spritesReady, frameImage, accentOf, framesOf, ACTIVITIES, PULL, STEP_MS } from './sprite-player.js';
+import { SIZE, ACTIVITIES, PULL, sheet, accentName, drawFrame, frameCount, stepMs } from './sprite-player.js';
 
-const KINDS = ['pip', 'pip', 'cart', 'coin'];
-/** A 48-pixel loader: pip at one of his activities, a turning cartridge, or a spinning coin. Chosen at random each time. */
+const KINDS = ['pip', 'pip', 'save'];
+/** The loader: pip (PS1) at one of his activities, or the PS2 memory-card save screen. Chosen at random each time. */
 export function retroLoader(label = 'Loading Pocket') {
   const host = document.createElement('span'); host.className = 'retro-loading'; host.setAttribute('role', 'status'); host.setAttribute('aria-label', label);
-  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 48; canvas.setAttribute('aria-hidden', 'true'); host.append(canvas);
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = SIZE; canvas.setAttribute('aria-hidden', 'true'); host.append(canvas);
   const ctx = canvas.getContext('2d'), media = matchMedia('(prefers-reduced-motion: reduce)');
-  let timer = 0, frame = 0, running = false, disposed = false, kind = 'pip', activity = 0, pulled = 0;
+  let timer = 0, frame = 0, running = false, disposed = false, kind = 'pip', activity = 0, pulled = 0, accent = 'yellow';
   const pick = () => { kind = KINDS[Math.floor(Math.random() * KINDS.length)]; activity = Math.floor(Math.random() * ACTIVITIES); frame = 0; };
   pick();
   const draw = () => {
-    if (!spritesReady()) return;
-    const pulling = !running && pulled > 0, frames = pulling && kind === 'pip' ? framesOf('pip', PULL) : framesOf(kind, activity);
-    const index = pulling ? Math.min(frames.length - 1, Math.floor(pulled * frames.length)) : frame % frames.length;
-    ctx.clearRect(0, 0, 48, 48); ctx.drawImage(frameImage(frames[index], accentOf(host)), 0, 0);
+    if (!running && pulled > 0) { const n = frameCount('pip', PULL); return drawFrame(ctx, 'pip', accent, PULL, Math.min(n - 1, Math.floor(pulled * n))); }
+    return drawFrame(ctx, kind, accent, activity, frame);
   };
   const stopped = () => disposed || !running || document.hidden || media.matches || document.documentElement.dataset.reduceMotion === 'true' || !host.isConnected;
   function tick() {
     timer = 0; if (stopped()) return;
-    frame++; const length = framesOf(kind, activity).length;
+    frame++; const length = frameCount(kind, activity);
     if (kind === 'pip' && frame % length === 0 && frame >= length * 2) { activity = (activity + 1 + Math.floor(Math.random() * (ACTIVITIES - 1))) % ACTIVITIES; frame = 0; }
-    draw(); timer = setTimeout(tick, STEP_MS[kind]);
+    draw(); timer = setTimeout(tick, stepMs(kind, activity));
   }
-  function resume() { clearTimeout(timer); timer = 0; draw(); if (!stopped()) timer = setTimeout(tick, STEP_MS[kind]); }
+  function resume() { clearTimeout(timer); timer = 0; draw(); if (!stopped()) timer = setTimeout(tick, stepMs(kind, activity)); }
   host.running = value => { if (value && !running) pick(); running = value; if (!value) pulled = 0; resume(); };
   host.pull = value => { if (!running) { pulled = Math.max(0, Math.min(.999, value)); draw(); } };
   host.dispose = () => { disposed = true; clearTimeout(timer); document.removeEventListener('visibilitychange', resume); media.removeEventListener('change', resume); };
   document.addEventListener('visibilitychange', resume); media.addEventListener('change', resume);
-  loadSprites().then(() => { if (!disposed) requestAnimationFrame(draw); });
+  requestAnimationFrame(() => { if (disposed) return; accent = accentName(host); Promise.all([sheet('pip', accent), sheet('save', accent)]).then(resume, () => {}); });
   return host;
 }
 

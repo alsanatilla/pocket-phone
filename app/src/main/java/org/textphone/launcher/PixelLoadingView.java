@@ -5,11 +5,11 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.view.View;
 
-/** Pip as a 48-pixel sprite with six little activities, the same frames as the browser (RetroSprites, drawn by tools/sprites). */
+/** pip as a PS1-style 3D sprite with six little activities; the same sheets as the browser (drawn by tools/sprites/ps1). */
 final class PixelLoadingView extends View {
-    private static final long FRAME_MS = 110;
     private final Activity activity;
     private final Paint pixels = new Paint();
+    private final SpriteArt art = new SpriteArt();
     private boolean running, paused = true, attached, destroyed, scheduled, motionAllowed, phaseLocked;
     private int frame, loops, accent, phase, activityPose;
     private final java.util.Random random=new java.util.Random();
@@ -18,7 +18,7 @@ final class PixelLoadingView extends View {
             scheduled = false;
             if (!visibleRunning() || !motionAllowed) return;
             frame++;
-            if(frame%SpriteArt.activity(activityPose).length==0&&++loops>=3){loops=0;if(!phaseLocked)activityPose=(activityPose+1+random.nextInt(SpriteArt.ACTIVITIES-1))%SpriteArt.ACTIVITIES;}
+            if(frame%SpriteArt.frames(false,activityPose)==0&&++loops>=2){loops=0;frame=0;if(!phaseLocked)activityPose=(activityPose+1+random.nextInt(SpriteArt.ACTIVITIES-1))%SpriteArt.ACTIVITIES;}
             invalidate();
             schedule();
         }
@@ -28,6 +28,7 @@ final class PixelLoadingView extends View {
         super(activity);
         this.activity = activity;
         accent = PocketDesign.accent(activity);
+        SpriteArt.prepare(activity, accent, this);
         pixels.setAntiAlias(false);
         pixels.setDither(false);
         setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -106,14 +107,12 @@ final class PixelLoadingView extends View {
     }
 
     private void schedule() {
-        if (!scheduled && visibleRunning() && motionAllowed) scheduled = postDelayed(tick, FRAME_MS);
+        if (!scheduled && visibleRunning() && motionAllowed) scheduled = postDelayed(tick, SpriteArt.step(false, activityPose));
     }
 
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        String[] frames = SpriteArt.activity(activityPose);
-        // Still frames (motion off, or not yet running) show a happy mid-animation pose.
-        int index = running && motionAllowed ? frame % frames.length : Math.min(2, frames.length - 1);
-        SpriteArt.draw(canvas, getWidth(), getHeight(), frames[index], accent, pixels);
+        // Still frames (motion off, or not yet running) show a mid-animation pose.
+        art.draw(this, canvas, false, activityPose, running && motionAllowed ? frame : 2, accent, pixels);
     }
 }

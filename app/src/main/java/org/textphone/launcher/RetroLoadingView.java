@@ -6,48 +6,45 @@ import android.graphics.Paint;
 import android.view.View;
 
 /**
- * The pull-to-refresh and sync loader: pip at one of his activities, a turning cartridge or a spinning coin, picked at random.
- * Frames are baked bitmaps from {@link RetroSprites}; nothing is allocated per frame.
+ * The pull-to-refresh and sync loader: pip (PS1) at one of his activities, or the PS2-style memory-card save screen,
+ * picked at random. Frames come from sprite sheets in assets; nothing is allocated per frame.
  */
 final class RetroLoadingView extends View {
-    private static final int PIP = 0, CART = 1, COIN = 2;
     private final Paint paint = new Paint();
+    private final SpriteArt art = new SpriteArt();
     private final java.util.Random random = new java.util.Random();
-    private boolean active, attached;
-    private int frame, kind, activity;
+    private boolean active, attached, saveScreen;
+    private int frame, activity;
     private float pulled;
     private final Runnable tick = new Runnable() { public void run() {
         if (!playing()) return;
-        frame++; String[] frames = frames();
-        if (kind == PIP && frame % frames.length == 0 && frame >= frames.length * 2) { activity = (activity + 1 + random.nextInt(SpriteArt.ACTIVITIES - 1)) % SpriteArt.ACTIVITIES; frame = 0; }
-        invalidate(); postDelayed(this, step());
+        frame++;
+        if (!saveScreen && frame % SpriteArt.frames(false, activity) == 0 && frame >= SpriteArt.frames(false, activity) * 2) { activity = (activity + 1 + random.nextInt(SpriteArt.ACTIVITIES - 1)) % SpriteArt.ACTIVITIES; frame = 0; }
+        invalidate(); postDelayed(this, SpriteArt.step(saveScreen, activity));
     }};
     RetroLoadingView(Context context) {
         super(context);
         setContentDescription("Syncing Pocket"); setFocusable(false);
         setMinimumHeight(PocketDesign.dp(context, 96)); setMinimumWidth(PocketDesign.dp(context, 96));
-        choose();
+        choose(); SpriteArt.prepare(context, PocketDesign.accent(context), this);
     }
-    private void choose() { kind = new int[]{PIP, PIP, CART, COIN}[random.nextInt(4)]; activity = random.nextInt(SpriteArt.ACTIVITIES); frame = 0; }
-    private String[] frames() { return kind == PIP ? SpriteArt.activity(activity) : kind == CART ? RetroSprites.CART : RetroSprites.COIN; }
-    private long step() { return kind == PIP ? 110 : kind == CART ? 70 : 80; }
+    private void choose() { saveScreen = random.nextInt(3) == 0; activity = random.nextInt(SpriteArt.ACTIVITIES); frame = 0; }
     void running(boolean value) {
         if (value && !active) choose();
         active = value; if (!value) pulled = 0;
-        removeCallbacks(tick); invalidate(); if (playing()) postDelayed(tick, step());
+        removeCallbacks(tick); invalidate(); if (playing()) postDelayed(tick, SpriteArt.step(saveScreen, activity));
     }
-    /** While pulling, pip crouches further the further the page is pulled; the cartridge and coin turn with the finger. */
+    /** While pulling, pip crouches further the further the page is pulled. */
     void pull(float progress) { if (!active) { pulled = Math.max(0, Math.min(.999f, progress)); invalidate(); } }
     private boolean playing() { return active && attached && isShown() && getWindowVisibility()==VISIBLE && getContext() instanceof android.app.Activity && PageMotion.enabled((android.app.Activity)getContext()); }
-    private void resume() { removeCallbacks(tick); if(playing())postDelayed(tick, step()); }
+    private void resume() { removeCallbacks(tick); if(playing())postDelayed(tick, SpriteArt.step(saveScreen, activity)); }
     @Override protected void onAttachedToWindow(){super.onAttachedToWindow();attached=true;resume();}
     @Override protected void onDetachedFromWindow(){attached=false;removeCallbacks(tick);super.onDetachedFromWindow();}
     @Override protected void onVisibilityChanged(View v,int visibility){super.onVisibilityChanged(v,visibility);if(paint!=null)resume();}
     @Override protected void onWindowVisibilityChanged(int visibility){super.onWindowVisibilityChanged(visibility);if(paint!=null)resume();}
     @Override protected void onDraw(Canvas canvas) {
-        boolean pulling = !active && pulled > 0;
-        String[] frames = pulling && kind == PIP ? SpriteArt.activity(SpriteArt.PULL) : frames();
-        int index = pulling ? Math.min(frames.length - 1, (int)(pulled * frames.length)) : frame % frames.length;
-        SpriteArt.draw(canvas, getWidth(), getHeight(), frames[index], PocketDesign.accent(getContext()), paint);
+        int accent = PocketDesign.accent(getContext());
+        if (!active && pulled > 0) { int n = SpriteArt.frames(false, SpriteArt.PULL); art.draw(this, canvas, false, SpriteArt.PULL, Math.min(n - 1, (int)(pulled * n)), accent, paint); return; }
+        art.draw(this, canvas, saveScreen, activity, frame, accent, paint);
     }
 }

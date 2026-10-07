@@ -1,63 +1,82 @@
 package org.textphone.launcher;
 
+import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
-import java.util.HashMap;
-import java.util.Map;
+import android.view.View;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
-/** Decodes the run-length frames of {@link RetroSprites}, tints them from the accent colour and draws them pixel-crisp. */
+/**
+ * Plays pip (a PS1-style 3D render) and the PS2-style save screen from the sprite sheets in assets/sprites,
+ * drawn by tools/sprites/ps1. One sheet per accent colour; only the current accent's sheets stay in memory,
+ * and they are decoded off the UI thread so drawing never waits.
+ */
 final class SpriteArt {
+    static final int ACTIVITIES = 6, PULL = 6; // wave, walk, juggle, read, hop, write · then the pull crouch
     private static final Object LOCK = new Object();
-    private static final Map<String, Bitmap> FRAMES = new HashMap<>();
-    private static int tinted = Integer.MIN_VALUE;
+    private static String loadedAccent = "", loadingAccent = "";
+    private static Bitmap pip, save;
+    private static final List<View> WAITING = new ArrayList<>();
+    private final Rect source = new Rect(), destination = new Rect();
 
-    /** Same letters and mixes as src/client/sprite-player.js. */
-    private static int[] palette(int accent) {
-        int r = accent >> 16 & 255, g = accent >> 8 & 255, b = accent & 255;
-        int[] p = new int[128];
-        p['o'] = shade(r, g, b, .16f); p['d'] = shade(r, g, b, .38f); p['s'] = shade(r, g, b, .62f); p['a'] = 0xff000000 | accent & 0xffffff;
-        p['l'] = mix(r, g, b, .38f); p['h'] = mix(r, g, b, .75f);
-        p['G'] = rgb(85, 88, 92); p['g'] = rgb(141, 144, 148); p['w'] = rgb(242, 242, 242); p['k'] = rgb(5, 5, 5);
-        p['t'] = shade(r, g, b, .09f); p['u'] = shade(r, g, b, .17f);
-        p['Y'] = rgb(140, 100, 50); p['y'] = rgb(255, 191, 105); p['z'] = rgb(255, 225, 175);
-        return p;
-    }
-    private static int rgb(int r, int g, int b) { return 0xff000000 | r << 16 | g << 8 | b; }
-    private static int shade(int r, int g, int b, float k) { return rgb(Math.round(r * k), Math.round(g * k), Math.round(b * k)); }
-    private static int mix(int r, int g, int b, float k) { return rgb(Math.round(r + (255 - r) * k), Math.round(g + (255 - g) * k), Math.round(b + (255 - b) * k)); }
-
-    /** One tinted frame; frames of the previous accent are dropped when the accent changes. */
-    static Bitmap frame(String rle, int accent) {
-        synchronized (LOCK) {
-            if (accent != tinted) { FRAMES.clear(); tinted = accent; }
-            Bitmap bitmap = FRAMES.get(rle);
-            if (bitmap != null) return bitmap;
-            int size = RetroSprites.SIZE, cells = size * size, cell = 0;
-            int[] colors = palette(accent), pixels = new int[cells];
-            for (int i = 0; i < rle.length() && cell < cells;) {
-                int count = 0;
-                while (i < rle.length() && Character.isDigit(rle.charAt(i))) count = count * 10 + (rle.charAt(i++) - '0');
-                char letter = i < rle.length() ? rle.charAt(i++) : '.';
-                int color = letter < 128 ? colors[letter] : 0;
-                for (int n = 0; n < count && cell < cells; n++) pixels[cell++] = color;
-            }
-            bitmap = Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888);
-            FRAMES.put(rle, bitmap);
-            return bitmap;
+    /** The baked accent nearest to Pocket's current accent. */
+    static String accentName(int accent) {
+        String best = RetroSprites.ACCENT_NAMES[0]; long distance = Long.MAX_VALUE;
+        for (int i = 0; i < RetroSprites.ACCENT_COLORS.length; i++) {
+            int c = RetroSprites.ACCENT_COLORS[i];
+            long dr = (c >> 16 & 255) - (accent >> 16 & 255), dg = (c >> 8 & 255) - (accent >> 8 & 255), db = (c & 255) - (accent & 255), d = dr * dr + dg * dg + db * db;
+            if (d < distance) { distance = d; best = RetroSprites.ACCENT_NAMES[i]; }
         }
+        return best;
     }
+    private static Bitmap read(Context c, String name) {
+        BitmapFactory.Options options = new BitmapFactory.Options(); options.inScaled = false; options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        try (InputStream in = c.getAssets().open("sprites/" + name + ".png")) { return BitmapFactory.decodeStream(in, null, options); }
+        catch (IOException | OutOfMemoryError error) { return null; }
+    }
+    /** Starts decoding the accent's sheets in the background; `view` is redrawn when they are ready. */
+    static void prepare(Context c, int accent, View view) {
+        String name = accentName(accent); Context app = c.getApplicationContext();
+        synchronized (LOCK) {
+            if (name.equals(loadedAccent)) return;
+            if (view != null && !WAITING.contains(view)) WAITING.add(view);
+            if (name.equals(loadingAccent)) return;
+            loadingAccent = name;
+        }
+        Thread worker = new Thread(() -> {
+            Bitmap nextPip = read(app, "pip-" + name), nextSave = read(app, "save-" + name);
+            List<View> redraw;
+            synchronized (LOCK) {
+                if (!name.equals(loadingAccent)) return; // a newer accent was asked for meanwhile
+                pip = nextPip; save = nextSave; loadedAccent = name; loadingAccent = "";
+                redraw = new ArrayList<>(WAITING); WAITING.clear();
+            }
+            for (View v : redraw) v.postInvalidate();
+        }, "Pocket sprites");
+        worker.setDaemon(true); worker.start();
+    }
+    private static Bitmap ready(boolean saveScreen, int accent) {
+        synchronized (LOCK) { return accentName(accent).equals(loadedAccent) ? saveScreen ? save : pip : null; }
+    }
+    static int frames(boolean saveScreen, int activity) { return saveScreen ? RetroSprites.SAVE_FRAMES : RetroSprites.PIP_FRAMES[Math.max(0, Math.min(RetroSprites.PIP_FRAMES.length - 1, activity))]; }
+    static long step(boolean saveScreen, int activity) { return saveScreen ? RetroSprites.SAVE_STEP_MS : RetroSprites.PIP_STEP_MS[Math.max(0, Math.min(RetroSprites.PIP_STEP_MS.length - 1, activity))]; }
 
-    /** Draws a frame centred in the view with the largest whole-number scale that fits. */
-    static void draw(Canvas canvas, int width, int height, String rle, int accent, Paint paint) {
-        int scale = Math.max(1, Math.min(width, height) / RetroSprites.SIZE), side = scale * RetroSprites.SIZE;
-        int left = (width - side) / 2, top = (height - side) / 2;
+    /** Draws one frame filling the view, square and centred, without smoothing so the pixels stay hard. */
+    void draw(View view, Canvas canvas, boolean saveScreen, int activity, int frame, int accent, Paint paint) {
+        Bitmap image = ready(saveScreen, accent);
+        if (image == null) { prepare(view.getContext(), accent, view); return; }
+        int size = RetroSprites.SIZE, cols = saveScreen ? RetroSprites.SAVE_COLS : RetroSprites.PIP_COLS;
+        int index = saveScreen ? Math.floorMod(frame, RetroSprites.SAVE_FRAMES) : activity * RetroSprites.PIP_COLS + Math.floorMod(frame, frames(false, activity));
+        source.set(index % cols * size, index / cols * size, index % cols * size + size, index / cols * size + size);
+        int width = view.getWidth(), height = view.getHeight(), side = Math.min(width, height), left = (width - side) / 2, top = (height - side) / 2;
+        destination.set(left, top, left + side, top + side);
         paint.setFilterBitmap(false); paint.setAntiAlias(false); paint.setDither(false);
-        canvas.drawBitmap(frame(rle, accent), null, new Rect(left, top, left + side, top + side), paint);
+        canvas.drawBitmap(image, source, destination, paint);
     }
-
-    static String[] activity(int index) { return RetroSprites.PIP[Math.max(0, Math.min(RetroSprites.PIP.length - 1, index))]; }
-    static final int ACTIVITIES = 6, PULL = 6;
-    private SpriteArt() { }
 }
