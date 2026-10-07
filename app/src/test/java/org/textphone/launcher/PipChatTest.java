@@ -246,8 +246,8 @@ public class PipChatTest {
     }
     private static final class LinearAssertions {
         static void formatted(View root) {
-            android.view.ViewGroup group = (android.view.ViewGroup) root;
-            TextView body = (TextView) group.getChildAt(3);
+            // Find the answer by its text: activity, reasoning and sources sit above it in the turn.
+            TextView body = CameraAlbumTest.findContaining(root, "30 minutes"); assertNotNull(body);
             assertTrue(body.getText() instanceof Spanned); assertFalse(body.getText().toString().contains("**"));
             assertFalse(body.getText().toString().contains("##"));
         }

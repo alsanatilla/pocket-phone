@@ -47,21 +47,23 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
     if (index < 0 && result.sources.length < 24) { index = result.sources.length; result.sources.push(found); }
     if (index >= 0) result.answer += ` [${index + 1}](${found.href.replace(/[()]/g, c => encodeURIComponent(c))})`;
   };
-  const finishFromObservations = reason => {
+  const finishFromObservations = (reason, failed = false) => {
     const observations = completed.length ? completed : (resume?.observations || []).map(row => { try { return { name: row.name, answer: JSON.parse(row.result) }; } catch { return null; } }).filter(Boolean);
     if (!result.answer.trim()) {
       const excerpts = observations.flatMap(({ answer }) => answer.error ? [] : answer.kind === "proposal" ? ["Prepared for review: " + answer.proposal.title] : answer.kind === "plan" ? [] : answer.text ? [String(answer.title || "Source") + ": " + answer.text.slice(0, 600)] : (answer.results || answer.notes || answer.tasks || answer.appointments || []).slice(0, 3).map(item => (item.title || item.text || "Source") + (item.description || item.excerpt ? ": " + (item.description || item.excerpt).slice(0, 300) : "")));
       result.answer = excerpts.length ? "Collected observations:\n\n" + excerpts.slice(0, 8).map(item => "- " + item).join("\n") : "Research stopped before a final answer was available.";
     }
     result.answer += "\n\n" + reason + " Completed lookups remain in the activity.";
-    result.activity = settle(result.activity, "failed", reason); result.phase = "done";
-    onUpdate(structuredClone(result)); return result;
+    result.activity = settle(result.activity, "failed", reason); result.phase = failed ? "failed" : "done";
+    onUpdate(structuredClone(result));
+    if (failed) throw new Error(reason);
+    return result;
   };
   clock();
   try {
     for (let round = 0; round <= RESEARCH_LIMITS.continuations; round++) {
       currentRound = round;
-      check(); if (tokens < 1) return finishFromObservations("The configured reply token limit was reached.");
+      check(); if (tokens < 1) return finishFromObservations("The configured reply token limit was reached. Continue when you’re ready.", true);
       const reserve = Math.min(1024, Math.max(1, Math.floor(value.maxTokens / 3))), final = Boolean(finalReason) || round === RESEARCH_LIMITS.continuations || calls >= RESEARCH_LIMITS.calls || searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || tokens <= reserve;
       result.phase = final ? "synthesizing" : "requesting"; publish();
       for (const row of result.activity.filter(row => row.kind === "web" && row.state === "queued")) { record(row.id, { state: "running" }); result.phase = "searching web"; }
@@ -91,7 +93,7 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
       check(); if (!response.ok) throw new Error(httpError(response.status));
       if (!response.body || !response.headers.get("content-type")?.includes("text/event-stream")) throw new Error("This endpoint did not return a chat stream. Check its browser and streaming support.");
       let terminal = false, stop = "", text = "", output = 0;
-      const blocks = [], partials = new Map(), reads = new Map(), reasoning = {}, details = new Map();
+      const blocks = [], partials = new Map(), reads = new Map(), argumentErrors = [], reasoning = {}, details = new Map();
       for await (const data of readSse(response.body, controller.signal)) {
         clock(); check();
         if (data === "[DONE]") { if (value.provider === "compatible") terminal = true; break; }
@@ -135,10 +137,13 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
           }
           if (event.type === "content_block_stop" && partials.has(event.index)) {
             const partial = partials.get(event.index); let args;
-            try { args = partial.args.trim() ? JSON.parse(partial.args) : partial.initial; } catch { throw new Error("The provider returned invalid tool arguments."); }
-            if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("The tool arguments must be an object.");
-            blocks[event.index].input = args; record(partial.id, { title: label(partial.name, args), input: JSON.stringify(args) });
-            if (!partial.web) reads.set(event.index, { ...partial, input: args });
+            try { args = partial.args.trim() ? JSON.parse(partial.args) : partial.initial; }
+            catch { argumentErrors.push("The provider returned invalid tool arguments."); }
+            if (args !== undefined) {
+              if (!args || typeof args !== "object" || Array.isArray(args)) argumentErrors.push("The tool arguments must be an object.");
+              else { blocks[event.index].input = args; record(partial.id, { title: label(partial.name, args), input: JSON.stringify(args) }); if (!partial.web) reads.set(event.index, { ...partial, input: args }); }
+            }
+            if (args === undefined || !args || typeof args !== "object" || Array.isArray(args)) record(partial.id, { input: partial.args });
           }
           if (event.type === "message_delta") { stop = event.delta?.stop_reason || stop; output = event.usage?.output_tokens || output; }
           if (event.type === "message_stop") terminal = true;
@@ -171,9 +176,11 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
           result.activity = settle(result.activity, "failed", "Tool request did not finish within this round's token allowance");
           finalReason = "Finish within the remaining reply token budget"; continue;
         }
-        return finishFromObservations("The configured reply token limit was reached.");
+        return finishFromObservations("The configured reply token limit was reached. Continue when you’re ready.", true);
       }
       if (["refusal", "content_filter"].includes(stop)) throw new Error("The provider declined this reply.");
+      // A token-limited block can end mid-JSON. Only reject malformed completed calls after the finish reason is known.
+      if (argumentErrors.length) throw new Error(argumentErrors[0]);
       if (value.provider === "compatible") for (const [index, partial] of [...partials].sort(([a], [b]) => a - b)) {
         if (typeof partial.id !== "string" || !partial.id || partial.id.length > 200 || typeof partial.name !== "string" || !partial.name) throw new Error("The provider returned an incomplete tool request.");
         let input; try { input = JSON.parse(partial.args || "{}"); } catch { throw new Error("The provider returned invalid tool arguments."); }
@@ -253,7 +260,7 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
     }
     return finishFromObservations("The research continuation limit was reached.");
   } catch (error) {
-    if (!signal?.aborted && (timedOut || deadlineReached)) return finishFromObservations(deadlineReached ? "The five-minute research deadline was reached." : "The provider stopped responding for 90 seconds.");
+    if (!signal?.aborted && (timedOut || deadlineReached)) return finishFromObservations(deadlineReached ? "The five-minute research deadline was reached. Continue when you’re ready." : "The provider stopped responding for 90 seconds. Continue when you’re ready.", true);
     if (!signal?.aborted) { result.activity = settle(result.activity, "failed", timedOut ? "Timed out" : error.message); result.phase = "failed"; onUpdate(structuredClone(result)); }
     if (timedOut) throw new Error("The provider took too long to respond. Retry when you’re ready.");
     if (controller.signal.aborted) throw new DOMException("Stopped", "AbortError");

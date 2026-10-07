@@ -2,6 +2,13 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.18.1 — Finish research when a round fills up
+
+- When an intermediate model round reaches its output cap, Pip uses the reserved final-answer tokens instead of ending the run early. Phone and browser discard unfinished tool requests and preserve completed observations for synthesis.
+- Truncated Anthropic tool JSON is never executed. Malformed completed calls still fail visibly. The phone's tool-input limit now accommodates the same proposal payloads as the browser.
+- If final synthesis exhausts its budget or a browser run reaches its idle/absolute deadline, partial work stays incomplete and offers **Continue**. It remains visible without being replayed as a completed answer.
+- Android and Astro builds passed. 25 browser agent checks pass; the full Android unit suite ran with 555 cases, and its six failing cases already failed on 0.16.0. Model and search traffic was simulated; no handset was attached. The APK is unsigned for the signing agent.
+
 ## 0.18.0 — Pip agent
 
 - Pip can plan and complete multi-step research on phone and web: eight tool continuations and a final synthesis, 20 client calls, eight web calls, 48,000 characters of tool data, three concurrent independent reads and five minutes. The configured reply token budget spans all rounds, including providers that omit token usage. Unoffered tools never execute.

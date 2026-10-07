@@ -101,6 +101,48 @@ public class ClaudeAgentTransportTest {
                 ClaudeChatClient.cacheKey("read_note", new JSONObject("{\"offset\":0,\"id\":1}")));
     }
 
+    @Test public void intermediateLengthKeepsCompleteObservationsAndSynthesizesWithoutPartialToolJson() throws Exception {
+        String truncated = limited(new JSONObject().put("content", "Incomplete draft.").put("tool_calls",
+                new JSONArray().put(call("unfinished_call", "propose_action", "{\"kind\":\"note\",\"title\":\"unfinished"))));
+        run((round, body) -> {
+            if (round == 0) return tools(call("complete_read", "read_note", "{\"id\":" + note + "}"));
+            if (round == 1) return truncated;
+            return answer("Final synthesis from the original note.");
+        }, "[]", "");
+        assertTrue(listener.done); assertEquals(3, sent.size()); assertEquals("none", sent.get(2).getString("tool_choice"));
+        JSONArray history = sent.get(2).getJSONArray("messages");
+        assertTrue(history.toString().contains("Original fixture")); assertFalse(history.toString().contains("unfinished_call"));
+        assertEquals("Final synthesis from the original note.", listener.answer.toString()); assertEquals(1, listener.interims);
+        int caps = 0; for (JSONObject body : sent) caps += body.getInt("max_tokens"); assertEquals(config.maxTokens, caps);
+        assertEquals(1, (int) ReflectionHelpers.getField(lastCall, "toolCalls")); assertEquals(1, planner.entries().size());
+        JSONArray rows = ChatActivity.read(listener.activity); boolean abandoned = false;
+        for (int i = 0; i < rows.length(); i++) if ("propose_action".equals(rows.getJSONObject(i).optString("name"))) {
+            JSONObject row = rows.getJSONObject(i); assertEquals("failed", row.getString("state"));
+            assertEquals("incomplete_tool_call", new JSONObject(row.getString("result")).getString("error")); abandoned = true;
+        }
+        assertTrue(abandoned);
+    }
+
+    @Test public void finalLengthKeepsUsefulPartialAnswerWithoutAnotherRequest() throws Exception {
+        String first = limited(new JSONObject().put("content", "Incomplete initial answer.")), second = limited(new JSONObject().put("content", "Useful final portion."));
+        try { run((round, body) -> round == 0 ? first : second, "[]", ""); fail("Final truncation must stay resumable."); }
+        catch (java.lang.reflect.InvocationTargetException limited) { assertTrue(limited.getCause().getMessage().contains("token limit")); }
+        assertFalse(listener.done); assertEquals(2, sent.size()); assertEquals("none", sent.get(1).getString("tool_choice"));
+        assertEquals("Useful final portion.", listener.answer.toString()); assertEquals(1, listener.interims);
+        assertEquals(config.maxTokens, sent.get(0).getInt("max_tokens") + sent.get(1).getInt("max_tokens"));
+    }
+
+    @Test public void legalProposalInputAboveFourThousandCharactersProducesReviewResultWithoutSaving() throws Exception {
+        String text = "x".repeat(5600), arguments = new JSONObject().put("kind", "note").put("title", "Long draft").put("text", text).toString();
+        assertTrue(arguments.length() > 4096 && arguments.length() <= 8000);
+        run((round, body) -> round == 0 ? tools(call("long_proposal", "propose_action", arguments)) : answer("Review the draft."), "[]", "");
+        assertTrue(listener.done); assertEquals(1, planner.entries().size());
+        JSONArray history = sent.get(1).getJSONArray("messages");
+        JSONObject result = new JSONObject(history.getJSONObject(history.length() - 1).getString("content"));
+        assertEquals(text, result.getJSONObject("proposal").getString("text")); assertFalse(result.has("error"));
+        assertTrue(result.toString().length() <= 8000);
+    }
+
     @Test public void explicitContinueReusesPermittedCompletedResultsAndKeepsPriorProposal() throws Exception {
         String observed = PocketChatTools.execute(context, "read_note", new JSONObject().put("id", note));
         JSONArray previous = new JSONArray().put(checkpoint("read", "read_note", new JSONObject().put("id", note), observed))
@@ -234,9 +276,16 @@ public class ClaudeAgentTransportTest {
                 .put("delta", new JSONObject().put("content", text)).put("finish_reason", "stop"))) + "\n\ndata: [DONE]\n\n"; }
         catch (Exception impossible) { throw new AssertionError(impossible); }
     }
+    private static String limited(JSONObject delta) {
+        try { return "data: " + new JSONObject().put("choices", new JSONArray().put(new JSONObject().put("index", 0)
+                .put("delta", delta).put("finish_reason", "length"))) + "\n\ndata: [DONE]\n\n"; }
+        catch (Exception impossible) { throw new AssertionError(impossible); }
+    }
     private static class Recording implements ClaudeChatClient.Listener {
         String activity = "[]"; boolean done;
-        public boolean text(String value) { return true; }
+        final StringBuilder answer = new StringBuilder(); int interims;
+        public boolean text(String value) { answer.append(value); return true; }
+        public void interim() { answer.setLength(0); interims++; }
         public synchronized void activity(String value) {
             JSONArray rows = ChatActivity.read(value);
             for (int i = 0; i < rows.length(); i++) {

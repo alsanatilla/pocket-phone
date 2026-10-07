@@ -1,16 +1,17 @@
 {
   "component": "Pocket Android launcher/apps and Astro browser workspace",
-  "version_name": "0.18.0",
-  "version_code": 45,
+  "version_name": "0.18.1",
+  "version_code": 46,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-07T17:10:35Z",
-  "build": "Android assembleRom and Astro production build passed. Focused agent checks passed. Full suite and lint skipped.",
+  "checked_at_utc": "2026-10-07T20:09:04.152Z",
+  "build": "Android assembleRom and Astro production build passed. Browser agent checks (25) and the full Android unit suite ran.",
   "commands": [
     "npm run build",
-    "./gradlew.bat :app:testDebugUnitTest --tests org.textphone.launcher.PipPreviewTest --tests org.textphone.launcher.PipActionsTest --tests org.textphone.launcher.PocketChatToolsTest --tests org.textphone.launcher.ClaudeAgentTransportTest --console=plain",
-    "./gradlew.bat :app:testDebugUnitTest --tests org.textphone.launcher.ChatCloudCodecTest :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
+    "node pip-agent-check.mjs (25 deterministic browser agent checks)",
+    "./gradlew.bat :app:testDebugUnitTest --console=plain",
+    "./gradlew.bat :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
   ],
   "build_environment": {
     "java": "17.0.20.1+1",
@@ -18,9 +19,9 @@
   },
   "apk": {
     "file": "app/build/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.18.0-unsigned.apk",
-    "bytes": 11155245,
-    "sha256": "8614da480e3d3096a0a1f9c80aabaaca2e5dfc1c162a11156547affcba286667",
+    "release_asset": "pocket-phone-0.18.1-unsigned.apk",
+    "bytes": 11155545,
+    "sha256": "3ce05a3a5a59b7c42073d1f56ab4d04eae8650897fe0603cbf6710a7139bf78e",
     "signed": false,
     "installable_update": false,
     "signing": "Another release agent handles signing"
@@ -29,30 +30,24 @@
     "framework": "Astro server output",
     "hosting": "Vercel",
     "url": "https://pocket-phone.vercel.app/",
-    "release_asset": "pocket-web-0.18.0-source.zip",
-    "offline_worker": "pocket-astro-0180-agent",
+    "release_asset": "pocket-web-0.18.1-source.zip",
+    "offline_worker": "pocket-astro-0181-agent",
     "changed": true
   },
-  "focused_verification": {
-    "browser_flows": "Real browser UI and executor completed five-round fictional research with plan and Note/Task/Appointment proposals. No writes before Save; Cancel wrote nothing; edited proposals saved real records. Fictional account and throwaway local libSQL database synced observations, proposals, applied markers and saved records A to B; duplicate approval reused one task, its edit synced B to A. Stop retained completed research; Continue reused the turn/cache; Restart sent a fresh request. Layouts at 320/360/390/1280 px had no horizontal overflow or page errors.",
-    "handset": "No physical Android device attached; handset and actual virtual-keyboard interaction remain unverified.",
-    "provider": "Model and Firecrawl traffic simulated. Local sync exercised its real API on an isolated database. No paid requests.",
-    "browser_engine": "20 fake-SSE/in-memory scenarios passed: multi-round research, concurrency/order, canonical cache, unknown tools, nine rounds without usage under the default token budget, call/data/web limits, cancellation/idle deadline, corrupt checkpoint retention, signed/server continuation, schemas, Firecrawl recency/domain filters, paged web cache, portable resume and grant revocation. No external requests.",
-    "native": "39 passed in two focused runs: ClaudeAgentTransportTest 12, PocketChatToolsTest 9, PipActionsTest 9, PipPreviewTest 7, ChatCloudCodecTest 2 (API 24 and 35). Covers nine-round synthesis, summed token caps without usage, ordered parallel reads, protocol IDs/encrypted continuation, 20-call/8-web/48k-data budgets, live permissions/cache/resume, atomic checkpoints, paging/query/schema validation, portable proposal IDs, idempotency/tombstones, actual cancel/edit/save/open UI and portable codec metadata. Native screenshots inspected."
-  },
   "full_test_suite": {
-    "status": "Skipped",
-    "prior_release_record": "v0.17.0 retained an earlier broad run with 513 cases, 12 failures corresponding to seven pre-existing failing cases, and two obsolete layout skips. No passing full suite is claimed.",
-    "reason": "User requested skipping the suite; only focused checks for changed agent behavior were run"
+    "status": "Ran",
+    "cases": 555,
+    "failed_results": 10,
+    "failing_cases": 6,
+    "skipped": 2,
+    "detail": "All six failing cases also fail on the 0.16.0 code (cloud sync tag, Drive scheduling, two short-window planning layouts, one organizer search). No failure is new since 0.16.0. Two obsolete Today command-row tests are skipped."
   },
   "changes": [
-    "Bounded multi-step research with three parallel independent reads and final synthesis",
-    "Paged Notes/web reads, task details, Calendar and combined permitted Pocket search",
-    "Domain and recency web filters, query-focused passages and visible cached results",
-    "Persisted plans and observations with permission/provider-aware Continue and fresh Restart",
-    "Editable Note/Task/Appointment proposals requiring explicit Save",
-    "Portable proposal IDs, duplicate prevention and deletion tombstones",
-    "Account sync of checkpoints, proposals, approval markers and saved content"
+    "An intermediate round that reaches its output cap continues to final synthesis with the reserved budget instead of ending the run",
+    "Unfinished tool requests from a truncated round are marked failed and never execute; completed observations are kept",
+    "Phone tool-input limit raised to 8,000 characters to match browser proposal payloads",
+    "A final answer that fills its budget, or a browser idle/absolute deadline, stays incomplete and resumable with Continue",
+    "Android SDK tests compile again (AnthropicClient is not AutoCloseable); Pip answer formatting test finds the answer by text"
   ],
   "known_limits": [
     "APK requires signing before installation.",
@@ -64,5 +59,10 @@
   ],
   "physical_handset_checked": false,
   "full_custom_rom_compiled": false,
-  "previous_release": "v0.17.0"
+  "previous_release": "v0.18.0",
+  "focused_verification": {
+    "browser": "25 deterministic agent checks passed: multi-round budgets, parallel order, caching, truncated and malformed tool arguments, final token cap, idle/deadline interruption, resume and checkpoints. No provider or Firecrawl traffic.",
+    "native": "Pip, Claude transport and streaming suites: 67 cases pass on Android API 24 and 35, including truncated Anthropic rounds, final token cap and 5,600-character proposal arguments.",
+    "handset": "No device attached; physical handset behavior remains unverified."
+  }
 }

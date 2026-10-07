@@ -47,22 +47,7 @@ public class PipStreamingTest {
                 + event("content_block_delta", "{\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"query\\\":\\\"run\\\"}\"}}")
                 + event("content_block_stop", "{\"index\":2}") + anthropicEnd("tool_use");
         String second = anthropicStart("second") + anthropicText(0, "No running notes were found.") + anthropicEnd("end_turn");
-        HttpClient http = new HttpClient() {
-            public HttpResponse execute(HttpRequest request, RequestOptions options) {
-                ByteArrayOutputStream bytes = new ByteArrayOutputStream(); request.body().writeTo(bytes);
-                try { bodies.add(new JSONObject(new String(bytes.toByteArray(), StandardCharsets.UTF_8))); }
-                catch (Exception invalid) { throw new AssertionError(invalid); }
-                String sse = bodies.size() == 1 ? first : second;
-                return new HttpResponse() {
-                    public int statusCode() { return 200; }
-                    public Headers headers() { return Headers.builder().put("content-type", "text/event-stream").build(); }
-                    public InputStream body() { return new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)); }
-                    public void close() { }
-                };
-            }
-            public CompletableFuture<HttpResponse> executeAsync(HttpRequest request, RequestOptions options) { return CompletableFuture.completedFuture(execute(request, options)); }
-            public void close() { }
-        };
+        HttpClient http = anthropicTransport(bodies, List.of(first, second));
         ClaudeChatClient.Call call = new ClaudeChatClient.Call(context, config, "chat-one",
                 List.of(new ClaudeChatClient.Message("user", "Find my running notes")), 64_000, capture);
         AnthropicClient client = new AnthropicClientImpl(ClientOptions.builder().httpClient(http)
@@ -79,6 +64,70 @@ public class PipStreamingTest {
         assertEquals("opaque-signature", continuation.getJSONObject(0).getString("signature"));
         assertEquals("I'll look in your notes.", continuation.getJSONObject(1).getString("text"));
         assertTrue(bodies.get(0).get("system").toString().contains("You are pip"));
+    }
+
+    @Test public void anthropicTruncatedToolJsonUsesReservedSynthesisAndKeepsOnlyCompleteProtocol() throws Exception {
+        Capture capture = new Capture(); ChatProvider.Config config = ChatProvider.defaults("anthropic"); List<JSONObject> bodies = new ArrayList<>();
+        String first = anthropicStart("first")
+                + event("content_block_start", "{\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"complete_read\",\"name\":\"search_notes\",\"input\":{}}}")
+                + event("content_block_stop", "{\"index\":0}") + anthropicEnd("tool_use");
+        String second = anthropicStart("limited") + anthropicText(0, "Incomplete draft.")
+                + event("content_block_start", "{\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"unfinished_call\",\"name\":\"propose_action\",\"input\":{}}}")
+                + event("content_block_delta", new JSONObject().put("index", 1).put("delta", new JSONObject().put("type", "input_json_delta")
+                        .put("partial_json", "{\"kind\":\"note\",\"title\":\"unfinished")).toString())
+                + event("content_block_stop", "{\"index\":1}") + anthropicEnd("max_tokens", 190);
+        String third = anthropicStart("final") + anthropicText(0, "Final synthesis from completed observations.") + anthropicEnd("end_turn");
+        ClaudeChatClient.Call call = new ClaudeChatClient.Call(context, config, "limited-chat", List.of(new ClaudeChatClient.Message("user", "Find a note and draft a summary")), 64000, capture);
+        { AnthropicClient client = new AnthropicClientImpl(ClientOptions.builder().httpClient(anthropicTransport(bodies, List.of(first, second, third)))
+                .baseUrl("https://api.anthropic.com").maxRetries(0).build()); invoke(call, "runAnthropic", AnthropicClient.class, client); }
+        assertTrue(capture.complete); assertEquals(3, bodies.size()); assertEquals(1, capture.interims);
+        assertEquals("Final synthesis from completed observations.", capture.answer.toString());
+        assertEquals("none", bodies.get(2).getJSONObject("tool_choice").getString("type"));
+        JSONArray continued = bodies.get(2).getJSONArray("messages"); assertEquals(3, continued.length());
+        assertTrue(continued.toString().contains("complete_read")); assertTrue(continued.toString().contains("tool_result"));
+        assertFalse(continued.toString().contains("unfinished_call")); assertFalse(continued.toString().contains("Incomplete draft."));
+        assertEquals(1828, bodies.get(2).getInt("max_tokens")); assertEquals(250, capture.usage.outputTokens);
+        JSONArray activity = ChatActivity.read(capture.activity); boolean aborted = false;
+        for (int i = 0; i < activity.length(); i++) if ("propose_action".equals(activity.getJSONObject(i).optString("name"))) {
+            JSONObject row = activity.getJSONObject(i); assertEquals("failed", row.getString("state"));
+            assertEquals("incomplete_tool_call", new JSONObject(row.getString("result")).getString("error")); aborted = true;
+        }
+        assertTrue(aborted);
+    }
+
+    @Test public void anthropicFinalTokenLimitKeepsPartialTextIncompleteWithoutAnotherRequest() throws Exception {
+        Capture capture = new Capture(); ChatProvider.Config config = ChatProvider.defaults("anthropic"); List<JSONObject> bodies = new ArrayList<>();
+        String first = anthropicStart("limited") + anthropicText(0, "Incomplete initial answer.") + anthropicEnd("max_tokens", 170);
+        String second = anthropicStart("final") + anthropicText(0, "Useful final portion.") + anthropicEnd("max_tokens", 1878);
+        ClaudeChatClient.Call call = new ClaudeChatClient.Call(context, config, "final-limit-chat", List.of(new ClaudeChatClient.Message("user", "Question")), 64000, capture);
+        { AnthropicClient client = new AnthropicClientImpl(ClientOptions.builder().httpClient(anthropicTransport(bodies, List.of(first, second)))
+                .baseUrl("https://api.anthropic.com").maxRetries(0).build());
+            try { invoke(call, "runAnthropic", AnthropicClient.class, client); fail("Final truncation must stay resumable."); }
+            catch (java.lang.reflect.InvocationTargetException limited) { assertTrue(limited.getCause().getMessage().contains("token limit")); }
+        }
+        assertFalse(capture.complete); assertEquals("Useful final portion.", capture.answer.toString()); assertEquals(2, bodies.size());
+        assertEquals("none", bodies.get(1).getJSONObject("tool_choice").getString("type"));
+        assertEquals(config.maxTokens, bodies.get(0).getInt("max_tokens") + bodies.get(1).getInt("max_tokens"));
+        assertEquals(config.maxTokens, capture.usage.outputTokens);
+    }
+
+    @Test public void anthropicInitialProposalArgumentsAboveFourThousandCharactersRemainReadOnly() throws Exception {
+        Capture capture = new Capture(); ChatProvider.Config config = ChatProvider.defaults("anthropic"); List<JSONObject> bodies = new ArrayList<>();
+        String text = "x".repeat(5600); JSONObject arguments = new JSONObject().put("kind", "note").put("title", "Long draft").put("text", text);
+        assertTrue(arguments.toString().length() > 4096 && arguments.toString().length() <= 8000);
+        PlannerStore planner = new PlannerStore(context.getSharedPreferences("pocket_planner", 0)); int before = planner.entries().size();
+        String first = anthropicStart("proposal") + event("content_block_start", new JSONObject().put("index", 0)
+                .put("content_block", new JSONObject().put("type", "tool_use").put("id", "long_proposal").put("name", "propose_action").put("input", arguments)).toString())
+                + event("content_block_stop", "{\"index\":0}") + anthropicEnd("tool_use");
+        String second = anthropicStart("answer") + anthropicText(0, "Review the draft.") + anthropicEnd("end_turn");
+        ClaudeChatClient.Call call = new ClaudeChatClient.Call(context, config, "proposal-chat", List.of(new ClaudeChatClient.Message("user", "Draft a note")), 64000, capture);
+        { AnthropicClient client = new AnthropicClientImpl(ClientOptions.builder().httpClient(anthropicTransport(bodies, List.of(first, second)))
+                .baseUrl("https://api.anthropic.com").maxRetries(0).build()); invoke(call, "runAnthropic", AnthropicClient.class, client); }
+        assertTrue(capture.complete); assertEquals(before, planner.entries().size());
+        JSONObject resultBlock = bodies.get(1).getJSONArray("messages").getJSONObject(2).getJSONArray("content").getJSONObject(0);
+        Object content = resultBlock.get("content");
+        JSONObject result = new JSONObject(content instanceof String ? (String) content : ((JSONArray) content).getJSONObject(0).getString("text"));
+        assertEquals(text, result.getJSONObject("proposal").getString("text")); assertFalse(result.has("error")); assertTrue(result.toString().length() <= 8000);
     }
 
     @Test public void compatibleReasoningDoesNotDuplicateAndToolFollowupRetainsItsProtocol() throws Exception {
@@ -132,7 +181,29 @@ public class PipStreamingTest {
                 + event("content_block_stop", "{\"index\":" + index + "}");
     }
     private static String anthropicEnd(String reason) throws Exception {
-        return event("message_delta", "{\"delta\":{\"stop_reason\":\"" + reason + "\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":30}}") + event("message_stop", "{}");
+        return anthropicEnd(reason, 30);
+    }
+    private static String anthropicEnd(String reason, int tokens) throws Exception {
+        return event("message_delta", "{\"delta\":{\"stop_reason\":\"" + reason + "\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":" + tokens + "}}") + event("message_stop", "{}");
+    }
+    private static HttpClient anthropicTransport(List<JSONObject> bodies, List<String> replies) {
+        return new HttpClient() {
+            public HttpResponse execute(HttpRequest request, RequestOptions options) {
+                ByteArrayOutputStream bytes = new ByteArrayOutputStream(); request.body().writeTo(bytes);
+                try { bodies.add(new JSONObject(new String(bytes.toByteArray(), StandardCharsets.UTF_8))); }
+                catch (Exception invalid) { throw new AssertionError(invalid); }
+                assertTrue("Unexpected extra provider request", bodies.size() <= replies.size());
+                String sse = replies.get(bodies.size() - 1);
+                return new HttpResponse() {
+                    public int statusCode() { return 200; }
+                    public Headers headers() { return Headers.builder().put("content-type", "text/event-stream").build(); }
+                    public InputStream body() { return new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)); }
+                    public void close() { }
+                };
+            }
+            public CompletableFuture<HttpResponse> executeAsync(HttpRequest request, RequestOptions options) { return CompletableFuture.completedFuture(execute(request, options)); }
+            public void close() { }
+        };
     }
     private static String compatible(JSONObject delta, String finish) throws Exception {
         return "data: " + new JSONObject().put("model", "test-model").put("choices", new JSONArray().put(new JSONObject().put("index", 0)
@@ -141,10 +212,13 @@ public class PipStreamingTest {
     private static final class Capture implements ClaudeChatClient.Listener {
         final StringBuilder answer = new StringBuilder(), trail = new StringBuilder(); final List<String> order = new ArrayList<>();
         boolean complete; int interims;
+        String activity = "[]"; ClaudeChatClient.Usage usage = ClaudeChatClient.Usage.EMPTY;
         public boolean text(String delta) { answer.append(delta); return true; }
         public void reasoning(String delta) { trail.append(delta); }
         public void interim() { interims++; order.add("interim"); answer.setLength(0); }
         public void step(String label) { order.add("step"); trail.append("\n").append(label).append("\n"); }
+        public void activity(String value) { activity = value; }
+        public void usage(ClaudeChatClient.Usage value) { usage = value; }
         public void done(String model, ClaudeChatClient.Usage usage) { complete = true; }
         public void failed(String reason) { fail(reason); }
     }
