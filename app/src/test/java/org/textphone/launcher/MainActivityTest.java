@@ -61,14 +61,17 @@ public class MainActivityTest {
 
     private void shortcut(String label) { ((View) label(label).getParent()).performClick(); }
 
-    @Test public void homeHasTheNineReferenceShortcutsAndSoftKeys() {
+    @Test public void homeHasTheNineReferenceShortcutsAndTheDock() {
         for (String label : new String[]{"smart txt", "whatsapp", "dumb txt", "contacts",
-                "call history", "settings", "maps", "camera", "rides", "capture", "today", "pip", "all"}) {
+                "call history", "settings", "maps", "camera", "rides", "today", "search", "apps"}) {
             assertNotNull(label(label));
         }
+        View root = activity.findViewById(android.R.id.content);
+        assertNotNull(root.findViewWithTag("workspace_capture"));
+        assertNotNull(root.findViewWithTag("today_chat"));
         assertTrue(((View) label("smart txt").getParent()).isSelected());
-        assertEquals(0xFF000000, label("smart txt").getCurrentTextColor());
-        assertEquals(0xFFFFFFFF, label("camera").getCurrentTextColor());
+        assertEquals(PocketDesign.accent(activity), label("smart txt").getCurrentTextColor());
+        assertEquals(PocketDesign.TEXT, label("camera").getCurrentTextColor());
     }
 
     @Test public void callHistoryOpensThePocketPhoneApp() {
@@ -88,9 +91,10 @@ public class MainActivityTest {
 
     @Test public void missingSmartMessagingAppOpensTheShortcutPicker() {
         shortcut("smart txt");
-        assertNotNull(label("Choose an installed app for this shortcut."));
+        assertNotNull(label("Use default"));
         label("Use default").performClick();
-        assertNotNull(label("capture"));
+        assertNotNull(label("today"));
+        assertNotNull(label("smart txt"));
     }
 
     @Test public void homeIntentAlwaysReturnsToTheGrid() {
@@ -116,12 +120,12 @@ public class MainActivityTest {
         ((View) label("Colour").getParent()).performClick();
         assertEquals(1, activity.getSharedPreferences("text_phone", 0).getInt("accent", -1));
         activity.onBackPressed();
-        assertEquals(0xFF9BE564, label("capture").getCurrentTextColor());
+        assertEquals(PocketDesign.MOVEMENT, label("pocket").getCurrentTextColor());
     }
 
     @Test public void allAppsReturnsToTheScreenThatOpenedIt() {
-        label("all").performClick();
-        assertNotNull(label("apps"));
+        shortcut("apps");
+        assertNotNull(label("installed"));
         activity.onBackPressed();
         assertNotNull(label("smart txt"));
         shortcut("settings");
@@ -146,7 +150,11 @@ public class MainActivityTest {
             int[] position = new int[2];
             text.getLocationInWindow(position);
             assertTrue(shortcut + " is below the status bar", position[1] >= 28);
-            assertTrue(shortcut + " is above the footer", position[1] + text.getHeight() < 680);
+            View dock = root.findViewWithTag("today_actions");
+            int[] dockPosition = new int[2];
+            if (dock != null) dock.getLocationInWindow(dockPosition);
+            int footer = dock == null ? 680 : dockPosition[1];
+            assertTrue(shortcut + " is above the dock (" + (position[1] + text.getHeight()) + " vs " + footer + ")", position[1] + text.getHeight() < footer);
         }
         int[] first = new int[2];
         int[] last = new int[2];

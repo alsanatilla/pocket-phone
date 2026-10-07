@@ -40,6 +40,16 @@ public class PocketAppsTest {
     static TextView find(View view, String text) { // Chrome labels are lowercase by design; tests name controls without depending on letter case.
         if (view instanceof TextView && text.equalsIgnoreCase(((TextView)view).getText().toString())) return (TextView)view;
         if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup)view).getChildCount(); i++) { TextView result = find(((ViewGroup)view).getChildAt(i), text); if (result != null) return result; } return null; }
+    /** The "+ note" and "+ task" commands live in their own workspace tab, so a test that wants one selects that tab first. */
+    static TextView findCommand(View root, String label) {
+        TextView found = find(root, label);
+        if (found != null) return found;
+        String lower = label.toLowerCase(), tab = lower.contains("note") ? "notes" : lower.contains("task") ? "tasks" : null;
+        TextView tabView = tab == null ? null : find(root, tab);
+        if (tabView == null) return null;
+        tabView.performClick();
+        return find(root, label);
+    }
     private static void click(PocketActivity activity, String text) { TextView view = find(activity.getWindow().getDecorView(), text); assertNotNull(text, view); view.performClick(); }
     @Test public void nativeDialpadDoesNotCallUntilTheUserPressesCall() {
         ShadowTelecomManager telecom = Shadows.shadowOf(context.getSystemService(TelecomManager.class)); telecom.setDefaultDialerPackage(context.getPackageName()); telecom.setReadPhoneStatePermission(true); telecom.setCallPhonePermission(true);

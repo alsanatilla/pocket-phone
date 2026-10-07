@@ -1,26 +1,26 @@
 {
   "component": "Pocket Android launcher/apps and Astro browser workspace",
-  "version_name": "0.16.0",
-  "version_code": 43,
+  "version_name": "0.17.0",
+  "version_code": 44,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-07T10:23:14.200Z",
-  "build": "Android assembleRom and Astro production build passed. Focused setup checks passed. Full test suite and lint skipped at the user’s request.",
+  "checked_at_utc": "2026-10-07T16:31:28Z",
+  "build": "Android assembleRom and Astro production build passed. Focused browser and native checks passed. Lint and final full-suite rerun skipped.",
   "commands": [
     "npm run build",
-    "./gradlew.bat -I app/build/tmp/release-0160.gradle :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain",
-    "./gradlew.bat :app:testDebugUnitTest --tests SetupPreviewTest --tests HomeDashboardTest --tests MainActivityTest --tests CloudSyncFlowTest --tests BackRoutesTest"
+    "./gradlew.bat :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain",
+    "./gradlew.bat -I tools/render-layouts.gradle :app:renderRomLayouts -PrenderCase=org.textphone.launcher.PipPreviewTest --console=plain"
   ],
   "build_environment": {
     "java": "17.0.20.1+1",
     "node": "v24.19.0"
   },
   "apk": {
-    "file": "app/build/release-0160/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.16.0-unsigned.apk",
-    "bytes": 10825476,
-    "sha256": "51d417fe67245c0f33d49fae517d7b701ad1803ebc421e7ffdb6fd45c4ef585c",
+    "file": "app/build/outputs/apk/rom/app-rom-unsigned.apk",
+    "release_asset": "pocket-phone-0.17.0-unsigned.apk",
+    "bytes": 11133521,
+    "sha256": "2f446a6c983ba385d11d294955578183bae687e975763d6faaba570efbdfe22c",
     "signed": false,
     "installable_update": false,
     "signing": "Another release agent handles signing"
@@ -29,35 +29,43 @@
     "framework": "Astro server output",
     "hosting": "Vercel",
     "url": "https://pocket-phone.vercel.app/",
-    "release_asset": "pocket-web-0.16.0-source.zip",
-    "offline_worker": "pocket-astro-0160-setup",
+    "release_asset": "pocket-web-0.17.0-source.zip",
+    "offline_worker": "pocket-astro-0170-warm",
     "changed": true
   },
   "focused_verification": {
-    "browser": "Isolated Astro dev server with a local libSQL file and a fictional account: setup page at 1280px and 390px; create account inline and return to the phone step after reload; link a phone with a real device-code from /api/auth/device/code; skip and ask again; COROS return (?coros=error) lands back on setup; OpenRouter key saved and Pip marked ready; Today banner, Apps and Account entries; hiding the reminder. No production data or paid provider used.",
-    "native": "Robolectric SetupPreviewTest: 2 passed, 0 failed. Step order, skips and ask again, link/email sign-in intents into CloudActivity, Pip presets and empty-key guard, finished state, Home reminder beside the wordmark and hiding it. HomeDashboardTest and MainActivityTest tile-fit checks pass with the reminder.",
-    "existing_failures": "CloudSyncFlowTest (looks for a cloud_sync tag the account screen no longer has) and MainActivityTest.missingSmartMessagingAppOpensTheShortcutPicker fail identically on the 0.15.0 code.",
-    "handset": "No device attached to adb; physical handset behavior remains unverified."
+    "browser": "Eight functional flows: missing and real cached COROS readings, Today order and add-tile persistence, task groups/steps/completion, explicit thought conversion, note autosave/navigation, Apps search/launch, and simulated OpenRouter/Firecrawl streaming with real Pocket note reads and cancellation. 65 layout checks over 13 routes at 320/360/390/768/1280 px: no horizontal overflow or browser page errors. Two independent browsers and a fictional account on a throwaway local database verified Notes/Tasks/Thoughts/Today preferences/Pip stored turns and drafts in both directions and their rendered UIs. No production data or paid requests.",
+    "native": "WarmConsolePreviewTest: 3 passed; PipPreviewTest: 6 passed. Covers COROS bars, unique chosen task, explicit thought promotion, task steps/completion, tiles and app tabs, large font at 320 dp, keyboard-constrained chat, inspectable execution and sources. Native screenshots inspected.",
+    "existing_failures": "Earlier broad debug run: 513 cases, 12 failures corresponding to seven cases also failing on committed 0.16.0; 2 obsolete Today layout cases skipped in favor of WarmConsolePreviewTest. This is not a passing suite.",
+    "handset": "No device attached to adb; physical handset behavior remains unverified.",
+    "readability": "40 seeded desktop/phone page views, 1191 text runs: minimum measured content size 13 px, minimum computed contrast 4.7:1, no findings under the audit rules. This covers rendered text, not every possible content/state or graphical contrast."
   },
   "full_test_suite": {
-    "status": "Skipped",
-    "reason": "Explicit user instruction; lint also skipped"
+    "status": "Not rerun for final release",
+    "reason": "User requested skipping the suite; earlier agent run results retained honestly",
+    "earlier_cases": 513,
+    "earlier_failures": 12,
+    "pre_existing_failing_cases": 7,
+    "obsolete_layout_skips": 2
   },
   "changes": [
-    "One ordered setup page on phone and web: account, phone link, COROS, Pip",
-    "Remembered skips with ask again; page opens at the first open step",
-    "Inline browser sign-in; phone account screen opens at the chosen action and returns to setup",
-    "COROS sign-in returns to setup; account COROS connection shows on the phone",
-    "Pip presets: OpenRouter free router or Claude key; keys stay per device",
-    "Reminders on browser Today and phone Home, entries in Apps, Account and phone Settings"
+    "Warm Console design shared across native and web screens",
+    "COROS bars lead Home and Today; chosen/due actions appear once; direct customizable tiles",
+    "Clear task groups with expandable steps; explicit thought conversion; note autosave and draft preservation",
+    "Oversized animated Pip navigation and inspectable tool/search activity with keyboard-aware composer",
+    "Pocket tool groups and Android Installed tab with scoped search",
+    "Plex Mono fonts bundled with license notices; header-only cached dithered artwork",
+    "Settings, setup and secondary screens inherit shared typography, colors and controls"
   ],
   "known_limits": [
     "APK requires signing before installation.",
-    "Physical handset interaction remains unverified.",
-    "Browser Pip keys remain per tab by design, so the browser asks again in a new tab.",
-    "Existing cloud storage has not gained end-to-end encryption in this release."
+    "No physical handset or real virtual-keyboard interaction was available.",
+    "Provider responses were simulated for this pass; live paid-provider behavior was not checked.",
+    "Earlier broad test run has pre-existing failures; see focused_verification.existing_failures.",
+    "Browser Pip keys remain per tab by design.",
+    "Cloud storage has not gained end-to-end encryption."
   ],
   "physical_handset_checked": false,
   "full_custom_rom_compiled": false,
-  "previous_release": "v0.15.0"
+  "previous_release": "v0.16.0"
 }

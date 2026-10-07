@@ -35,7 +35,7 @@ export function clearWorkspace() {
 /** True when this browser holds guest records worth bringing into an account. */
 export function guestHasData() {
   if(Object.keys(native()).some(key=>key.startsWith('pocket:pip-chat:')))return true;
-  for (const name of ['notes.json', 'tasks.json', 'parking.json', 'journal.json', 'gym.json']) {
+  for (const name of ['notes.json', 'tasks.json', 'parking.json', 'journal.json', 'gym.json', 'travel-v2']) {
     try { const doc = JSON.parse(native().getItem('pocket:' + name) || 'null'); if (doc && Object.values(doc).some(value => Array.isArray(value) && value.length)) return true; } catch { /* unreadable copy */ }
   }
   return false;
@@ -52,4 +52,4 @@ export function importGuestCopy() {
   // All tabs switch to this account; only its server may rotate the transferred token.
   native().removeItem('pocket:coros'); native().removeItem('pocket:coros-client');
 }
-addEventListener('storage', event => { if (event.key === ACTIVE) location.reload(); });
+globalThis.addEventListener?.('storage', event => { if (event.key === ACTIVE) globalThis.location?.reload(); });

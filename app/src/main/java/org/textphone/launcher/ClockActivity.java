@@ -74,7 +74,7 @@ public final class ClockActivity extends PocketActivity {
             action("start timer", () -> { int value; try { value = Integer.parseInt(minutes.getText().toString()); } catch (NumberFormatException e) { throw new IllegalArgumentException("Enter minutes."); }
                 if (value < 1 || value > 1440) throw new IllegalArgumentException("Use 1 to 1440 minutes.");String label=timerLabel.getText().toString().trim();ready(() -> timer(value * 60,label.isEmpty()?"Timer":label)); });
         } else {
-            wallClock = label(new java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(new java.util.Date()), 40, WHITE); body.addView(wallClock);
+            wallClock = label(new java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(new java.util.Date()), PocketDesign.DISPLAY, PocketDesign.CALENDAR); wallClock.setTypeface(PocketFonts.pixel(this)); body.addView(wallClock);
             commands(body, new String[]{"+ alarm", "agenda"}, 0, this::alarmEditor, () -> startActivity(new Intent(this, AgendaActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
         }
         boolean listed = false;
@@ -105,7 +105,7 @@ public final class ClockActivity extends PocketActivity {
     private void alarmForm(int hour,int minute,String savedTitle,boolean savedDaily){alarmForm(hour,minute,savedTitle,savedDaily,0);}
     private void alarmForm(int hour, int minute, String savedTitle, boolean savedDaily,long id) {
         editingAlarm = true; editingAlarmId=id; chosenHour = hour; chosenMinute = minute; screen(id==0?"new alarm":"edit alarm"); counter=wallClock=null;countdowns.clear();alarmTitle = input("Label", InputType.TYPE_CLASS_TEXT); alarmTitle.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(200)}); alarmTitle.setText(savedTitle);alarmTitle.setTag("alarm_title");
-        android.widget.Button time=action(String.format(Locale.getDefault(),"%02d:%02d",chosenHour,chosenMinute),()->new TimePickerDialog(this,(picker,h,m)->{chosenHour=h;chosenMinute=m;((TextView)body.findViewWithTag("alarm_time")).setText(String.format(Locale.getDefault(),"%02d:%02d",h,m));},chosenHour,chosenMinute,true).show());time.setTag("alarm_time");time.setContentDescription("Change alarm time");time.setTextSize(PocketDesign.typeSize(this,30));
+        android.widget.Button time=action(String.format(Locale.getDefault(),"%02d:%02d",chosenHour,chosenMinute),()->new TimePickerDialog(this,(picker,h,m)->{chosenHour=h;chosenMinute=m;((TextView)body.findViewWithTag("alarm_time")).setText(String.format(Locale.getDefault(),"%02d:%02d",h,m));},chosenHour,chosenMinute,true).show());time.setTag("alarm_time");time.setContentDescription("Change alarm time");time.setTextSize(PocketDesign.typeSize(this,40));time.setTypeface(PocketFonts.pixel(this));time.setTextColor(PocketDesign.colors(this,PocketDesign.CALENDAR));
         alarmDaily = new CheckBox(this); alarmDaily.setText("Daily"); PocketDesign.text(alarmDaily, PocketDesign.BODY, WHITE); alarmDaily.setMinHeight(dp(PocketDesign.CONTROL)); alarmDaily.setChecked(savedDaily); body.addView(alarmDaily);
         android.widget.Button save = action("save", () -> {ClockStore.Entry existing=editingAlarmId==0?null:ClockStore.find(this,editingAlarmId);if(editingAlarmId!=0&&existing==null){message("This alarm was removed. Return to the alarm list.");return;}Runnable commit=()->{ClockStore.Entry e = new ClockStore.Entry();e.id=editingAlarmId; e.kind = "alarm"; e.enabled = existing==null||existing.enabled; e.daily = alarmDaily.isChecked(); e.title = alarmTitle.getText().toString().trim();
             if (e.title.isEmpty()) e.title = "Alarm"; e.hour = chosenHour; e.minute = chosenMinute; e.due = ClockStore.nextTime(e.hour, e.minute, System.currentTimeMillis()); AlarmScheduler.saveAndArm(this, e); page = "alarms"; render(); };if(existing!=null&&!existing.enabled)commit.run();else ready(commit);}); PocketDesign.primary(save);
@@ -140,7 +140,7 @@ public final class ClockActivity extends PocketActivity {
         if (p.getBoolean("running", false) && p.getInt("boot", -1) == ClockStore.boot(this)) total += Math.max(0, SystemClock.elapsedRealtime() - p.getLong("start", SystemClock.elapsedRealtime())); return total; }
     private void stopwatch() { ClockCloud.restoreStopwatch(this);android.content.SharedPreferences p = getSharedPreferences("pocket_stopwatch", 0);
         if (p.getInt("boot", -1) != ClockStore.boot(this)) p.edit().putBoolean("running", false).apply();
-        counter = label(duration(stopwatchMillis()), 36, WHITE); body.addView(counter);
+        counter = label(duration(stopwatchMillis()), PocketDesign.DISPLAY, PocketDesign.YELLOW); counter.setTypeface(PocketFonts.pixel(this)); body.addView(counter);
         keys(new String[]{p.getBoolean("running", false) ? "pause" : "start", "reset"}, () -> {
             if (p.getBoolean("running", false)) p.edit().putLong("total", stopwatchMillis()).putBoolean("running", false).apply();
             else p.edit().putLong("start", SystemClock.elapsedRealtime()).putInt("boot", ClockStore.boot(this)).putBoolean("running", true).apply();ClockCloud.touchStopwatch(this); render();

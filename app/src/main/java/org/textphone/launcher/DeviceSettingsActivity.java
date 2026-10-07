@@ -12,12 +12,20 @@ import android.widget.SeekBar;
 
 /** Pocket controls public device APIs; protected changes use Android's consent panels. */
 public final class DeviceSettingsActivity extends PocketActivity {
+    @Override protected String scene() { return PixelBackdrop.TILES; }
+    private void styleSlider(SeekBar slider, String label) {
+        slider.setContentDescription(label);
+        slider.setProgressTintList(android.content.res.ColorStateList.valueOf(PocketDesign.YELLOW));
+        slider.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(PocketDesign.LINE));
+        slider.setThumbTintList(android.content.res.ColorStateList.valueOf(PocketDesign.CREAM));
+        slider.setPadding(dp(8), dp(8), dp(8), dp(8));
+    }
     @Override protected void onCreate(Bundle state) { super.onCreate(state); screen("device settings");
         action("Wi-Fi / mobile data", () -> startActivity(new Intent(Build.VERSION.SDK_INT >= 29 ? Settings.Panel.ACTION_INTERNET_CONNECTIVITY : Settings.ACTION_WIRELESS_SETTINGS)));
         action("Bluetooth", () -> startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)));
         action("permissions", () -> startActivity(new Intent(this, PermissionsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
         body.addView(label("Brightness", 17, WHITE)); SeekBar brightness = new SeekBar(this); brightness.setMax(255); brightness.setMinimumHeight(dp(PocketDesign.CONTROL));
-        brightness.setProgress(Settings.System.getInt(getContentResolver(), Settings.System.SCREEN_BRIGHTNESS, 128)); body.addView(brightness);
+        styleSlider(brightness, "Brightness"); brightness.setProgress(Settings.System.getInt(getContentResolver(), Settings.System.SCREEN_BRIGHTNESS, 128)); body.addView(brightness);
         brightness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             public void onProgressChanged(SeekBar s, int value, boolean user) { if (user) { android.view.WindowManager.LayoutParams p = getWindow().getAttributes(); p.screenBrightness = Math.max(1, value) / 255f; getWindow().setAttributes(p); } }
             public void onStartTrackingTouch(SeekBar s) {}
@@ -43,8 +51,8 @@ public final class DeviceSettingsActivity extends PocketActivity {
         action("open source licenses", this::licenses);
     }
     private void licenses() {
-        String[] names = {"Pocket · MIT", "VT323 · Open Font License", "Markwon · Apache 2.0", "commonmark-java · BSD", "AndroidX annotations · Apache 2.0", "Anthropic SDK · MIT", "Network dependency notices"};
-        String[] files = {"Pocket-MIT.txt", "VT323-OFL.txt", "Markwon-APACHE-2.0.txt", "CommonMark-BSD.txt", "Markwon-APACHE-2.0.txt", "Anthropic-MIT.txt", "Network-NOTICES.txt"};
+        String[] names = {"Pocket · MIT", "VT323 · Open Font License", "IBM Plex Mono · Open Font License", "Markwon · Apache 2.0", "commonmark-java · BSD", "AndroidX annotations · Apache 2.0", "Anthropic SDK · MIT", "Network dependency notices"};
+        String[] files = {"Pocket-MIT.txt", "VT323-OFL.txt", "IBMPlexMono-OFL.txt", "Markwon-APACHE-2.0.txt", "CommonMark-BSD.txt", "Markwon-APACHE-2.0.txt", "Anthropic-MIT.txt", "Network-NOTICES.txt"};
         new android.app.AlertDialog.Builder(this).setTitle("Open source licenses").setItems(names, (dialog, item) -> {
             try (java.io.InputStream input = getAssets().open("licenses/" + files[item])) {
                 java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream(); byte[] buffer = new byte[4096]; int read;
@@ -56,7 +64,7 @@ public final class DeviceSettingsActivity extends PocketActivity {
         }).show();
     }
     private void volume(String name, int stream, AudioManager audio) { body.addView(label(name + " volume", 15, WHITE)); SeekBar slider = new SeekBar(this); slider.setMinimumHeight(dp(PocketDesign.CONTROL));
-        slider.setMax(audio.getStreamMaxVolume(stream)); slider.setProgress(audio.getStreamVolume(stream)); body.addView(slider);
+        styleSlider(slider, name + " volume"); slider.setMax(audio.getStreamMaxVolume(stream)); slider.setProgress(audio.getStreamVolume(stream)); body.addView(slider);
         slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             public void onProgressChanged(SeekBar s, int value, boolean user) { if (user) try { audio.setStreamVolume(stream, value, 0); } catch (SecurityException e) { message("Android requires Do not disturb access for this change."); } }
             public void onStartTrackingTouch(SeekBar s) {} public void onStopTrackingTouch(SeekBar s) {}

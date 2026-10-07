@@ -16,9 +16,9 @@
 .setup-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
 .setup-choice button { min-height: 64px; padding: 8px 12px; text-align: left; font: 22px/1 var(--pixel); box-shadow: inset 0 0 0 1px var(--line, #303438); }
 .setup-choice button.selected { color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
-.setup-choice .sub { display: block; margin-top: 4px; font: 12px var(--mono); color: var(--muted); }
+.setup-choice .sub { display: block; margin-top: 4px; font: 13px var(--mono); color: var(--muted); }
 .setup-finish { padding: 24px 0 0; }
 .setup-banner { display: flex; align-items: center; gap: 12px; max-width: 70rem; margin: 0 0 1.5rem; border-bottom: 1px solid var(--line, #303438); }
 .setup-banner .row-button { flex: 1; color: var(--accent); }
-.setup-banner .setup-hide { color: var(--muted); font-size: 13px; padding: 0 2px; }
+.setup-banner .setup-hide { color: var(--muted); font-size: 14px; padding: 0 2px; }
 @media (max-width: 620px) { .setup-panel, .setup-why { padding-left: 0; } .setup-note { display: none; } }

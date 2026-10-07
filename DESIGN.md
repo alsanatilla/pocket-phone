@@ -1,6 +1,6 @@
-# Pocket design system — 0.14.0
+# Pocket design system — 0.17.0
 
-Pocket is a daily Android dashboard and a set of small native apps for the Nothing Phone (3a). Its character comes from black, white monospace text, pixel titles and icons, and labelled soft keys. Its polish comes from every app using the same few patterns, so a page can be scanned without learning it first.
+Pocket is an Android launcher and a browser workspace. Warm Console uses warm ink, cream monospace text, quiet semantic color, pixel headings and Pip's console sprite. Every screen shares the same typography, spacing, targets and navigation patterns.
 
 0.5.21 replaces per-app variations with one shared set of components in `PocketDesign` and `PocketActivity`. See [RESEARCH.md](RESEARCH.md) for the earlier research that informed proximity, hierarchy and soft keys.
 
@@ -9,25 +9,29 @@ Pocket is a daily Android dashboard and a set of small native apps for the Nothi
 1. One typeface for content: monospace. Pixel type (VT323) is only for page titles, the Home clock, readings and the shutter. No sans-serif anywhere in Pocket's own pages.
 2. Chrome is lowercase: page titles, header buttons, tabs, item commands, soft keys and setting names. Content keeps its own case: task and note text, messages, explanations, names such as COROS or WhatsApp.
 3. Everything starts at the same left edge (16 dp plus safe insets). Commands under an item start where the item's text starts.
-4. Accent marks one thing per group: a commit (save, send, + task), the selected tab, the next/now item, and the classic Home soft keys. Everything else is white or muted.
-5. Group with space, not lines. Sections use a small uppercase label and a 24 dp gap. No dividers, cards or shadows. Each area has its own dithered artwork fading into black behind its header; working lists and editors below stay plain.
+4. Amber marks actions and selection. Sage marks recovery and movement, blue marks appointments, lilac marks thoughts and notes, and coral marks overdue actions. These colors belong to small readings, marks or text, never colored card outlines.
+5. Group with space and neutral rules. Use plain rows and restrained neutral surfaces, with no colored borders or decorative helper labels. Each area has dithered artwork confined to its header; working lists and editors below stay plain.
 6. Touch targets stay at least 48 dp (rows 56 dp) even when labels are small.
 7. Android owns Home, Recents, the keyboard and permission dialogs.
 
 ## Tokens
 
-Each area has an original scene so a page is recognisable before it is read: sky (Home, Today), stars (Thoughts), road (Tasks), waves (Notes, Paper), terrain (Movement), iron (Gym), tiles (Apps) and rings (Search). The bitmaps come from one ordered-dither kernel in `PixelBackdrop.java` and `pixel-backdrop.js`, tinted with Pocket's accent and faded toward black. The left side and lower edge stay quiet and titles carry a dark halo, so text over the artwork stays readable. Text remains native text. The artwork is static, cached by size on Android, and redrawn only on resize in the browser. No background photo, animation loop or external asset is downloaded.
+Each area has an original header scene: sky (Home, Today), stars (Thoughts), road (Tasks), waves (Notes, Paper), terrain (Movement), iron (Gym), tiles (Apps), rings (Search) and a wandering dotted route in browser Travel. `PixelBackdrop.java` and `pixel-backdrop.js` share an ordered-dither kernel tinted toward warm ink. The left side and lower edge stay quiet so titles remain readable. Text remains native text. Artwork is static and cached; browser scenes redraw on resize and disconnect on exit. No background photo, animation loop or external asset is downloaded.
 
-Pip uses just the upper-corner pixel glow. It fades to black before the middle of the page, and sparse sparks stay inside the light. The conversation and composer sit on black. Pip's controls retain the shared focus underline and pressed state. The background has no animation loop; Pip's character continues its activities, including playing a tiny gamepad. Browser observers are disconnected on chat replacement and page exit. Geometric status marks, square corner ticks and terse signal labels give chat an early PS1/PS2 feel within Pocket's own palette and typography. No full-screen effects or sound are added.
+Pip's upper-corner pixel glow stays inside the header. The transcript and composer sit on plain warm ink. Pip's controls retain shared focus and pressed states; its sprite animates while visible and pauses with reduced motion. Actual tool and search activity supplies the console character without invented telemetry or explanatory labels. No full-screen effects or sound are added.
 
 | Role | Value | Purpose |
 | --- | --- | --- |
-| Page | #000000 | Pages, fields and control backgrounds |
-| Main text | #FFFFFF | Content and ordinary controls |
-| Supporting text | #AAAAAA | Metadata, hints, section labels, header buttons |
-| Disabled | #858B91 | Unavailable actions |
-| Accent | #F9F594 (or Green/Blue/White in Settings) | Commit, selection, next/now |
-| Feedback / warning | #FFBF69 | Feedback line, overdue |
+| Page | #12110F | Page and control backgrounds |
+| Surface | #1E1C18 | Quiet grouped surfaces and fields |
+| Main text | #F0E9DD | Content and ordinary controls |
+| Supporting text | #B6AC9D | Metadata and secondary controls |
+| Rule | #3E392F | Neutral separators |
+| Accent | #ECC981 | Commit and selection |
+| Calendar | #A5BFDC | Appointment time |
+| Thoughts / notes | #C1AED5 | Undecided ideas and saved context |
+| Movement | #ADBF9C | Recovery and body readings |
+| Overdue | #EFA58E | Overdue actions and feedback |
 | Page inset | 16 dp | Shared left/right edge plus safe insets |
 | Header | 48 dp, grows with font scale | back · title · one action |
 | Control / tab / item command | 48 dp | Compact tappable text |
@@ -37,9 +41,9 @@ Pip uses just the upper-corner pixel glow. It fades to black before the middle o
 
 | Role | Size | Face |
 | --- | --- | --- |
-| Section label, metadata on Home | 12 sp bold uppercase / 12 sp | Monospace |
+| Section label, metadata | 13 sp medium | IBM Plex Mono |
 | Row metadata, commands, soft keys, header buttons | 14 sp | Monospace |
-| Body, chat, steps | 16 sp | Monospace |
+| Body, chat, steps | 16 sp | IBM Plex Mono regular |
 | Row title, setting name, editors | 18 sp | Monospace |
 | Item page title (task) | 20 sp bold | Monospace |
 | Page title | 24 sp | Pixel |
@@ -55,7 +59,7 @@ Every page is built from these and nothing else.
 | Component | Use | Anatomy |
 | --- | --- | --- |
 | Header | Top of every page, including chat and camera | `back` (muted) · centered lowercase pixel title · one action: `home`, `settings`, or an accent commit such as `save` |
-| Section | Separates groups on a page | 12 sp bold uppercase muted label, 24 dp above (8 dp when first) |
+| Section | Separates groups on a page | Pixel heading with 24 dp above; compact metadata uses 13 sp Plex |
 | Row | Anything that opens something | 18 sp title, optional 14 sp muted second line, whole row is the target |
 | Value row | Settings and task details | Name on the left, value in accent on the right |
 | Tabs | Switching views of one page (Clock, Today filters, Agenda, Dice) | Equal cells, muted labels, the selected one bold accent above a short accent bar |
@@ -68,28 +72,33 @@ Keypads (phone dial pad, calculator, in-call controls, timer presets, dice count
 
 ## Screens
 
-### Home
+### Home and Today
 
-Read top to bottom as now → next → body → act:
+Read top to bottom as body → next → act → decide → personal shortcuts:
 
-1. Status line, wordmark, clock and date.
-2. One list with a fixed left column: up to two appointments (time), the next task (`task`, with the open count on the right) and the latest note (`note`). The column is wide enough for a 12-hour time, so every title starts at the same x.
-3. Health readings (recovery · strain · condition), centered.
-4. Quick actions (`+ thought` · `today` · `focus`).
-5. The tile row.
-6. Accent soft keys: `capture` · `today` · `pip` · `all`. Notifications open from the count in the status line.
+1. Warm sky header, date and native Home clock.
+2. Three equally centered COROS-derived bars: recovery, strain and condition. Missing readings stay empty; stored readings retain their date. Each opens its Movement detail.
+3. The current or next appointment with its actual time.
+4. Chosen, due and overdue actions, each shown once with a direct completion target.
+5. Thoughts ready to revisit, with an explicit make-task action.
+6. Saved Today tiles with direct add/edit controls. Existing order, hidden tiles and sync stay intact.
+7. Fixed navigation and an oversized actual Pip sprite. Pip has an accessible name and no visible text label in navigation.
 
-Readings, quick actions and tiles share one three-column grid with identical cell margins, so their centres line up exactly (checked by `RedesignPreviewTest`).
+Pip's daily brief remains its own screen and an optional tile; it no longer occupies the first Today slot.
 
 ### Workspace
 
-Header and date, fixed tabs **today / thoughts / tasks / notes**, a scrolling body and fixed bottom actions. Today shows the current/next appointment, ready thoughts, chosen/due actions and review links. Tasks has Open / Today / Later / Done filters; Notes has its own readable list; Thoughts has undecided ideas and optional review times. The primary bottom action fits without clipping: capture, + new, + task or + note. Search, Calendar and pip sit alongside it.
+Header and date, fixed tabs **today / thoughts / tasks / notes**, a scrolling body and a fixed dock: Today, Search, Capture, Pip and Apps. Tasks opens at All, with Open / Today / Later / Done filters and separate chosen, overdue, today, later and done groups. Steps expand in place and are built only when opened. Notes has a readable list and editor; Thoughts has undecided ideas and optional revisit times. Pip's oversized sprite has an accessible name without a visible text label.
 
 A task page shows the title, status, complete / edit / focus commands, steps, details and source. Plan time reserves an appointment linked to that task. A thought page offers make task / edit, revisit, source note and let go. The transition happens only when chosen; a reminder time never commits an idea to action.
 
 ### Apps
 
-One searchable directory: custom shortcuts, communicate, plan & think, capture & keep, extras, then installed apps. Photos is the camera album; Paper is the handwritten-page bridge into Notes; Activity is review. Stored app ids remain stable even when their displayed names change. See [WORKFLOW.md](WORKFLOW.md).
+Android has Pocket and Installed tabs with scoped search. Pocket tools use small glyphs and generous two-column rows grouped by purpose; installed apps stay in one alphabetical column and launch through the real package manager. Custom groups and shortcuts remain available. Switching tabs retains the query. The browser shows its real Pocket tools directly, including Travel and Zines. Stored app ids remain stable. See [WORKFLOW.md](WORKFLOW.md).
+
+### Travel
+
+Travel lives in Apps → Plan. The browser planner is an ordered route of waypoints, arrival connections, accommodation options, booking links, personal ratings, cancellation dates and costs. Totals stay grouped by their original currency. A small memory prompt lives beside the practical record, so the place still belongs to a story. The South America 2028 itinerary supplied for the exploration is saved as local starter data. This web-only workspace keeps its black, monospace and pixel-led visual language, using open spacing instead of itinerary cards.
 
 ### Chat
 

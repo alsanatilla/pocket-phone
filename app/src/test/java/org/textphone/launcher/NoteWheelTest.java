@@ -33,7 +33,7 @@ public class NoteWheelTest {
     @Before public void setup() {
         RuntimeEnvironment.getApplication().getSharedPreferences("pocket_planner",0).edit().clear().commit();
         controller=Robolectric.buildActivity(MainActivity.class,new Intent().putExtra("pocket_screen","today")).setup(); activity=controller.get();
-        root=activity.findViewById(android.R.id.content); PocketAppsTest.find(root,"+ note").performClick();
+        root=activity.findViewById(android.R.id.content); PocketAppsTest.findCommand(root,"+ note").performClick();
         ReflectionHelpers.<PageMotion>getField(activity,"motion").settle(); layout(360,800);
         editor=root.findViewWithTag("capture_editor");editor.setText("Trip\nTrain");editor.setSelection(0,4);
     }

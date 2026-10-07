@@ -22,7 +22,7 @@ import java.util.Locale;
 
 /** The day printed as a till receipt: what Pocket saw you do, totalled at the bottom. */
 public final class ReceiptActivity extends PocketActivity {
-    static final int PAPER = 0xFFF2EFE6, INK = 0xFF161616, FADED = 0xFF6B675E;
+    static final int PAPER = PocketDesign.CREAM, INK = PocketDesign.INK, FADED = 0xFF6B675E;
     private long day;
 
     @Override protected void onCreate(Bundle state) { super.onCreate(state); day = start(state == null ? System.currentTimeMillis() : state.getLong("day", System.currentTimeMillis())); render(); }
@@ -80,7 +80,7 @@ public final class ReceiptActivity extends PocketActivity {
     }
     private TextView ink(String text, int size, int color, boolean bold) {
         TextView view = new TextView(this); view.setText(text); PocketDesign.text(view, size, color);
-        view.setTypeface(Typeface.MONOSPACE, bold ? Typeface.BOLD : Typeface.NORMAL); return view;
+        view.setTypeface(bold ? PocketFonts.medium(this) : PocketFonts.body(this)); return view;
     }
     private void center(LinearLayout paper, String text, int size, boolean bold) {
         TextView view = ink(text, size, INK, bold); view.setGravity(Gravity.CENTER); view.setPadding(0, dp(2), 0, dp(2));

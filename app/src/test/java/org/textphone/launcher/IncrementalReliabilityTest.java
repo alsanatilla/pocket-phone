@@ -156,7 +156,7 @@ public class IncrementalReliabilityTest {
     @Test public void sharingTextWhileTheNoteIsAlreadyOpenUpdatesTheVisibleEditor() {
         ActivityController<MainActivity> controller = today(); MainActivity a = controller.get();
         try {
-            PocketAppsTest.find(a.findViewById(android.R.id.content), "+ note").performClick(); editor(a).setText("Existing draft");
+            PocketAppsTest.findCommand(a.findViewById(android.R.id.content),"+ note").performClick(); editor(a).setText("Existing draft");
             controller.newIntent(new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "Shared text"));
             assertEquals("Existing draft\n\nShared text", editor(a).getText().toString());
         } finally { controller.pause().stop().destroy(); }

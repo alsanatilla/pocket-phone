@@ -72,12 +72,15 @@ final class ClaudeSidebar extends FrameLayout {
     private final Button back, settings, setup, send, retry, chats, newChat, openReply, modelPicker, toolsPicker, webPicker;
     private String shownContext="";
     private final TextView error, cacheStatus, loadingLabel, accessStatus, emptyText, conversationTitle;
-    private final PixelLoadingView loading;
+    private final PixelLoadingView loading, emptyAvatar;
+    private final LinearLayout chatHeader;
+    private WrapRow chatActions;
     private boolean opened, observing, destroyed, applyingDraft, renderQueued, swipeCandidate, capturedSwipe;
     private float startX, startY;
     private long lastSubmitAt;
     private String displayedChat = "";
     private int originalAccessibility, insetLeft, insetTop, insetRight, insetBottom, keyboardBottom, themedAccent;
+    private boolean keyboardVisible;
     private final LinkedHashMap<String, TurnView> rows = new LinkedHashMap<>();
     private final ClaudeChatRepository.Observer observer = this::scheduleRender;
     private final Runnable renderTask = () -> { renderQueued = false; if (!destroyed && opened) render(); };
@@ -124,7 +127,7 @@ final class ClaudeSidebar extends FrameLayout {
         newChat=control("+ new",()->{repository.newChat();render();});newChat.setTag("pip_new_chat");PocketDesign.headerControl(newChat,PocketDesign.accent(activity));
         navigation.addView(newChat,new LinearLayout.LayoutParams(dp(64),dp(48)));
         panel.addView(navigation);
-        LinearLayout header = horizontal();
+        LinearLayout header = horizontal(); chatHeader = header;
         header.setGravity(Gravity.TOP);
         header.setPadding(dp(PocketDesign.INSET), dp(4), dp(PocketDesign.INSET), dp(4));
         LinearLayout identityColumn=new LinearLayout(activity);identityColumn.setOrientation(LinearLayout.VERTICAL);
@@ -133,16 +136,14 @@ final class ClaudeSidebar extends FrameLayout {
         title.setTypeface(PocketFonts.pixel(activity));identityColumn.addView(title);
         conversationTitle=label("new chat",12,PocketDesign.MUTED);conversationTitle.setTag("pip_conversation_title");conversationTitle.setMaxLines(2);conversationTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);identityColumn.addView(conversationTitle);
         header.addView(identityColumn,new LinearLayout.LayoutParams(0,-2,1));
-        LinearLayout actions=new LinearLayout(activity);actions.setOrientation(LinearLayout.VERTICAL);LinearLayout editActions=horizontal();
+        WrapRow chatCommands=new WrapRow(activity);chatCommands.setPadding(dp(PocketDesign.INSET),0,dp(PocketDesign.INSET),0);chatActions=chatCommands;
         Button rename=control("rename",()->renameChat(new ChatStore.Summary(repository.currentId(),repository.snapshot().title,System.currentTimeMillis(),0)));
         Button remove=control("delete",()->showDialog(new AlertDialog.Builder(activity).setTitle("Delete chat?").setNegativeButton("cancel",null).setPositiveButton("delete",(d,w)->{repository.delete(repository.currentId());render();}).create()));
-        for(Button action:new Button[]{rename,remove}){PocketDesign.headerControl(action,PocketDesign.MUTED);action.setTextSize(12);editActions.addView(action,new LinearLayout.LayoutParams(0,dp(44),1));}
-        actions.addView(editActions);
         settings = control("API settings", this::showSettings);
         settings.setContentDescription("Chat settings");
-        PocketDesign.headerControl(settings, PocketDesign.MUTED);
-        settings.setTextSize(12);actions.addView(settings,new LinearLayout.LayoutParams(-1,dp(44)));header.addView(actions,new LinearLayout.LayoutParams(dp(168),-2));
+        for(Button action:new Button[]{rename,remove,settings}){PocketDesign.command(action,false);action.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));chatCommands.addView(action,PocketDesign.commandCell(activity,action==rename));}
         panel.addView(header, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        panel.addView(chatCommands, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
         scroll = new ScrollView(activity);
         scroll.setTag("claude_chat_scroll");
@@ -156,8 +157,8 @@ final class ClaudeSidebar extends FrameLayout {
         empty.setOrientation(LinearLayout.VERTICAL);
         empty.setTag("claude_chat_empty");
         empty.setGravity(Gravity.CENTER_VERTICAL);empty.setMinimumHeight(dp(260));
-        PixelLoadingView avatar=new PixelLoadingView(activity);empty.addView(avatar,new LinearLayout.LayoutParams(dp(96),dp(96)));
-        TextView greeting = label("room to think", 40, PocketDesign.WHITE);
+        emptyAvatar=new PixelLoadingView(activity);emptyAvatar.setRunning(true);empty.addView(emptyAvatar,new LinearLayout.LayoutParams(dp(96),dp(96)));
+        TextView greeting = label("new chat", 40, PocketDesign.WHITE);
         greeting.setTypeface(PocketFonts.pixel(activity));
         greeting.setPadding(0, dp(32), 0, dp(12));
         empty.addView(greeting, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
@@ -180,9 +181,11 @@ final class ClaudeSidebar extends FrameLayout {
         loadingRow.setPadding(dp(PocketDesign.INSET), 0, dp(PocketDesign.INSET), 0);
         loading = new PixelLoadingView(activity);
         loading.setTag("pip_loading");
-        loadingRow.addView(loading, new LinearLayout.LayoutParams(dp(96), dp(96)));
+        loadingRow.addView(loading, new LinearLayout.LayoutParams(dp(48), dp(48)));
         loadingLabel = label("thinking", 14, PocketDesign.MUTED);
         loadingLabel.setPadding(dp(4), 0, 0, 0);
+        loadingLabel.setMaxLines(2);
+        loadingLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
         loadingLabel.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         loadingRow.addView(loadingLabel, new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
         openReply = control("open", () -> { repository.openReplyingChat(); render(); });
@@ -196,6 +199,12 @@ final class ClaudeSidebar extends FrameLayout {
         errorRow.setGravity(Gravity.CENTER_VERTICAL);
         errorRow.setPadding(dp(PocketDesign.INSET), dp(4), dp(PocketDesign.INSET), dp(4));
         error = label("", 14, PocketDesign.WARNING);
+        error.setMaxLines(2);
+        error.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        error.setMinHeight(dp(48));
+        error.setFocusable(true);
+        error.setOnClickListener(view -> showDialog(new AlertDialog.Builder(activity).setTitle("Response error")
+                .setMessage(error.getText()).setPositiveButton("close", null).create()));
         error.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         errorRow.addView(error, new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
         retry = control("retry", this::retry);
@@ -225,14 +234,15 @@ final class ClaudeSidebar extends FrameLayout {
         statusRow.addView(cacheStatus, new LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
         statusRow.setVisibility(View.GONE);
         panel.addView(statusRow, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-        contextRow=new LinearLayout(activity);contextRow.setOrientation(LinearLayout.VERTICAL);contextRow.setPadding(dp(16),0,dp(16),0);contextRow.setTag("pip_context");panel.addView(contextRow);
+        // Draft attachments belong to the scrollable thread so long context titles cannot push the composer below the keyboard.
+        contextRow=new LinearLayout(activity);contextRow.setOrientation(LinearLayout.VERTICAL);contextRow.setPadding(0,dp(8),0,0);contextRow.setTag("pip_context");page.addView(contextRow);
         LinearLayout capabilities = horizontal(); capabilities.setPadding(dp(16), 0, dp(16), 0);
         capabilities.setBackground(new android.graphics.drawable.Drawable() {
             final android.graphics.Paint line = new android.graphics.Paint();
             @Override public void draw(android.graphics.Canvas canvas) {
                 android.graphics.Rect bounds = getBounds(); line.setColor(PocketDesign.LINE); line.setStrokeWidth(dp(1));
                 canvas.drawLine(dp(16), bounds.top, bounds.right - dp(16), bounds.top, line);
-                line.setColor(PocketDesign.accent(activity)); line.setAlpha(128);
+                line.setColor(PocketDesign.LINE); line.setAlpha(255);
                 canvas.drawLine(dp(16), bounds.top, dp(20), bounds.top, line); canvas.drawLine(dp(16), bounds.top, dp(16), bounds.top + dp(4), line);
                 canvas.drawLine(bounds.right - dp(20), bounds.top, bounds.right - dp(16), bounds.top, line); canvas.drawLine(bounds.right - dp(16), bounds.top, bounds.right - dp(16), bounds.top + dp(4), line);
             }
@@ -240,11 +250,11 @@ final class ClaudeSidebar extends FrameLayout {
             @Override public void setColorFilter(android.graphics.ColorFilter filter) { }
             @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
         });
-        toolsPicker = control("□ tools [0]", this::showPocketAccess); toolsPicker.setTag("pip_tools");
-        webPicker = control("△ web · off", this::toggleWebSearch); webPicker.setTag("pip_web_search");
+        toolsPicker = control("tools [0]", this::showPocketAccess); toolsPicker.setTag("pip_tools");
+        webPicker = control("web · off", this::toggleWebSearch); webPicker.setTag("pip_web_search");
         for (Button command : new Button[]{toolsPicker, webPicker}) {
-            PocketDesign.command(command, false); command.setTextSize(12);
-            capabilities.addView(command, new LinearLayout.LayoutParams(0, dp(44), 1));
+            PocketDesign.command(command, false); command.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));
+            capabilities.addView(command, PocketDesign.commandCell(activity, command == toolsPicker));
         }
         panel.addView(capabilities);
 
@@ -261,7 +271,7 @@ final class ClaudeSidebar extends FrameLayout {
         composer.setMinLines(2);
         composer.setMaxLines(5);
         composer.setFilters(new InputFilter[]{new InputFilter.LengthFilter(ClaudeChatRepository.MAX_INPUT_CHARS)});
-        composer.setHint("Think it through with pip…");
+        composer.setHint("think it through…");
         composer.setContentDescription("Chat message");
         composer.setText(repository.draft());
         composer.addTextChangedListener(new TextWatcher() {
@@ -290,18 +300,19 @@ final class ClaudeSidebar extends FrameLayout {
         send = control("send", this::submit);
         send.setTag("claude_chat_send");
         PocketDesign.softKey(send, 1, 2, true);
-        send.setMinWidth(dp(72));
+        send.setMinWidth(dp(64));
         panel.addView(inputRow, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         LinearLayout composerActions=horizontal();composerActions.setPadding(dp(16),0,dp(16),dp(8));
-        Button attach=control("+ context",this::attachContext);attach.setTag("pip_attach_context");PocketDesign.command(attach,false);attach.setTextSize(12);composerActions.addView(attach,new LinearLayout.LayoutParams(dp(82),dp(44)));
-        modelPicker=control(ChatProvider.get(activity).model,this::showProvider);PocketDesign.command(modelPicker,false);modelPicker.setTextSize(12);modelPicker.setMaxLines(2);modelPicker.setEllipsize(android.text.TextUtils.TruncateAt.END);composerActions.addView(modelPicker,new LinearLayout.LayoutParams(0,dp(44),1));
-        composerActions.addView(send,new LinearLayout.LayoutParams(dp(58),dp(44)));panel.addView(composerActions);
+        Button attach=control("+ context",this::attachContext);attach.setTag("pip_attach_context");PocketDesign.command(attach,false);attach.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));composerActions.addView(attach,PocketDesign.commandCell(activity,true));
+        modelPicker=control(ChatProvider.get(activity).model,this::showProvider);PocketDesign.command(modelPicker,false);modelPicker.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));modelPicker.setMaxLines(1);modelPicker.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);modelPicker.setGravity(Gravity.CENTER_VERTICAL|Gravity.END);composerActions.addView(modelPicker,new LinearLayout.LayoutParams(0,dp(48),1));
+        composerActions.addView(send,new LinearLayout.LayoutParams(dp(64),dp(48)));panel.addView(composerActions);
 
         // Read the incoming insets here, before a page consumes them during child dispatch.
         setOnApplyWindowInsetsListener((view, insets) -> {
             if (Build.VERSION.SDK_INT >= 30) {
                 android.graphics.Insets safe = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
                 insetLeft = safe.left; insetTop = safe.top; insetRight = safe.right; insetBottom = safe.bottom;
+                keyboardVisible = insets.isVisible(WindowInsets.Type.ime());
             } else {
                 insetLeft = insets.getSystemWindowInsetLeft(); insetTop = insets.getSystemWindowInsetTop();
                 insetRight = insets.getSystemWindowInsetRight(); insetBottom = insets.getSystemWindowInsetBottom();
@@ -343,7 +354,7 @@ final class ClaudeSidebar extends FrameLayout {
     void close() {
         if (destroyed || !opened) return;
         opened = false;
-        loading.setPaused(true);
+        loading.setPaused(true); emptyAvatar.setPaused(true);
         capturedSwipe = false;
         swipeCandidate = false;
         hideKeyboard();
@@ -370,7 +381,7 @@ final class ClaudeSidebar extends FrameLayout {
         opened = false;
         capturedSwipe = false;
         swipeCandidate = false;
-        loading.setPaused(true);
+        loading.setPaused(true); emptyAvatar.setPaused(true);
         stopAnimations();
         main.removeCallbacks(renderTask);
         renderQueued = false;
@@ -392,13 +403,13 @@ final class ClaudeSidebar extends FrameLayout {
     void resume() {
         if (destroyed) return;
         refreshTheme();
-        loading.refresh();
+        loading.refresh(); emptyAvatar.refresh();
         if (!observing) { observing = true; repository.observe(observer); }
         if (opened) render();
     }
 
     void pause() {
-        loading.setPaused(true);
+        loading.setPaused(true); emptyAvatar.setPaused(true);
         if (observing) { repository.removeObserver(observer); observing = false; }
         main.removeCallbacks(renderTask);
         renderQueued = false;
@@ -408,7 +419,8 @@ final class ClaudeSidebar extends FrameLayout {
         if (destroyed) return;
         destroyed = true;
         pause();
-        loading.destroy();
+        loading.destroy(); emptyAvatar.destroy();
+        for (TurnView row : rows.values()) row.avatar.destroy();
         stopAnimations();
         if (dialog != null) { dialog.dismiss(); dialog = null; }
         if (getViewTreeObserver().isAlive()) getViewTreeObserver().removeOnGlobalLayoutListener(legacyKeyboard);
@@ -518,8 +530,8 @@ final class ClaudeSidebar extends FrameLayout {
         setup.setVisibility(View.GONE);
         emptyText.setVisibility(View.GONE);
         chats.setText("chats ["+repository.chats().size()+"]");modelPicker.setText(provider.model);
-        toolsPicker.setText("□ tools [" + PocketChatTools.definitions(activity).size() + "]");
-        webPicker.setText("△ web · " + (provider.webSearch ? "on" : "off"));
+        toolsPicker.setText("tools [" + PocketChatTools.definitions(activity).size() + "]");
+        webPicker.setText("web · " + (provider.webSearch ? "on" : "off"));
         webPicker.setEnabled(true); webPicker.setTextColor(provider.webSearch ? PocketDesign.accent(activity) : PocketDesign.MUTED);
         String context=ChatContext.write(repository.context());if(!context.equals(shownContext)){shownContext=context;contextRow.removeAllViews();addContextRows(contextRow,repository.context(),true);}
         StringBuilder access = new StringBuilder();
@@ -533,10 +545,11 @@ final class ClaudeSidebar extends FrameLayout {
         accessStatus.setText(access.length() == 0 ? "pocket access · off" : "reads " + access);
         accessStatus.setContentDescription(access.length() == 0 ? "Pocket access off. Change access." : "Chat may read " + access + ". Change access.");
         empty.setVisibility(snapshot.turns.isEmpty() ? View.VISIBLE : View.GONE);
+        emptyAvatar.setPaused(!opened || !observing || !snapshot.turns.isEmpty());
         emptyText.setText(" ");
         loadingRow.setVisibility(snapshot.running || snapshot.busyElsewhere ? View.VISIBLE : View.GONE);
         String status = snapshot.status == null || snapshot.status.isEmpty() ? "requesting" : snapshot.status;
-        String progress = snapshot.busyElsewhere ? "◌ replying" : ChatActivity.phase(status);
+        String progress = snapshot.busyElsewhere ? "replying in another chat" : status;
         if (!loadingLabel.getText().toString().equals(progress)) loadingLabel.setText(progress);
         openReply.setVisibility(snapshot.busyElsewhere ? View.VISIBLE : View.GONE);
         loading.setPhase(status);
@@ -557,10 +570,12 @@ final class ClaudeSidebar extends FrameLayout {
         }
         for (String id : new HashSet<>(rows.keySet())) if (!retained.contains(id)) {
             TurnView removed = rows.remove(id);
+            removed.avatar.destroy();
             log.removeView(removed.root);
         }
         String failure = snapshot.error == null ? "" : snapshot.error;
         error.setText(failure);
+        error.setContentDescription(failure.isEmpty() ? null : failure + ". Open full error.");
         error.setVisibility(failure.isEmpty() ? View.GONE : View.VISIBLE);
         boolean retryAvailable = canRetry(snapshot);
         errorRow.setVisibility(failure.isEmpty() && !retryAvailable ? View.GONE : View.VISIBLE);
@@ -982,27 +997,33 @@ final class ClaudeSidebar extends FrameLayout {
         int accent = PocketDesign.accent(activity);
         PocketDesign.headerControl(back, PocketDesign.MUTED); PocketDesign.headerControl(settings, PocketDesign.MUTED);
         PocketDesign.headerControl(chats, accent); PocketDesign.headerControl(newChat, accent);
-        settings.setTextSize(12);
-        PocketDesign.command(setup, true); PocketDesign.command(retry, true); PocketDesign.softKey(send, 1, 2, true); send.setMinWidth(dp(72));
+        settings.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));
+        PocketDesign.command(setup, true); PocketDesign.command(retry, true); PocketDesign.softKey(send, 1, 2, true); send.setMinWidth(dp(64));
         PocketDesign.input(composer, android.graphics.Color.TRANSPARENT); composer.setTextSize(PocketDesign.typeSize(activity, PocketDesign.BODY)); composer.setGravity(Gravity.TOP | Gravity.START);
-        composer.setShadowLayer(dp(4), 0, 0, PocketDesign.BLACK);
+        composer.setShadowLayer(0, 0, 0, 0);
         glowControls(panel);
         if (markdown == null || accent != themedAccent) {
             themedAccent = accent;
-            panel.setBackground(new PixelBackdrop(activity, accent, 0, PixelBackdrop.GLOW));
+            panel.setBackgroundColor(PocketDesign.INK);
+            chatHeader.setBackground(new PixelBackdrop(activity, accent, 96, PixelBackdrop.SKY));
             markdown = Markwon.builder(activity).usePlugin(new AbstractMarkwonPlugin() {
                 @Override public void configureTheme(MarkwonTheme.Builder theme) {
                     theme.headingBreakHeight(0).headingTextSizeMultipliers(new float[]{1.4f, 1.25f, 1.125f, 1f, 1f, 1f})
                             .linkColor(themedAccent).thematicBreakColor(PocketDesign.LINE)
-                            .blockQuoteColor(themedAccent).codeBackgroundColor(0xFF191919).codeBlockBackgroundColor(0xFF191919);
+                            .blockQuoteColor(PocketDesign.LINE).codeBackgroundColor(PocketDesign.PLANE).codeBlockBackgroundColor(PocketDesign.PLANE);
                 }
                 @Override public void configureSpansFactory(MarkwonSpansFactory.Builder spans) {
                     spans.appendFactory(Heading.class, (configuration, props) -> new PixelHeadingSpan());
-                    spans.appendFactory(StrongEmphasis.class, (configuration, props) -> new android.text.style.ForegroundColorSpan(themedAccent));
+                    spans.appendFactory(StrongEmphasis.class, (configuration, props) -> new MediumSpan());
                 }
             }).build();
             for (TurnView row : rows.values()) { row.lastText = null; row.lastReasoning = null; }
         }
+    }
+
+    private final class MediumSpan extends android.text.style.MetricAffectingSpan {
+        @Override public void updateDrawState(android.text.TextPaint paint) { paint.setTypeface(PocketFonts.medium(activity)); }
+        @Override public void updateMeasureState(android.text.TextPaint paint) { updateDrawState(paint); }
     }
 
     private final class PixelHeadingSpan extends android.text.style.MetricAffectingSpan {
@@ -1014,6 +1035,8 @@ final class ClaudeSidebar extends FrameLayout {
     private final class TurnView {
         final LinearLayout root = new LinearLayout(activity);
         final TextView name = label("pip", 24, PocketDesign.WHITE);
+        final LinearLayout speaker = horizontal();
+        final PixelLoadingView avatar = new PixelLoadingView(activity);
         final LinearLayout toolRows = new LinearLayout(activity);
         final Button activityToggle = control("activity", this::toggleActivity);
         final Button reasoningToggle = control("reasoning", this::toggleReasoning);
@@ -1021,6 +1044,8 @@ final class ClaudeSidebar extends FrameLayout {
         final TextView body = label("", 16, PocketDesign.WHITE);
         final TextView state = label("", 12, PocketDesign.MUTED);
         final LinearLayout sources = new LinearLayout(activity), actions = new LinearLayout(activity);
+        final Button sourcesToggle = control("sources", this::toggleSources);
+        boolean sourcesExpanded; String lastSourceActivity;
         final Button keepNote = control("keep note", () -> keepReply(0));
         final Button parkThought = control("park thought", () -> keepReply(1));
         final Button makeTask = control("make task", () -> keepReply(2));
@@ -1032,32 +1057,39 @@ final class ClaudeSidebar extends FrameLayout {
             root.setOrientation(LinearLayout.VERTICAL);
             name.setTypeface(PocketFonts.pixel(activity));
             name.setPadding(0, 0, 0, dp(6));
+            speaker.setGravity(Gravity.CENTER_VERTICAL);
+            speaker.addView(avatar, new LinearLayout.LayoutParams(dp(36), dp(36)));
+            speaker.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+            avatar.setPaused(true);
+            PocketDesign.command(sourcesToggle, false);
+            sourcesToggle.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));
+            sourcesToggle.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             PocketDesign.command(reasoningToggle, false);
             reasoningToggle.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));
             reasoning.setTextIsSelectable(true);
             reasoning.setLineSpacing(dp(3), 1f);
             reasoning.setPadding(dp(12), 0, 0, dp(12));
             body.setGravity(Gravity.TOP | Gravity.START);
-            body.setLineSpacing(dp(4), 1f);
+            PocketDesign.reading(body);
             body.setTextIsSelectable(true);
             state.setPadding(0, dp(4), 0, 0);
             sources.setOrientation(LinearLayout.VERTICAL);
             actions.setOrientation(LinearLayout.VERTICAL);
-            LinearLayout firstActions = horizontal(), secondActions = horizontal();
+            WrapRow replyActions = new WrapRow(activity);
             for (Button action : new Button[]{keepNote, parkThought, makeTask, copy}) {
-                PocketDesign.command(action, false); action.setTextSize(12);
-                (action == keepNote || action == parkThought ? firstActions : secondActions)
-                        .addView(action, new LinearLayout.LayoutParams(dp(136), dp(44)));
+                PocketDesign.command(action, false); action.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));
+                replyActions.addView(action, PocketDesign.commandCell(activity, action == keepNote));
             }
-            actions.addView(firstActions); actions.addView(secondActions);
-            root.addView(name, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+            actions.addView(replyActions);
+            root.addView(speaker, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             toolRows.setOrientation(LinearLayout.VERTICAL);
-            PocketDesign.command(activityToggle, false); activityToggle.setTextSize(12); activityToggle.setMinHeight(dp(44)); activityToggle.setMaxLines(3);
+            PocketDesign.command(activityToggle, false); activityToggle.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META)); activityToggle.setMinHeight(dp(48)); activityToggle.setMaxLines(3);
             root.addView(activityToggle, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(toolRows, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(reasoningToggle, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(reasoning, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(body, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+            root.addView(sourcesToggle, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(sources, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(state, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(actions, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
@@ -1066,10 +1098,15 @@ final class ClaudeSidebar extends FrameLayout {
         void update(ClaudeChatRepository.Turn turn) {
             this.turn = turn;
             boolean assistant = "assistant".equals(turn.role);
-            name.setVisibility(assistant ? View.VISIBLE : View.GONE);
+            speaker.setVisibility(View.VISIBLE);
+            avatar.setVisibility(assistant ? View.VISIBLE : View.GONE);
+            name.setText(assistant ? "pip" : "you");
+            name.setTypeface(assistant ? PocketFonts.pixel(activity) : PocketFonts.medium(activity));
+            name.setTextSize(PocketDesign.typeSize(activity, assistant ? 24 : PocketDesign.META));
+            name.setTextColor(assistant ? PocketDesign.CREAM : PocketDesign.MUTED);
             if (!chosen) expanded = false;
             root.setTag("claude_turn_" + turn.id);
-            root.setPadding(0, dp(assistant ? 8 : 24), 0, dp(assistant ? 8 : 0));
+            root.setPadding(0, dp(24), 0, dp(16));
             if (!turn.text.equals(lastText) || !turn.state.equals(lastState) || assistant != lastAssistant) {
                 long now = SystemClock.elapsedRealtime();
                 long interval = Math.min(300, Math.max(100, turn.text.length() / 120));
@@ -1077,22 +1114,17 @@ final class ClaudeSidebar extends FrameLayout {
                 if (assistant && "pending".equals(turn.state) && lastText != null && now - styledAt < interval) scheduleRender();
                 else {
                     if (assistant && !turn.text.isEmpty()) markdown.setMarkdown(body, turn.text);
-                    else body.setText(assistant ? turn.text : "> " + turn.text);
-                    body.setTextColor(assistant ? PocketDesign.WHITE : themedAccent);
+                    else body.setText(turn.text);
+                    body.setTextColor(PocketDesign.CREAM);
                     body.setContentDescription(assistant ? null : "You: " + turn.text);
                     lastText = turn.text; lastState = turn.state; lastAssistant = assistant; styledAt = now;
                 }
             }
             body.setVisibility(body.length() == 0 ? View.GONE : View.VISIBLE);
-            if (!turn.context.equals(lastContext) || assistant != lastAssistant) {
-                sources.removeAllViews();
-                if (!assistant) addContextRows(sources, ChatContext.read(turn.context), false);
-                lastContext = turn.context;
-            }
-            sources.setVisibility(sources.getChildCount() == 0 ? View.GONE : View.VISIBLE);
+            updateSources();
             updateActivity();
             updateReasoning();
-            String status = "stopped".equals(turn.state) ? "pip · stopped" : "failed".equals(turn.state) && !turn.text.isEmpty() ? "pip · incomplete" : "";
+            String status = "stopped".equals(turn.state) ? "stopped" : "failed".equals(turn.state) && !turn.text.isEmpty() ? "incomplete" : "";
             state.setText(status);
             state.setVisibility(status.isEmpty() ? View.GONE : View.VISIBLE);
             keepNote.setTag("pip_keep_" + turn.id);
@@ -1105,10 +1137,11 @@ final class ClaudeSidebar extends FrameLayout {
         void updateActivity() {
             org.json.JSONArray events = ChatActivity.read(turn.activity);
             boolean visible = "assistant".equals(turn.role) && events.length() > 0;
-            if (!activityChosen) activityExpanded = "pending".equals(turn.state);
+            if (!activityChosen) activityExpanded = false;
             activityToggle.setVisibility(visible ? View.VISIBLE : View.GONE);
-            activityToggle.setText(ChatActivity.heading(events) + (activityExpanded ? " −" : " +"));
-            activityToggle.setContentDescription((activityExpanded ? "Hide" : "Show") + " tool activity: " + ChatActivity.heading(events));
+            activityToggle.setText(activitySummary(events) + (activityExpanded ? " −" : " +"));
+            activityToggle.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            activityToggle.setContentDescription((activityExpanded ? "Hide" : "Show") + " execution details: " + activitySummary(events));
             activityToggle.setTag("pip_activity_" + turn.id);
             toolRows.setVisibility(visible && activityExpanded ? View.VISIBLE : View.GONE);
             if (!turn.activity.equals(lastActivity)) {
@@ -1117,13 +1150,44 @@ final class ClaudeSidebar extends FrameLayout {
                     org.json.JSONObject event = events.optJSONObject(i); if (event == null) continue;
                     String status = event.optString("state"); long duration = event.optLong("ended") - event.optLong("started");
                     Button row = control(ChatActivity.mark(status) + " " + event.optString("title") + "\n" + status
-                            + (duration > 0 ? " · " + Math.max(1, Math.round(duration / 1000f)) + "s" : ""), () -> showToolDetails(event));
-                    PocketDesign.command(row, false); glowControl(row); row.setTextSize(12); row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-                    row.setTextColor("failed".equals(status) ? PocketDesign.WARNING : PocketDesign.accent(activity)); row.setMinHeight(dp(48));
-                    row.setPadding(dp(12), dp(8), 0, dp(8)); row.setMaxLines(4); toolRows.addView(row, new LinearLayout.LayoutParams(-1, -2));
+                            + (duration > 0 ? " · " + durationLabel(duration) : "")
+                            + (event.optString("summary").isEmpty() ? "" : "\n" + event.optString("summary"))
+                            + sourceCountLabel(event), () -> showToolDetails(event));
+                    PocketDesign.command(row, false); glowControl(row); row.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META)); row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                    row.setTextColor("failed".equals(status) ? PocketDesign.WARNING : PocketDesign.MUTED); row.setMinHeight(dp(48));
+                    row.setBackground(PocketDesign.separator(activity)); row.setPadding(dp(12), dp(8), 0, dp(8)); row.setMaxLines(5); toolRows.addView(row, new LinearLayout.LayoutParams(-1, -2));
                 }
                 lastActivity = turn.activity;
             }
+        }
+        void toggleSources() { sourcesExpanded = !sourcesExpanded; updateSources(); }
+        void updateSources() {
+            boolean assistant = "assistant".equals(turn.role);
+            if (!turn.context.equals(lastContext) || !turn.activity.equals(lastSourceActivity)) {
+                sources.removeAllViews();
+                if (!assistant) addContextRows(sources, ChatContext.read(turn.context), false);
+                else {
+                    java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+                    org.json.JSONArray events = ChatActivity.read(turn.activity);
+                    for (int i = 0; i < events.length(); i++) {
+                        org.json.JSONObject event = events.optJSONObject(i); if (event == null) continue;
+                        org.json.JSONArray links = event.optJSONArray("sources"); if (links == null) continue;
+                        for (int n = 0; n < links.length(); n++) {
+                            org.json.JSONObject link = links.optJSONObject(n); if (link == null || !seen.add(link.optString("href"))) continue;
+                            Button source = control(link.optString("title"), () -> openToolSource(link.optString("href")));
+                            PocketDesign.row(source, PocketDesign.MUTED); source.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));
+                            source.setMaxLines(3); sources.addView(source, new LinearLayout.LayoutParams(-1, -2));
+                        }
+                    }
+                }
+                lastContext = turn.context; lastSourceActivity = turn.activity;
+            }
+            int count = sources.getChildCount();
+            sourcesToggle.setTag("pip_sources_" + turn.id);
+            sourcesToggle.setText(count + (count == 1 ? " source" : " sources") + (sourcesExpanded ? " −" : " +"));
+            sourcesToggle.setContentDescription((sourcesExpanded ? "Hide " : "Show ") + count + " sources");
+            sourcesToggle.setVisibility(assistant && count > 0 ? View.VISIBLE : View.GONE);
+            sources.setVisibility(count > 0 && (!assistant || sourcesExpanded) ? View.VISIBLE : View.GONE);
         }
         void keepReply(int which) {
             if (destroyed) return;
@@ -1170,21 +1234,62 @@ final class ClaudeSidebar extends FrameLayout {
         }
     }
 
+    private String activitySummary(org.json.JSONArray events) {
+        int reads = 0, searches = 0, pages = 0; boolean failed = false, stopped = false;
+        for (int i = 0; i < events.length(); i++) {
+            org.json.JSONObject event = events.optJSONObject(i); if (event == null) continue;
+            String state = event.optString("state"), name = event.optString("name");
+            if ("running".equals(state) || "queued".equals(state)) return event.optString("title") + " · " + state;
+            if ("web_search".equals(name) || "search_web".equals(name)) searches++;
+            else if ("read_web_page".equals(name)) pages++;
+            else reads++;
+            failed |= "failed".equals(state); stopped |= "stopped".equals(state);
+        }
+        java.util.List<String> labels = new java.util.ArrayList<>();
+        if (reads > 0) labels.add(reads + (reads == 1 ? " Pocket read" : " Pocket reads"));
+        if (searches > 0) labels.add(searches + (searches == 1 ? " web search" : " web searches"));
+        if (pages > 0) labels.add(pages + (pages == 1 ? " page read" : " page reads"));
+        return String.join(" · ", labels) + (failed ? " · failed" : stopped ? " · stopped" : "");
+    }
+    private String durationLabel(long elapsed) {
+        return elapsed < 1000 ? elapsed + "ms" : String.format(java.util.Locale.ROOT, "%.1fs", elapsed / 1000.0);
+    }
+    private String sourceCountLabel(org.json.JSONObject event) {
+        org.json.JSONArray links = event.optJSONArray("sources"); int count = links == null ? 0 : links.length();
+        return count == 0 ? "" : " · " + count + (count == 1 ? " source" : " sources");
+    }
+    private String toolInput(org.json.JSONObject event) {
+        try {
+            org.json.JSONObject input = new org.json.JSONObject(event.optString("input", "{}"));
+            String query = input.optString("query"), url = input.optString("url");
+            if (!query.isEmpty()) return "query · " + query;
+            if (!url.isEmpty()) return url;
+            if (input.has("days")) return "range · " + input.optInt("days") + " days";
+            if (input.has("id")) return "item · " + input.optString("id");
+        } catch (org.json.JSONException ignored) { }
+        return "";
+    }
+
     private void showToolDetails(org.json.JSONObject event) {
         LinearLayout fields = new LinearLayout(activity); fields.setOrientation(LinearLayout.VERTICAL); fields.setPadding(dp(20), dp(8), dp(20), dp(8));
         TextView summary = label(event.optString("summary", event.optString("state")), 14, PocketDesign.WHITE);
         summary.setTextIsSelectable(true); fields.addView(summary);
+        long elapsed = event.optLong("ended") - event.optLong("started");
+        TextView execution = label(event.optString("state") + (elapsed > 0 ? " · " + durationLabel(elapsed) : ""), PocketDesign.META, PocketDesign.MUTED);
+        fields.addView(execution);
+        String input = toolInput(event);
+        if (!input.isEmpty()) { TextView query = label(input, PocketDesign.BODY, PocketDesign.CREAM); query.setTextIsSelectable(true); fields.addView(query); }
         org.json.JSONArray links = event.optJSONArray("sources");
         if (links != null) for (int i = 0; i < links.length(); i++) {
             org.json.JSONObject link = links.optJSONObject(i); if (link == null) continue;
             Button source = control(link.optString("title"), () -> openToolSource(link.optString("href")));
-            PocketDesign.command(source, false); glowControl(source); source.setTextSize(12); source.setMinHeight(dp(44));
+            PocketDesign.command(source, false); glowControl(source); source.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META)); source.setMinHeight(dp(48));
             source.setMaxLines(3); fields.addView(source, new LinearLayout.LayoutParams(-1, -2));
         }
         TextView parameters = label(event.optString("name") + "\n" + event.optString("input"), 12, PocketDesign.MUTED);
         parameters.setTextIsSelectable(true); parameters.setVisibility(View.GONE); parameters.setPadding(0, dp(8), 0, dp(8));
-        Button expand = control("◇ parameters", () -> parameters.setVisibility(parameters.getVisibility() == View.GONE ? View.VISIBLE : View.GONE));
-        PocketDesign.command(expand, false); glowControl(expand); expand.setTextSize(12); fields.addView(expand); fields.addView(parameters);
+        Button expand = control("execution parameters", () -> parameters.setVisibility(parameters.getVisibility() == View.GONE ? View.VISIBLE : View.GONE));
+        PocketDesign.command(expand, false); glowControl(expand); expand.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META)); fields.addView(expand); fields.addView(parameters);
         ScrollView scroll = new ScrollView(activity); scroll.addView(fields);
         showDialog(new AlertDialog.Builder(activity).setTitle(event.optString("title")).setView(scroll).setPositiveButton("close", null).create());
     }
@@ -1246,8 +1351,8 @@ final class ClaudeSidebar extends FrameLayout {
         for(int i=0;i<sources.size();i++){
             int index=i;ChatContext source=sources.get(i);LinearLayout row=horizontal();
             Button card=control(source.kind+" · "+source.title,()->showDialog(new AlertDialog.Builder(activity).setTitle(source.title).setMessage(source.text).setPositiveButton("close",null).create()));
-            PocketDesign.command(card,false);glowControl(card);card.setTextColor(PocketDesign.accent(activity));card.setTextSize(12);card.setMaxLines(2);card.setEllipsize(android.text.TextUtils.TruncateAt.END);row.addView(card,new LinearLayout.LayoutParams(0,-2,1));
-            if(removable){Button remove=control("×",()->{repository.removeContext(index);render();});remove.setContentDescription("Remove "+source.title);row.addView(remove,new LinearLayout.LayoutParams(dp(44),dp(44)));}
+            PocketDesign.command(card,false);glowControl(card);card.setTextColor(PocketDesign.NOTES);card.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));card.setMaxLines(2);card.setEllipsize(android.text.TextUtils.TruncateAt.END);row.addView(card,new LinearLayout.LayoutParams(0,-2,1));
+            if(removable){Button remove=control("×",()->{repository.removeContext(index);render();});remove.setContentDescription("Remove "+source.title);row.addView(remove,new LinearLayout.LayoutParams(dp(48),dp(48)));}
             target.addView(row,new LinearLayout.LayoutParams(-1,-2));
         }
     }
@@ -1264,6 +1369,9 @@ final class ClaudeSidebar extends FrameLayout {
 
     private void applyPanelPadding() {
         if (panel == null) return;
+        int headerVisibility = keyboardVisible ? View.GONE : View.VISIBLE;
+        if (chatHeader != null && chatHeader.getVisibility() != headerVisibility) chatHeader.setVisibility(headerVisibility);
+        if (chatActions != null && chatActions.getVisibility() != headerVisibility) chatActions.setVisibility(headerVisibility);
         int left = Math.max(0, insetLeft - Math.max(0, getWidth() - panelWidth()));
         int bottom = Math.max(insetBottom, keyboardBottom);
         if (panel.getPaddingLeft() != left || panel.getPaddingTop() != insetTop || panel.getPaddingRight() != insetRight || panel.getPaddingBottom() != bottom)
@@ -1278,7 +1386,7 @@ final class ClaudeSidebar extends FrameLayout {
         int[] location = new int[2]; getLocationOnScreen(location);
         int overlap = Math.max(0, location[1] + getHeight() - visible.bottom);
         int next = overlap > dp(120) ? overlap : 0;
-        if (next != keyboardBottom) { keyboardBottom = next; applyPanelPadding(); }
+        if (next != keyboardBottom || keyboardVisible != (next > 0)) { keyboardBottom = next; keyboardVisible = next > 0; applyPanelPadding(); }
     }
 
     private void stopAnimations() {
@@ -1326,10 +1434,10 @@ final class ClaudeSidebar extends FrameLayout {
         }
     }
     private LinearLayout horizontal() { LinearLayout row = new LinearLayout(activity); row.setOrientation(LinearLayout.HORIZONTAL); return row; }
-    private TextView label(String value, int size, int color) { TextView view = new TextView(activity); PocketDesign.text(view, size, color); view.setShadowLayer(dp(4), 0, 0, PocketDesign.BLACK); view.setText(value); return view; }
+    private TextView label(String value, int size, int color) { TextView view = new TextView(activity); PocketDesign.text(view, size, color); view.setShadowLayer(0, 0, 0, 0); view.setText(value); return view; }
     private Button control(String value, Runnable action) {
         Button view = new Button(activity); PocketDesign.text(view, 14, PocketDesign.WHITE); PocketDesign.control(view);
-        view.setShadowLayer(dp(4), 0, 0, PocketDesign.BLACK);
+        view.setShadowLayer(0, 0, 0, 0);
         glowControl(view); view.setText(value); view.setOnClickListener(ignored -> { if (!destroyed) action.run(); }); return view;
     }
 }

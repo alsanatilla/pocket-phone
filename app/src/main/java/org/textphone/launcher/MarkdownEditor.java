@@ -22,6 +22,10 @@ final class MarkdownEditor extends EditText {
     private float downX, downY, rawX, rawY;
     MarkdownEditor(Context context) {
         super(context);
+        PocketDesign.editor(this);
+        setTextSize(PocketDesign.typeSize(context, PocketDesign.BODY));
+        PocketDesign.reading(this);
+        setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
         addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             public void onTextChanged(CharSequence s, int start, int before, int count) { changedAt = start; inserted = count; replaced = before; }

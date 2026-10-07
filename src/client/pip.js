@@ -9,10 +9,14 @@ import { CATEGORIES, access, saveAccess, definitions, firecrawlKey, setFirecrawl
 import { activity, settle, mark, elapsed, activityTitle, phaseLabel } from "./pip-activity.js";
 
 const store = new ChatStore();
-let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0;
+let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, viewportCleanup = null;
 const runner = new ReplyRunner(store, { onChange: event => {
   const entry = document.getElementById("pip-entry");
-  if (entry) entry.textContent = runner.active ? "pip · replying" : "pip";
+  if (entry) {
+    entry.classList.toggle('replying', Boolean(runner.active));
+    entry.setAttribute('aria-label', runner.active ? 'Pip · replying' : 'Pip');
+    entry.title = runner.active ? 'Pip · replying' : 'Pip';
+  }
   if (!mounted?.root.isConnected) return;
   if (event.type === "delta" && mounted.uid === event.chatId) {
     mounted.latest = event.turn;
@@ -26,6 +30,26 @@ const caption = text => ui.h("p", { class: "meta muted", text });
 export function leave() {
   mounted?.root.querySelectorAll(".pip-mascot, .pixel-backdrop").forEach(c=>c.dispose?.());
   clearTimeout(paintTimer); clearInterval(phaseTimer); paintTimer = phaseTimer = 0; mounted = null;
+  viewportCleanup?.(); viewportCleanup = null;
+}
+
+function fitViewport() {
+  const panel = mounted?.root.querySelector('.pip-panel'); if (!panel) return;
+  const viewport = window.visualViewport;
+  const height = viewport?.height || innerHeight;
+  const keyboard = height < innerHeight * .78 && document.activeElement?.id === 'pip-prompt';
+  document.documentElement.classList.toggle('pip-keyboard', Boolean(keyboard));
+  const top = Math.max(0, panel.getBoundingClientRect().top - (viewport?.offsetTop || 0));
+  const gutter = parseFloat(getComputedStyle(mounted.root.parentElement).paddingBottom) || 0;
+  panel.style.setProperty('--pip-available', Math.max(128, height - top - gutter) + 'px');
+}
+function watchViewport() {
+  const viewport = window.visualViewport;
+  const fit = () => requestAnimationFrame(fitViewport);
+  window.addEventListener('resize', fit); viewport?.addEventListener('resize', fit); viewport?.addEventListener('scroll', fit);
+  document.addEventListener('focusin', fit); document.addEventListener('focusout', fit);
+  viewportCleanup = () => { window.removeEventListener('resize', fit); viewport?.removeEventListener('resize', fit); viewport?.removeEventListener('scroll', fit); document.removeEventListener('focusin', fit); document.removeEventListener('focusout', fit); document.documentElement.classList.remove('pip-keyboard'); };
+  fit();
 }
 
 export function withContext(source) {
@@ -59,7 +83,7 @@ export function mount(root, uid, helpers) {
     localStorage.setItem("pocket:pip-current", chat.uid);
     // A stable route makes browser Back work for both a chat and its source page.
     if (uid !== chat.uid) history.replaceState(null, "", "#/pip/" + chat.uid);
-    mounted = { root, uid: chat.uid, replies: new Map(), latest: null }; render();
+    mounted = { root, uid: chat.uid, replies: new Map(), latest: null }; render(); watchViewport();
   } catch (error) { root.append(caption(error.message), button("API settings", () => apiSettings(DEFAULT_CONFIG))); }
 }
 
@@ -97,7 +121,7 @@ function replyComponent(turn, chat) {
   const actions = ui.h("div", { class: "pip-reply-actions" });
   const reply = ui.h("article", { class: "pip-reply", "aria-label": "pip reply" }, ui.h("div", { class: "pip-speaker", text: "pip" }), toolGroup, reasoning, answer, sources, phase, actions);
   const message = ui.h("section", { class: "pip-message", "data-turn": turn.uid },
-    ui.h("p", { class: "pip-question", text: "> " + turn.text }), contextCards(turn.context || []), reply);
+    ui.h("p", { class: "pip-question" }, ui.h("span", { class: "accent", text: "> " }), turn.text), contextCards(turn.context || []), reply);
   mounted.replies.set(turn.uid, { answer, reasoning, reasoningText, tools, toolGroup, toolTitle, sources, sourceTitle, sourceList, phase, actions, chat });
   updateReply(turn); return message;
 }
@@ -119,10 +143,14 @@ function updateReply(turn) {
   if (parts.activitySignature !== signature) {
     const expanded = new Set([...parts.tools.querySelectorAll("details[open]")].map(node => node.dataset.id));
     parts.tools.replaceChildren(...rows.map(row => ui.h("details", { class: "pip-tool " + row.state, "data-id": row.id, ...(expanded.has(row.id) ? { open: true } : {}) },
-      ui.h("summary", {}, ui.h("span", { text: mark(row.state) + " " + row.title }), ui.h("span", { class: "meta muted", text: [row.state, elapsed(row)].filter(Boolean).join(" · ") })),
+      ui.h("summary", {}, ui.h("span", { text: mark(row.state) + " " + row.title }), ui.h("span", { class: "meta muted pip-tool-status", text: [row.state, elapsed(row)].filter(Boolean).join(" · ") })),
       ui.h("div", { class: "pip-tool-details" }, row.summary ? caption(row.summary) : null, row.sources.map(item => sourceLink(item)),
         ui.h("details", { class: "pip-parameters" }, ui.h("summary", { text: "◇ parameters" }), ui.h("code", { text: row.name }), row.input ? ui.h("pre", { text: row.input }) : null)))));
     parts.activitySignature = signature;
+  }
+  for (const node of parts.tools.querySelectorAll('.pip-tool')) {
+    const row = rows.find(item => item.id === node.dataset.id), status = node.querySelector('.pip-tool-status');
+    if (row && status) status.textContent = [row.state, row.ended ? elapsed(row) : row.started ? Math.max(0, Math.floor((Date.now() - row.started) / 1000)) + 's' : ''].filter(Boolean).join(' · ');
   }
   const citations = JSON.stringify(turn.sources || []);
   if (parts.sourceSignature !== citations) { parts.sources.hidden = !turn.sources?.length; parts.sourceTitle.textContent = "△ sources [" + (turn.sources?.length || 0) + "]"; parts.sourceList.replaceChildren(...(turn.sources || []).map((item, index) => sourceLink(item, "[" + (index + 1) + "] " + item.title))); parts.sourceSignature = citations; }
@@ -136,7 +164,7 @@ function updateReply(turn) {
   if (!active) {
     const text = () => selectedAnswer(parts.answer, turn.answer);
     parts.actions.replaceChildren(...(turn.answer ? [
-      button("keep note", () => { const note = notes.create("# " + parts.chat.title + "\n\n" + text()); ui.go("/notes/" + note.uid); }),
+      button("save note", () => { const note = notes.create("# " + parts.chat.title + "\n\n" + text()); ui.go("/notes/" + note.uid); }),
       button("park thought", async () => {
         const value = await ui.ask("thought", { value: text().slice(0, 500), multiline: true, limit: 500 });
         if (!value?.trim()) return;
@@ -171,7 +199,7 @@ async function pocketAccess(chat) {
 }
 
 function composer(chat) {
-  const field = ui.h("textarea", { id: "pip-prompt", "aria-label": "Message pip", placeholder: "Think it through with pip…", maxlength: 16000, rows: 3 });
+  const field = ui.h("textarea", { id: "pip-prompt", "aria-label": "Message Pip", placeholder: "message Pip…", maxlength: 16000, rows: 3 });
   field.value = chat.draft;
   const draftStatus = caption(""), saveDraft = () => {
     try { store.update(chat.uid, c => { c.draft = field.value; }); draftStatus.textContent = ""; }
@@ -203,7 +231,7 @@ function render() {
   clearInterval(phaseTimer); mounted.replies.clear(); mounted.latest = null;
   const thread = ui.h("div", { class: "pip-thread", tabindex: 0, "aria-label": "Conversation" }); mounted.thread = thread;
   if (chat.turns.length) thread.append(...chat.turns.map(turn => replyComponent(turn, chat)));
-  else thread.append(ui.h("div", { class: "pip-empty" }, mascot(), ui.h("h2", { text: "room to think" })));
+  else thread.append(ui.h("div", { class: "pip-empty" }, mascot()));
   const other = runner.active && runner.active.chatId !== chat.uid ? ui.h("div", { class: "pip-running" }, button("open reply", () => ui.go("/pip/" + runner.active.chatId)), button("stop", () => runner.stop())) : null;
   const progress=runner.active?.chatId===chat.uid ? ui.h("div",{class:"pip-loading"},mascot(true),ui.h("span",{class:"meta muted",text:phaseLabel(runner.active.turn.phase),role:"status"})) : null;
   const header = ui.h("header", { class: "pip-heading" }, ui.h("div", {}, ui.h("h1", { class: "workspace-title", text: "pip" }), caption(chat.title)), ui.h("div", { class: "pip-chat-actions" },
@@ -212,7 +240,8 @@ function render() {
     button("API settings", () => apiSettings(chat.config))));
   const panel = ui.h("div", { class: "pip-panel" }, backdrop("glow"), header, other, thread, progress, composer(chat));
   mounted.root.replaceChildren(ui.h("div", { class: "pip-layout" }, conversationNav(chat), panel));
-  requestAnimationFrame(() => { if (mounted?.thread === thread) thread.scrollTop = thread.scrollHeight; });
+  if (runner.active?.chatId === chat.uid) phaseTimer = setInterval(() => { if (!document.hidden && mounted?.thread === thread && runner.active) updateReply(runner.active.turn); }, 1000);
+  requestAnimationFrame(() => { if (mounted?.thread === thread) { fitViewport(); thread.scrollTop = thread.scrollHeight; } });
 }
 
 async function attachSource(uid) {

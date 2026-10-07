@@ -1,5 +1,5 @@
 .retro-loading{display:inline-flex;width:96px;height:96px;color:var(--accent,#f5f587);align-items:center;justify-content:center;pointer-events:none}
-.retro-loading[hidden]{display:none}.retro-loading canvas{width:96px;height:96px;image-rendering:pixelated}
+.retro-loading[hidden],.refresh-indicator[hidden]{display:none!important}.retro-loading canvas{width:96px;height:96px;image-rendering:pixelated}
 .refresh-indicator{position:fixed;z-index:90;top:0;left:calc(50% - 48px)}
 .today-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:32px 48px}.today-tile{min-width:0;border-top:1px solid var(--dim,#444);padding-top:12px}.today-tile-header{display:flex;justify-content:space-between;align-items:center;gap:8px}.today-tile-header .section{margin:0}.today-tile .keys{flex-wrap:wrap}.today-tile-editor .keys{margin-top:0}
 @media(max-width:680px){.today-tiles{gap:20px 20px}.tile-value{font-size:28px}}

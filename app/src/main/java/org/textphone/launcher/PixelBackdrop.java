@@ -22,7 +22,7 @@ final class PixelBackdrop extends Drawable {
     PixelBackdrop(Context context, int accent, int heightDp) { this(context, accent, heightDp, SKY); }
     PixelBackdrop(Context context, int accent, int heightDp, String scene) {
         this.accent = accent; this.scene = scene == null ? SKY : scene;
-        height = PocketDesign.dp(context, heightDp);
+        height = PocketDesign.dp(context, heightDp > 0 ? heightDp : 96);
         cell = Math.max(1, PocketDesign.dp(context, 2));
         paint.setAntiAlias(false); paint.setFilterBitmap(false); paint.setDither(false);
     }
@@ -120,7 +120,7 @@ final class PixelBackdrop extends Drawable {
         return light;
     }
 
-    /** Pip: only the upper-corner bloom, fading to black before the middle of the page. */
+    /** Pip: only the upper-corner bloom, fading to ink before the middle of the page. */
     private static double glow(int x, int y, double v, int width, int height) {
         double size=Math.min(width,height);
         double c=Math.hypot((x-width)/size,(y+height*.02)/size);
@@ -155,16 +155,17 @@ final class PixelBackdrop extends Drawable {
     @Override public void draw(Canvas canvas) {
         Rect bounds=getBounds();
         if(bounds.width()<=0||bounds.height()<=0)return;
-        int drawHeight=GLOW.equals(scene)?bounds.height():Math.min(height,bounds.height());
+        int drawHeight=Math.min(height,bounds.height());
         int width=Math.max(1,(bounds.width()+cell-1)/cell), high=Math.max(1,(drawHeight+cell-1)/cell);
         if(image==null||columns!=width||rows!=high){
             columns=width;rows=high;int[] pixels=new int[width*high];
             int red=accent>>16&255, green=accent>>8&255, blue=accent&255;
             for(int y=0;y<high;y++)for(int x=0;x<width;x++){
                 int level=shade(scene,x,y,width,high);
-                int r=(int)Math.round((red*.55+255*.45)*level/7);
-                int g=(int)Math.round((green*.55+255*.45)*level/7);
-                int b=(int)Math.round((blue*.55+255*.45)*level/7);
+                double strength = level / 7.0 * .65;
+                int r=(int)Math.round(18+(red-18)*strength);
+                int g=(int)Math.round(17+(green-17)*strength);
+                int b=(int)Math.round(15+(blue-15)*strength);
                 pixels[y*width+x]=0xff000000|r<<16|g<<8|b;
             }
             image=Bitmap.createBitmap(pixels,width,high,Bitmap.Config.ARGB_8888);

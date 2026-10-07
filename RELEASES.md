@@ -2,6 +2,14 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.17.0 — Warm Console
+
+- Phone and web share warm ink, cream IBM Plex Mono, VT323 headings and readings, amber actions, and restrained sage, blue, lilac and coral accents. Dithered artwork stays in headers; lists, editors and chat remain plain. Pip appears as a larger animated sprite in navigation without a text label.
+- Home and Today lead with COROS-derived Recovery, Strain and Condition bars, then the next appointment, chosen/due/overdue actions shown once, ready thoughts and customizable tiles. Add, remove and reorder tiles directly. The daily brief remains an app and optional tile.
+- Tasks opens at All, with clear groups, direct completion and expandable steps. Thoughts become tasks only through the explicit action. Notes keeps autosave, drafts, pinning, source links and Pip actions. Apps groups Pocket tools; Android separately lists installed apps with scoped search. The existing browser Travel workspace is retained.
+- Pip exposes actual tool/search status, elapsed times, inputs and sources; reasoning stays separate. The composer remains usable in constrained keyboard layouts. Firecrawl searches now count as web activity on both platforms. Settings, setup, editors and secondary screens inherit the shared design.
+- Android and Astro production builds passed. Focused native workspace checks passed (3), as did Pip layout/activity checks (6). Browser checks covered eight functional flows and 65 responsive layouts without page errors. A 40-view readability audit found a 13 px minimum content size and 4.7:1 minimum measured contrast, with no findings. Provider traffic was simulated; no handset was available. The earlier broad Android run recorded 513 cases, 12 failures matching seven pre-existing failing cases, and two obsolete-layout skips; it is not a passing suite. Lint and a final full-suite rerun were skipped. The APK is unsigned for the signing agent.
+
 ## 0.16.0 — One setup path
 
 - **Set up Pocket** replaces four separate setups with one ordered page on phone and web: account, phone link, COROS, then Pip. Each step shows its state (connected, skipped or next) and opens at the first open step. Skips are remembered and can be asked again. Today (browser) and Home (phone) show a small reminder until every step is connected or skipped; it can be hidden, and setup stays under Apps/Settings.

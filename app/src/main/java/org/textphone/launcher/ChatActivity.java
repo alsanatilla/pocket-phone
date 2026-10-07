@@ -21,7 +21,7 @@ final class ChatActivity {
             if (rows.size() >= 32) return;
             row = new JSONObject().put("id", id).put("started", System.currentTimeMillis()); rows.put(id, row);
         }
-        if (name != null) row.put("name", name).put("kind", "web_search".equals(name) ? "web" : "tool");
+        if (name != null) row.put("name", name).put("kind", isWeb(name) ? "web" : "tool");
         if (input != null) row.put("input", input.toString()).put("title", title(row.optString("name"), input));
         if (state != null) { row.put("state", state); if (!("queued".equals(state) || "running".equals(state))) row.put("ended", System.currentTimeMillis()); }
         if (summary != null) row.put("summary", summary);
@@ -39,7 +39,7 @@ final class ChatActivity {
                 JSONObject row = values.optJSONObject(i); if (row == null || row.optString("id").isEmpty()) continue;
                 String state = row.optString("state");
                 if (!("queued".equals(state) || "running".equals(state) || "done".equals(state) || "failed".equals(state) || "stopped".equals(state))) continue;
-                JSONObject safe = new JSONObject().put("id", clip(row.optString("id"), 200)).put("kind", "web".equals(row.optString("kind")) ? "web" : "tool")
+                JSONObject safe = new JSONObject().put("id", clip(row.optString("id"), 200)).put("kind", "web".equals(row.optString("kind")) || isWeb(row.optString("name")) ? "web" : "tool")
                         .put("name", clip(row.optString("name"), 80)).put("title", clip(row.optString("title"), 240))
                         .put("input", clip(row.optString("input"), 1024)).put("state", state).put("summary", clip(row.optString("summary"), 500))
                         .put("started", Math.max(0, row.optLong("started"))).put("ended", Math.max(0, row.optLong("ended")));
@@ -136,5 +136,6 @@ final class ChatActivity {
         }
         return links;
     }
+    private static boolean isWeb(String name) { return "web_search".equals(name) || "search_web".equals(name) || "read_web_page".equals(name); }
     private static String clip(String value, int limit) { return value.length() <= limit ? value : value.substring(0, limit); }
 }

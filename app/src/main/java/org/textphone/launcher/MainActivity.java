@@ -82,7 +82,7 @@ public class MainActivity extends Activity {
     private static final int CAMERA_REQUEST = 41;
     private static final int EXPORT_REQUEST = 72;
     private static final int NOTE_HISTORY_REQUEST = 73;
-    private static final int[] ACCENTS = {0xFFF9F594, 0xFF9BE564, 0xFF8FDDE7, Color.WHITE};
+    private static final int[] ACCENTS = {WarmWorkspace.AMBER, WarmWorkspace.MOVEMENT, WarmWorkspace.CALENDAR, WarmWorkspace.TEXT};
     private static final String[] ACCENT_NAMES = {"Yellow", "Green", "Blue", "White"};
     private static final String[] SHORTCUTS = {"smart txt", "whatsapp", "dumb txt", "contacts",
             "call history", "settings", "maps", "camera", "rides"};
@@ -105,8 +105,11 @@ public class MainActivity extends Activity {
     private EditText captureEditor;
     private EditText captureStepsEditor;
     private String captureKind = "note", captureText = "", appQuery = "";
-    private String captureDue = "", captureSteps = "", taskFilter = "Open", organizerQuery = "";
-    private String workspaceTab = "today";
+    private String captureDue = "", captureSteps = "", taskFilter = "All", organizerQuery = "";
+    private String workspaceTab = "today", appScope = "pocket";
+    private TextView appCount;
+    private long expandedTask;
+    private final List<WarmWorkspace.Meter> movementMeters = new ArrayList<>();
     private LinearLayout workspaceTabs;
     private LinearLayout pocketAppResults;
     private long captureReview;
@@ -117,7 +120,7 @@ public class MainActivity extends Activity {
     private boolean captureImportant;
     private int captureSelectionStart = -1, captureSelectionEnd = -1;
     private long captureId;
-    private TextView nextTaskText, taskCountText;
+    private TextView nextTaskText, taskCountText, movementConnect;
 
     private SharedPreferences preferences;
     private DashboardTiles tiles;
@@ -185,9 +188,9 @@ public class MainActivity extends Activity {
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             if (CloudSync.ACTION_SYNCED.equals(intent.getAction())) { if ("today".equals(screen) || "task_detail".equals(screen) || "thought_detail".equals(screen) || "search".equals(screen)) render(); else if ("home".equals(screen)) { homePlanRefresh = true; requestHomeRefresh(false); } return; }
-            if (CorosRepository.ACTION_UPDATED.equals(intent.getAction())) { if ("home".equals(screen)) { homeRebuild |= romProfile && (CorosRepository.get(MainActivity.this).connected() || CorosRepository.get(MainActivity.this).cached() != null) != (movementValues.size() == 3); requestHomeRefresh(false); } else if ("today".equals(screen) && "today".equals(workspaceTab)) refreshDailyBrief(); return; }
+            if (CorosRepository.ACTION_UPDATED.equals(intent.getAction())) { if ("home".equals(screen) || "today".equals(screen)) updateMovement(); return; }
             if ("home".equals(screen)) requestHomeRefresh(false);
-            else if ("today".equals(screen) && "today".equals(workspaceTab) && (Intent.ACTION_TIME_TICK.equals(intent.getAction()) || Intent.ACTION_TIME_CHANGED.equals(intent.getAction()) || Intent.ACTION_TIMEZONE_CHANGED.equals(intent.getAction()))) refreshDailyBrief();
+            else if ("today".equals(screen) && "today".equals(workspaceTab) && (Intent.ACTION_TIME_TICK.equals(intent.getAction()) || Intent.ACTION_TIME_CHANGED.equals(intent.getAction()) || Intent.ACTION_TIMEZONE_CHANGED.equals(intent.getAction()))) { updateMovement(); refreshDayPlan(); }
             else if ("notifications".equals(screen)
                     && PhoneNotifications.ACTION_UPDATED.equals(intent.getAction())) render();
         }
@@ -248,8 +251,8 @@ public class MainActivity extends Activity {
             captureKind = savedInstanceState.getString("capture_kind", "note");
             captureText = savedInstanceState.getString("capture_text", "");
             captureId = savedInstanceState.getLong("capture_id", 0);
-            appQuery = savedInstanceState.getString("app_query", "");
-            taskFilter = savedInstanceState.getString("task_filter", "Open");
+            appQuery = savedInstanceState.getString("app_query", ""); appScope = savedInstanceState.getString("app_scope", "pocket");
+            taskFilter = savedInstanceState.getString("task_filter", "All");
             organizerQuery = savedInstanceState.getString("organizer_query", "");focusTitle=savedInstanceState.getString("focus_title","");
             workspaceTab = savedInstanceState.getString("workspace_tab", "today");
             captureReview = savedInstanceState.getLong("capture_review", 0);
@@ -334,7 +337,7 @@ public class MainActivity extends Activity {
         else if ("settings".equals(screen)) updateHomeStatus();
         else if ("notifications".equals(screen)) render();
         else if ("apps".equals(screen) || "assign".equals(screen)) ensureAppIndex();
-        if ("today".equals(screen) && "today".equals(workspaceTab)) refreshDailyBrief();
+        if ("today".equals(screen) && "today".equals(workspaceTab)) { updateMovement(); refreshMovement(); refreshDailyBrief(); }
     }
 
     @Override protected void onStop() {
@@ -379,7 +382,7 @@ public class MainActivity extends Activity {
         state.putString("capture_kind", captureKind);
         state.putString("capture_text", captureText);
         state.putLong("capture_id", captureId);
-        state.putString("app_query", appQuery);
+        state.putString("app_query", appQuery); state.putString("app_scope", appScope);
         state.putString("task_filter", taskFilter);
         state.putString("organizer_query", organizerQuery);state.putString("focus_title",focusTitle);
         state.putString("workspace_tab", workspaceTab); state.putLong("capture_review", captureReview);state.putString("workspace_search_query",workspaceSearchQuery);
@@ -556,13 +559,14 @@ public class MainActivity extends Activity {
         dismissNoteWheel();
         activeRoute=new RouteTrail.Route(screen,captureId,captureKind,assigningShortcut,appsReturnTo,appQuery);
         navigation.update();
+        appCount = null;
         pageGeneration++; filterGeneration++; if (appFilter != null) appUi.removeCallbacks(appFilter); appFilter = null; appRowsReady = false;
         clock = date = network = battery = alarm = torchValue = null;
         homeStatus = null;
         notificationCount = null;
         homeDay = homeHint = null;
-        nextTaskText = taskCountText = null;
-        noteText = null; homeNoteId = 0; movementValues.clear(); movementStates.clear(); homeSlotIndices.clear();
+        nextTaskText = taskCountText = movementConnect = null;
+        noteText = null; homeNoteId = 0; movementValues.clear(); movementStates.clear(); movementMeters.clear(); homeSlotIndices.clear();
         captureEditor = null;
         captureStepsEditor = null;planHost=null;todayFilters=todayActions=null;todayDate=null;todayFocusTitle="";planRequest++;
         briefRequest++; briefPendingSignature = briefShownSignature = briefFailedSignature = ""; briefHost = briefFacts = null; briefAsk = briefTileValue = briefTileDetail = null;
@@ -618,20 +622,27 @@ public class MainActivity extends Activity {
         boolean pullable=!("capture".equals(screen)||"focus".equals(screen)||"assign".equals(screen)||"note_preview".equals(screen));
         pullRefresh=pullable?new PullRefreshLayout(this,viewport,this::pullSync):null;
         View scrollHost=pullRefresh!=null?pullRefresh:viewport, page=scrollHost;
-        boolean todayPage="today".equals(screen),taskEditor="capture".equals(screen)&&"task".equals(captureKind);String scene=headerScene();
-        if(todayPage||taskEditor||scene!=null){
+        boolean todayPage="today".equals(screen),taskEditor="capture".equals(screen)&&"task".equals(captureKind);
+        boolean workspacePage=todayPage||"home".equals(screen)||"apps".equals(screen)||"search".equals(screen)||"capture".equals(screen)||"task_detail".equals(screen)||"thought_detail".equals(screen)||"note_preview".equals(screen)||"focus".equals(screen);
+        if(workspacePage){
             LinearLayout shell=new LinearLayout(this);shell.setOrientation(LinearLayout.VERTICAL);shell.setBackgroundColor(BACKGROUND);shell.setTag(todayPage?"today_workspace":taskEditor?"task_editor_workspace":screen+"_workspace");
             shell.setPadding(dp(horizontal),dp(4),dp(horizontal),dp(4));
             shell.setOnApplyWindowInsetsListener((view,insets)->{int left,top,right,bottom;
                 if(Build.VERSION.SDK_INT>=30){android.graphics.Insets safe=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout()|WindowInsets.Type.ime());left=safe.left;top=safe.top;right=safe.right;bottom=safe.bottom;}
                 else{left=insets.getSystemWindowInsetLeft();top=insets.getSystemWindowInsetTop();right=insets.getSystemWindowInsetRight();bottom=insets.getSystemWindowInsetBottom();}
                 view.setPadding(dp(horizontal)+left,dp(4)+top,dp(horizontal)+right,dp(4)+bottom);return insets.consumeSystemWindowInsets();});
-            View header=content.findViewWithTag("page_header");content.removeView(header);
-            if(scene!=null){shell.setBackground(new PixelBackdrop(this,accent(),todayPage?140:88,scene));header.setBackgroundColor(android.graphics.Color.TRANSPARENT);TextView heading=header.findViewWithTag("page_heading");if(heading!=null)heading.setShadowLayer(dp(6),0,0,android.graphics.Color.BLACK);}
-            shell.addView(header,new LinearLayout.LayoutParams(-1,-2));
-            if(todayPage){content.removeView(todayDate);shell.addView(todayDate,new LinearLayout.LayoutParams(-1,-2));content.removeView(workspaceTabs);shell.addView(workspaceTabs,new LinearLayout.LayoutParams(-1,-2));}
+            View header=content.findViewWithTag("page_header");
+            if(header!=null){content.removeView(header);shell.addView(header,new LinearLayout.LayoutParams(-1,-2));}
+            if(todayPage){
+                content.removeView(todayDate);shell.addView(todayDate,new LinearLayout.LayoutParams(-1,-2));
+                content.removeView(workspaceTabs);shell.addView(workspaceTabs,new LinearLayout.LayoutParams(-1,-2));WarmWorkspace.rule(shell);
+            }else if("apps".equals(screen)){
+                content.removeView(appCount);shell.addView(appCount,new LinearLayout.LayoutParams(-1,-2));
+                View scopes=content.findViewWithTag("app_scope_tabs");content.removeView(scopes);shell.addView(scopes,new LinearLayout.LayoutParams(-1,-2));
+            }
             viewport.setPadding(0,0,0,0);viewport.setOnApplyWindowInsetsListener(null);viewport.setTag(todayPage?"today_scroll":taskEditor?"task_editor_scroll":screen+"_scroll");
-            shell.addView(scrollHost,new LinearLayout.LayoutParams(-1,0,1));if(todayPage)shell.addView(todayActions,new LinearLayout.LayoutParams(-1,-2));page=shell;
+            shell.addView(scrollHost,new LinearLayout.LayoutParams(-1,0,1));WarmWorkspace.rule(shell);
+            if(!todayPage)todayActions=workspaceDock();shell.addView(todayActions,new LinearLayout.LayoutParams(-1,-2));page=shell;
         }
         motion.show(page, pageKey(screen)); if (appRowsReady || !"apps".equals(screen) && !"assign".equals(screen)) motion.dataReady(); page.requestApplyInsets();if(planHost!=null)refreshDayPlan();refreshDailyBrief();
         renderedOrganizer = "today".equals(screen) || "task_detail".equals(screen) || "thought_detail".equals(screen) || "search".equals(screen) ? organizerState() : "";
@@ -759,22 +770,26 @@ public class MainActivity extends Activity {
     }
 
     /** The same header as every Pocket app: back, lowercase pixel title, one contextual action. */
-    private void heading(String title, String backTo, String rightLabel, Runnable rightAction, boolean commit) {
-        LinearLayout header = new LinearLayout(this);header.setTag("page_header"); header.setGravity(Gravity.CENTER_VERTICAL); PocketDesign.header(header);
-        TextView previous = text("back", 14, SECONDARY); PocketDesign.headerControl(previous, SECONDARY); previous.setGravity(Gravity.CENTER);
-        previous.setTag("navigation_back");previous.setOnClickListener(v -> onBackPressed()); header.addView(previous, new LinearLayout.LayoutParams(PocketDesign.headerWidth(previous,64), PocketDesign.headerHeight(this)));
-        TextView heading = text(title, 24, PRIMARY);
-        heading.setTag("page_heading"); PocketDesign.title(heading);
-        header.addView(heading, new LinearLayout.LayoutParams(0, PocketDesign.headerHeight(this), 1));
-        TextView right = text(rightLabel, 14, commit ? accent() : SECONDARY); PocketDesign.headerControl(right, commit ? accent() : SECONDARY); right.setGravity(Gravity.CENTER);
-        right.setOnClickListener(v -> rightAction.run());if("settings".equalsIgnoreCase(rightLabel))right.setTag("app_settings"); header.addView(right, new LinearLayout.LayoutParams(PocketDesign.headerWidth(right,rightLabel.length()>5?96:64), PocketDesign.headerHeight(this)));
-        content.addView(header); gap(4);
+    private void heading(String title,String backTo,String rightLabel,Runnable rightAction,boolean commit) {
+        boolean hero="today".equals(screen)||"apps".equals(screen)||"search".equals(screen);
+        LinearLayout header=new LinearLayout(this);header.setTag("page_header");header.setOrientation(LinearLayout.VERTICAL);PocketDesign.header(header);
+        LinearLayout controls=new LinearLayout(this);controls.setGravity(Gravity.CENTER_VERTICAL);
+        TextView previous=text("back",13,SECONDARY);PocketDesign.headerControl(previous,SECONDARY);previous.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);
+        previous.setTag("navigation_back");previous.setOnClickListener(v->onBackPressed());controls.addView(previous,new LinearLayout.LayoutParams(PocketDesign.headerWidth(previous,56),PocketDesign.headerHeight(this)));
+        TextView titleView=text(hero?"pocket":title,hero?12:24,hero?SECONDARY:PRIMARY);titleView.setTag(hero?"page_brand":"page_heading");
+        if(hero){titleView.setTypeface(PocketFonts.body(this));titleView.setGravity(Gravity.CENTER_VERTICAL);titleView.setLetterSpacing(.12f);}else PocketDesign.title(titleView);
+        controls.addView(titleView,new LinearLayout.LayoutParams(0,PocketDesign.headerHeight(this),1));
+        TextView right=text(rightLabel,13,commit?accent():SECONDARY);PocketDesign.headerControl(right,commit?accent():SECONDARY);right.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);right.setOnClickListener(v->rightAction.run());
+        if("settings".equalsIgnoreCase(rightLabel))right.setTag("app_settings");controls.addView(right,new LinearLayout.LayoutParams(PocketDesign.headerWidth(right,rightLabel.length()>5?92:56),PocketDesign.headerHeight(this)));header.addView(controls);
+        if(hero){String scene=headerScene();if(scene!=null)header.setBackground(new PixelBackdrop(this,accent(),116,scene));
+            TextView heading=text(title,46,PRIMARY);heading.setTag("page_heading");heading.setTextSize(size(46));heading.setTypeface(PocketFonts.pixel(this));heading.setPadding(0,dp(10),0,dp(4));if(Build.VERSION.SDK_INT>=28)heading.setAccessibilityHeading(true);header.addView(heading);}
+        content.addView(header);gap(4);
     }
-    /** A group label, the same in every app. */
-    private TextView section(LinearLayout host, String label, boolean first) {
-        TextView view = text(label, 12, SECONDARY); PocketDesign.section(view, first); host.addView(view); return view;
+    private TextView section(LinearLayout host,String label,boolean first) {
+        TextView view=text(label,26,PRIMARY);view.setTextSize(size(26));view.setTypeface(PocketFonts.pixel(this));view.setPadding(0,dp(first?12:24),0,dp(8));
+        if(Build.VERSION.SDK_INT>=28)view.setAccessibilityHeading(true);host.addView(view);return view;
     }
-    /** Page-level commands pinned to the bottom of a page. */
+
     private LinearLayout softKeys(String tag, String[] names, String[] tags, int primary, Runnable... actions) {
         LinearLayout bar = new LinearLayout(this); bar.setTag(tag);
         for (int i = 0; i < names.length; i++) {
@@ -794,7 +809,9 @@ public class MainActivity extends Activity {
     }
 
     private void renderHome() {
-        content.setBackground(new PixelBackdrop(this,accent(),212));
+        // Short screens keep all three tile rows above the dock: a smaller clock, shorter tiles and tighter gaps, never a hidden row.
+        final boolean compactHome = !romProfile && getResources().getDisplayMetrics().heightPixels / getResources().getDisplayMetrics().density < 780;
+        content.setBackgroundColor(BACKGROUND);
         LinearLayout status = new LinearLayout(this);
         status.setOrientation(LinearLayout.HORIZONTAL);
         status.setGravity(Gravity.CENTER_VERTICAL);
@@ -821,7 +838,7 @@ public class MainActivity extends Activity {
         status.addView(battery, new LinearLayout.LayoutParams(-2, -2));
         content.addView(status);
         // Keep the main panel compact: classic phone proportions on a tall touch screen.
-        gap(romProfile ? 8 : 16);
+        gap(romProfile || compactHome ? 8 : 16);
         TextView wordmark = text("pocket", 22, accent());
         wordmark.setTypeface(pixelTypeface);
         if (SetupActivity.open(this) > 0 && !SetupActivity.hidden(this)) {
@@ -838,17 +855,21 @@ public class MainActivity extends Activity {
             content.addView(line);
         } else content.addView(wordmark);
         gap(2);
-        TextView bigClock = text("", PocketDesign.DISPLAY, PRIMARY);
+        TextView bigClock = text("", compactHome ? 40 : PocketDesign.DISPLAY, PRIMARY);
         bigClock.setTypeface(pixelTypeface);
         bigClock.setTag("home_clock");
         content.addView(bigClock);
         homeDay = text("", 11, SECONDARY);
-        homeDay.setTypeface(Typeface.MONOSPACE);
+        homeDay.setTypeface(PocketFonts.body(this));
         homeDay.setLetterSpacing(.08f);
         content.addView(homeDay);
+        LinearLayout hero = new LinearLayout(this); hero.setOrientation(LinearLayout.VERTICAL);
+        hero.setTag("home_hero"); hero.setBackground(new PixelBackdrop(this,accent(),164,PixelBackdrop.SKY));
+        while (content.getChildCount() > 0) { View child = content.getChildAt(0); content.removeViewAt(0); hero.addView(child); }
+        content.addView(hero);
         if(romProfile&&!HomeChoice.active(this))action("use Pocket as home",14,accent(),this::chooseHome).setTag("home_setup");
-        gap(romProfile ? 12 : 16);
-        renderDailyBrief();
+        gap(romProfile || compactHome ? 8 : 16);
+        renderDashboardMovement(content);
         if (romProfile) renderDashboardAgenda();
 
         LinearLayout grid = new LinearLayout(this);
@@ -858,34 +879,34 @@ public class MainActivity extends Activity {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setMinimumHeight(dp(romProfile ? 80 : 102));
+            row.setMinimumHeight(dp(romProfile ? 80 : compactHome ? 76 : 102));
             for (int column = 0; column < 3; column++) {
                 int index = romProfile && column == 2 ? 4 : rowIndex * 3 + column;
                 LinearLayout tile = new LinearLayout(this) {
                     @Override protected void onMeasure(int widthSpec, int heightSpec) {
                         super.onMeasure(widthSpec, heightSpec);
                         if (romProfile) return;
-                        int square = Math.max(getMeasuredWidth(), getMeasuredHeight());
+                        int square = compactHome ? Math.max(getMeasuredHeight(), Math.round(getMeasuredWidth() * .66f)) : Math.max(getMeasuredWidth(), getMeasuredHeight());
                         super.onMeasure(widthSpec, View.MeasureSpec.makeMeasureSpec(square, View.MeasureSpec.EXACTLY));
                     }
                 };
                 tile.setOrientation(LinearLayout.VERTICAL);
                 tile.setGravity(Gravity.CENTER);
                 if (romProfile) tile.setMinimumHeight(dp(72));
-                tile.setPadding(dp(8), dp(8), dp(8), dp(8));
+                tile.setPadding(dp(compactHome ? 6 : 8), dp(compactHome ? 6 : 8), dp(compactHome ? 6 : 8), dp(compactHome ? 6 : 8));
                 tile.setFocusable(true);
                 tile.setClickable(true);
                 tile.setTag("tile_" + shortcuts[index]);
                 tile.setContentDescription(tiles.label(shortcuts[index]) + ". Hold to edit shortcut.");
                 PhoneIcon icon = new PhoneIcon(this, romProfile ? tiles.icon(shortcuts[index]) : index);
                 icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-                int iconSize = romProfile ? 26 : 34;
+                int iconSize = romProfile ? 26 : compactHome ? 28 : 34;
                 tile.addView(icon, new LinearLayout.LayoutParams(dp(iconSize), dp(iconSize)));
                 TextView label = text(tiles.label(shortcuts[index]), 12, PRIMARY);
                 label.setTag("tile_label_" + shortcuts[index]); label.setMaxLines(2); label.setEllipsize(TextUtils.TruncateAt.END);
-                label.setTypeface(Typeface.MONOSPACE);
+                label.setTypeface(PocketFonts.body(this));
                 label.setGravity(Gravity.CENTER);
-                label.setPadding(0, dp(6), 0, 0);
+                label.setPadding(0, dp(compactHome ? 4 : 6), 0, 0);
                 label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
                 tile.addView(label);
                 tile.setOnClickListener(v -> {
@@ -911,7 +932,7 @@ public class MainActivity extends Activity {
         content.addView(grid, new LinearLayout.LayoutParams(-1, -2));
         if (romProfile && !homeSlotIndices.contains(selectedShortcut)) selectedShortcut = homeSlotIndices.get(0);
         if (!romProfile) {
-            gap(14);
+            gap(compactHome ? 6 : 14);
             nextTaskText = action("", 13, accent(), () -> navigate("today"));
             nextTaskText.setMinHeight(dp(48));
             nextTaskText.setSingleLine(true);
@@ -923,26 +944,6 @@ public class MainActivity extends Activity {
         }
         flexibleSpace();
         addFeedback();
-        LinearLayout footer = new LinearLayout(this);
-        footer.setTag("home_footer");
-        footer.setOrientation(LinearLayout.HORIZONTAL);
-        String[] names = {"capture", "today", "pip", "all"};
-        for (int i = 0; i < names.length; i++) {
-            int item = i;
-            TextView link = text(names[i], 14, accent());
-            link.setTag("home_" + names[i]);
-            // Home keeps the classic accent soft keys; elsewhere only a commit key uses accent.
-            PocketDesign.softKey(link, i, names.length, true);
-            link.setFocusable(true);
-            link.setOnClickListener(v -> {
-                if (item == 0) captureMenu();
-                else if (item == 1) openPocket(OrganizerActivity.class);
-                else if (item == 2) openChat();
-                else navigate("apps");
-            });
-            footer.addView(link, PocketDesign.softKeyCell(this, i, names.length));
-        }
-        PocketDesign.header(footer); content.addView(footer);
         selectShortcut(selectedShortcut);
         updateHome();
     }
@@ -968,8 +969,6 @@ public class MainActivity extends Activity {
         noteText = (TextView) dashboardRow(agenda, "note", SECONDARY, () -> { if (homeNoteId > 0) openNote(homeNoteId); }).getChildAt(1);
         noteText.setTag("dashboard_note");
         content.addView(agenda); gap(8);
-        renderDashboardMovement(content);
-
         LinearLayout quick = new LinearLayout(this); quick.setTag("dashboard_quick");
         quick.setOrientation(LinearLayout.HORIZONTAL);
         String[] labels = {"+ thought", "today", "focus"};
@@ -1021,49 +1020,51 @@ public class MainActivity extends Activity {
         showRow(noteText, latest != null, latest == null ? null : "Latest note: " + NoteThoughts.title(latest) + ". Open note.");
     }
     private void renderDashboardMovement(LinearLayout host) {
-        CorosRepository repository = CorosRepository.get(this);
-        if (!repository.connected() && repository.cached() == null) {
-            LinearLayout connect = dashboardRow((LinearLayout) content.findViewWithTag("dashboard_agenda"), "move", SECONDARY, () -> openPocket(MovementActivity.class));
-            connect.setTag("dashboard_movement_connect"); TextView title = (TextView) connect.getChildAt(1);
-            title.setText("connect COROS"); title.setTextColor(SECONDARY); showRow(title, true, "Movement. Connect COROS."); return;
+        LinearLayout row = new LinearLayout(this); row.setTag("dashboard_movement"); row.setPadding(0,dp(10),0,dp(16));
+        String[] names = {"recovery","strain","condition"};
+        int[] colors = {WarmWorkspace.MOVEMENT,WarmWorkspace.AMBER,WarmWorkspace.CALENDAR};
+        for (int i=0;i<3;i++) {
+            int score=i; LinearLayout cell=new LinearLayout(this);cell.setOrientation(LinearLayout.VERTICAL);cell.setGravity(Gravity.CENTER_HORIZONTAL);
+            cell.setPadding(dp(4),dp(4),dp(4),dp(8));cell.setMinimumHeight(dp(108));cell.setFocusable(true);PocketDesign.list(cell);
+            TextView name=text(names[i],13,SECONDARY), value=text("—",38,colors[i]), state=text("—",12,SECONDARY);
+            value.setTextSize(size(38));value.setTypeface(PocketFonts.pixel(this));
+            for(TextView line:new TextView[]{name,value}){line.setGravity(Gravity.CENTER);line.setSingleLine(true);line.setEllipsize(TextUtils.TruncateAt.END);cell.addView(line);}
+            WarmWorkspace.Meter meter=new WarmWorkspace.Meter(this,colors[i]);LinearLayout.LayoutParams bars=new LinearLayout.LayoutParams(-1,dp(5));bars.topMargin=dp(6);bars.bottomMargin=dp(8);cell.addView(meter,bars);
+            state.setGravity(Gravity.CENTER);state.setMaxLines(2);state.setEllipsize(TextUtils.TruncateAt.END);cell.addView(state);
+            cell.setTag("dashboard_movement_"+i);movementValues.add(value);movementStates.add(state);movementMeters.add(meter);
+            for(int j=0;j<cell.getChildCount();j++)cell.getChildAt(j).setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            cell.setOnClickListener(v->startActivity(new Intent(this,MovementActivity.class).putExtra("score",score).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
+            row.addView(cell,new LinearLayout.LayoutParams(0,-2,1));
         }
-        LinearLayout row = new LinearLayout(this); row.setTag("dashboard_movement");
-        String[] names = {"recovery", "strain", "condition"};
-        for (int i = 0; i < names.length; i++) {
-            int score = i; LinearLayout cell = new LinearLayout(this); cell.setOrientation(LinearLayout.VERTICAL); cell.setGravity(Gravity.CENTER_HORIZONTAL);
-            cell.setPadding(0, dp(8), 0, dp(8)); cell.setMinimumHeight(dp(84)); cell.setFocusable(true); PocketDesign.list(cell);
-            TextView name = text(names[i], 12, SECONDARY), value = text("—", 25, PRIMARY), state = text("", 12, SECONDARY);
-            value.setTypeface(pixelTypeface);
-            for (TextView line : new TextView[]{name, value, state}) { line.setGravity(Gravity.CENTER); line.setSingleLine(true); line.setEllipsize(TextUtils.TruncateAt.END); cell.addView(line); }
-            cell.setTag("dashboard_movement_" + i); movementValues.add(value); movementStates.add(state);
-            for (int j = 0; j < cell.getChildCount(); j++) cell.getChildAt(j).setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            cell.setOnClickListener(v -> startActivity(new Intent(this, MovementActivity.class).putExtra("score", score).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
-            row.addView(cell, PocketDesign.column(this));
-        }
-        host.addView(row, new LinearLayout.LayoutParams(-1, -2)); updateMovement();
+        host.addView(row,new LinearLayout.LayoutParams(-1,-2));updateMovement();
+        CorosRepository repository=CorosRepository.get(this);
+        movementConnect=actionInto(host,"connect COROS",14,WarmWorkspace.MOVEMENT,()->openPocket(MovementActivity.class));movementConnect.setTag("dashboard_movement_connect");movementConnect.setVisibility(repository.connected()?View.GONE:View.VISIBLE);
+        refreshMovement();
     }
     private void updateMovement() {
-        if (movementValues.size() != 3) return;
-        CorosRepository.Snapshot snapshot = CorosRepository.get(this).cached();
-        if (snapshot == null) { for (int i = 0; i < 3; i++) { movementValues.get(i).setText("—"); movementStates.get(i).setText("not loaded"); } return; }
-        Scores.Result result = snapshot.scores;
-        String stale = snapshot.today() ? "" : snapshot.date.toString() + " · ";
-        String[] values = {result.recovery == null ? "—" : result.recovery.score + "%", result.strain.strain + "%", String.valueOf(result.conditioning.score)};
-        String[] states = {result.recovery == null ? "no reading" : result.recovery.zone, "of " + result.strain.low + "–" + result.strain.high, result.conditioning.status};
-        for (int i = 0; i < 3; i++) {
-            movementValues.get(i).setText(values[i]); movementStates.get(i).setText(stale + states[i]);
-            movementValues.get(i).setTextColor(i == 0 && result.recovery != null && result.recovery.score < 34 ? accent() : PRIMARY);
-            View cell = (View) movementValues.get(i).getParent(); cell.setContentDescription(new String[]{"Recovery", "Strain", "Conditioning"}[i] + " " + values[i] + ", " + stale + states[i] + ". Open movement.");
+        if(movementValues.size()!=3)return;
+        if(movementConnect!=null)movementConnect.setVisibility(CorosRepository.get(this).connected()?View.GONE:View.VISIBLE);
+        if(todayDate!=null)todayDate.setText(new SimpleDateFormat("EEE · d MMM",Locale.getDefault()).format(new Date()));
+        CorosRepository.Snapshot snapshot=CorosRepository.get(this).cached();
+        Scores.Result result=snapshot==null?null:snapshot.scores;
+        int[] scores={result==null||result.recovery==null?-1:result.recovery.score,result==null||result.strain==null?-1:result.strain.strain,result==null||result.conditioning==null?-1:result.conditioning.score};
+        String[] states={result==null||result.recovery==null?"—":result.recovery.zone,result==null||result.strain==null?"—":result.strain.low+"–"+result.strain.high,result==null||result.conditioning==null?"—":result.conditioning.status};
+        String stale=snapshot==null||snapshot.today()?"":snapshot.date.toString()+" · ";
+        for(int i=0;i<3;i++){
+            String value=scores[i]<0?"—":String.valueOf(scores[i])+(i<2?"%":"");
+            movementValues.get(i).setText(value);movementStates.get(i).setText(stale+states[i]);movementMeters.get(i).score(scores[i]);
+            View cell=(View)movementValues.get(i).getParent();cell.setContentDescription(new String[]{"Recovery","Strain","Condition"}[i]+" "+value+", "+stale+states[i]+". Open movement scores.");
         }
     }
     private void refreshMovement() {
-        if (!romProfile || movementLoading || !CorosRepository.get(this).connected()) return;
-        movementLoading = true; CorosRepository repository = CorosRepository.get(this);
-        appWorker.execute(() -> {
-            try { repository.refresh(false); } catch (IOException ignored) { /* The Movement screen keeps the actionable error. */ }
-            appUi.post(() -> { movementLoading = false; if (!destroyed && "home".equals(screen)) requestHomeRefresh(false); });
+        if(movementLoading||!CorosRepository.get(this).connected())return;
+        movementLoading=true;CorosRepository repository=CorosRepository.get(this);
+        appWorker.execute(()->{
+            try{repository.refresh(false);}catch(IOException ignored){ }
+            appUi.post(()->{movementLoading=false;if(!destroyed&&("home".equals(screen)||"today".equals(screen))){updateMovement();}});
         });
     }
+
     private void dashboardEvent(LinearLayout host, DayPlan.Item item, DayPlan.Result plan) {
         boolean current = item.when <= plan.now && item.end > plan.now;
         boolean soon = current || item.when - plan.now <= 30 * 60_000;
@@ -1083,10 +1084,10 @@ public class MainActivity extends Activity {
         selectedShortcut = Math.max(0, Math.min(8, index));
         for (int i = 0; i < homeTiles.size(); i++) {
             boolean selected = homeSlotIndices.get(i) == selectedShortcut;
-            homeTiles.get(i).setBackground(PocketDesign.tile(this, selected));
+            PocketDesign.list(homeTiles.get(i));
             homeTiles.get(i).setSelected(selected);
-            homeLabels.get(i).setTextColor(selected ? BACKGROUND : PRIMARY);
-            homeIcons.get(i).setTint(selected ? BACKGROUND : PRIMARY, selected ? accent() : BACKGROUND);
+            homeLabels.get(i).setTextColor(selected ? accent() : PRIMARY);
+            homeIcons.get(i).setTint(selected ? accent() : PRIMARY, BACKGROUND);
         }
     }
 
@@ -1362,7 +1363,7 @@ public class MainActivity extends Activity {
         Locale locale = Locale.getDefault();
         Date now = new Date();
         clock.setText(new SimpleDateFormat(twentyFourHour() ? "HH:mm" : "h:mm a", locale).format(now));
-        clock.setTypeface(Typeface.MONOSPACE);
+        clock.setTypeface(PocketFonts.body(this));
         TextView bigClock = content.findViewWithTag("home_clock");
         if (bigClock != null) {
             bigClock.setText(new SimpleDateFormat(twentyFourHour() ? "HH:mm" : "h:mm", locale).format(now));
@@ -1428,7 +1429,8 @@ public class MainActivity extends Activity {
             }
             homeIcons.get(i).setNotificationDot(hasNotification);
         }
-        if (romProfile) { updateDashboardSources(entries == null ? Collections.emptyList() : entries); updateMovement(); }
+        if (romProfile) updateDashboardSources(entries == null ? Collections.emptyList() : entries);
+        updateMovement();
         if (homeHint != null) {
             AlarmManager manager = (AlarmManager) getSystemService(ALARM_SERVICE);
             AlarmManager.AlarmClockInfo next = manager == null ? null : manager.getNextAlarmClock();
@@ -1545,67 +1547,78 @@ public class MainActivity extends Activity {
     }
 
     private void renderApps() {
-        heading("apps", appsReturnTo,"settings",()->navigate("settings"),false);
-        pocketAppResults = new LinearLayout(this);pocketAppResults.setOrientation(LinearLayout.VERTICAL);pocketAppResults.setTag("pocket_apps");content.addView(pocketAppResults);
-        renderPocketApps();
-        section(content, "installed", false);
+        heading("apps",appsReturnTo,"settings",()->navigate("settings"),false);
+        appCount=text("",12,SECONDARY);appCount.setTag("app_count");appCount.setPadding(0,0,0,dp(12));content.addView(appCount);
+        LinearLayout tabs=new LinearLayout(this);tabs.setTag("app_scope_tabs");
+        for(String scope:new String[]{"pocket","installed"}){
+            TextView tab=actionInto(tabs,scope,14,SECONDARY,()->{appScope=scope;render();});
+            tab.setTag("app_scope_"+scope);PocketDesign.tab(tab,scope.equals(appScope));tab.setContentDescription(scope+" apps"+(scope.equals(appScope)?", selected":""));tab.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));
+        }
+        content.addView(tabs);WarmWorkspace.rule(content);
         addInstalledApps(false);
-        View search=content.findViewWithTag("app_search");content.removeView(search);content.addView(search,1);
+        WarmWorkspace.rule(content);action("settings",14,WarmWorkspace.AMBER,()->navigate("settings")).setTag("apps_settings");
         addFeedback();
     }
     private void renderPocketApps() {
-        if(pocketAppResults==null)return;pocketAppResults.removeAllViews();
-        boolean customHeading=false;
-        for(int i=0;i<shortcuts.length;i++){
-            String slot=shortcuts[i];
-            if(!tiles.group(slot)&&tiles.app(slot)==null&&tiles.pocket(slot).equals(slot)&&!preferences.contains("shortcut_name_"+slot))continue;
-            if(!AppSearch.matches(tiles.label(slot),appQuery))continue;
-            if(!customHeading){section(pocketAppResults,"your shortcuts",true);customHeading=true;}
-            int index=i;TextView row=actionInto(pocketAppResults,tiles.label(slot),18,PRIMARY,()->openShortcut(index));
-            row.setTag("all_shortcut_"+slot);row.setOnLongClickListener(v->{editShortcut(slot);return true;});
+        if(pocketAppResults==null)return;pocketAppResults.removeAllViews();int total=18,visible=0;
+        List<String> custom=new ArrayList<>();
+        for(String slot:shortcuts)if(tiles.group(slot)||tiles.app(slot)!=null||!tiles.pocket(slot).equals(slot)||preferences.contains("shortcut_name_"+slot))custom.add(slot);
+        total+=custom.size();
+        if(!custom.isEmpty()){
+            List<String> matches=new ArrayList<>();for(String slot:custom)if(AppSearch.matches(tiles.label(slot),appQuery))matches.add(slot);
+            if(!matches.isEmpty()){section(pocketAppResults,"your shortcuts",true);for(int i=0;i<matches.size();i+=2){LinearLayout row=new LinearLayout(this);
+                for(int j=i;j<Math.min(i+2,matches.size());j++){String slot=matches.get(j);int index=java.util.Arrays.asList(shortcuts).indexOf(slot);
+                    View app=catalogApp(tiles.label(slot),tiles.group(slot)?"group":tiles.pocket(slot),"all_shortcut_"+slot,()->openShortcut(index));
+                    app.setOnLongClickListener(v->{editShortcut(slot);return true;});row.addView(app,new LinearLayout.LayoutParams(0,-2,1));visible++;}
+                if(matches.size()-i==1)row.addView(new View(this),new LinearLayout.LayoutParams(0,1,1));pocketAppResults.addView(row);}}
         }
-        String[][] groups={{"communicate","phone","messages","contacts"},{"plan & think","today","brief","thoughts","tasks","notes","calendar","clock","pip"},{"capture & keep","camera","photos","paper"},{"body","movement","gym"},{"extras","calculator","dice"}};
-        for(String[] group:groups){boolean heading=false;for(int i=1;i<group.length;i++){String name=group[i];if(!AppSearch.matches(name,appQuery))continue;
-            if(!heading){section(pocketAppResults,group[0],pocketAppResults.getChildCount()==0);heading=true;}
-            actionInto(pocketAppResults,name,18,PRIMARY,()->{
-                if("thoughts".equals(name)||"tasks".equals(name)||"notes".equals(name))selectWorkspace(name);
-                else if("calendar".equals(name))openPocket(AgendaActivity.class);else if("photos".equals(name))openPocket(FilesActivity.class);else if("paper".equals(name))openPocket(JournalActivity.class);else if("pip".equals(name))openChat();else openPocketApp(name);
-            }).setTag("pocket_app_"+name);
-        }}
+        String[][] groups={{"Day","today","calendar","clock","brief"},{"Keep","thoughts","tasks","notes","paper"},{"Capture","camera","photos"},{"Movement","movement","gym"},{"Phone","phone","messages","contacts"},{"Extras","calculator","dice","activity"}};
+        for(String[] group:groups){List<String> matches=new ArrayList<>();for(int i=1;i<group.length;i++)if(AppSearch.matches(catalogLabel(group[i]),appQuery))matches.add(group[i]);if(matches.isEmpty())continue;
+            section(pocketAppResults,group[0],pocketAppResults.getChildCount()==0);
+            for(int i=0;i<matches.size();i+=2){LinearLayout row=new LinearLayout(this);
+                for(int j=i;j<Math.min(i+2,matches.size());j++){String id=matches.get(j);row.addView(catalogApp(catalogLabel(id),id,"pocket_app_"+id,()->openCatalogApp(id)),new LinearLayout.LayoutParams(0,-2,1));visible++;}
+                if(matches.size()-i==1)row.addView(new View(this),new LinearLayout.LayoutParams(0,1,1));pocketAppResults.addView(row);}
+        }
+        if(visible==0)pocketAppResults.addView(text("no apps match",14,SECONDARY));
+        if(appCount!=null)appCount.setText(total+" Pocket apps");appRowsReady=true;motion.dataReady();
+    }
+    private String catalogLabel(String id){return "brief".equals(id)?"daily brief":id;}
+    private View catalogApp(String label,String id,String tag,Runnable open){
+        LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setMinimumHeight(dp(52));row.setPadding(0,dp(8),dp(10),dp(8));row.setTag(tag);row.setFocusable(true);PocketDesign.list(row);
+        row.addView(new WarmWorkspace.Glyph(this,id,WarmWorkspace.color(id)),new LinearLayout.LayoutParams(dp(18),dp(18)));
+        TextView name=text(label,15,PRIMARY);name.setPadding(dp(10),0,0,0);name.setMaxLines(2);name.setEllipsize(TextUtils.TruncateAt.END);name.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);row.addView(name,new LinearLayout.LayoutParams(0,-2,1));
+        row.setContentDescription(label);row.setOnClickListener(v->{launchOrigin=v;try{open.run();}finally{launchOrigin=null;}});return row;
+    }
+    private void openCatalogApp(String id){
+        if("today".equals(id)||"thoughts".equals(id)||"tasks".equals(id)||"notes".equals(id))selectWorkspace(id);
+        else if("calendar".equals(id))openPocket(AgendaActivity.class);
+        else if("photos".equals(id))openPocket(FilesActivity.class);
+        else if("paper".equals(id))openPocket(JournalActivity.class);
+        else if("activity".equals(id))openPocket(ReceiptActivity.class);
+        else openPocketApp(id);
+    }
+    private void addInstalledApps(boolean assign) {
+        int page=pageGeneration;EditText search=new EditText(this);search.setTag("app_search");PocketDesign.input(search);search.setSingleLine(true);
+        search.setHint(assign?"search installed…":"search "+appScope+"…");search.setContentDescription(assign?"Search installed apps":"Search "+appScope+" apps");
+        search.setText(appQuery);content.addView(search,new LinearLayout.LayoutParams(-1,-2));
+        LinearLayout results=new LinearLayout(this);results.setOrientation(LinearLayout.VERTICAL);results.setTag("app_results");content.addView(results,new LinearLayout.LayoutParams(-1,-2));pocketAppResults=results;
+        Runnable filter=()->{
+            if(page!=pageGeneration||destroyed)return;
+            int filtered=++filterGeneration;results.removeAllViews();
+            if(!assign&&"pocket".equals(appScope)){renderPocketApps();return;}
+            if(installedApps==null){results.addView(text("loading apps…",14,SECONDARY));if(appCount!=null)appCount.setText("…");ensureAppIndex();return;}
+            if(appCount!=null)appCount.setText(installedApps.size()+" installed apps");
+            List<InstalledApps.Entry> matches=new ArrayList<>();for(InstalledApps.Entry entry:installedApps)if(AppSearch.matches(entry.label,appQuery))matches.add(entry);
+            if(matches.isEmpty()){results.addView(text("no apps match",14,SECONDARY));appRowsReady=true;motion.dataReady();return;}
+            appendApps(matches,0,results,search,assign,page,filtered);
+        };
+        appFilter=filter;search.addTextChangedListener(new TextWatcher(){
+            public void beforeTextChanged(CharSequence value,int start,int count,int after){}
+            public void onTextChanged(CharSequence value,int start,int before,int count){appQuery=value.toString();filterGeneration++;appUi.removeCallbacks(filter);appUi.postDelayed(filter,80);}
+            public void afterTextChanged(Editable value){}
+        });filter.run();
     }
 
-    private void addInstalledApps(boolean assign) {
-        int page = pageGeneration;
-        EditText search = new EditText(this);
-        search.setTag("app_search");
-        search.setTextColor(PRIMARY); search.setHintTextColor(SECONDARY);
-        search.setTypeface(Typeface.MONOSPACE); search.setTextSize(16);
-        search.setSingleLine(true); search.setHint("Find app: name or 2–9");
-        search.setText(appQuery); search.setMinHeight(dp(48));
-        PocketDesign.input(search);
-        content.addView(search, new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout results = new LinearLayout(this);
-        results.setOrientation(LinearLayout.VERTICAL); results.setTag("app_results");
-        content.addView(results, new LinearLayout.LayoutParams(-1, -2));
-        Runnable filter = () -> {
-            if (page != pageGeneration || destroyed) return;
-            if(!assign)renderPocketApps();
-            int filtered = ++filterGeneration; results.removeAllViews();
-            if (installedApps == null) { results.addView(text("Loading apps…", 16, SECONDARY)); ensureAppIndex(); return; }
-            List<InstalledApps.Entry> matches = new ArrayList<>(); for (InstalledApps.Entry entry : installedApps) if (AppSearch.matches(entry.label, appQuery)) matches.add(entry);
-            if (matches.isEmpty()) { results.addView(text(appQuery.isEmpty() ? "No other apps found" : "No matches", 16, SECONDARY)); appRowsReady = true; motion.dataReady(); return; }
-            appendApps(matches, 0, results, search, assign, page, filtered);
-        };
-        appFilter = filter;
-        search.addTextChangedListener(new TextWatcher() {
-            public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
-            public void onTextChanged(CharSequence value, int start, int before, int count) {
-                appQuery = value.toString(); filterGeneration++; appUi.removeCallbacks(filter); appUi.postDelayed(filter, 80);
-            }
-            public void afterTextChanged(Editable value) { }
-        });
-        filter.run();
-    }
     private void ensureAppIndex() {
         if (installedApps != null) { if (appFilter != null) appFilter.run(); return; }
         if (indexLoading || destroyed) return; indexLoading = true; int version = indexVersion;
@@ -1622,18 +1635,20 @@ public class MainActivity extends Activity {
             });
         });
     }
-    private void appendApps(List<InstalledApps.Entry> matches, int start, LinearLayout results, EditText search, boolean assign, int page, int filtered) {
-        if (page != pageGeneration || filtered != filterGeneration || destroyed || !appVisible) return;
-        int end = Math.min(matches.size(), start + 24);
-        for (int i = start; i < end; i++) { InstalledApps.Entry app = matches.get(i);
-            actionInto(results, app.label, 16, PRIMARY, () -> { hideKeyboard(search);
-                if (assign) { tiles.assign(assigningShortcut, app.packageName, app.label); navigate("home"); }
-                else launch(app.label, new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setClassName(app.packageName, app.activityName)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED));
-            });
+    private void appendApps(List<InstalledApps.Entry> matches,int start,LinearLayout results,EditText search,boolean assign,int page,int filtered) {
+        if(page!=pageGeneration||filtered!=filterGeneration||destroyed||!appVisible)return;
+        int end=Math.min(matches.size(),start+24);
+        for(int i=start;i<end;i++){
+            InstalledApps.Entry app=matches.get(i);String letter=app.label.isEmpty()?"#":app.label.substring(0,1).toUpperCase(Locale.getDefault());
+            String previous=i==0?"":matches.get(i-1).label.isEmpty()?"#":matches.get(i-1).label.substring(0,1).toUpperCase(Locale.getDefault());
+            if(!letter.equals(previous)){TextView group=section(results,letter,i==0);group.setTypeface(PocketFonts.pixel(this));group.setTextSize(size(24));group.setTextColor(WarmWorkspace.AMBER);group.setPadding(0,dp(i==0?12:20),0,dp(4));}
+            actionInto(results,app.label,16,PRIMARY,()->{hideKeyboard(search);
+                if(assign){tiles.assign(assigningShortcut,app.packageName,app.label);navigate("home");}
+                else launch(app.label,new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setClassName(app.packageName,app.activityName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED));
+            }).setTag("installed_app_"+app.packageName);
         }
-        if (end < matches.size()) results.postOnAnimation(() -> appendApps(matches, end, results, search, assign, page, filtered));
-        else { appRowsReady = true; motion.dataReady(); }
+        if(end<matches.size())results.postOnAnimation(()->appendApps(matches,end,results,search,assign,page,filtered));
+        else{appRowsReady=true;motion.dataReady();}
     }
 
     private void plannerAction(Runnable action) {
@@ -1660,21 +1675,23 @@ public class MainActivity extends Activity {
     private void drawDayPlan(LinearLayout target,DayPlan.Result plan,boolean home){
         target.removeAllViews();target.setVisibility(View.VISIBLE);
         if(home){int shown=0;for(DayPlan.Item item:plan.items){if(item.end<=plan.now||item.when>=plan.end)continue;dashboardEvent(target,item,plan);if(++shown==2)break;}target.setVisibility(shown==0?View.GONE:View.VISIBLE);return;}
-        DayPlan.Item focus=plan.next();
-        for(DayPlan.Item item:plan.items)if(!item.allDay&&item.when<=plan.now&&item.end>plan.now){focus=item;break;}
+        DayPlan.Item focus=plan.next();for(DayPlan.Item item:plan.items)if(!item.allDay&&item.when<=plan.now&&item.end>plan.now){focus=item;break;}
         todayFocusTitle=focus==null||!organizerQuery.trim().isEmpty()?"":focus.title;
         if(!organizerQuery.trim().isEmpty()||focus==null){target.setVisibility(View.GONE);return;}
         DayPlan.Item item=focus;boolean current=item.when<=plan.now&&item.end>plan.now;
-        String time=item.allDay?"All day":new SimpleDateFormat(twentyFourHour()?"HH:mm":"h:mma",Locale.getDefault()).format(new Date(item.when));
-        String day=item.when>=plan.start&&item.when<plan.end?"Today":new SimpleDateFormat("EEE d MMM",Locale.getDefault()).format(new Date(item.when));
-        LinearLayout hero=new LinearLayout(this);hero.setOrientation(LinearLayout.VERTICAL);hero.setPadding(0,dp(8),0,dp(8));hero.setTag("today_event_"+item.id);hero.setMinimumHeight(dp(56));PocketDesign.list(hero);hero.setFocusable(true);
-        TextView timeView=todayText(time,16,accent(),false);timeView.setTag("today_focus_time");hero.addView(timeView);
-        TextView title=todayText(item.title,18,PRIMARY,false);title.setPadding(0,dp(8),0,dp(8));title.setTag("today_focus_title");hero.addView(title);
-        TextView meta=todayText((current?"Now · ":"Next · ")+day+" · "+item.source,12,accent(),false);meta.setTag("today_focus_meta");hero.addView(meta);
-        hero.setContentDescription(time+", "+item.title+", "+meta.getText());for(int i=0;i<hero.getChildCount();i++)hero.getChildAt(i).setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        hero.setOnClickListener(view->{if(item.external)startActivity(new Intent(Intent.ACTION_VIEW,android.content.ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI,item.id)));else startActivity(new Intent(this,AgendaActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("appointment_id",item.id));});target.addView(hero);
-        if(!plan.issue.isEmpty())target.addView(todayText(plan.issue+" · Settings",12,SECONDARY,false));
+        section(target,current?"Now":"Next appointment",true);
+        LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.TOP);row.setPadding(0,dp(6),0,dp(12));row.setTag("today_event_"+item.id);row.setMinimumHeight(dp(64));PocketDesign.list(row);row.setFocusable(true);
+        String time=item.allDay?"all day":new SimpleDateFormat(twentyFourHour()?"HH:mm":"h:mma",Locale.getDefault()).format(new Date(item.when));
+        TextView when=text(time,29,WarmWorkspace.CALENDAR);when.setTypeface(PocketFonts.pixel(this));when.setTag("today_focus_time");when.setPadding(0,dp(2),dp(12),0);row.addView(when,new LinearLayout.LayoutParams(Math.max(dp(72),(int)when.getPaint().measureText(time)+dp(12)),-2));
+        LinearLayout words=new LinearLayout(this);words.setOrientation(LinearLayout.VERTICAL);
+        TextView title=text(item.title,16,PRIMARY);title.setTypeface(PocketFonts.medium(this));title.setTag("today_focus_title");words.addView(title);
+        String day=item.when>=plan.start&&item.when<plan.end?"today":new SimpleDateFormat("EEE d MMM",Locale.getDefault()).format(new Date(item.when));
+        TextView meta=text(day+(item.source.isEmpty()?"":" · "+item.source),12,SECONDARY);meta.setTag("today_focus_meta");meta.setPadding(0,dp(6),0,0);words.addView(meta);row.addView(words,new LinearLayout.LayoutParams(0,-2,1));
+        row.setContentDescription(time+", "+item.title+", "+day+", "+item.source);when.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);words.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        row.setOnClickListener(v->{if(item.external)startActivity(new Intent(Intent.ACTION_VIEW,android.content.ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI,item.id)));else startActivity(new Intent(this,AgendaActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("appointment_id",item.id));});target.addView(row);WarmWorkspace.rule(target);
+        if(!plan.issue.isEmpty())actionInto(target,plan.issue,12,SECONDARY,this::organizerSettings);
     }
+
     private void planRow(LinearLayout host,DayPlan.Item item,DayPlan.Result plan,boolean home){boolean current=item.when<=plan.now&&item.end>plan.now;String time=item.allDay?"All day":new SimpleDateFormat(twentyFourHour()?"HH:mm":"h:mma",Locale.getDefault()).format(new Date(item.when));String day=item.when>=plan.start&&item.when<plan.end?"Today":new SimpleDateFormat("EEE d MMM",Locale.getDefault()).format(new Date(item.when));
         Runnable open=()->{if(item.external)startActivity(new Intent(Intent.ACTION_VIEW,android.content.ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI,item.id)));else startActivity(new Intent(this,AgendaActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("appointment_id",item.id));};
         LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setTag((home?"dashboard_event_":"today_event_")+item.id);row.setMinimumHeight(dp(56));PocketDesign.list(row);row.setFocusable(true);row.setOnClickListener(v->open.run());
@@ -1683,48 +1700,49 @@ public class MainActivity extends Activity {
         row.setContentDescription(day+", "+time+", "+item.title+", "+item.source);clock.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);title.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);host.addView(row);}
 
     private float todaySize(float sp){return sp*(preferences.getBoolean("large_text",false)?1.15f:1f);}
-    private TextView todayText(String value,float sp,int color,boolean bold){TextView view=text(value,sp,color);view.setTextSize(todaySize(sp));view.setTypeface(Typeface.MONOSPACE,bold?Typeface.BOLD:Typeface.NORMAL);return view;}
+    private TextView todayText(String value,float sp,int color,boolean bold){TextView view=text(value,sp,color);view.setTextSize(todaySize(sp));view.setTypeface(bold?PocketFonts.medium(this):PocketFonts.body(this));return view;}
     private void renderToday() {
-        heading(workspaceTab, "home","settings",this::organizerSettings,false);
-        todayDate=todayText(new SimpleDateFormat("EEE · d MMM",Locale.getDefault()).format(new Date()),12,SECONDARY,false);todayDate.setTag("today_date");todayDate.setGravity(Gravity.CENTER);todayDate.setPadding(0,0,0,dp(4));content.addView(todayDate);
-        workspaceTabs = new LinearLayout(this); workspaceTabs.setTag("workspace_tabs");
-        for (String tab : new String[]{"today", "thoughts", "tasks", "notes"}) {
-            TextView link = actionInto(workspaceTabs, tab, 14, SECONDARY, () -> selectWorkspace(tab));
-            link.setTag("workspace_tab_" + tab); PocketDesign.tab(link, tab.equals(workspaceTab));
-            link.setContentDescription(tab + (tab.equals(workspaceTab) ? ", selected" : "")); link.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));
+        heading(workspaceTab,"home","settings",this::organizerSettings,false);
+        todayDate=todayText(new SimpleDateFormat("EEE · d MMM",Locale.getDefault()).format(new Date()),12,SECONDARY,false);todayDate.setTag("today_date");todayDate.setPadding(0,0,0,dp(12));content.addView(todayDate);
+        workspaceTabs=new LinearLayout(this);workspaceTabs.setTag("workspace_tabs");
+        for(String tab:new String[]{"today","thoughts","tasks","notes"}){
+            TextView link=actionInto(workspaceTabs,tab,14,SECONDARY,()->selectWorkspace(tab));link.setTag("workspace_tab_"+tab);PocketDesign.tab(link,tab.equals(workspaceTab));
+            link.setContentDescription(tab+(tab.equals(workspaceTab)?", selected":""));link.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));
         }
         content.addView(workspaceTabs);
-        if ("thoughts".equals(workspaceTab)) { renderThoughts(content); workspaceBottom("+ new", () -> openThoughtCapture(0)); addFeedback(); return; }
-        if ("notes".equals(workspaceTab)) { renderWorkspaceNotes(content); workspaceBottom("+ note", () -> openCapture("note",0,"")); addFeedback(); return; }
-        boolean daily = "today".equals(workspaceTab);
+        if("thoughts".equals(workspaceTab)){renderThoughts(content);workspaceBottom("capture",this::captureMenu);addFeedback();return;}
+        if("notes".equals(workspaceTab)){renderWorkspaceNotes(content);workspaceBottom("capture",this::captureMenu);addFeedback();return;}
+        boolean daily="today".equals(workspaceTab);
+        if(daily)renderDashboardMovement(content);
         planHost=new LinearLayout(this);planHost.setOrientation(LinearLayout.VERTICAL);planHost.setTag("today_plan");homePlan=false;content.addView(planHost);
-        if (!daily) planHost.setVisibility(View.GONE);
-        if (daily) {
-            int ready = ParkingStore.backCount(this, System.currentTimeMillis());
-            if (ready > 0) action(ready + (ready == 1 ? " thought to revisit" : " thoughts to revisit"),14,accent(),()->selectWorkspace("thoughts")).setTag("today_thought_review");
-            resumeWriting();
+        if(!daily)planHost.setVisibility(View.GONE);
+        if(!daily){
+            commands(content,"today_commands",new String[]{"+ task","focus","search"},new String[]{"today_add_task","today_focus","today_search_tasks"},0,()->openCapture("task",0,""),()->navigate("focus"),this::searchOrganizer);
+            todayFilters=new LinearLayout(this);todayFilters.setTag("today_filters");
+            int required=0;List<TextView> filters=new ArrayList<>();
+            for(String name:new String[]{"All","Open","Today","Later","Done"}){
+                TextView filter=actionInto(todayFilters,name.toLowerCase(Locale.ROOT),14,SECONDARY,()->{taskFilter=name;render();});filter.setTag("task_filter_"+name);PocketDesign.tab(filter,name.equals(taskFilter));
+                filter.setSingleLine(true);filter.setContentDescription(name+" tasks"+(name.equals(taskFilter)?", selected":""));filters.add(filter);required+=Math.max(dp(48),(int)Math.ceil(filter.getPaint().measureText(filter.getText().toString()))+dp(16));
+            }
+            int available=getResources().getDisplayMetrics().widthPixels-dp(PocketDesign.INSET*2);
+            if(required<=available){for(TextView filter:filters)filter.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));content.addView(todayFilters);}
+            else{for(TextView filter:filters)filter.setLayoutParams(new LinearLayout.LayoutParams(Math.max(dp(48),(int)Math.ceil(filter.getPaint().measureText(filter.getText().toString()))+dp(16)),-2));
+                android.widget.HorizontalScrollView strip=new android.widget.HorizontalScrollView(this);strip.setHorizontalScrollBarEnabled(false);strip.setTag("task_filters_scroll");strip.addView(todayFilters,new android.widget.HorizontalScrollView.LayoutParams(-2,-2));content.addView(strip,new LinearLayout.LayoutParams(-1,-2));}
         }
-        if(daily)commands(content,"today_commands",new String[]{"+ task","+ note","focus"},new String[]{"today_add_task","today_add_note","today_focus"},0,
-                ()->openCapture("task",0,""),()->openCapture("note",0,""),()->navigate("focus"));
-        if(daily){renderDailyBrief();renderTodayTiles();}
-        section(content,"tasks",false).setTag("today_tasks_heading");
-        todayFilters=new LinearLayout(this);todayFilters.setTag("today_filters");
-        for(String name:new String[]{"Open","Today","Later","Done"}){
-            TextView filter=actionInto(todayFilters,name.toLowerCase(Locale.ROOT),14,SECONDARY,()->{taskFilter=name;workspaceTab="tasks";render();});
-            filter.setTag("task_filter_"+name);PocketDesign.tab(filter,name.equals(daily ? "Today" : taskFilter));
-            filter.setContentDescription(name+" tasks"+(name.equals(taskFilter)?", selected":""));
-            filter.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));
-        }
-        if(!daily)content.addView(todayFilters);
-        if(!organizerQuery.trim().isEmpty()){TextView query=action("search · "+organizerQuery,14,accent(),this::searchOrganizer);query.setTag("organizer_query");query.setMaxLines(1);query.setEllipsize(TextUtils.TruncateAt.END);}
+        if(!organizerQuery.trim().isEmpty())action("search · "+organizerQuery,14,accent(),this::searchOrganizer).setTag("organizer_query");
+        section(content,daily?"Tasks":"tasks",false).setTag("today_tasks_heading");
         LinearLayout taskResults=new LinearLayout(this);taskResults.setOrientation(LinearLayout.VERTICAL);taskResults.setTag("today_tasks");content.addView(taskResults);
-        LinearLayout noteResults=new LinearLayout(this);noteResults.setOrientation(LinearLayout.VERTICAL);noteResults.setTag("today_notes");content.addView(noteResults);renderOrganizerLists(taskResults,noteResults);
-        noteResults.setVisibility(View.GONE);
-        if(daily){action("all tasks",14,SECONDARY,()->selectWorkspace("tasks")).setTag("today_all_tasks");
-            section(content,"review",false);action("done tasks",14,SECONDARY,()->{taskFilter="Done";selectWorkspace("tasks");});action("today's activity",14,SECONDARY,()->openPocket(ReceiptActivity.class));}
-        workspaceBottom(daily ? "capture" : "+ task", daily ? this::captureMenu : () -> openCapture("task",0,""));
-        addFeedback();
+        LinearLayout noteResults=new LinearLayout(this);noteResults.setOrientation(LinearLayout.VERTICAL);noteResults.setTag("today_notes");content.addView(noteResults);renderOrganizerLists(taskResults,noteResults);noteResults.setVisibility(View.GONE);
+        if(daily){
+            action("all tasks",14,SECONDARY,()->selectWorkspace("tasks")).setTag("today_all_tasks");
+            ParkingStore.Item ready=null;long now=System.currentTimeMillis();for(ParkingStore.Item item:ParkingStore.open(this))if(item.back(now)){ready=item;break;}
+            if(ready!=null){ParkingStore.Item thought=ready;section(content,"Thought to revisit",false);LinearLayout row=ReadableRows.item(this,thought.text,"ready to revisit",WarmWorkspace.THOUGHT,"today_thought_review",()->openThought(thought.id));content.addView(row);
+                commands(content,"today_thought_actions",new String[]{"make task","ask Pip"},new String[]{"today_thought_make_task","today_thought_ask_pip"},0,()->plannerAction(()->openTask(ParkingStore.promote(this,thought.id))),()->askPip("thought",thought.id,thought.text,thought.text));}
+            renderTodayTiles();resumeWriting();
+        }
+        workspaceBottom("capture",this::captureMenu);addFeedback();
     }
+
     private void renderDailyBrief() {
         briefHost = new LinearLayout(this); briefHost.setOrientation(LinearLayout.VERTICAL); briefHost.setTag("daily_brief");
         LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
@@ -1808,6 +1826,7 @@ public class MainActivity extends Activity {
     // ── Today tiles: a synced, editable set of live readings. Tapping one opens its app. ──
     private void renderTodayTiles() {
         LinearLayout host = new LinearLayout(this); host.setOrientation(LinearLayout.VERTICAL); host.setTag("today_tiles");
+        section(host,"Tiles",false);
         commands(host, "today_tile_commands", new String[]{"+ add tile", "edit tiles"},
                 new String[]{"today_add_tile", "today_edit_tiles"}, 0, this::addTodayTile, this::editTodayTiles);
         List<String> kinds = TodayTiles.visible(this);
@@ -1827,12 +1846,12 @@ public class MainActivity extends Activity {
         String[] reading = TodayTiles.reading(this, planner, kind);
         LinearLayout tile = new LinearLayout(this); tile.setOrientation(LinearLayout.VERTICAL); tile.setPadding(dp(2), dp(10), dp(2), dp(10)); tile.setMinimumHeight(dp(96));
         tile.setTag("today_tile_" + kind); tile.setFocusable(true); PocketDesign.list(tile);
-        TextView name = text(kind, 12, SECONDARY); name.setAllCaps(true); name.setLetterSpacing(.08f); name.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        TextView value = text(reading[0], 28, PRIMARY); value.setTypeface(PocketFonts.pixel(this)); value.setSingleLine(true); value.setEllipsize(TextUtils.TruncateAt.END);
+        TextView name = text(TodayTiles.label(this,kind), 12, SECONDARY);
+        TextView value = text(reading[0], 32, WarmWorkspace.color(kind)); value.setTypeface(PocketFonts.pixel(this)); value.setSingleLine(true); value.setEllipsize(TextUtils.TruncateAt.END);
         TextView detail = text(reading[1], 12, SECONDARY); detail.setMaxLines(2); detail.setEllipsize(TextUtils.TruncateAt.END);
         if ("brief".equals(kind)) { briefTileValue = value; briefTileDetail = detail; }
         for (TextView part : new TextView[]{name, value, detail}) { part.setPadding(0, dp(2), 0, dp(2)); part.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO); tile.addView(part); }
-        tile.setContentDescription(kind + ", " + reading[0] + ", " + reading[1] + ". Open. Hold to edit tile.");
+        tile.setContentDescription(TodayTiles.label(this,kind) + ", " + reading[0] + ", " + reading[1] + ". Open. Hold to edit tile.");
         tile.setOnClickListener(v -> openTodayTile(kind));
         tile.setOnLongClickListener(v -> { tileMenu(TodayTiles.visible(this), kind); return true; });
         return tile;
@@ -1889,10 +1908,29 @@ public class MainActivity extends Activity {
         try { TodayTiles.saveVisible(this, kinds); } catch (RuntimeException error) { showFeedback(error.getMessage() == null ? "Could not save the tiles." : error.getMessage()); return; }
         persistDraft(); render();
     }
-    private void workspaceBottom(String label, Runnable capture) {
-        todayActions = softKeys("today_actions",new String[]{label,"search","calendar","pip"},new String[]{"workspace_capture","today_search","today_calendar","today_chat"},0,
-                capture,()->navigate("search"),()->openPocket(AgendaActivity.class),this::openChat);
+    private void workspaceBottom(String label,Runnable capture) { todayActions=workspaceDock(); }
+    private LinearLayout workspaceDock(){
+        LinearLayout bar=new LinearLayout(this);bar.setTag("today_actions");bar.setGravity(Gravity.CENTER_VERTICAL);bar.setBackgroundColor(BACKGROUND);bar.setMinimumHeight(dp(80));
+        String[] names={"today","search","capture","Pip","apps"};
+        for(int i=0;i<names.length;i++){
+            int item=i;boolean selected=i==0&&"today".equals(screen)||i==1&&"search".equals(screen)||i==4&&"apps".equals(screen);
+            View target;
+            if(i==3){target=PocketDesign.navMascot(this,80);target.setTag("today_chat");target.setContentDescription("Pip");}
+            else{
+                LinearLayout cell=new LinearLayout(this);cell.setOrientation(LinearLayout.VERTICAL);cell.setGravity(Gravity.CENTER);cell.setMinimumHeight(dp(64));cell.setPadding(dp(2),dp(6),dp(2),dp(6));PocketDesign.list(cell);
+                int color=i==2?WarmWorkspace.INK:selected?WarmWorkspace.AMBER:SECONDARY;
+                WarmWorkspace.Glyph glyph=new WarmWorkspace.Glyph(this,names[i],color);
+                if(i==2){GradientDrawable fill=new GradientDrawable();fill.setColor(WarmWorkspace.AMBER);fill.setCornerRadius(dp(7));glyph.setBackground(fill);glyph.setPadding(dp(10),dp(8),dp(10),dp(8));}
+                cell.addView(glyph,new LinearLayout.LayoutParams(dp(i==2?44:18),dp(i==2?40:18)));
+                if(i!=2){TextView name=text(names[i],11,color);name.setGravity(Gravity.CENTER);name.setPadding(0,dp(4),0,0);name.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);cell.addView(name);}
+                cell.setTag(i==0?"workspace_today":i==1?"today_search":i==2?"workspace_capture":"workspace_apps");target=cell;
+                target.setContentDescription(i==2?"Capture":names[i]+(selected?", selected":""));
+            }
+            target.setFocusable(true);target.setSelected(selected);target.setOnClickListener(v->{if(item==0)selectWorkspace("today");else if(item==1)navigate("search");else if(item==2)captureMenu();else if(item==3)openChat();else navigate("apps");});
+            bar.addView(target,i==3?new LinearLayout.LayoutParams(dp(80),dp(80)):new LinearLayout.LayoutParams(0,dp(80),1));
+        }return bar;
     }
+
     private void selectWorkspace(String tab) {
         if (!java.util.Arrays.asList("today","thoughts","tasks","notes").contains(tab)) return;
         persistDraft(); workspaceTab = tab; organizerQuery = "";
@@ -1910,31 +1948,55 @@ public class MainActivity extends Activity {
         }).show()).setTag("workspace_resume");
     }
     private void renderWorkspaceNotes(LinearLayout host) {
-        commands(host,"notes_capture",new String[]{"+ note","+ paper page"},new String[]{"notes_new","notes_paper"},0,()->openCapture("note",0,""),()->openPocket(JournalActivity.class));
-        List<PlannerStore.Entry> notes = new ArrayList<>();for(PlannerStore.Entry entry:planner.entries())if("note".equals(entry.kind))notes.add(entry);
-        Collections.sort(notes,(a,b)->planner.notePinned(a.id)!=planner.notePinned(b.id)?(planner.notePinned(a.id)?-1:1):Long.compare(planner.noteUpdated(b),planner.noteUpdated(a)));
-        section(host,"notes · "+notes.size(),true);
-        if(notes.isEmpty())host.addView(text("No notes yet.",16,SECONDARY));
-        for(PlannerStore.Entry entry:notes){String[] excerpt=ReadableRows.excerpt(entry.text);
-            LinearLayout row=ReadableRows.item(this,excerpt[0],(planner.notePinned(entry.id)?"Pinned · ":"")+excerpt[1],SECONDARY,"note_open_"+entry.id,()->openNote(entry.id));
-            row.setOnLongClickListener(v->{entryMenu(entry);return true;});host.addView(row);
-        }
+        commands(host,"notes_capture",new String[]{"+ note","paper","drafts"},new String[]{"notes_new","notes_paper","notes_drafts"},0,()->openCapture("note",0,""),()->openPocket(JournalActivity.class),this::resumeNoteDraft);
+        EditText search=new EditText(this);PocketDesign.input(search);search.setSingleLine(true);search.setTag("notes_search");search.setHint("search notes…");search.setText(organizerQuery);host.addView(search);
+        LinearLayout list=new LinearLayout(this);list.setOrientation(LinearLayout.VERTICAL);list.setTag("notes_results");host.addView(list);
+        Runnable filter=()->{organizerQuery=search.getText().toString();list.removeAllViews();String query=organizerQuery.trim().toLowerCase(Locale.getDefault());
+            List<PlannerStore.Entry> notes=new ArrayList<>();for(PlannerStore.Entry entry:planner.entries())if("note".equals(entry.kind)&&entry.text.toLowerCase(Locale.getDefault()).contains(query))notes.add(entry);
+            Collections.sort(notes,(a,b)->planner.notePinned(a.id)!=planner.notePinned(b.id)?(planner.notePinned(a.id)?-1:1):Long.compare(planner.noteUpdated(b),planner.noteUpdated(a)));
+            if(notes.isEmpty())list.addView(text(query.isEmpty()?"no notes":"no matching notes",14,SECONDARY));
+            for(PlannerStore.Entry entry:notes){String[] excerpt=ReadableRows.excerpt(entry.text);LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.VERTICAL);row.setTag("note_open_"+entry.id);row.setPadding(0,dp(18),0,dp(18));row.setMinimumHeight(dp(64));row.setFocusable(true);PocketDesign.list(row);
+                if(planner.notePinned(entry.id)){TextView pin=text("pinned",12,WarmWorkspace.THOUGHT);pin.setPadding(0,0,0,dp(6));row.addView(pin);}
+                TextView title=text(excerpt[0],16,PRIMARY);title.setTypeface(PocketFonts.medium(this));title.setTag("note_open_"+entry.id+"_title");title.setMaxLines(3);row.addView(title);
+                if(!excerpt[1].isEmpty()){TextView preview=text(excerpt[1],14,SECONDARY);preview.setTag("note_open_"+entry.id+"_detail");preview.setPadding(0,dp(6),0,0);preview.setMaxLines(3);row.addView(preview);}
+                String stamp=new SimpleDateFormat("d MMM · HH:mm",Locale.getDefault()).format(new Date(planner.noteUpdated(entry)));
+                TextView meta=text(stamp+(planner.hasDraft("note",entry.id)?" · draft":""),12,SECONDARY);meta.setPadding(0,dp(10),0,0);row.addView(meta);
+                row.setContentDescription((planner.notePinned(entry.id)?"Pinned note, ":"Note, ")+excerpt[0]+", "+excerpt[1]+", "+stamp);for(int i=0;i<row.getChildCount();i++)row.getChildAt(i).setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                row.setOnClickListener(v->openNote(entry.id));row.setOnLongClickListener(v->{entryMenu(entry);return true;});list.addView(row);WarmWorkspace.rule(list);
+            }
+        };
+        search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){filter.run();}public void afterTextChanged(Editable e){}});filter.run();
         if(PocketCloud.selected(this)&&PocketCloud.saved(this))actionInto(host,"recently deleted",14,SECONDARY,()->openNoteHistory(0));
     }
+    private void resumeNoteDraft(){
+        List<String> labels=new ArrayList<>();List<Runnable> actions=new ArrayList<>();
+        if(planner.hasDraft("note",0)){labels.add("new note");actions.add(()->openCapture("note",0,""));}
+        for(PlannerStore.Entry entry:planner.entries())if("note".equals(entry.kind)&&planner.hasDraft("note",entry.id)){labels.add(ReadableRows.excerpt(entry.text)[0]);actions.add(()->openCapture("note",entry.id,entry.text));}
+        if(labels.isEmpty()){showFeedback("no note drafts");return;}choose("Drafts",labels,actions);
+    }
     private void renderThoughts(LinearLayout host) {
-        List<ParkingStore.Item> items = ParkingStore.open(this); section(host,"thoughts · "+items.size(),true);
-        if(items.isEmpty())host.addView(text("No thoughts yet.",16,SECONDARY));
-        long now=System.currentTimeMillis();for(ParkingStore.Item item:items){
-            String meta=item.due==0?"Undecided":item.back(now)?"Ready to revisit":"Revisit · "+java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT,java.text.DateFormat.SHORT).format(new Date(item.due));
-            if(!item.note.isEmpty())meta+=" · from a note";
-            host.addView(ReadableRows.item(this,item.text,meta,item.back(now)?accent():SECONDARY,"thought_open_"+item.id,()->openThought(item.id)));
+        commands(host,"thoughts_capture",new String[]{"+ thought"},new String[]{"thoughts_new"},0,()->openThoughtCapture(0));
+        List<ParkingStore.Item> items=ParkingStore.open(this);if(items.isEmpty())host.addView(text("no thoughts",14,SECONDARY));
+        long now=System.currentTimeMillis();
+        for(ParkingStore.Item item:items){
+            LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.VERTICAL);row.setPadding(0,dp(18),0,dp(12));row.setTag("thought_item_"+item.id);
+            TextView stamp=text(new SimpleDateFormat("d MMM · HH:mm",Locale.getDefault()).format(new Date(item.created)),12,SECONDARY);row.addView(stamp);
+            TextView title=actionInto(row,item.text,16,PRIMARY,()->openThought(item.id));title.setTag("thought_open_"+item.id);title.setPadding(0,dp(8),0,dp(8));title.setMaxLines(6);
+            String status=item.back(now)?"ready to revisit":item.due==0?"":new SimpleDateFormat("EEE d MMM · HH:mm",Locale.getDefault()).format(new Date(item.due));
+            if(!status.isEmpty()){TextView meta=text(status,12,WarmWorkspace.THOUGHT);meta.setPadding(0,0,0,dp(4));row.addView(meta);}
+            PlannerStore.Entry note=NoteSync.byUid(planner,item.note);if(note!=null)actionInto(row,"from note · "+NoteThoughts.title(note),12,SECONDARY,()->openNote(note.id)).setTag("thought_note_"+item.id);
+            commands(row,"thought_actions_"+item.id,new String[]{"make task","ask Pip"},new String[]{"thought_promote_"+item.id,"thought_pip_"+item.id},0,
+                    ()->plannerAction(()->openTask(ParkingStore.promote(this,item.id))),()->askPip("thought",item.id,item.text,item.text));
+            host.addView(row);WarmWorkspace.rule(host);
         }
         List<ParkingStore.Item> handled=new ArrayList<>();for(ParkingStore.Item item:ParkingStore.items(this))if(!item.open())handled.add(item);
-        if(!handled.isEmpty())actionInto(host,"handled thoughts · "+handled.size(),14,SECONDARY,()->{
-            String[] labels=new String[handled.size()];for(int i=0;i<labels.length;i++)labels[i]=handled.get(i).text;
-            new AlertDialog.Builder(this).setTitle("Handled thoughts").setItems(labels,(dialog,index)->openThought(handled.get(index).id)).show();
-        });
+        if(!handled.isEmpty())actionInto(host,"handled thoughts · "+handled.size(),14,SECONDARY,()->{String[] labels=new String[handled.size()];for(int i=0;i<labels.length;i++)labels[i]=handled.get(i).text;new AlertDialog.Builder(this).setTitle("Handled thoughts").setItems(labels,(dialog,index)->openThought(handled.get(index).id)).show();});
     }
+    private void askPip(String kind,long id,String title,String body){
+        persistDraft();try{ClaudeChatRepository.get(this).attach(new ChatContext(kind,id,title.substring(0,Math.min(title.length(),500)),body.substring(0,Math.min(body.length(),8000))));openChat();}
+        catch(IllegalArgumentException error){showFeedback(error.getMessage());}
+    }
+
     private void openThought(long id) { persistDraft();captureEditor=null;captureStepsEditor=null;captureId=id;captureKind="thought";navigate("thought_detail"); }
     private void openThoughtCapture(long id) {
         persistDraft();ParkingStore.Item item=id==0?null:ParkingStore.find(this,id);captureKind="thought";captureId=id;
@@ -1951,8 +2013,8 @@ public class MainActivity extends Activity {
             content.addView(text(ParkingStore.TASK.equals(item.state)?"Made into a task":"Let go",14,SECONDARY));
             if(linked!=0)action("open task",18,accent(),()->openTask(linked));return;
         }
-        commands(content,"thought_commands",new String[]{"make task","edit"},new String[]{"thought_promote","thought_edit"},0,
-                ()->plannerAction(()->openTask(ParkingStore.promote(this,item.id))),()->openThoughtCapture(item.id));
+        commands(content,"thought_commands",new String[]{"make task","ask Pip","edit"},new String[]{"thought_promote","thought_ask_pip","thought_edit"},0,
+                ()->plannerAction(()->openTask(ParkingStore.promote(this,item.id))),()->askPip("thought",item.id,item.text,item.text),()->openThoughtCapture(item.id));
         valueAction("revisit",item.due==0?"when I choose":java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT,java.text.DateFormat.SHORT).format(new Date(item.due)),()->chooseThoughtReview(item.due,value->{ParkingStore.repark(this,item.id,value);ParkingReceiver.arm(this);render();})).setTag("thought_review");
         PlannerStore.Entry note=NoteSync.byUid(planner,item.note);if(note!=null)action("from note · "+NoteThoughts.title(note),16,SECONDARY,()->openNote(note.id));
         action("let go",14,SECONDARY,()->new AlertDialog.Builder(this).setTitle("Let this thought go?").setNegativeButton("Keep",null).setPositiveButton("Let go",(d,w)->{ParkingStore.close(this,item.id,ParkingStore.KILLED);ParkingReceiver.arm(this);leave("today");}).show());
@@ -2025,74 +2087,67 @@ public class MainActivity extends Activity {
         else if("appointment".equals(hit.kind)){try{startActivity(new Intent(this,AgendaActivity.class).putExtra("appointment_id",Long.parseLong(hit.uid)));}catch(NumberFormatException invalid){showFeedback("This appointment is unavailable.");}}
     }
     private void searchOrganizer(){
-        int page=pageGeneration;EditText search=new EditText(this);search.setTag("organizer_search");search.setTextColor(PRIMARY);search.setHintTextColor(SECONDARY);search.setTextSize(16);search.setTypeface(Typeface.MONOSPACE);search.setSingleLine(true);search.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);search.setMinHeight(dp(48));search.setHint("> Find tasks or notes");search.setText(organizerQuery);PocketDesign.input(search);
+        int page=pageGeneration;EditText search=new EditText(this);search.setTag("organizer_search");search.setTextColor(PRIMARY);search.setHintTextColor(SECONDARY);search.setTextSize(16);search.setTypeface(PocketFonts.body(this));search.setSingleLine(true);search.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);search.setMinHeight(dp(48));search.setHint("> Find tasks or notes");search.setText(organizerQuery);PocketDesign.input(search);
         android.widget.FrameLayout field=new android.widget.FrameLayout(this);field.setPadding(dp(16),dp(8),dp(16),dp(8));field.addView(search);
         AlertDialog.Builder builder=new AlertDialog.Builder(this).setTitle("Find tasks or notes").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Find",(dialog,which)->{if(!destroyed&&page==pageGeneration&&"today".equals(screen)){organizerQuery=search.getText().toString().trim();render();}});
         if(!organizerQuery.isEmpty())builder.setNeutralButton("Clear",(dialog,which)->{if(!destroyed&&page==pageGeneration&&"today".equals(screen)){organizerQuery="";render();}});
         AlertDialog dialog=builder.create();search.setOnEditorActionListener((view,action,event)->{if(action==android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH){dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();return true;}return false;});dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);dialog.setOnShowListener(ignored->{search.requestFocus();search.setSelection(search.length());});dialog.show();
     }
 
-    private void renderOrganizerLists(LinearLayout tasks, LinearLayout notes) {
-        tasks.removeAllViews(); notes.removeAllViews();
-        try {
-            List<PlannerStore.Entry> entries = planner.entries(), matches = new ArrayList<>();
-            Collections.sort(entries,(a,b)->Boolean.compare("note".equals(b.kind)&&planner.notePinned(b.id),"note".equals(a.kind)&&planner.notePinned(a.id)));
-            String query = organizerQuery.trim().toLowerCase(Locale.getDefault()), today = PlannerDates.today();
-            String filter = "today".equals(workspaceTab) ? "Today" : taskFilter;
-            int noteCount = 0;
-            long pinned=getSharedPreferences("pocket_planner",0).getLong("next_task",0);
-            for (PlannerStore.Entry entry : entries) {
-                String searchable = entry.text + "\n" + PlannerStore.stepsText(entry.steps);
-                if (!searchable.toLowerCase(Locale.getDefault()).contains(query)) continue;
-                if ("note".equals(entry.kind)) {
-                    if (!"notes".equals(workspaceTab)) continue;
-                    if(noteCount++==0)section(notes,"notes",false);
-                    String[] excerpt=ReadableRows.excerpt(entry.text);
-                    if(planner.notePinned(entry.id))excerpt[1]="Pinned"+(excerpt[1].isEmpty()?"":" · "+excerpt[1]);
-                    LinearLayout row=ReadableRows.item(this,excerpt[0],excerpt[1],SECONDARY,"note_open_"+entry.id,()->openCapture("note",entry.id,entry.text));
-                    row.setOnLongClickListener(v -> { entryMenu(entry); return true; });notes.addView(row,new LinearLayout.LayoutParams(-1,-2));continue;
-                }
-                if (!"task".equals(entry.kind) || entry.done != "Done".equals(filter)) continue;
-                if ("Today".equals(filter) && entry.id!=pinned && (entry.due.isEmpty() || entry.due.compareTo(today) > 0)) continue;
-                if ("Later".equals(filter) && (entry.due.isEmpty() || entry.due.compareTo(today) <= 0)) continue;
+    private void renderOrganizerLists(LinearLayout tasks,LinearLayout notes) {
+        tasks.removeAllViews();notes.removeAllViews();
+        try{
+            String query=organizerQuery.trim().toLowerCase(Locale.getDefault()),today=PlannerDates.today();boolean daily="today".equals(workspaceTab);
+            String filter=daily?"Today":taskFilter;long pinned=planner.preferences().getLong("next_task",0);List<PlannerStore.Entry> matches=new ArrayList<>();
+            for(PlannerStore.Entry entry:planner.entries()){
+                if(!"task".equals(entry.kind)||!(entry.text+"\n"+PlannerStore.stepsText(entry.steps)).toLowerCase(Locale.getDefault()).contains(query))continue;
+                if(!"All".equals(filter)&&entry.done!="Done".equals(filter))continue;
+                if("Today".equals(filter)&&entry.id!=pinned&&(entry.due.isEmpty()||entry.due.compareTo(today)>0))continue;
+                if("Later".equals(filter)&&entry.id!=pinned&&!entry.due.isEmpty()&&entry.due.compareTo(today)<=0)continue;
                 matches.add(entry);
             }
-            Collections.sort(matches,(a,b)->a.id==b.id?0:a.id==pinned?-1:b.id==pinned?1:PlannerStore.compareTasks(a,b));
-            java.util.Set<String> groups=new java.util.HashSet<>();for(PlannerStore.Entry entry:matches)groups.add(taskGroup(entry,pinned,today));
-            String lastGroup = "";
-            TextView taskHeading = content.findViewWithTag("today_tasks_heading");
-            taskHeading.setText("tasks · " + matches.size() + " " + filter.toLowerCase(Locale.getDefault()));
-            for (PlannerStore.Entry entry : matches) {
-                String group=taskGroup(entry,pinned,today);
-                if (groups.size()>1&&!group.equals(lastGroup)) {
-                    TextView label = section(tasks, group, true); if (group.equals("Overdue")) label.setTextColor(AMBER);
-                    label.setPadding(0, dp(lastGroup.isEmpty()?8:16), 0, dp(4)); lastGroup = group;
-                }
-                LinearLayout line = new LinearLayout(this); line.setGravity(Gravity.CENTER_VERTICAL);
-                android.widget.CheckBox check = taskCheckbox(entry.done, "task_check_" + entry.id, (entry.done ? "Reopen " : "Complete ") + entry.text,
-                        () -> plannerAction(() -> { TaskReminders.toggle(this,entry.id); render(); }));
-                check.setContentDescription((entry.done ? "Reopen " : "Complete ") + entry.text);
-                line.addView(check, new LinearLayout.LayoutParams(dp(48), -2));
-                boolean isNext=entry.id==pinned&&!entry.done;
-                String details = (isNext?"Next · ":"")+(entry.important ? "Important · " : "") + taskDateLabel(entry.due);
-                if (!entry.steps.isEmpty()) details += " · " + entry.completedSteps() + "/" + entry.steps.size() + " steps";
-                int metadataColor=!entry.due.isEmpty()&&entry.due.compareTo(today)<0&&!entry.done?AMBER:isNext?accent():SECONDARY;
-                LinearLayout item=ReadableRows.item(this,entry.text,details,metadataColor,"task_open_"+entry.id,()->openTask(entry.id));
-                TextView title=(TextView)item.getChildAt(0);
+            Collections.sort(matches,(a,b)->{int groups=Integer.compare(taskRank(a,pinned,today),taskRank(b,pinned,today));return groups!=0?groups:PlannerStore.compareTasks(a,b);});
+            TextView heading=content.findViewWithTag("today_tasks_heading");if(heading!=null)heading.setText(daily?"Tasks":"tasks · "+matches.size());
+            String last="";
+            for(PlannerStore.Entry entry:matches){
+                String group=taskGroup(entry,pinned,today);if(!group.equals(last)){TextView label=section(tasks,group,true);label.setTextSize(size(23));if("Overdue".equals(group))label.setTextColor(WarmWorkspace.OVERDUE);last=group;}
+                LinearLayout block=new LinearLayout(this);block.setOrientation(LinearLayout.VERTICAL);block.setTag("task_row_"+entry.id);LinearLayout line=new LinearLayout(this);line.setGravity(Gravity.TOP);
+                android.widget.CheckBox check=taskCheckbox(entry.done,"task_check_"+entry.id,(entry.done?"Reopen ":"Complete ")+entry.text,()->plannerAction(()->{TaskReminders.toggle(this,entry.id);render();}));
+                check.setButtonTintList(ColorStateList.valueOf(entry.id==pinned&&!entry.done?WarmWorkspace.AMBER:SECONDARY));line.addView(check,new LinearLayout.LayoutParams(dp(48),-2));
+                boolean chosen=entry.id==pinned&&!entry.done,overdue=!entry.done&&!entry.due.isEmpty()&&entry.due.compareTo(today)<0;
+                String detail=(chosen?"chosen next · ":"")+(entry.important?"important · ":"")+taskDateLabel(entry.due).toLowerCase(Locale.getDefault());
+                LinearLayout item=ReadableRows.item(this,entry.text,detail,overdue?WarmWorkspace.OVERDUE:chosen?WarmWorkspace.AMBER:!entry.due.isEmpty()?WarmWorkspace.CALENDAR:SECONDARY,"task_open_"+entry.id,()->openTask(entry.id));
+                item.setPadding(0,dp(10),0,dp(10));TextView title=(TextView)item.getChildAt(0);title.setTextSize(size(16));title.setTypeface(PocketFonts.body(this));
+                if(item.getChildCount()>1)((TextView)item.getChildAt(1)).setTextSize(size(13));
                 if(entry.done){title.setTextColor(SECONDARY);title.setPaintFlags(title.getPaintFlags()|android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);}
-                item.setPadding(dp(4),dp(8),0,dp(8));
-                item.setOnLongClickListener(v -> { taskQuickActions(entry.id); return true; });line.addView(item,new LinearLayout.LayoutParams(0,-2,1));
-                TextView more=text("⋮",24,SECONDARY);PocketDesign.control(more);more.setTag("task_more_"+entry.id);
-                more.setContentDescription("Actions for "+entry.text);more.setOnClickListener(v->taskQuickActions(entry.id));
-                line.addView(more,new LinearLayout.LayoutParams(dp(48),-2));tasks.addView(line);
+                item.setOnLongClickListener(v->{taskQuickActions(entry.id);return true;});line.addView(item,new LinearLayout.LayoutParams(0,-2,1));
+                TextView more=text("⋮",24,SECONDARY);PocketDesign.control(more);more.setTag("task_more_"+entry.id);more.setContentDescription("Actions for "+entry.text);more.setOnClickListener(v->taskQuickActions(entry.id));line.addView(more,new LinearLayout.LayoutParams(dp(48),-2));block.addView(line);
+                if(!entry.steps.isEmpty()){
+                    if(daily){TextView steps=text(entry.completedSteps()+" / "+entry.steps.size()+" steps",12,SECONDARY);steps.setPadding(dp(48),0,0,dp(12));block.addView(steps);}
+                    else{
+                        LinearLayout steps=new LinearLayout(this);steps.setOrientation(LinearLayout.VERTICAL);steps.setTag("task_inline_steps_"+entry.id);steps.setPadding(dp(48),0,0,dp(8));steps.setVisibility(expandedTask==entry.id?View.VISIBLE:View.GONE);
+                        TextView toggle=actionInto(block,entry.completedSteps()+" / "+entry.steps.size()+" steps "+(expandedTask==entry.id?"▴":"▾"),12,SECONDARY,()->{});
+                        toggle.setOnClickListener(v->{boolean open=steps.getVisibility()!=View.VISIBLE;
+                            if(open&&expandedTask!=0&&expandedTask!=entry.id){LinearLayout previous=content.findViewWithTag("task_inline_steps_"+expandedTask);if(previous!=null){previous.removeAllViews();previous.setVisibility(View.GONE);}
+                                TextView oldToggle=content.findViewWithTag("task_steps_toggle_"+expandedTask);PlannerStore.Entry oldTask=planner.find(expandedTask);if(oldToggle!=null&&oldTask!=null)oldToggle.setText(oldTask.completedSteps()+" / "+oldTask.steps.size()+" steps ▾");}
+                            steps.removeAllViews();if(open)renderInlineSteps(steps,entry);steps.setVisibility(open?View.VISIBLE:View.GONE);expandedTask=open?entry.id:0;toggle.setText(entry.completedSteps()+" / "+entry.steps.size()+" steps "+(open?"▴":"▾"));});
+                        toggle.setTag("task_steps_toggle_"+entry.id);toggle.setPadding(dp(48),0,0,0);toggle.setContentDescription("Show or hide steps for "+entry.text);
+                        if(expandedTask==entry.id)renderInlineSteps(steps,entry);
+                        block.addView(steps);
+                    }
+                }
+                tasks.addView(block);WarmWorkspace.rule(tasks);
             }
-            if (matches.isEmpty()) tasks.addView(todayText(query.isEmpty()?"No "+filter.toLowerCase(Locale.US)+" tasks":"No matching tasks",14,SECONDARY,false));
-            if(noteCount==0){section(notes,"notes",false);notes.addView(todayText(query.isEmpty()?"No notes":"No matching notes",14,SECONDARY,false));}
-
-        } catch (IllegalStateException | IllegalArgumentException error) { tasks.addView(text(error.getMessage(), 16, AMBER)); }
+            if(matches.isEmpty())tasks.addView(text(query.isEmpty()?"no "+filter.toLowerCase(Locale.getDefault())+" tasks":"no matching tasks",14,SECONDARY));
+        }catch(IllegalStateException|IllegalArgumentException error){tasks.addView(text(error.getMessage(),16,WarmWorkspace.OVERDUE));}
     }
-
-    private String taskGroup(PlannerStore.Entry entry,long pinned,String today){return entry.done?"Completed":entry.id==pinned?"Next":entry.due.isEmpty()?"Anytime":entry.due.compareTo(today)<0?"Overdue":entry.due.equals(today)?"Today":"Upcoming";}
+    private void renderInlineSteps(LinearLayout host,PlannerStore.Entry entry){
+        for(int i=0;i<entry.steps.size();i++){int index=i;PlannerStore.Step step=entry.steps.get(i);LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);
+            android.widget.CheckBox check=taskCheckbox(step.done,"task_inline_step_"+entry.id+"_"+i,(step.done?"Reopen ":"Complete ")+step.text,()->plannerAction(()->{planner.toggleStep(entry.id,index);render();}));row.addView(check,new LinearLayout.LayoutParams(dp(48),-2));
+            TextView name=text(step.text,14,step.done?SECONDARY:PRIMARY);if(step.done)name.setPaintFlags(name.getPaintFlags()|android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);row.addView(name,new LinearLayout.LayoutParams(0,-2,1));host.addView(row);}
+    }
+    private int taskRank(PlannerStore.Entry entry,long pinned,String today){return entry.done?4:entry.id==pinned?0:!entry.due.isEmpty()&&entry.due.compareTo(today)<0?1:entry.due.equals(today)?2:3;}
+    private String taskGroup(PlannerStore.Entry entry,long pinned,String today){return entry.done?"Done":entry.id==pinned?"Chosen next":!entry.due.isEmpty()&&entry.due.compareTo(today)<0?"Overdue":entry.due.equals(today)?"Today":"Later";}
 
     private String taskDateLabel(String due) {
         if (due.isEmpty()) return "No date";
@@ -2154,7 +2209,7 @@ public class MainActivity extends Activity {
         try { entry = planner.find(captureId); }
         catch (IllegalStateException error) { content.addView(text(error.getMessage(), 16, AMBER)); return; }
         if (entry == null) { content.addView(text("This task was removed.", 16, SECONDARY)); return; }
-        TextView title=text(entry.text,20,entry.done?SECONDARY:PRIMARY);title.setTypeface(Typeface.MONOSPACE,Typeface.BOLD);
+        TextView title=text(entry.text,20,entry.done?SECONDARY:PRIMARY);title.setTypeface(PocketFonts.medium(this));
         title.setPadding(0,dp(8),0,dp(4));title.setTag("task_detail_title");content.addView(title);
         boolean chosen=planner.preferences().getLong("next_task",0)==entry.id;
         String status=(entry.done?"Done":chosen?"Next":"Open")+(entry.important?" · Important":"")+" · "+taskDateLabel(entry.due);
@@ -2241,11 +2296,12 @@ public class MainActivity extends Activity {
         else heading(title, "today", "save", saveCapture, true);
         captureEditor.setTag("capture_editor");
         captureEditor.setTextColor(PRIMARY); captureEditor.setHintTextColor(SECONDARY);
-        captureEditor.setTypeface(Typeface.MONOSPACE); captureEditor.setTextSize(17);
+        captureEditor.setTypeface(PocketFonts.body(this)); captureEditor.setTextSize(17);
         captureEditor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         PocketDesign.input(captureEditor);
         if (!task) PocketDesign.editor(captureEditor);
+        captureEditor.setLineSpacing(dp(5),1f);
         captureEditor.setFilters(new InputFilter[]{new InputFilter.LengthFilter(
                 "task".equals(captureKind) ? PlannerStore.TASK_LIMIT : PlannerStore.NOTE_LIMIT)});
         captureEditor.setHint(task ? "Task title" : "Write a note…");
@@ -2268,7 +2324,7 @@ public class MainActivity extends Activity {
             section(content, "steps", false);
             captureStepsEditor = new EditText(this); captureStepsEditor.setTag("task_steps_editor");
             captureStepsEditor.setTextColor(PRIMARY); captureStepsEditor.setHintTextColor(SECONDARY);
-            captureStepsEditor.setTypeface(Typeface.MONOSPACE); captureStepsEditor.setTextSize(16);
+            captureStepsEditor.setTypeface(PocketFonts.body(this)); captureStepsEditor.setTextSize(16);
             captureStepsEditor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
             PocketDesign.input(captureStepsEditor); captureStepsEditor.setGravity(Gravity.TOP);
             captureStepsEditor.setFilters(new InputFilter[]{new InputFilter.LengthFilter(PlannerStore.STEPS_TEXT_LIMIT)});
@@ -2376,7 +2432,7 @@ public class MainActivity extends Activity {
     private void dismissNoteWheel() { if (captureEditor instanceof MarkdownEditor) ((MarkdownEditor) captureEditor).dismissWheel(); }
 
     private void renderNotePreview() {
-        heading("preview", "capture");
+        heading("note", "capture");
         TextView preview = text("", PocketDesign.BODY, PRIMARY); preview.setTag("note_markdown_preview"); preview.setTextIsSelectable(true);
         preview.setGravity(Gravity.TOP | Gravity.START); preview.setMinHeight(dp(120));
         io.noties.markwon.Markwon.builder(this)
@@ -2402,6 +2458,7 @@ public class MainActivity extends Activity {
             tools = softKeys("preview_actions", new String[]{"edit", "share", "task", "paper", "more"}, new String[]{"note_edit", "note_share", "note_task", "note_paper", "note_more"}, 0,
                     () -> navigate("capture"), share, this::captureNoteTask, () -> openPocket(JournalPageActivity.class, pageUid), more); }
         content.addView(tools);
+        action("ask Pip",14,WarmWorkspace.THOUGHT,()->askPip("note",captureId,ReadableRows.excerpt(captureText)[0],captureText)).setTag("note_ask_pip");
         addFeedback();
     }
 

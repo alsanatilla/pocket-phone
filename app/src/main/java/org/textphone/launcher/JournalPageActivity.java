@@ -58,7 +58,7 @@ public final class JournalPageActivity extends PocketActivity {
     private void line(JSONObject line, File image) {
         if (line == null) return;
         String text = line.optString("note_line", ""); if (text.isEmpty()) text = line.optString("text", ""); if (text.isEmpty()) return;
-        TextView row = label(text.replaceFirst("^- \\[ \\] ", "☐ ").replaceFirst("^- ", "· ").replaceFirst("^# ", ""), PocketDesign.BODY, "blue".equals(line.optString("ink")) ? 0xFF8FB8FF : WHITE);
+        TextView row = label(text.replaceFirst("^- \\[ \\] ", "☐ ").replaceFirst("^- ", "· ").replaceFirst("^# ", ""), PocketDesign.BODY, "blue".equals(line.optString("ink")) ? PocketDesign.CALENDAR : WHITE);
         PocketDesign.row(row, WHITE); row.setMinHeight(dp(48)); body.addView(row);
         JSONArray uncertain = line.optJSONArray("uncertain");
         if (uncertain != null && uncertain.length() > 0) {

@@ -87,7 +87,7 @@ final class NoteFormatWheel {
         if (view == null || selected == index) return;
         selected = index;
         if (index >= 0) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-        for (int i = 0; i < view.options.length; i++) view.options[i].setTextColor(i == index ? Color.BLACK : PocketDesign.WHITE);
+        for (int i = 0; i < view.options.length; i++) view.options[i].setTextColor(i == index ? PocketDesign.INK : PocketDesign.WHITE);
         view.invalidate();
     }
     private void choose(int index) {
@@ -124,7 +124,7 @@ final class NoteFormatWheel {
         private TextView label(String text, int color) {
             TextView item = new TextView(getContext()); item.setText(text); PocketDesign.text(item, PocketDesign.SMALL, color);
             item.setGravity(Gravity.CENTER); item.setFocusable(true); item.setMinHeight(dp(52));
-            item.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), null, null)); return item;
+            item.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33ECC981), null, null)); return item;
         }
         @Override protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
             float distance = radius * .71f;
@@ -135,11 +135,11 @@ final class NoteFormatWheel {
             cancel.layout(Math.round(x) - dp(32), Math.round(y) - dp(28), Math.round(x) + dp(32), Math.round(y) + dp(28));
         }
         @Override protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas); paint.setColor(0xFF101214); canvas.drawCircle(x, y, radius, paint);
+            super.onDraw(canvas); paint.setColor(PocketDesign.PLANE); canvas.drawCircle(x, y, radius, paint);
             if (selected >= 0) {
                 paint.setColor(PocketDesign.accent(getContext())); canvas.drawArc(bounds, selected * 45 - 112.5f, 45, true, paint);
             }
-            paint.setColor(Color.BLACK); canvas.drawCircle(x, y, dp(34), paint);
+            paint.setColor(PocketDesign.INK); canvas.drawCircle(x, y, dp(34), paint);
         }
         int indexAt(float px, float py, boolean bounded) {
             double distance = Math.hypot(px - x, py - y);

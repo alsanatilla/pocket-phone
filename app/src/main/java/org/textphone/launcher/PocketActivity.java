@@ -49,7 +49,7 @@ public abstract class PocketActivity extends Activity {
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        getWindow().setNavigationBarColor(Color.BLACK);
+        getWindow().setNavigationBarColor(PocketDesign.INK);
         if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarContrastEnforced(false);
         motion = new PageMotion(this); if (state != null) motion.restore(state.getBundle("page_scrolls")); setContentView(motion.host());
         navigation = new NativeNavigation(this, new NativeNavigation.Page() {
@@ -69,7 +69,7 @@ public abstract class PocketActivity extends Activity {
         pageGeneration++;
         if (!hasInternalBack()) homePage = pageKey;
         root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.BLACK); root.setPadding(dp(PocketDesign.INSET), dp(4), dp(PocketDesign.INSET), dp(4));
+        root.setBackgroundColor(PocketDesign.INK); root.setPadding(dp(PocketDesign.INSET), dp(4), dp(PocketDesign.INSET), dp(4));
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int l, t, r, b;
             if (Build.VERSION.SDK_INT >= 30) {
@@ -87,7 +87,7 @@ public abstract class PocketActivity extends Activity {
         Button home = button("home", () -> { startActivity(new Intent(this, MainActivity.class)
                 .setAction(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK)); }); PocketDesign.headerControl(home, GRAY);headerRight=home;
         header.addView(home, new LinearLayout.LayoutParams(PocketDesign.headerWidth(home,64), PocketDesign.headerHeight(this))); PocketDesign.header(header);
-        if (scene() != null) { root.setBackground(new PixelBackdrop(this, PocketDesign.accent(this), 88, scene())); header.setBackgroundColor(Color.TRANSPARENT); name.setShadowLayer(dp(6), 0, 0, Color.BLACK); }
+        if (scene() != null) header.setBackground(new PixelBackdrop(this, PocketDesign.accent(this), PocketDesign.HEADER, scene()));
         root.addView(header);
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true);
         body = new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(0, dp(4), 0, dp(4));
@@ -97,7 +97,7 @@ public abstract class PocketActivity extends Activity {
         loading = new RetroLoadingView(this); loading.setVisibility(View.GONE);
         root.addView(loading, new LinearLayout.LayoutParams(-1, dp(72)));
         notice = label("", 12, PocketDesign.WARNING); notice.setMinHeight(dp(32)); notice.setPadding(0, dp(8), 0, dp(8));
-        notice.setBackgroundColor(Color.BLACK); notice.setVisibility(View.GONE); notice.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); root.addView(notice);
+        notice.setBackgroundColor(PocketDesign.INK); notice.setVisibility(View.GONE); notice.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); root.addView(notice);
         motion.show(root, pageKey); root.requestApplyInsets();
         navigation.update();
     }
@@ -116,7 +116,7 @@ public abstract class PocketActivity extends Activity {
     }
     /** Page-level commands fixed at the bottom, below feedback. {@code primary} is -1 when none is a commit. */
     protected LinearLayout softKeys(String[] names, int primary, Runnable... actions) {
-        LinearLayout bar = row(); bar.setTag("soft_keys");
+        LinearLayout bar = row(); bar.setTag("soft_keys"); bar.setBackground(PocketDesign.separator(this));
         for (int i = 0; i < names.length; i++) { Button key = button(names[i], actions[i]); PocketDesign.softKey(key, i, names.length, i == primary); bar.addView(key, PocketDesign.softKeyCell(this, i, names.length)); }
         root.addView(bar, new LinearLayout.LayoutParams(-1, -2)); return bar;
     }

@@ -1,19 +1,23 @@
 <resources>
     <style name="TextPhoneBase" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">monospace</item>
-        <item name="android:textColorPrimary">#FFFFFF</item>
-        <item name="android:textColorSecondary">#AAAAAA</item>
-        <item name="android:colorControlNormal">#AAAAAA</item>
-        <item name="android:colorControlActivated">#F9F594</item>
-        <item name="android:colorButtonNormal">#000000</item>
+        <item name="android:textColorPrimary">#F0E9DD</item>
+        <item name="android:textColorSecondary">#B6AC9D</item>
+        <item name="android:colorControlNormal">#B6AC9D</item>
+        <item name="android:colorControlActivated">#ECC981</item>
+        <item name="android:colorButtonNormal">#12110F</item>
+        <item name="android:colorBackground">#12110F</item>
+        <item name="android:colorBackgroundFloating">#1E1C18</item>
+        <item name="android:textColorLink">#ECC981</item>
+        <item name="android:textSize">16sp</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:windowBackground">#000000</item>
+        <item name="android:windowBackground">#12110F</item>
         <item name="android:windowIsTranslucent">false</item>
         <item name="android:windowShowWallpaper">false</item>
-        <item name="android:colorAccent">#F9F594</item>
-        <item name="android:statusBarColor">#000000</item>
-        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:colorAccent">#ECC981</item>
+        <item name="android:statusBarColor">#12110F</item>
+        <item name="android:navigationBarColor">#12110F</item>
         <item name="android:windowFullscreen">true</item>
     </style>
     <style name="TextPhoneTheme" parent="TextPhoneBase" />

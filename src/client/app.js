@@ -1,4 +1,4 @@
-import { storage as localStorage } from './workspace-storage.js';
+import { storage as localStorage, tabStorage as workspaceSession } from './workspace-storage.js';
 // Pocket workstation, hosted by Astro.
 import * as cloud from "./cloud.js";
 import * as legacyDrive from "./drive.js";
@@ -9,6 +9,8 @@ import { SEARCH_KINDS, documentRows, chatRows, localSearch } from '../shared/sea
 import { ChatStore } from './pip-core.js';
 import * as reader from "./reader.js";
 import * as pip from "./pip.js";
+import { mascot } from './pip-pixels.js';
+import { scores } from './scores.js';
 import { backdrop } from "./pixel-backdrop.js";
 import * as zines from "./zines.js";
 import * as movement from "./movement.js";
@@ -18,7 +20,8 @@ import { syncNow, describe, onStatus, status } from "./sync.js";
 import { gym, weekStart } from "./store.js";
 import { installRefresh } from "./retro-loading.js";
 import { initExtras, todayTiles, TODAY_CATALOG } from "./extras.js";
-import { agenda, clock as clockStore, mountAgenda, mountClock, startClockRuntime } from "./planner.js";
+import * as travel from "./travel.js";
+import { agenda, clock as clockStore, mountAgenda, mountClock, startClockRuntime, focusTask, planTask, remindTask } from "./planner.js";
 import { mountBrief, readBrief, briefEnabled } from './daily-brief.js';
 import * as setup from './setup.js';
 import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
@@ -26,7 +29,7 @@ import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thou
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const TOOLS = ["today", "thoughts", "tasks", "notes", "movement", "gym", "apps"];
-let content = null, notice = null, parkingDraft = "", briefView = null;
+let content = null, notice = null, parkingDraft = "", parkingDraftOwner = activeAccount(), briefView = null, flushNote = null;
 
 // ── DOM helpers ──
 function h(tag, props = {}, ...children) {
@@ -44,33 +47,38 @@ const go = path => { location.hash = "#" + path; };
 const say = text => { if (notice) notice.textContent = text || ""; };
 const rowButton = (title, sub, onclick, props = {}) => h("button", { class: "row-button", onclick, ...props }, title, sub ? h("span", { class: "sub" }, sub) : null);
 const keys = (...buttons) => h("div", { class: "keys" }, buttons.map(([label, run, extra]) => h("button", { onclick: run, ...(extra || {}) }, label)));
+const keypad = (...buttons) => { const node = keys(...buttons); node.classList.add("keypad"); return node; };
 const section = (text, tone = "muted") => h("div", { class: "section " + tone, text });
 const guard = run => () => { try { run(); } catch (error) { say(error.message); } };
 
 // ── Shell: one bar of tools, then the open tool. ──
 function shell() {
   if (content?.isConnected) return;
-  const tabs = TOOLS.map((name, i) => h("button", { class: "tab", "data-tool": name, onclick: () => go("/" + name) }, h("span", { class: "key", text: String(i + 1) }), name));
+  const tabs = TOOLS.map((name, i) => h("button", { class: "tab", "data-tool": name, title: name + " · " + (i + 1), onclick: () => go("/" + name) }, name));
   content = h("main", { class: "content" }); notice = h("div", { class: "notice", role: "status" });
   root.replaceChildren(
     h("header", { class: "bar" },
       h("button", { class: "brand", onclick: () => go("/today"), title: "Today", text: "pocket" }),
       h("nav", { class: "tabs", "aria-label": "Workspace" }, tabs),
-      h("button", { class: "pip-entry", id: "pip-entry", onclick: () => go("/pip"), text: "pip" }),
-      h("button", { class: "status", id: "sync-status", onclick: () => go("/sync"), title: "Sync settings" }, describe())),
+      h("button", { class: "pip-entry", id: "pip-entry", "aria-label": "Pip", title: "Pip", onclick: () => go("/pip") }, mascot(true)),
+      h("button", { class: "status", id: "sync-status", onclick: () => go("/sync"), title: "Sync settings" }, statusLabel())),
     content, notice);
 }
-/** Clears the work area for one tool; toolbar actions sit at its top right. */
+/** The sync state on two short lines: "SIGN IN" over "7 WAITING". */
+const statusLabel = () => describe().replace(" · ", "\n");
+/** Clears the work area for one tool; toolbar actions sit right under its header. */
 function view(tool, actions = []) {
+  flushNote?.(); flushNote = null;
   briefView?.(); briefView = null;
   zines.leave(); pip.leave(); shell(); closeDialog(); say("");
   content.querySelectorAll('.pixel-backdrop').forEach(canvas=>canvas.dispose?.());
   const pipEntry = document.getElementById("pip-entry"); pipEntry.classList.toggle("selected", tool === "pip"); pipEntry.setAttribute("aria-current", tool === "pip" ? "page" : "false");
-  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync", "calendar", "clock", "account", "brief", "setup"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
+  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync", "calendar", "clock", "travel", "account", "brief", "setup"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
   const activeTab = document.querySelector(".tab.active"), tabs = activeTab?.parentElement;
   if (tabs) tabs.scrollLeft = activeTab.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - activeTab.clientWidth) / 2;
   document.title = "pocket · " + (tool === "sync" ? "account" : tool);
   content.replaceChildren();
+  content.classList.toggle('content-pip', tool === 'pip');
   if (actions.length) add(content, h("div", { class: "toolbar" }, actions.map(([label, run, extra]) => h("button", { onclick: run, ...(extra || {}) }, label))));
   const body = h("div", { class: "tool tool-" + tool }); add(content, body);
   if (!reduceMotion) body.classList.add("enter");
@@ -79,10 +87,16 @@ function view(tool, actions = []) {
 const split = (body, ...columns) => { add(body, h("div", { class: "split" }, columns.map(c => h("div", { class: "col" }, c)))); };
 
 // ── Dialogs, shaped like Pocket's list dialog ──
-let dialogDone = null;
-function closeDialog(value = null) { if (dialogDone) { const done = dialogDone; dialogDone = null; done(value); } dialogHost.hidden = true; dialogHost.replaceChildren(); }
+let dialogDone = null, dialogFocus = null;
+function closeDialog(value = null) {
+  if (dialogDone) { const done = dialogDone; dialogDone = null; done(value); }
+  dialogHost.hidden = true; dialogHost.replaceChildren();
+  const focus = dialogFocus; dialogFocus = null;
+  if (focus?.isConnected) focus.focus({ preventScroll: true });
+}
 function dialog(title, body, actions) {
   closeDialog();
+  dialogFocus = document.activeElement;
   return new Promise(resolve => {
     dialogDone = resolve;
     const box = h("div", { class: "box", role: "dialog", "aria-modal": "true", "aria-label": title }, h("h2", { text: title }), body,
@@ -109,13 +123,52 @@ const briefApi = { h, add, go, say, askPip: brief => guard(() => go('/pip/' + pi
 const source = item => item.note ? notes.get(item.note) : null;
 const thoughtMeta = item => !item.due ? "Undecided" : item.due <= Date.now() ? "Ready to revisit" : "Revisit " + relative(item.due);
 const taskMeta = task => [task.done ? "Done" : task.due ? (task.due < taskDay() ? "Overdue · " : "") + task.due : "No date", task.important ? "Important" : "", task.steps?.length ? task.steps.filter(s => s.done).length + "/" + task.steps.length + " steps" : ""].filter(Boolean).join(" · ");
+const groupHeading = (title, count, actions = []) => h('div', { class: 'warm-heading' }, h('h2', { text: title }), count != null ? h('span', { class: 'meta muted', text: String(count) }) : null, actions.length ? keys(...actions) : null);
+function taskRow(task, refresh = route, showSteps = false) {
+  const chosen = !task.done && load('tasks.json').next?.uid === task.uid;
+  const metaText = h('span', { class: !task.done && task.due && task.due < taskDay() ? 'late-label' : '', text: taskMeta(task) });
+  const meta = h('div', { class: 'task-meta' }, chosen ? h('span', { class: 'chosen-label', text: 'chosen next · ' }) : null,
+    metaText);
+  const main = h('div', { class: 'task-main' }, h('button', { class: 'task-name', onclick: () => go('/tasks/' + task.uid), text: task.text }), meta);
+  if (task.steps?.length) {
+    const completed = task.steps.filter(step => step.done).length;
+    const progress = h('span', { class: 'task-progress', 'aria-hidden': 'true' }, h('i', { style: 'width:' + Math.round(completed / task.steps.length * 100) + '%' }));
+    meta.append(progress);
+    if (showSteps) {
+      const summary = h('summary', { text: completed + ' / ' + task.steps.length + ' steps' }), list = h('div');
+      const steps = h('details', { class: 'task-steps', ...(chosen ? { open: true } : {}) }, summary, list);
+      const drawSteps = () => {
+        if (!steps.open) { list.replaceChildren(); return; }
+        if (list.childElementCount) return;
+        list.replaceChildren(...task.steps.map((step, i) => {
+          let label;
+          const input = h('input', { type: 'checkbox', 'aria-label': step.text, onchange: guard(() => {
+            tasks.edit(task.uid, value => { value.steps[i].done = input.checked; });
+            task.steps[i].done = input.checked;
+            const count = task.steps.filter(value => value.done).length;
+            summary.textContent = count + ' / ' + task.steps.length + ' steps'; metaText.textContent = taskMeta(task);
+            progress.firstElementChild.style.width = Math.round(count / task.steps.length * 100) + '%';
+            label.classList.toggle('done', input.checked);
+          }) });
+          input.checked = step.done;
+          label = h('label', { class: 'task-step' + (step.done ? ' done' : '') }, input, h('span', { text: step.text }));
+          return label;
+        }));
+      };
+      steps.addEventListener('toggle', drawSteps); drawSteps(); main.append(steps);
+    }
+  }
+  return h('article', { class: 'warm-task' + (chosen ? ' chosen' : '') + (task.done ? ' done' : ''), 'data-task': task.uid },
+    h('button', { class: 'task-check', 'aria-label': (task.done ? 'Reopen ' : 'Complete ') + task.text, 'aria-pressed': String(Boolean(task.done)), onclick: guard(() => { tasks.complete(task.uid); refresh(); }) }, h('span')), main);
+}
 // Each area has its own header artwork, so a page is recognisable before it is read.
-const SCENE = { calendar: "tiles", clock: "rings", today: "sky", thoughts: "stars", tasks: "road", notes: "waves", search: "rings", apps: "tiles", gym: "iron" };
+const SCENE = { calendar: "tiles", clock: "rings", travel: "travel", today: "sky", thoughts: "stars", tasks: "road", notes: "waves", search: "rings", apps: "tiles", gym: "iron" };
 // Every area header has the same size; the page's actions sit in its top right corner.
 function workspaceTitle(body, title, meta = "", scene = SCENE[title] || SCENE[body.className.match(/tool-(\w+)/)?.[1]] || "sky") {
   const actions = body.previousElementSibling?.classList.contains("toolbar") ? body.previousElementSibling : null;
+  // Page actions sit on plain ground right under the artwork, never on top of it.
   add(body, h("header", { class: "workspace-sky" }, backdrop(scene),
-    h("div", { class: "workspace-sky-title" }, h("h1", { class: "workspace-title", text: title }), h("p", { class: "small muted", text: meta })), actions));
+    h("div", { class: "workspace-sky-title" }, h("h1", { class: "workspace-title", text: title }), h("p", { class: "small muted", text: meta }))), actions);
 }
 async function capture() {
   const choice = await choose("Capture", ["Thought", "Task", "Note"]);
@@ -152,7 +205,7 @@ function tileGrid() {
   for (const tile of todayTiles.list()) {
     const [value, detail, path] = tileReading(tile.kind), name = tile.label || tile.kind;
     grid.append(h("button", { class: "row-button today-tile", "data-tile": tile.kind, "aria-label": name + ", " + value + ", " + detail, onclick: () => go(path) },
-      h("span", { class: "section muted", text: name.toUpperCase() }), h("span", { class: "tile-value", text: value }), h("span", { class: "sub", text: detail })));
+      h("span", { class: "section muted", text: name }), h("span", { class: "tile-value", text: value }), h("span", { class: "sub", text: detail })));
   }
   return grid;
 }
@@ -180,49 +233,99 @@ function setupBanner(body) {
   add(body, h('div', { class: 'setup-banner' }, rowButton('finish setting up pocket', state.done + ' of ' + state.total + ' connected · next: ' + state.next, () => go('/setup')),
     h('button', { class: 'setup-hide', 'aria-label': 'Hide the setup reminder', onclick: () => { setup.hide(); route(); } }, 'hide')));
 }
+function todayHealth(body) {
+  const strip = h('div', { class: 'health-strip', 'aria-label': 'Recovery, strain and condition' });
+  const draw = (fresh = false) => {
+    const deck = coros.cachedCockpit() || {}, cache = coros.cached(), items = cache?.list || [];
+    const profile = { ...deck.profile, observedMax: coros.observedMaxHr() }, result = scores({ activities: items, deck, profile });
+    const activityData = Array.isArray(cache?.list), currentActivities = activityData && taskDay(cache.at || 0) === taskDay(), dayData = deck.daily?.days?.some(day => day.date === taskDay() && Number.isFinite(day.steps));
+    const strain = currentActivities || dayData ? result.strain.strain : null;
+    // A stale snapshot cannot establish that subsequent days contained no training.
+    const conditionResult = activityData && cache.at && !currentActivities ? scores({ activities: items, deck, profile, today: taskDay(cache.at) }).conditioning : result.conditioning;
+    const condition = activityData ? conditionResult.score : null;
+    const at = Math.max(deck.at || 0, cache?.at || 0), state = at ? fresh && taskDay(at) === taskDay() ? 'live' : 'cached' : 'missing';
+    strip.dataset.state = state;
+    if (state === 'missing' && !coros.connected()) {
+      strip.replaceChildren(h('button', { class: 'health-connect', onclick: () => go('/movement') },
+        h('span', { class: 'health-connect-action', text: 'connect COROS' }), h('span', { class: 'meta muted', text: 'recovery · strain · condition' })));
+      return;
+    }
+    strip.replaceChildren(...[
+      ['recovery', 'recovery', result.recovery?.score ?? null, '%', result.recovery?.zone || '—', deck.at || 0],
+      ['strain', 'strain', strain, '%', strain != null ? result.strain.target.join('–') + '%' : '—', currentActivities ? cache.at : deck.at || 0],
+      ['condition', 'conditioning', condition, '', condition != null ? conditionResult.status : '—', cache?.at || 0],
+    ].map(([label, name, value, unit, zone, readingAt]) => {
+      const available = Number.isFinite(value), bar = h('span', { class: 'health-bar', 'aria-hidden': 'true' }, Array.from({ length: 10 }, (_, i) => h('i', { class: available && i < Math.round(Math.min(100, value) / 10) ? 'filled' : '' })));
+      return h('button', { class: 'health-stat ' + label, 'data-score': name, 'data-state': available ? fresh && readingAt && taskDay(readingAt) === taskDay() ? 'live' : 'cached' : 'missing', 'aria-label': label + ': ' + (available ? value + unit + ', ' + zone : 'no reading'), title: readingAt ? 'Updated ' + new Date(readingAt).toLocaleString() : label,
+        onclick: () => { workspaceSession.setItem('pocket:movement-open', name); go('/movement'); } },
+        h('span', { class: 'health-label', text: label }), h('span', { class: 'health-value' }, available ? String(value) : '—', available && unit ? h('small', { text: unit }) : null), bar, h('span', { class: 'health-zone', text: zone }));
+    }));
+  };
+  draw();
+  if (coros.connected()) Promise.allSettled([coros.activities(90), coros.cockpit(28)]).then(results => { if (body.isConnected) draw(results.every(result => result.status === 'fulfilled')); });
+  return strip;
+}
 function todayView() {
-  const body = view("today", [["+ capture", capture], ["tiles", editTiles], ["search", () => go("/search")], ["pip", () => go("/pip")]]);
+  const body = view("today", [["+ capture", capture], ["search", () => go("/search")]]);
   workspaceTitle(body, "today", new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }));
-  setupBanner(body);
-  const briefHost = h('div', { class: 'today-brief-host' }); add(body, briefHost);
-  briefView = mountBrief(briefHost, briefApi, { compact: true });
-  add(body, tileGrid());
+  add(body, todayHealth(body));
+  const now = Date.now(), appointments = agenda.all(), next = appointments.find(event => event.when + event.minutes * MINUTE > now);
+  if (next) {
+    const sameDay = new Date(next.when).toDateString() === new Date(now).toDateString();
+    add(body, groupHeading('Up next', appointments.filter(event => new Date(event.when).toDateString() === new Date(now).toDateString()).length + ' today'),
+      h('button', { class: 'today-event', onclick: () => go('/calendar/' + next.uid) }, h('span', { class: 'event-time', text: new Date(next.when).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }),
+        h('span', { class: 'event-main' }, h('span', { class: 'event-name', text: next.title }), h('span', { class: 'meta muted', text: [!sameDay ? new Date(next.when).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '', next.minutes + ' min', 'until ' + new Date(next.when + next.minutes * MINUTE).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })].filter(Boolean).join(' · ') }))));
+  }
   const chosen = load("tasks.json").next?.uid, all = tasks.list(), due = all.filter(t => !t.done && (t.uid === chosen || t.due && t.due <= taskDay()));
-  due.sort((a,b) => Number(b.uid === chosen) - Number(a.uid === chosen));
+  due.sort((a,b) => Number(b.uid === chosen) - Number(a.uid === chosen) || String(a.due || '').localeCompare(String(b.due || '')));
   const ready = parking.open().filter(t => t.due > 0 && t.due <= Date.now());
-  const left = [section("DO TODAY"), ...due.map(t => rowButton(t.text, taskMeta(t) + (t.uid === chosen ? " · Chosen next" : ""), () => go("/tasks/" + t.uid)))];
-  if(!due.length)left.push(h("p", { class: "small muted", text: "No tasks for today." }));
-  left.push(keys(["all tasks", () => go("/tasks")], ["+ task", () => go("/tasks/new")]));
-  const right = [section("REVISIT"), ready.length ? rowButton(ready.length + (ready.length === 1 ? " thought is ready" : " thoughts are ready"), "", () => go("/thoughts")) : h("p", { class: "small muted", text: "Nothing to revisit." })];
-  const latest = notes.list()[0];
-  if(latest)right.push(section("PICK UP WHERE YOU LEFT OFF"), rowButton(noteTitle(latest), "Open note", () => go("/notes/" + latest.uid)));
-  right.push(section("REVIEW"), rowButton("Activity", "", () => go("/receipt")));
-  split(body,left,right);
+  add(body, groupHeading('Do today', due.length), due.map(task => taskRow(task)), keys(['all tasks', () => go('/tasks')], ['+ task', () => go('/tasks/new')], ['focus', () => go('/clock/new/focus')]));
+  if (ready.length) add(body, groupHeading('Revisit', ready.length + (ready.length === 1 ? ' thought' : ' thoughts')),
+    ready.map(item => rowButton(item.text, thoughtMeta(item), () => go('/thoughts/' + item.id), { class: 'row-button today-thought' })));
+  add(body, groupHeading('Your tiles', null, [['+ add', editTiles], ['edit', editTiles]]), tileGrid());
+  setupBanner(body);
 }
 function parkingView(id) {
-  const body = view("thoughts", [["+ thought", () => { go("/thoughts"); setTimeout(() => document.getElementById("thought-capture")?.focus(), 0); }], ["search", () => go("/search")]]);
+  // The list opens with "+ park a thought" right below, so the toolbar adds it only on a thought's own page.
+  const body = view("thoughts", [...(id ? [["+ thought", () => { go("/thoughts"); setTimeout(() => document.getElementById("thought-capture")?.focus(), 0); }]] : []), ["search", () => go("/search")]]);
   workspaceTitle(body, "thoughts", parking.open().length + " undecided");
   const item = id ? load("parking.json").items.find(i => String(i.id) === String(id)) : null;
   if(item) {
     add(body,rowButton("‹ thoughts", "", () => go("/thoughts")),h("p", { class: "thought", text: item.text }),h("p", { class: "meta muted", text: item.state === "parked" ? thoughtMeta(item) : item.state === "task" ? "Made into a task" : "Let go" }));
     const linked = tasks.list().find(t => t.source?.token === "thought:" + item.id);
-    if(item.state === "parked")add(body, keys(["make task", guard(() => { const task = tasks.fromThought(item); go("/tasks/" + task.uid); })], ["edit", async () => { const value = await ask("Edit thought", { value: item.text, multiline: true }); if(value?.trim())guard(() => { if(value.trim().length>500)throw new Error("Keep a thought within 500 characters."); parking.update(item.id,t => { t.text=value.trim(); }); parkingView(id); })(); }], ["revisit", () => repark(item)], ["let go", () => letGo(item)]));
+    if(item.state === "parked")add(body, keys(["make task", () => convertThought(item)], ["edit", async () => { const value = await ask("Edit thought", { value: item.text, multiline: true }); if(value?.trim())guard(() => { if(value.trim().length>500)throw new Error("Keep a thought within 500 characters."); parking.update(item.id,t => { t.text=value.trim(); }); parkingView(id); })(); }], ["revisit", () => repark(item)], ["let go", () => letGo(item)]));
     else if(linked)add(body,rowButton("Open task", linked.text, () => go("/tasks/" + linked.uid)));
     if(source(item))add(body,rowButton("Source note", noteTitle(source(item)), () => go("/notes/" + item.note)));
     add(body,rowButton("think with pip", "", () => thinkWithPip("thought", item.id, item.text, item.text, "/thoughts/" + item.id)));
     return;
   }
   const field = h("textarea", { id: "thought-capture", placeholder: "An idea, a question, something to consider…", maxlength: 500, "aria-label": "New thought", oninput: e => { parkingDraft=e.target.value; localStorage.setItem("pocket:thought-draft",parkingDraft); } });
+  if (parkingDraftOwner !== activeAccount()) { parkingDraft = ''; parkingDraftOwner = activeAccount(); }
   field.value = parkingDraft || localStorage.getItem("pocket:thought-draft") || "";
   const review = h("select", { "aria-label": "Revisit thought" }, h("option", { value: "none", text: "Revisit when I choose" }), DELAYS.map(d => h("option", { value: d, text: "Revisit " + d })));
   const saveThought = guard(() => { const item = parking.park(field.value,when(review.value)); receipt.log(KIND.PARK,item.text); parkingDraft=""; localStorage.removeItem("pocket:thought-draft"); parkingView(); say("Saved to Thoughts."); });
   const open = parking.open();
-  split(body,[section("CAPTURE"),field,review,keys(["save thought",saveThought,{class:"accent"}]),rowButton("Handled thoughts", "", async () => { const items=load("parking.json").items.filter(t=>t.state!=="parked").sort((a,b)=>b.updated-a.updated); if(!items.length){say("No handled thoughts yet.");return;} const i=await choose("Handled thoughts",items.map(t=>t.text));if(i!=null)go("/thoughts/"+items[i].id); })],
-    [section("UNDECIDED ["+open.length+"]"),open.length ? open.map(item => rowButton(item.text,thoughtMeta(item)+(source(item)?" · "+noteTitle(source(item)):""),()=>go("/thoughts/"+item.id))) : h("p",{class:"small muted",text:"Nothing parked yet."})]);
+  const capturePanel = h('details', { class: 'thought-capture-panel', ...(field.value || !open.length ? { open: true } : {}) }, h('summary', { text: '+ park a thought' }), field, review, keys(['save thought', saveThought, { class: 'accent' }]));
+  field.addEventListener('focus', () => { capturePanel.open = true; });
+  add(body, capturePanel, h('div', { class: 'thought-list' }, open.map(item => h('article', { class: 'thought-item' },
+    h('div', { class: 'meta muted', text: new Date(item.created).toLocaleDateString([], { day: 'numeric', month: 'short' }) }),
+    rowButton(item.text, thoughtMeta(item) + (source(item) ? ' · ' + noteTitle(source(item)) : ''), () => go('/thoughts/' + item.id)),
+    keys(['make task', () => convertThought(item)], ['ask Pip', () => thinkWithPip('thought', item.id, item.text, item.text, '/thoughts/' + item.id)])))),
+    rowButton("Handled thoughts", "", async () => { const items=load("parking.json").items.filter(t=>t.state!=="parked").sort((a,b)=>b.updated-a.updated); if(!items.length){say("No handled thoughts yet.");return;} const i=await choose("Handled thoughts",items.map(t=>t.text));if(i!=null)go("/thoughts/"+items[i].id); }));
+}
+async function convertThought(item) {
+  const value = await ask('Make task', { value: item.text, ok: 'create task', limit: 500 });
+  if (!value?.trim()) return;
+  guard(() => {
+    if (value.trim().length > 500) throw new Error('Write an action, up to 500 characters.');
+    const task = tasks.fromThought(item);
+    if (task.text !== value.trim()) tasks.edit(task.uid, current => { current.text = value.trim(); });
+    go('/tasks/' + task.uid);
+  })();
 }
 async function letGo(item) { if(await confirmBox("Let this thought go?", "let go"))guard(()=>{parking.close(item.id,"killed");receipt.log(KIND.KILL,item.text);go("/thoughts");})(); }
 async function repark(item) { const choices=["When I choose",...DELAYS];const i=await choose("Revisit thought",choices);if(i==null)return;guard(()=>{parking.repark(item.id,i===0?0:when(choices[i]));parkingView(item.id);})(); }
-let taskFilter = "Open";
+let taskFilter = "All";
 function tasksView(uid) {
   const task = uid && uid !== "new" ? tasks.get(uid) : null;
   const body = view("tasks", [["+ task",()=>go("/tasks/new")],["search",()=>go("/search")]]);
@@ -231,7 +334,7 @@ function tasksView(uid) {
   if(uid && !task){add(body,rowButton("‹ tasks","",()=>go("/tasks")),h("p",{class:"small muted",text:"This task was removed."}));return;}
   if(task){
     add(body,rowButton("‹ tasks","",()=>go("/tasks")),h("p",{class:"thought",text:task.text}),h("p",{class:"meta muted",text:taskMeta(task)}),
-      keys([task.done?"reopen":"complete",guard(()=>{tasks.complete(uid);tasksView(uid);}),{class:"accent"}],["edit",()=>go("/tasks/"+uid+"/edit")],...(!task.done?[["do next",guard(()=>{tasks.next(uid);go("/today");})]]:[])));
+      keys([task.done?"reopen":"complete",guard(()=>{tasks.complete(uid);tasksView(uid);}),{class:"accent"}],["edit",()=>go("/tasks/"+uid+"/edit")],...(!task.done?[["do next",guard(()=>{tasks.next(uid);go("/today");})], ['focus', guard(() => focusTask(task))], ['plan', guard(() => planTask(task))], ['remind', guard(() => remindTask(task))]]:[])));
     for(const [i,step] of (task.steps||[]).entries())add(body,rowButton((step.done?"[x] ":"[ ] ")+step.text,"",guard(()=>{tasks.edit(uid,t=>{t.steps[i].done=!t.steps[i].done;});tasksView(uid);})));
     if(task.source){const context=task.source;const note=context.note_uid?notes.get(context.note_uid):null;const thoughtId=context.token?.startsWith("thought:")?context.token.slice(8):null;
       if(thoughtId)add(body,rowButton("Source thought","",()=>go("/thoughts/"+thoughtId)));
@@ -239,9 +342,15 @@ function tasksView(uid) {
       add(body,section("CONTEXT"),h("p",{class:"small muted",style:"white-space:pre-wrap",text:context.text}));}
     add(body,rowButton("think with pip", "", () => thinkWithPip("task", task.uid, task.text, [task.text,...(task.steps||[]).map(s=>(s.done?"[x] ":"[ ] ")+s.text)].join("\n"), "/tasks/" + uid)),rowButton("delete task","",async()=>{if(await confirmBox("Delete this task on all devices?","delete"))guard(()=>{tasks.remove(uid);go("/tasks");})();}));return;
   }
-  add(body,keys(...["Open","Today","Later","Done"].map(f=>[f,()=>{taskFilter=f;tasksView();},{class:f===taskFilter?"selected":""}])));
-  const all=tasks.list().filter(t=>t.done===(taskFilter==="Done")&&(taskFilter!=="Today"||t.due&&t.due<=taskDay()||t.uid===load("tasks.json").next?.uid)&&(taskFilter!=="Later"||t.due>taskDay()));
-  add(body,all.length?all.map(t=>rowButton(t.text,taskMeta(t),()=>go("/tasks/"+t.uid))):h("p",{class:"small muted",text:"No tasks in this view."}));
+  const quickKey = 'pocket:task-draft', quickDraft = () => { try { return JSON.parse(localStorage.getItem(quickKey)) || {}; } catch { return {}; } };
+  const quick = h('input', { 'aria-label': 'New task', placeholder: 'add a task…', maxlength: 500, value: quickDraft().text || '', oninput: guard(() => localStorage.setItem(quickKey, JSON.stringify({ ...quickDraft(), text: quick.value }))) });
+  add(body, h('form', { class: 'task-quick', onsubmit: event => { event.preventDefault(); guard(() => { if (!quick.value.trim()) return; tasks.create(quick.value, null, quickDraft()); localStorage.removeItem(quickKey); tasksView(); })(); } }, quick, h('button', { type: 'submit', 'aria-label': 'Add task', text: '+' })));
+  add(body,keypad(...["All","Open","Today","Later","Done"].map(f=>[f,()=>{taskFilter=f;tasksView();},{class:f===taskFilter?"selected":"", 'aria-pressed': String(f===taskFilter)}])));
+  const all=tasks.list().filter(t=>(taskFilter==='All'||t.done===(taskFilter==="Done"))&&(taskFilter!=="Today"||t.due&&t.due<=taskDay()||t.uid===load("tasks.json").next?.uid)&&(taskFilter!=="Later"||t.due>taskDay()));
+  const chosen = load('tasks.json').next?.uid, groups = new Map([['Chosen next', []], ['Overdue', []], ['Today', []], ['Later', []], ['Done', []]]);
+  for (const task of all) groups.get(task.done ? 'Done' : task.uid === chosen ? 'Chosen next' : task.due && task.due < taskDay() ? 'Overdue' : task.due === taskDay() ? 'Today' : 'Later').push(task);
+  for (const [title, list] of groups) if (list.length) add(body, groupHeading(title, list.length), list.map(task => taskRow(task, () => tasksView(), true)));
+  if (!all.length) add(body, h('p', { class: 'meta muted', text: '0 tasks' }));
 }
 function taskEditor(body, task) {
   const draftKey="pocket:task-draft"+(task?":"+task.uid:"");
@@ -310,14 +419,45 @@ function searchView() {
     timer=setTimeout(async()=>{try{const {results:list}=await cloud.search(q);if(ticket===asked&&body.isConnected)show(combine(list,q));}catch{if(ticket===asked&&body.isConnected)show(local(q));}},180);};
   field.addEventListener("input",find);field.focus();if(searchQuery)find();
 }
+const APP_GROUPS = [
+  ['Day', [['today', 'today'], ['calendar', 'calendar'], ['clock', 'clock'], ['daily brief', 'brief'], ['travel', 'travel']]],
+  ['Keep', [['thoughts', 'thoughts'], ['tasks', 'tasks'], ['notes', 'notes'], ['zines', 'zines'], ['Pip', 'pip']]],
+  ['Movement', [['movement', 'movement'], ['gym', 'gym']]],
+  ['Extras', [['dice', 'dice'], ['activity', 'receipt'], ['set up Pocket', 'setup'], ['account & devices', 'sync']]],
+];
+const APP_GLYPHS = {
+  today: 'M2 3h12v11H2zM2 6h12M5 1v3M11 1v3M5 9h2M9 9h2', calendar: 'M2 3h12v11H2zM2 6h12M5 1v3M11 1v3M5 9h2M9 9h2M5 12h2',
+  clock: 'M4 2h8l2 2v8l-2 2H4l-2-2V4zM8 5v4h3', brief: 'M3 2h10v12H3zM6 5h4M6 8h4M6 11h2', thoughts: 'M4 2h8l2 2v5l-2 2H9v3H7v-3H4L2 9V4zM6 14h4',
+  tasks: 'M2 4l2 2 3-4M9 4h5M2 11l2 2 3-4M9 11h5', notes: 'M3 2h8l2 2v10H3zM6 6h4M6 9h4M6 12h2', zines: 'M2 3h5l1 2 1-2h5v10H9l-1 1-1-1H2zM8 5v8',
+  movement: 'M2 9h3l2-5 3 9 2-4h2', gym: 'M1 6v4M3 4v8M3 8h10M13 4v8M15 6v4', dice: 'M3 2h10l1 1v10l-1 1H3l-1-1V3zM5 5h1M10 5h1M8 8h1M5 11h1M10 11h1',
+  receipt: 'M3 2h10v12H3zM5 11V9M8 11V7M11 11V4', travel: 'M2 6h12v8H2zM5 6V3h6v3M6 6v8M10 6v8', pip: 'M2 3h12v8H8l-3 3v-3H2zM5 6h6',
+  setup: 'M8 2v3M8 11v3M2 8h3M11 8h3M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2M6 6h4v4H6z', sync: 'M6 2h4v4H6zM3 14v-4l2-2h6l2 2v4',
+};
+function appGlyph(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), path = document.createElementNS(svg.namespaceURI, 'path');
+  svg.setAttribute('viewBox', '0 0 16 16'); svg.setAttribute('aria-hidden', 'true'); svg.classList.add('app-glyph');
+  path.setAttribute('d', APP_GLYPHS[name] || APP_GLYPHS.notes); svg.append(path); return svg;
+}
+let appQuery = '';
 function appsView() {
-  const body=view("apps");workspaceTitle(body,"apps");
-  split(body,[section("THINK"),rowButton("pip","",()=>go("/pip")),rowButton("daily brief","",()=>go("/brief")),section("PLAN"),rowButton("Calendar","",()=>go("/calendar")),rowButton("Clock","",()=>go("/clock")),section("REVIEW"),rowButton("Activity","",()=>go("/receipt")),section("CREATE & KEEP"),rowButton("Zines","",()=>go("/zines"))],
-    [section("BODY"),rowButton("Movement","",()=>go("/movement")),rowButton("Gym","",()=>go("/gym")),section("EXTRAS"),rowButton("Dice","",()=>go("/dice")),section("SETTINGS"),rowButton("Set up Pocket","account · phone · COROS · pip",()=>go("/setup")),rowButton("Account & devices","",()=>go("/sync"))]);
+  const body = view('apps'); workspaceTitle(body, 'apps', APP_GROUPS.reduce((count, [, apps]) => count + apps.length, 0) + ' Pocket tools');
+  const field = h('input', { type: 'search', 'aria-label': 'Find app', placeholder: 'search pocket…', value: appQuery });
+  const clear = h('button', { type: 'button', 'aria-label': 'Clear app search', text: '×', onclick: () => { field.value = ''; filter(); field.focus(); } });
+  const catalog = h('div', { class: 'app-catalog' }, APP_GROUPS.map(([name, apps]) => h('section', { class: 'app-group' }, h('h2', { text: name }),
+    h('div', { class: 'app-group-list' }, apps.map(([label, id]) => h('button', { class: 'app-row app-' + id, 'data-name': label.toLowerCase(), onclick: () => go('/' + id) }, appGlyph(id), h('span', { text: label })))))));
+  const empty = h('p', { class: 'meta muted', hidden: true, text: '0 apps' });
+  const filter = () => {
+    const q = field.value.trim().toLowerCase(); appQuery = field.value; let count = 0;
+    for (const row of catalog.querySelectorAll('.app-row')) { row.hidden = !row.dataset.name.includes(q); if (!row.hidden) count++; }
+    for (const group of catalog.querySelectorAll('.app-group')) group.hidden = ![...group.querySelectorAll('.app-row')].some(row => !row.hidden);
+    clear.hidden = !q; empty.hidden = count > 0;
+  };
+  field.addEventListener('input', filter); filter();
+  add(body, h('div', { class: 'app-search' }, field, clear), catalog, empty);
 }
 
 // ── Notes: list on the left, the open note on the right. Saves as you type. ──
-let noteQuery = "", previewing = false, saveTimer = 0;
+let noteQuery = "", previewing = false;
 function notesView(uid) {
   const open = uid === "new" ? null : uid ? notes.get(uid) : null;
   const editing = uid === "new" || Boolean(open);
@@ -339,8 +479,8 @@ function notesView(uid) {
   const list = h("div", { class: "note-list" });
   const renderList = (current = uid) => {
     const q = noteQuery.trim().toLowerCase(), all = notes.list().filter(n => !q || n.text.toLowerCase().includes(q));
-    list.replaceChildren(...(all.length ? all.map(n => rowButton((n.pinned ? "▲ " : "") + noteTitle(n), summary(n),
-      () => go("/notes/" + n.uid), { class: "row-button" + (n.uid === current ? " selected" : "") }))
+    list.replaceChildren(...(all.length ? all.map(n => h('button', { class: 'row-button note-row' + (n.uid === current ? ' selected' : ''), onclick: () => go('/notes/' + n.uid) },
+      n.pinned ? h('span', { class: 'note-pin', text: 'pinned' }) : null, h('span', { class: 'note-title', text: noteTitle(n) }), h('span', { class: 'sub' }, summary(n))))
       : [h("p", { class: "small muted", text: q ? "No note matches." : "No notes yet." })]));
   };
   renderList();
@@ -462,9 +602,13 @@ function summary(n) {
 /** onSaved refreshes the list beside the editor, so a new note and changed titles show up while typing. */
 function editor(note, onSaved = () => {}) {
   let uid = note?.uid || null;
-  const state = h("span", { class: "meta muted", text: note ? "saved" : "new" });
+  const owner = activeAccount();
+  let draftKey = 'pocket:note-draft' + (uid ? ':' + uid : '');
+  const draft = localStorage.getItem(draftKey);
+  let saveTimer = 0, savedText = note?.text || '';
+  const state = h("span", { class: "meta muted", text: draft != null ? 'draft' : note ? "saved" : "new" });
   const area = h("textarea", { class: "note-editor", maxlength: NOTE_LIMIT, placeholder: "# Title\n\nWrite in Markdown…", "aria-label": "Note text", spellcheck: "true" });
-  area.value = note?.text || "";
+  area.value = draft ?? savedText;
   const preview = h("div", { class: "md", hidden: !previewing });
   area.hidden = previewing; if (previewing) preview.replaceChildren(markdown(area.value, uid));
   // Thought lines already handled in this note, counted per line text. A line parks once the cursor has left it,
@@ -486,14 +630,23 @@ function editor(note, onSaved = () => {}) {
   };
   const save = (finished = false) => {
     clearTimeout(saveTimer);
+    if (activeAccount() !== owner || uid && !notes.get(uid)) return;
     try {
-      if (!uid) { if (!area.value.trim()) return; uid = notes.create(area.value).uid; history.replaceState(null, "", "#/notes/" + uid); }
-      else notes.update(uid, area.value);
+      if (!uid) {
+        if (!area.value.trim()) return;
+        uid = notes.create(area.value).uid;
+        if (localStorage.getItem(draftKey) != null) localStorage.removeItem(draftKey);
+        draftKey = 'pocket:note-draft:' + uid;
+        if (area.isConnected && location.hash === '#/notes/new') history.replaceState(null, "", "#/notes/" + uid);
+      } else if (savedText !== area.value) notes.update(uid, area.value);
+      savedText = area.value;
+      if (localStorage.getItem(draftKey) != null) localStorage.removeItem(draftKey);
       parkFinished(finished); onSaved(uid);
       state.textContent = "saved";
     } catch (error) { say(error.message); }
   };
-  area.addEventListener("input", () => { state.textContent = "…"; clearTimeout(saveTimer); saveTimer = setTimeout(save, 600); });
+  flushNote = () => save(true);
+  area.addEventListener("input", () => { state.textContent = "…"; try { localStorage.setItem(draftKey, area.value); } catch (error) { say(error.message); } clearTimeout(saveTimer); saveTimer = setTimeout(save, 600); });
   area.addEventListener("keyup", event => { if (event.key === "Enter" || event.key.startsWith("Arrow")) { clearTimeout(saveTimer); saveTimer = setTimeout(save, 150); } });
   area.addEventListener("blur", () => save(true));
   // A note read from a journal page can show the page itself; leaving "paper" returns to the text.
@@ -509,7 +662,7 @@ function editor(note, onSaved = () => {}) {
     cloud.connected() ? h("button", { onclick: () => { save(true); if (uid) noteHistory(uid); } }, "history") : null,
     h("button", { onclick: () => { save(true); if(!uid)return; const n=notes.get(uid),selected=area.value.substring(area.selectionStart,area.selectionEnd).trim(); thinkWithPip("note",n.uid,noteTitle(n),selected||n.text,"/notes/"+n.uid); } }, "pip"),
     h("button", { onclick: async () => { if (!uid) { go("/notes"); return; } if (await confirmBox("Delete this note on all devices?", "delete")) { notes.remove(uid); go("/notes"); say("Deleted."); } } }, "delete"));
-  if (!previewing) setTimeout(() => area.focus({ preventScroll: true }), 0);
+  if (!previewing) setTimeout(() => { if (area.isConnected) area.focus({ preventScroll: true }); }, 0);
   return [bar, area, preview, paperPane];
 }
 /** A small Markdown renderer for what the phone's editor writes. Text is escaped before any formatting. */
@@ -611,7 +764,7 @@ function receiptView(key) {
     rule(), receipt.totals(lines).map(([name, n]) => h("div", { class: "total" + (name === "ITEMS" ? " b" : "") }, h("span", { text: name }), h("span", { text: String(n) }))), rule(),
     h("div", { class: "c b", text: "THANK YOU FOR LIVING" }), h("div", { class: "c", text: "PLEASE COME AGAIN" }), h("div", { class: "c bars", text: barcode(lines.length * 31 + Math.floor(+date / 86_400_000)) }));
   split(body, h("div", { class: "wide-only" }, dayList), [
-    h("div", { class: "narrow-only" }, keys(["‹ prev", () => shift(-1)], ["today", () => go("/receipt"), { disabled: isToday }], ["next ›", () => shift(1), { disabled: isToday }])),
+    h("div", { class: "narrow-only" }, keypad(["‹ prev", () => shift(-1)], ["today", () => go("/receipt"), { disabled: isToday }], ["next ›", () => shift(1), { disabled: isToday }])),
     h("div", { class: "roll" }, h("div", { class: "tear top" }), paper, h("div", { class: "tear" })),
     isToday ? rowButton("+ add a line", "", async () => { const text = await ask("Add to today's receipt", { placeholder: "Had a great coffee", ok: "print" }); if (text && text.trim()) { receipt.log(KIND.MEMO, text); receiptView(day); } }) : null]);
 }
@@ -631,8 +784,8 @@ function diceView() {
   const result = h("div", { class: "result" + (mode === "pick" ? " long" : ""), text: localStorage.getItem("pocket:dice-face") || "?", "aria-live": "polite" });
   const detail = h("div", { class: "small muted center", text: localStorage.getItem("pocket:dice-detail") || "" });
   const setMode = m => { localStorage.setItem("pocket:dice-mode", m); localStorage.removeItem("pocket:dice-face"); localStorage.removeItem("pocket:dice-detail"); diceView(); };
-  const left = [keys(...MODES.map(m => [m, () => setMode(m), { class: m === mode ? "selected" : "", "aria-pressed": String(m === mode) }])), result, detail,
-    mode === "dice" ? keys(["−", () => setCount(count - 1)], [`${count} ${count === 1 ? "die" : "dice"}`, () => {}, { disabled: true }], ["+", () => setCount(count + 1)]) : null,
+  const left = [keypad(...MODES.map(m => [m, () => setMode(m), { class: m === mode ? "selected" : "", "aria-pressed": String(m === mode) }])), result, detail,
+    mode === "dice" ? keypad(["−", () => setCount(count - 1)], [`${count} ${count === 1 ? "die" : "dice"}`, () => {}, { disabled: true }], ["+", () => setCount(count + 1)]) : null,
     mode === "pick" ? rowButton(list.length ? `From ${list.length}: ${list.join(", ")}` : "Add things to pick from", "", editList) : null,
     h("button", { class: "primary", id: "roll", onclick: () => roll(result, detail) }, mode === "coin" ? "flip" : mode === "pick" ? "pick one" : "roll"),
     h("div", { class: "meta muted center", text: "or press space" })];
@@ -835,13 +988,14 @@ async function keySettings() {
 const setupApi = { h, add, go, say, route, workspaceTitle, normalCode, linkPhone, signInForm: signedOutAccount };
 // ── Routing and keys ──
 function route() {
-  const [, name, arg] = (location.hash.replace(/^#/, "") || "/").split("/");
+  const [, name, arg, sub, leaf, deep] = (location.hash.replace(/^#/, "") || "/").split("/");
   if (name === "notes") notesView(arg); else if (name === "receipt") receiptView(arg); else if (name === "dice") diceView(); else if (name === "sync" || name === "account" || name === "link") accountView(name === "link" ? arg || "" : "", name === "account" && arg === "new");
   else if (name === "pip") pip.mount(view("pip"), arg, pipHelpers);
   else if (name === "zines") zines.mount(view("zines"), arg, { go, say, dialog, confirm: confirmBox });
   else if (name === "movement") movement.mount(view("movement"), { say });
   else if (name === "calendar") mountAgenda(view("calendar"), plannerApi);
   else if (name === "clock") mountClock(view("clock"), plannerApi);
+  else if (name === "travel") travel.mount(view("travel"), { tripId: arg || "", sub: sub || "", leaf: leaf || "", extra: deep || "" }, plannerApi);
   else if (name === "setup") setup.mount(view("setup"), setupApi, arg === "new");
   else if (name === "brief") { const body=view('brief'); workspaceTitle(body,'daily brief'); briefView=mountBrief(body,briefApi); }
   else if (name === "gym") gymView.mount(view("gym"), arg, { h, add, say, section, rowButton, keys, split, go, ask, choose, confirm: confirmBox, title: workspaceTitle });
@@ -850,7 +1004,7 @@ function route() {
 addEventListener("hashchange", route);
 let lastState = status.state;
 onStatus(() => {
-  const state = document.getElementById("sync-status"); if (state) state.textContent = describe();
+  const state = document.getElementById("sync-status"); if (state) state.textContent = statusLabel();
   const finished = lastState === "syncing" && status.state === "idle"; lastState = status.state;
   // Merged edits from the phone appear without a reload, unless the user is typing or a dialog is open.
   if (finished && status.changed && !searchOpening && !["#/zines", "#/movement", "#/pip"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea, select")) {
@@ -859,7 +1013,15 @@ onStatus(() => {
   }
 });
 addEventListener("keydown", event => {
-  if (!dialogHost.hidden) { if (event.key === "Escape") closeDialog(); return; }
+  if (!dialogHost.hidden) {
+    if (event.key === "Escape") closeDialog();
+    if (event.key === 'Tab') {
+      const targets = [...dialogHost.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], summary, [tabindex="0"]')].filter(node => node.getClientRects().length);
+      const first = targets[0], last = targets.at(-1);
+      if (first && (event.shiftKey && (document.activeElement === first || !dialogHost.contains(document.activeElement)) || !event.shiftKey && (document.activeElement === last || !dialogHost.contains(document.activeElement)))) { event.preventDefault(); (event.shiftKey ? last : first).focus(); }
+    }
+    return;
+  }
   const typing = document.activeElement?.matches("input, textarea, select"), name = location.hash.split("/")[1];
   if (typing) { if (event.key === "Escape") document.activeElement.blur(); return; }
   if (event.key >= "1" && event.key <= String(TOOLS.length) && !event.ctrlKey && !event.metaKey && !event.altKey) { go("/" + TOOLS[Number(event.key) - 1]); return; }
@@ -875,5 +1037,5 @@ initExtras();
 startClockRuntime();
 const refresh = installRefresh({ sync: syncNow, status, onStatus, describe, say });
 if ('serviceWorker' in navigator && !import.meta.env.DEV) navigator.serviceWorker.register('/sw.js').catch(() => {});
-addEventListener("pagehide", () => { zines.leave(); briefView?.(); briefView=null; });
+addEventListener("pagehide", () => { flushNote?.(); zines.leave(); briefView?.(); briefView=null; });
 addEventListener("pageshow", event => { if (event.persisted) route(); });

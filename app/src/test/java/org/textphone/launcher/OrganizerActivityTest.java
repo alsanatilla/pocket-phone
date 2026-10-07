@@ -29,7 +29,13 @@ public class OrganizerActivityTest {
     @Before public void start() { context=RuntimeEnvironment.getApplication(); context.getSharedPreferences("pocket_planner",0).edit().clear().commit(); }
     private PlannerStore store() { return new PlannerStore(context.getSharedPreferences("pocket_planner",0)); }
     private View root(MainActivity activity) { return activity.findViewById(android.R.id.content); }
-    private void click(MainActivity activity,String text) { View view=PocketAppsTest.find(root(activity),text);assertNotNull(text,view);while(!view.hasOnClickListeners()&&view.getParent() instanceof View)view=(View)view.getParent();assertTrue("Clickable "+text,view.performClick()); }
+    /** The page's scroll area sits inside the workspace shell, below its header and above the dock. */
+    private static ScrollView scrollOf(View view) {
+        if (view instanceof ScrollView) return (ScrollView) view;
+        if (view instanceof android.view.ViewGroup) for (int i = 0; i < ((android.view.ViewGroup) view).getChildCount(); i++) { ScrollView found = scrollOf(((android.view.ViewGroup) view).getChildAt(i)); if (found != null) return found; }
+        return null;
+    }
+    private void click(MainActivity activity,String text) { View view=PocketAppsTest.findCommand(root(activity),text);assertNotNull(text,view);while(!view.hasOnClickListeners()&&view.getParent() instanceof View)view=(View)view.getParent();assertTrue("Clickable "+text,view.performClick()); }
     private void chooseFormat(MainActivity activity,String label) {
         View format=root(activity).findViewWithTag("note_format_control"); assertNotNull(format);
         ReflectionHelpers.<PageMotion>getField(activity,"motion").settle(); layout(root(activity),360,800); format.performClick();
@@ -51,19 +57,20 @@ public class OrganizerActivityTest {
             MainActivity activity=controller.get(); click(activity,"+ note"); PageMotion motion=ReflectionHelpers.getField(activity,"motion"); motion.settle();
             EditText editor=root(activity).findViewWithTag("capture_editor"); editor.setText("# Travel\n- Train"); editor.setSelection(4);
             layout(motion.host(),360,720); int firstHeight=editor.getHeight();
-            View actions=motion.host().findViewWithTag("note_actions"); ScrollView viewport=(ScrollView)motion.host().getChildAt(0);
-            assertEquals(360,viewport.getWidth()); assertEquals(720,viewport.getHeight());
+            View actions=motion.host().findViewWithTag("note_actions"); ScrollView viewport=scrollOf(motion.host());
+            int firstViewport=viewport.getHeight(); // The page keeps its 16 dp inset on both sides; its height is what the header leaves above the bottom bar.
+            assertEquals(360-2*PocketDesign.INSET,viewport.getWidth()); assertTrue(firstViewport>0&&firstViewport<=720);
             assertEquals(viewport.getHeight()-viewport.getPaddingBottom()-viewport.getPaddingTop(),actions.getBottom());
             layout(motion.host(),432,960);
             assertEquals(firstHeight+240,editor.getHeight()); assertEquals(4,editor.getSelectionStart()); assertEquals("# Travel\n- Train",editor.getText().toString());
-            assertEquals(432,viewport.getWidth()); assertEquals(960,viewport.getHeight());
+            assertEquals(432-2*PocketDesign.INSET,viewport.getWidth()); assertEquals(firstViewport+240,viewport.getHeight());
         } finally { controller.pause().stop().destroy(); }
     }
     @Test public void noteControlsRemainReachableInAShortWindow() {
         ActivityController<MainActivity> controller=today(); try {
             MainActivity activity=controller.get(); click(activity,"+ note"); PageMotion motion=ReflectionHelpers.getField(activity,"motion"); motion.settle();
             EditText editor=root(activity).findViewWithTag("capture_editor"); editor.setText("Draft while the keyboard is open"); editor.setSelection(8);
-            layout(motion.host(),360,220); ScrollView viewport=(ScrollView)motion.host().getChildAt(0);
+            layout(motion.host(),360,220); ScrollView viewport=scrollOf(motion.host());
             assertTrue(editor.getHeight()>0); assertTrue(viewport.getChildAt(0).getHeight()>viewport.getHeight());
             // Model touch scrolling to the end without fullScroll moving keyboard focus into the editor.
             viewport.setSmoothScrollingEnabled(false); viewport.scrollTo(0,viewport.getChildAt(0).getHeight());

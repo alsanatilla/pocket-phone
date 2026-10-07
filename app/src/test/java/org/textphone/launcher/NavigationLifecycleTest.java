@@ -63,7 +63,7 @@ public class NavigationLifecycleTest {
         assertSame(grid, ReflectionHelpers.getField(activity, "content")); assertFalse(activity.isFinishing());
     }
     @Test public void nativeHomeIntentPresentsAnOpaqueDashboardImmediatelyAndKeepsDraft() {
-        MainActivity activity=open(MainActivity.class).get();navigate(activity,"today");PocketAppsTest.find(activity.findViewById(android.R.id.content),"+ note").performClick();
+        MainActivity activity=open(MainActivity.class).get();navigate(activity,"today");PocketAppsTest.findCommand(activity.findViewById(android.R.id.content),"+ note").performClick();
         EditText editor=activity.findViewById(android.R.id.content).findViewWithTag("capture_editor");editor.setText("Draft before Home");
         PageMotion motion=ReflectionHelpers.getField(activity,"motion");motion.host().measure(View.MeasureSpec.makeMeasureSpec(360,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(800,View.MeasureSpec.EXACTLY));motion.host().layout(0,0,360,800);
         activity.onNewIntent(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));View dashboard=motion.host().getChildAt(0);
@@ -81,7 +81,7 @@ public class NavigationLifecycleTest {
     }
     @Test public void recreatingForAHomeIntentShowsHomeInsteadOfTheLastInternalPage() {
         ActivityController<MainActivity> first=Robolectric.buildActivity(MainActivity.class).setup();MainActivity activity=first.get();navigate(activity,"today");
-        PocketAppsTest.find(activity.findViewById(android.R.id.content),"+ note").performClick();((EditText)activity.findViewById(android.R.id.content).findViewWithTag("capture_editor")).setText("Survives recreation");
+        PocketAppsTest.findCommand(activity.findViewById(android.R.id.content),"+ note").performClick();((EditText)activity.findViewById(android.R.id.content).findViewWithTag("capture_editor")).setText("Survives recreation");
         android.os.Bundle state=new android.os.Bundle();first.pause().saveInstanceState(state).stop().destroy();
         ActivityController<MainActivity> restored=Robolectric.buildActivity(MainActivity.class,new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)).create(state).start().resume().visible();controllers.add(restored);
         assertEquals("home",ReflectionHelpers.getField(restored.get(),"screen"));assertNull(restored.get().findViewById(android.R.id.content).findViewWithTag("capture_editor"));
@@ -90,7 +90,7 @@ public class NavigationLifecycleTest {
     @Test public void organizerTaskKeepsItsEditorAcrossHomeAndReopeningAndReleasesRootBackToAndroid() {
         ActivityController<OrganizerActivity> controller = open(OrganizerActivity.class); OrganizerActivity activity = controller.get();
         NativeNavigation navigation = ReflectionHelpers.getField(activity, "navigation"); assertNull(ReflectionHelpers.getField(navigation, "callback"));
-        PocketAppsTest.find(activity.findViewById(android.R.id.content), "+ note").performClick(); EditText editor = activity.findViewById(android.R.id.content).findViewWithTag("capture_editor");
+        PocketAppsTest.findCommand(activity.findViewById(android.R.id.content),"+ note").performClick(); EditText editor = activity.findViewById(android.R.id.content).findViewWithTag("capture_editor");
         editor.setText("# Independent task"); editor.setSelection(7); controller.pause().stop().newIntent(new Intent(activity, OrganizerActivity.class)); controller.restart().start().resume();
         assertSame(editor, activity.findViewById(android.R.id.content).findViewWithTag("capture_editor")); assertEquals(7, editor.getSelectionStart());
         controller.pause().stop(); new PlannerStore(activity.getSharedPreferences("pocket_planner", 0)).draft("note", 0, "# Updated in another Pocket editor");
@@ -115,7 +115,7 @@ public class NavigationLifecycleTest {
     }
     @Test @Config(sdk = 35) public void nativeBackCallbackCancelsWithoutLosingNoteTextThenCommitsToToday() {
         MainActivity activity = open(MainActivity.class).get(); navigate(activity, "today");
-        android.widget.TextView note = PocketAppsTest.find(activity.findViewById(android.R.id.content), "+ note"); assertNotNull(note); note.performClick();
+        android.widget.TextView note = PocketAppsTest.findCommand(activity.findViewById(android.R.id.content),"+ note"); assertNotNull(note); note.performClick();
         EditText editor = activity.findViewById(android.R.id.content).findViewWithTag("capture_editor"); assertNotNull(editor); editor.setText("# Keep me\n- next"); editor.setSelection(4);
         NativeNavigation navigation = ReflectionHelpers.getField(activity, "navigation"); OnBackAnimationCallback callback = ReflectionHelpers.getField(navigation, "callback");
         callback.onBackStarted(new BackEvent(0, 0, 0, BackEvent.EDGE_LEFT)); callback.onBackProgressed(new BackEvent(0, 0, .6f, BackEvent.EDGE_LEFT)); callback.onBackCancelled();

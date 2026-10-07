@@ -41,6 +41,7 @@ flowchart LR
 | Tasks | Actions you have chosen | Dates, importance, steps, chosen next action, local reminders, planned time and Focus. Completion appears in Activity. |
 | Notes | Context you want to keep | Markdown, pins, drafts, source material and paper transcripts. `>>` captures a thought; “Task” lets you choose an action while keeping the source. Signed-in history and recently deleted recover earlier text. |
 | Calendar | Time you reserve | Local appointments and reminders. “Plan time” on a task carries its title and link; the appointment can reopen that exact task. |
+| Travel | A place to go, then the part that stays | The browser planner saves an ordered route, each connection and overnight stop, hotel options, links, ratings, cancellation dates, booking references and costs. Costs remain grouped by currency. Small memories sit beside the practical plan. It is local to this browser, not yet part of cross-device sync. |
 | Focus / Clock | Doing something for a set time | Focus uses the task you opened, or Today’s shown appointment. Clock owns the timer, alarms and stopwatch. Starting Focus is explicit. |
 | Phone / Messages / Contacts | Communication | Contacts hand off to calls and SMS. Selected messages can become tasks with context. Messenger notifications open their original apps. |
 | Camera / Photos | Taking and keeping pictures | Camera’s album opens in Photos; sharing uses Android’s chooser. Photos shows Pocket captures. |

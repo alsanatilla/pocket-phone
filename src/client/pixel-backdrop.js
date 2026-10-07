@@ -1,6 +1,6 @@
-// Original header artwork, one scene per area. The ordered-dither kernel and every scene are shared with PixelBackdrop.java.
+// Original header artwork, one scene per area. Shared scenes use the same ordered-dither kernel as PixelBackdrop.java; Travel is browser-only.
 const BAYER = [0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
-export const SCENES = ['sky','stars','road','waves','terrain','iron','tiles','rings','glow'];
+export const SCENES = ['sky','stars','road','waves','terrain','iron','tiles','rings','glow','travel'];
 const clamp = v => Math.max(0, Math.min(1, v));
 const smooth = (a,b,v) => { const t=clamp((v-a)/(b-a)); return t*t*(3-2*t); };
 const fract = v => v-Math.floor(v);
@@ -98,7 +98,26 @@ function glow(x,y,u,v,aspect,width,height) {
   if(light>.03&&hash(Math.floor(x/6)+31,Math.floor(y/6))>.9&&x%6===2&&y%6===2)light+=.04+1.2*light;
   return Math.max(0,light-.03)*(1-smooth(.1,.5,v));
 }
-const PAINT = { sky, stars, road, waves, terrain, iron, tiles, rings, glow };
+// Travel: a little sun, a shoreline and a route that refuses to go straight.
+function travel(x,y,u,v,aspect,width,height) {
+  const sun=Math.hypot((u-.81)*aspect,v-.23);
+  let light=.035+.06*(1-v);
+  if(sun<.085)light=.62;
+  else if(sun<.15)light=Math.max(light,.17);
+  const far=.48+.035*Math.sin(u*10+1)+.025*Math.sin(u*23);
+  const near=.68+.045*Math.sin(u*7+2)+.025*Math.sin(u*19+1);
+  if(Math.abs(v-far)*height<1.5||Math.abs(v-near)*height<1.5)light=.28;
+  if(v>far&&v<near)light=.055+.08*hash(Math.floor(x/5),Math.floor(y/5)+8);
+  if(v>=near)light=.035+.06*hash(Math.floor(x/5),Math.floor(y/5)+19);
+  const route=.82-.42*u+.045*Math.sin(u*11);
+  if(u>.16&&u<.95&&Math.abs(v-route)*height<1.25&&x%6<3)light=.62;
+  for(const stop of [.22,.57,.87]){
+    const sy=.82-.42*stop+.045*Math.sin(stop*11), dx=Math.abs(u-stop)*width, dy=Math.abs(v-sy)*height;
+    if(dx+dy<3)light=.72;
+  }
+  return light;
+}
+const PAINT = { sky, stars, road, waves, terrain, iron, tiles, rings, glow, travel };
 
 export function shade(scene,x,y,width,height) {
   const u=(x+.5)/width, v=(y+.5)/height, aspect=width/height;
@@ -112,23 +131,49 @@ export function shade(scene,x,y,width,height) {
   return Math.min(7,base+(value-base>(BAYER[(y%4)*4+x%4]+.5)/16?1:0));
 }
 
+const ART_CACHE = new Map();
+const WARM_PALETTE = ['#12110f', '#232521', '#2b2d29', '#3b463d', '#52634f', '#657962', '#99a183', '#ecc981'].map(hex => {
+  const value = parseInt(hex.slice(1), 16); return [value >> 16 & 255, value >> 8 & 255, value & 255];
+});
+function landscapeLevel(scene, x, y, width, height) {
+  const u = (x + .5) / width, v = (y + .5) / height;
+  if (u < .36) return 0;
+  const fade = Math.min(1, (u - .36) / .2), dither = BAYER[(y % 4) * 4 + x % 4] / 16;
+  const px = u * 172, py = v * 77;
+  let level = 0;
+  const clouds = Math.sin(px / 13 + py / 8) * .23 + Math.sin(px / 29 - py / 6) * .22 + hash(Math.floor(px / 3), Math.floor(py / 2)) * .14;
+  if (v < .52 && clouds > .3 && dither < fade * .55) level = 2;
+  const hills = [50 + Math.sin(px / 23) * 7, 57 + Math.sin(px / 17 + 2) * 6, 65 + Math.sin(px / 31 + 5) * 5];
+  for (let i = 0; i < 3; i++) if (py > hills[i] && py < 76 && dither < fade * (.85 - i * .1)) level = i + 2;
+  if (Math.hypot(px - 139, py - 17) < 5.5 && dither < fade) level = 7;
+  if (scene === 'stars' && v < .52 && hash(x + 31, y) > .995 && dither < fade) level = 6;
+  if (px >= 119 && px < 122 && py >= 37 && py < 50) level = 6;
+  if (px >= 118 && px < 123 && py >= 35 && py < 38) level = 6;
+  if (px >= 120 && px < 121 && py >= 36 && py < 38) level = 7;
+  return level;
+}
+
 export function backdrop(scene='sky') {
   const canvas=document.createElement('canvas');canvas.className='pixel-backdrop';
   canvas.setAttribute('aria-hidden','true');canvas.dataset.scene=scene;
   let disposed=false, lastWidth=0, lastHeight=0;
   const draw=()=>{
     if(disposed||!canvas.isConnected)return;
-    const box=canvas.getBoundingClientRect(), width=Math.max(1,Math.ceil(box.width/2)), height=Math.max(1,Math.ceil(box.height/2));
+    const box=canvas.getBoundingClientRect(), width=Math.max(1,Math.min(640,Math.ceil(box.width/2))), height=Math.max(1,Math.min(180,Math.ceil(box.height/2)));
     if(width===lastWidth&&height===lastHeight)return;
     lastWidth=canvas.width=width;lastHeight=canvas.height=height;
-    const context=canvas.getContext('2d'), image=context.createImageData(width,height);
-    const hex=getComputedStyle(canvas).getPropertyValue('--accent').trim().replace('#','');
-    const accent=/^[0-9a-f]{6}$/i.test(hex)?parseInt(hex,16):0xf9f594;
-    const channels=[accent>>16&255,accent>>8&255,accent&255];
-    for(let y=0;y<height;y++)for(let x=0;x<width;x++){
-      const level=shade(scene,x,y,width,height), offset=(y*width+x)*4;
-      for(let c=0;c<3;c++)image.data[offset+c]=Math.round((channels[c]*.55+255*.45)*level/7);
-      image.data[offset+3]=255;
+    const context=canvas.getContext('2d'), cacheKey=scene+':'+width+':'+height;
+    let image=ART_CACHE.get(cacheKey);
+    if(!image){
+      image=context.createImageData(width,height);
+      for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+        const level=['sky','stars','tiles'].includes(scene)?landscapeLevel(scene,x,y,width,height):shade(scene,x,y,width,height), offset=(y*width+x)*4;
+        const channels=WARM_PALETTE[level];
+        for(let c=0;c<3;c++)image.data[offset+c]=channels[c];
+        image.data[offset+3]=255;
+      }
+      if(ART_CACHE.size>=24)ART_CACHE.delete(ART_CACHE.keys().next().value);
+      ART_CACHE.set(cacheKey,image);
     }
     context.putImageData(image,0,0);
   };

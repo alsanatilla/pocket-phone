@@ -22,6 +22,18 @@ final class TodayTiles {
     static boolean known(String kind) { return Arrays.asList(CATALOG).contains(kind); }
     static boolean onPhone(String kind) { return known(kind) && !"zines".equals(kind); }
 
+    static String label(Context c, String kind) {
+        JSONArray saved = stored(c);
+        if (saved != null) for (int i = 0; i < saved.length(); i++) {
+            JSONObject item = saved.optJSONObject(i);
+            if (item != null && kind.equals(item.optString("kind"))) {
+                String label = item.optString("label").trim();
+                if (!label.isEmpty()) return label;
+            }
+        }
+        return "brief".equals(kind) ? "daily brief" : "agenda".equals(kind) ? "calendar" : kind;
+    }
+
     private static JSONArray stored(Context c) {
         Object value = WorkspaceExtras.preference(c, PREFERENCE);
         return value instanceof JSONArray ? (JSONArray) value : null;
@@ -95,9 +107,9 @@ final class TodayTiles {
                 int sessions = GymStore.sessionsSince(c, GymStore.weekStart(now));
                 return new String[]{sessions + "×", "this week"};
             }
-            case "pip": return new String[]{"ask", "think with context"};
+            case "pip": return new String[]{"ask", ""};
             case "activity": return new String[]{String.valueOf(ReceiptTape.lines(c, now).size()), "recorded today"};
-            case "focus": return new String[]{"start", "a focus session"};
+            case "focus": return new String[]{"start", ""};
             case "clock": return new String[]{"clock", "alarms · timers"};
             case "paper": {
                 int pages = JournalStore.visible(c).size();

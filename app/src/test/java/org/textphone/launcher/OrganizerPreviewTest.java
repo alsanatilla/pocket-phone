@@ -37,6 +37,7 @@ public class OrganizerPreviewTest {
             activity.findViewById(android.R.id.content).findViewWithTag("task_open_"+task).performClick();save(activity,"pocket-task-detail.png");
             activity.findViewById(android.R.id.content).findViewWithTag("task_edit").performClick();save(activity,"pocket-task-editor.png");
             activity.onBackPressed();activity.onBackPressed();
+            PocketAppsTest.find(activity.findViewById(android.R.id.content),"notes").performClick();
             PocketAppsTest.find(activity.findViewById(android.R.id.content),"+ note").performClick();
             save(activity,"pocket-notes-empty.png");
             ((EditText)activity.findViewById(android.R.id.content).findViewWithTag("capture_editor")).setText("# Weekend plan\n\n## Before leaving\n- [x] Book train\n- [ ] Charge camera\n- [ ] Pack light\n\n**Meet at 09:30**\n\n> Keep the afternoon free.");
@@ -56,7 +57,7 @@ public class OrganizerPreviewTest {
         ServiceController<PhoneNotifications> service=Robolectric.buildService(PhoneNotifications.class).create();
         ActivityController<MainActivity> controller=Robolectric.buildActivity(MainActivity.class).setup();
         try {MainActivity activity=controller.get();save(activity,"pocket-controls-home.png");View root=activity.findViewById(android.R.id.content);
-            for(String key:new String[]{"capture","today","pip","all"}){TextView target=root.findViewWithTag("home_"+key);assertTrue(key,target.getHeight()>=56&&target.getWidth()>=56);}
+            for(String key:new String[]{"workspace_today","today_search","workspace_capture","today_chat","workspace_apps"}){View target=root.findViewWithTag(key);assertNotNull(key,target);assertTrue(key,target.getHeight()>=56&&target.getWidth()>=56);}
             PendingIntent open=PendingIntent.getActivity(activity,19,new Intent(activity,MainActivity.class),PendingIntent.FLAG_IMMUTABLE);
             Notification notice=new Notification.Builder(activity).setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("Calendar").setContentText("Planning session · 10:30").setContentIntent(open).build();
             Shadows.shadowOf(service.get()).addActiveNotification("com.example.calendar",17,notice);service.get().onListenerConnected();

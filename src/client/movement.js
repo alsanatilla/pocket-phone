@@ -304,7 +304,11 @@ function bands(series) {
     })));
 }
 
-export function mount(body, { say = () => {} } = {}) {
+/** Set once COROS says the sign-in is gone, so saved readings are drawn without asking again until it is connected. */
+let expired = false;
+/** `refresh: false` redraws what is saved without asking COROS again, so an expired sign-in cannot remount itself forever. */
+export function mount(body, { say = () => {}, refresh = true } = {}) {
+  if (coros.connected()) expired = false;
   const live = coros.connected() || coros.savedData(), saved = live ? coros.cached() : null;
   let items = live ? saved?.list || [] : sample(), deck = live ? coros.cachedCockpit() || {} : sampleCockpit();
   let at = saved?.at || 0, loading = false, selected = items[0]?.id;
@@ -317,7 +321,7 @@ export function mount(body, { say = () => {} } = {}) {
     const [activities, cockpit] = await Promise.allSettled([coros.activities(90, event?.type === 'click'), coros.cockpit(DAYS)]);
     loading = false;
     const failed = [activities, cockpit].find(answer => answer.status === "rejected");
-    if (failed?.reason instanceof coros.Expired) { say(failed.reason.message); mount(body, { say }); return; }
+    if (failed?.reason instanceof coros.Expired) { expired = true; say(failed.reason.message); mount(body, { say, refresh: false }); return; }
     if (failed) say(failed.reason.message);
     if (activities.status === "fulfilled") { items = activities.value; at = coros.cached()?.at || 0; if (!items.some(item => item.id === selected)) selected = items[0]?.id; }
     if (cockpit.status === "fulfilled") deck = cockpit.value;
@@ -326,7 +330,7 @@ export function mount(body, { say = () => {} } = {}) {
   const fetchDetail = async item => {
     details[item.id] = "loading";
     try { details[item.id] = await coros.activity(item); }
-    catch (error) { details[item.id] = "error"; say(error.message); if (error instanceof coros.Expired) { mount(body, { say }); return; } }
+    catch (error) { details[item.id] = "error"; say(error.message); if (error instanceof coros.Expired) { expired = true; mount(body, { say, refresh: false }); return; } }
     if (body.isConnected && selected === item.id) drawDetail();
   };
 
@@ -354,8 +358,8 @@ export function mount(body, { say = () => {} } = {}) {
     detail.hidden = !item;
     if (!item) return;
     if (item.sample) details[item.id] ??= sampleActivity(item);
-    else if (!details[item.id]) fetchDetail(item);
-    const info = details[item.id], ready = info && typeof info === "object" ? info : null, ride = item.type === "RIDE";
+    else if (!details[item.id] && !expired) fetchDetail(item);
+    const info = details[item.id] || (expired && !item.sample ? "error" : undefined), ready = info && typeof info === "object" ? info : null, ride = item.type === "RIDE";
     let route;
     if (ready?.path) {
       route = svg("svg", { viewBox: "0 0 320 190", role: "img", "aria-label": `${live ? "Route of this" : "Sample"} ${item.type.toLowerCase()}` },
@@ -463,5 +467,5 @@ export function mount(body, { say = () => {} } = {}) {
   };
 
   draw();
-  if (live) load();
+  if (live && refresh && !expired) load();
 }

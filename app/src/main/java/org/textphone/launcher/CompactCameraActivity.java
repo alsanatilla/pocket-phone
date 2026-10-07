@@ -69,7 +69,7 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
         String last = preferences.getString("last_photo", null);
         if (last != null) lastPhoto = Uri.parse(last);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        getWindow().setNavigationBarColor(Color.BLACK);
+        getWindow().setNavigationBarColor(PocketDesign.INK);
         if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarContrastEnforced(false);
         buildScreen();
         engine = new CameraEngine(this, preview, this);
@@ -129,7 +129,7 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
     }
     private void buildScreen() {
         LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(Color.BLACK);
+        root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(PocketDesign.INK);
         root.setPadding(dp(PocketDesign.INSET), dp(4), dp(PocketDesign.INSET), dp(4));
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int left, top, right, bottom;
@@ -149,7 +149,7 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
         Button back = button("back", 14, this::finish); PocketDesign.quiet(back, SECONDARY);
         header.setTag("page_header");PocketDesign.headerControl(back,SECONDARY);header.addView(back, new LinearLayout.LayoutParams(dp(64), PocketDesign.headerHeight(this)));
         TextView title = text("camera", 24, PRIMARY);
-        title.setTypeface(PocketFonts.pixel(this));
+        PocketDesign.title(title);
         title.setGravity(Gravity.CENTER);
         header.addView(title, new LinearLayout.LayoutParams(0, PocketDesign.headerHeight(this), 1));
         switchButton = button("rear", 14, () -> {
@@ -164,7 +164,7 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
         quality = text("", 14, SECONDARY); quality.setTag("camera_output"); quality.setMinHeight(dp(48)); quality.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         cameraOptions.addView(quality);
 
-        FrameLayout finder = new FrameLayout(this); finder.setTag("camera_finder"); finder.setBackgroundColor(0xFF080808);
+        FrameLayout finder = new FrameLayout(this); finder.setTag("camera_finder"); finder.setBackgroundColor(PocketDesign.PLANE);
         preview = new CameraPreview(this); preview.setTag("camera_preview");
         preview.setContentDescription("Camera viewfinder. Tap to focus and meter exposure.");
         finder.addView(preview, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
@@ -218,9 +218,9 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
 
         LinearLayout metadata = new LinearLayout(this); metadata.setGravity(Gravity.CENTER_VERTICAL);
         iso = text("ISO —", 11, SECONDARY);
-        metadata.addView(iso, new LinearLayout.LayoutParams(dp(70), dp(28)));
+        metadata.addView(iso, new LinearLayout.LayoutParams(dp(70), dp(22)));
         status = text("", 12, SECONDARY); status.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        status.setMinHeight(dp(28)); status.setMaxLines(2);
+        status.setMinHeight(dp(22)); status.setMaxLines(2);
         status.setEllipsize(android.text.TextUtils.TruncateAt.END);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         metadata.addView(status, new LinearLayout.LayoutParams(0, -2, 1)); root.addView(metadata);
@@ -237,7 +237,7 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
 
         LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
         gallery = new ImageButton(this); gallery.setTag("camera_gallery");
-        gallery.setBackgroundColor(Color.BLACK); gallery.setScaleType(android.widget.ImageView.ScaleType.CENTER_INSIDE);
+        gallery.setBackgroundColor(PocketDesign.INK); gallery.setScaleType(android.widget.ImageView.ScaleType.CENTER_INSIDE);
         gallery.setImageResource(R.drawable.ic_camera_photo); gallery.setPadding(dp(10), dp(8), dp(10), dp(8));
         gallery.setContentDescription("Open last photo"); gallery.setOnClickListener(view -> openPhoto());
         actions.addView(gallery, new LinearLayout.LayoutParams(dp(64), dp(64)));

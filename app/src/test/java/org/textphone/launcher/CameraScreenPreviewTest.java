@@ -47,12 +47,12 @@ public class CameraScreenPreviewTest {
             root.measure(View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY));
             root.layout(0, 0, 360, 800);
-            org.junit.Assert.assertEquals(48,root.findViewWithTag("page_header").getHeight());
+            org.junit.Assert.assertEquals(PocketDesign.HEADER,root.findViewWithTag("page_header").getHeight());
             // 0.5.21: profile, size, aspect and quality are an on-screen menu; flash and exposure stay in Settings.
             for (String tag : new String[]{"camera_profile", "camera_size", "camera_aspect", "camera_quality"}) org.junit.Assert.assertNotNull(tag, root.findViewWithTag(tag));
             org.junit.Assert.assertNull(root.findViewWithTag("camera_flash"));
             View finder=(View)root.findViewWithTag("camera_preview").getParent();
-            assertTrue("Setup rows leave at least 600 dp for the finder",finder.getHeight()>=600);
+            assertTrue("Setup rows leave at least 600 dp for the finder, got "+finder.getHeight(),finder.getHeight()>=600);
             root.findViewWithTag("app_settings").performClick();
             android.app.AlertDialog settings=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
             org.junit.Assert.assertNotNull(settings.findViewById(android.R.id.content).findViewWithTag("camera_flash"));

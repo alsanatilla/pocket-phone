@@ -7,8 +7,13 @@ import android.content.Context;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Rect;
 import android.os.Looper;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.util.ArrayList;
@@ -86,6 +91,59 @@ public class PipPreviewTest {
         saveView(picker.getWindow().getDecorView(), "pocket-22-pip-chats.png");
         assertEquals(2, repository.chats().size());
     }
+    @Test public void keyboardComposerFitsThreeContextsWhileReplying() throws Exception {
+        repository.send("Review the attached context."); assertTrue(started.get(0).await(5, TimeUnit.SECONDS));
+        for (int i = 0; i < 3; i++) repository.attach(new ChatContext("note", i + 1,
+                "A long attached note title that needs more than one line " + i, "Preview-only context."));
+        listeners.get(0).status("reading a long source title while preparing the response");
+        open();
+        // Model the keyboard's remaining 450dp area directly; legacy Robolectric frames do not report a real IME.
+        ViewTreeObserver.OnGlobalLayoutListener legacy = ReflectionHelpers.getField(sidebar, "legacyKeyboard");
+        sidebar.getViewTreeObserver().removeOnGlobalLayoutListener(legacy);
+        ReflectionHelpers.setField(sidebar, "keyboardVisible", true);
+        ReflectionHelpers.callInstanceMethod(sidebar, "applyPanelPadding");
+        View root = saveView(controller.get().findViewById(android.R.id.content), "pocket-warm-pip-keyboard.png", 450);
+        View send = root.findViewWithTag("claude_chat_send"), composer = root.findViewWithTag("claude_chat_composer");
+        Rect bounds = new Rect(); send.getDrawingRect(bounds); ((ViewGroup) root).offsetDescendantRectToMyCoords(send, bounds);
+        assertTrue("Send stays inside the keyboard-visible area", bounds.bottom <= root.getHeight());
+        assertTrue("Composer remains readable", composer.getHeight() >= 48);
+        assertTrue("The thread can still scroll", root.findViewWithTag("claude_chat_scroll").getHeight() >= 80);
+        LinearLayout attachments = root.findViewWithTag("pip_context"); assertEquals(3, attachments.getChildCount());
+        assertTrue("Attachments scroll with the thread", attachments.getParent() != root.findViewWithTag("claude_sidebar"));
+        ((ViewGroup) attachments.getChildAt(0)).getChildAt(1).performClick(); assertEquals(2, repository.context().size());
+        assertEquals("stop", ((TextView) send).getText().toString());
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(400, TimeUnit.MILLISECONDS);
+        send.performClick(); assertFalse(repository.snapshot().running);
+    }
+    @Test public void executionAndSourcesExpandAcrossCompletion() throws Exception {
+        repository.send("Find the source."); assertTrue(started.get(0).await(5, TimeUnit.SECONDS));
+        ChatActivity trace = new ChatActivity(listeners.get(0)::activity);
+        trace.record("lookup", "search_web", new org.json.JSONObject().put("query", "test-only source query"), "running", null, null);
+        open(); View root = save(controller.get(), "pocket-warm-pip-execution-running.png");
+        String id = repository.snapshot().turns.get(1).id;
+        TextView toggle = root.findViewWithTag("pip_activity_" + id); assertTrue(toggle.getText().toString().contains("running"));
+        toggle.performClick();
+        LinearLayout turn = root.findViewWithTag("claude_turn_" + id); ViewGroup events = (ViewGroup) turn.getChildAt(2);
+        assertEquals(View.VISIBLE, events.getVisibility()); assertEquals(1, events.getChildCount());
+        org.json.JSONArray sources = new org.json.JSONArray().put(ChatActivity.source("https://example.com/source", "Preview source"));
+        trace.record("lookup", "search_web", null, "done", "1 result", sources);
+        listeners.get(0).text("A reply from the actual recorded event fixture.");
+        listeners.get(0).done(ClaudeChatRepository.MODEL, ClaudeChatClient.Usage.EMPTY);
+        sidebar.closeImmediately(); sidebar.open(); root = save(controller.get(), "pocket-warm-pip-execution-complete.png");
+        toggle = root.findViewWithTag("pip_activity_" + id); assertTrue(toggle.getText().toString().contains("1 web search"));
+        assertEquals(View.VISIBLE, events.getVisibility());
+        TextView sourceToggle = root.findViewWithTag("pip_sources_" + id); assertEquals(View.VISIBLE, sourceToggle.getVisibility());
+        sourceToggle.performClick(); assertTrue(sourceToggle.getText().toString().startsWith("1 source"));
+        events.getChildAt(0).performClick(); AlertDialog details = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+        assertNotNull(details); assertTrue(details.isShowing());
+        assertTrue("Execution preserves the actual query", containsText(details.getWindow().getDecorView(), "test-only source query"));
+    }
+    private boolean containsText(View view, String value) {
+        if (view instanceof TextView && ((TextView) view).getText().toString().contains(value)) return true;
+        if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++)
+            if (containsText(((ViewGroup) view).getChildAt(i), value)) return true;
+        return false;
+    }
     private void seed() throws Exception {
         repository.send("Help me plan a calmer morning."); assertTrue(started.get(0).await(5, TimeUnit.SECONDS));
         ClaudeChatClient.Listener listener = listeners.get(0);
@@ -99,12 +157,15 @@ public class PipPreviewTest {
     }
     private View save(Activity activity, String name) throws Exception { return saveView(activity.findViewById(android.R.id.content), name); }
     private View saveView(View root, String name) throws Exception {
+        return saveView(root, name, 800);
+    }
+    private View saveView(View root, String name, int height) throws Exception {
         Shadows.shadowOf(Looper.getMainLooper()).idle();
         for (int pass = 0; pass < 2; pass++) {
-            root.measure(View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY));
-            root.layout(0, 0, 360, 800); Shadows.shadowOf(Looper.getMainLooper()).idle();
+            root.measure(View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
+            root.layout(0, 0, 360, height); Shadows.shadowOf(Looper.getMainLooper()).idle();
         }
-        Bitmap bitmap = Bitmap.createBitmap(360, 800, Bitmap.Config.ARGB_8888); root.draw(new Canvas(bitmap));
+        Bitmap bitmap = Bitmap.createBitmap(360, height, Bitmap.Config.ARGB_8888); root.draw(new Canvas(bitmap));
         File target = new File("build/screenshots", name); assertTrue(target.getParentFile().isDirectory() || target.getParentFile().mkdirs());
         try (FileOutputStream stream = new FileOutputStream(target)) { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)); }
         bitmap.recycle(); return root;

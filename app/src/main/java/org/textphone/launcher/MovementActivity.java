@@ -94,7 +94,9 @@ public final class MovementActivity extends PocketActivity {
     private void score(LinearLayout row, int index, String title, String value, String meta) {
         LinearLayout item = new LinearLayout(this); item.setOrientation(LinearLayout.VERTICAL); item.setMinimumHeight(dp(96));
         item.setPadding(dp(2), dp(8), dp(2), dp(8)); item.setFocusable(true); item.setTag("movement_score_" + index);
-        TextView name = label(title, 11, GRAY), number = label(value, 30, WHITE), state = label(meta, 11, GRAY);
+        int color = index == 0 ? PocketDesign.MOVEMENT : index == 1 ? PocketDesign.YELLOW : PocketDesign.CALENDAR;
+        TextView name = label(title, PocketDesign.META, GRAY), number = label(value, 40, color), state = label(meta, PocketDesign.META, GRAY);
+        number.setTypeface(PocketFonts.pixel(this));
         for (TextView text : new TextView[]{name, number, state}) { text.setPadding(0, dp(2), 0, dp(2)); item.addView(text); text.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO); }
         item.setContentDescription(title + " " + value + ", " + meta + ". Show details.");
         item.setOnClickListener(v -> { selected = selected == index ? -1 : index; render(); });

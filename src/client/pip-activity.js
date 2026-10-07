@@ -14,7 +14,7 @@ export function activity(items = []) {
   let size = 0;
   return items.slice(0, 32).flatMap(item => {
     if (!item?.id || !["queued", "running", "done", "failed", "stopped"].includes(item.state)) return [];
-    const row = { id: clip(item.id, 200), kind: item.kind === "web" ? "web" : "tool", name: clip(item.name, 80),
+    const row = { id: clip(item.id, 200), kind: item.kind === "web" || ["search_web", "read_web_page"].includes(item.name) ? "web" : "tool", name: clip(item.name, 80),
       title: clip(item.title), input: clip(item.input, 1024), state: item.state, summary: clip(item.summary, 500),
       started: Number(item.started) || 0, ended: Number(item.ended) || 0,
       sources: (Array.isArray(item.sources) ? item.sources : []).slice(0, 8).map(source).filter(Boolean) };

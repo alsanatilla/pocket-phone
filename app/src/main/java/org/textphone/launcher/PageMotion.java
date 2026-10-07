@@ -37,7 +37,7 @@ final class PageMotion {
     private boolean dataReady;
 
     PageMotion(Activity activity) {
-        this.activity = activity; host = new FrameLayout(activity); host.setBackgroundColor(android.graphics.Color.BLACK);
+        this.activity = activity; host = new FrameLayout(activity); host.setBackgroundColor(PocketDesign.INK);
     }
     FrameLayout host() { return host; }
     static boolean enabled(Activity activity) {
