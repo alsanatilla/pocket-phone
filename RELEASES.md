@@ -2,6 +2,12 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.15.0 — Pip’s daily brief
+
+- A compact, source-linked brief appears on phone Home and Today and browser Today, using saved recovery, appointments, tasks, thoughts ready to revisit and gym history. It works offline without an AI key. Recovery shows its sample date or cache age and marks stale readings; it does not prescribe training. Calendar boundaries use the local civil day, including DST and overnight appointments.
+- **Think with Pip / ask Pip** creates a new unsent conversation with the brief’s facts. Previous drafts remain intact; only Send contacts the configured provider. Opening the brief shows all available facts and its enable/disable setting, which syncs between devices. An optional daily brief tile is available without replacing existing layouts.
+- Focused checks cover identical Java/browser results, offline edits and rollover, strict preference validation, two-way account sync, source navigation and a simulated browser Pip reply. Android and Astro production builds passed. The full test suite and lint remain skipped as requested; no physical handset was available. The APK is unsigned for the signing agent.
+
 ## 0.14.1 — Add tiles directly on Today
 
 - The phone's Today page now has a visible **+ add tile** action above the grid. Choosing a tile adds it immediately. Adding and saving returns to Today without reopening the management dialog.

@@ -1,6 +1,6 @@
 # Pocket Phone
 
-Pocket 0.14.1 is a native launcher and personal workspace for the Nothing Phone (3a), with an Astro browser app hosted on [Vercel](https://pocket-phone.vercel.app/). The workflow is **capture → decide → plan → act → review**. See [WORKFLOW.md](WORKFLOW.md) for each app’s purpose and connections.
+Pocket 0.15.0 is a native launcher and personal workspace for the Nothing Phone (3a), with an Astro browser app hosted on [Vercel](https://pocket-phone.vercel.app/). The workflow is **capture → decide → plan → act → review**. See [WORKFLOW.md](WORKFLOW.md) for each app’s purpose and connections.
 
 **Today, Thoughts, Tasks and Notes** share a workspace. Thoughts stay undecided until you choose an action. Notes hold context; Tasks hold chosen actions. On the phone a task can reserve time in Pocket Calendar, start Focus and record completion in Activity. Movement and Gym stay separate. Camera leads to Photos; Paper leads to source-linked Notes; selected messages can lead to Tasks.
 
@@ -11,6 +11,8 @@ Use **sign in** on another device; **create account** is a separate choice. Pass
 Pip uses matching Pocket visuals on phone and web, with an upper-corner pixel glow and a small console-inspired mascot. Actual tool/search activity has queries, status, results and citations. Read-only Pocket access and Anthropic search start off and can be enabled from the composer. Keeping a reply as a Note, Thought or Task remains an explicit action. See [PIP.md](PIP.md).
 
 Shared headers, typography, rows, controls and Back conventions connect the apps. See [DESIGN.md](DESIGN.md), [CAMERA.md](CAMERA.md), [APP-STATUS.md](APP-STATUS.md) and [release notes](RELEASES.md).
+
+**Pip’s daily brief** brings saved recovery, today’s appointments, chosen or due tasks, thoughts ready to revisit and gym sessions onto phone Home and Today, and browser Today. Tap a fact to open its source, or **think with Pip** to prepare a fresh unsent conversation. The brief works offline without an AI key; it labels stale recovery readings and updates from local edits, sync and day changes. Disable it from the brief screen; that preference syncs between devices. Existing Today layouts stay in place, with **daily brief** available as an extra tile.
 
 ## Web development and deployment
 

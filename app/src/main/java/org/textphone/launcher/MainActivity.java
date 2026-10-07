@@ -91,6 +91,16 @@ public class MainActivity extends Activity {
     private String[] shortcuts = SHORTCUTS;
     private boolean romProfile;
     private LinearLayout planHost,todayFilters,todayActions;private TextView todayDate;private String todayFocusTitle="",focusTitle="";private boolean homePlan;private int planRequest;
+    private LinearLayout briefHost, briefFacts;
+    private TextView briefAsk, briefTileValue, briefTileDetail;
+    private PixelLoadingView briefSprite;
+    private DailyBrief.Result briefCached;
+    private String briefCachedSignature = "", briefPendingSignature = "";
+    private String briefShownSignature = "";
+    private String briefFailedSignature = "";
+    private long briefRetryAfter;
+    private int briefRequest, briefPendingPage, briefShownPage;
+    private final java.util.concurrent.ExecutorService briefWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
     private PlannerStore planner;
     private EditText captureEditor;
     private EditText captureStepsEditor;
@@ -175,8 +185,9 @@ public class MainActivity extends Activity {
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             if (CloudSync.ACTION_SYNCED.equals(intent.getAction())) { if ("today".equals(screen) || "task_detail".equals(screen) || "thought_detail".equals(screen) || "search".equals(screen)) render(); else if ("home".equals(screen)) { homePlanRefresh = true; requestHomeRefresh(false); } return; }
-            if (CorosRepository.ACTION_UPDATED.equals(intent.getAction())) { if ("home".equals(screen)) { homeRebuild |= romProfile && (CorosRepository.get(MainActivity.this).connected() || CorosRepository.get(MainActivity.this).cached() != null) != (movementValues.size() == 3); requestHomeRefresh(false); } return; }
+            if (CorosRepository.ACTION_UPDATED.equals(intent.getAction())) { if ("home".equals(screen)) { homeRebuild |= romProfile && (CorosRepository.get(MainActivity.this).connected() || CorosRepository.get(MainActivity.this).cached() != null) != (movementValues.size() == 3); requestHomeRefresh(false); } else if ("today".equals(screen) && "today".equals(workspaceTab)) refreshDailyBrief(); return; }
             if ("home".equals(screen)) requestHomeRefresh(false);
+            else if ("today".equals(screen) && "today".equals(workspaceTab) && (Intent.ACTION_TIME_TICK.equals(intent.getAction()) || Intent.ACTION_TIME_CHANGED.equals(intent.getAction()) || Intent.ACTION_TIMEZONE_CHANGED.equals(intent.getAction()))) refreshDailyBrief();
             else if ("notifications".equals(screen)
                     && PhoneNotifications.ACTION_UPDATED.equals(intent.getAction())) render();
         }
@@ -266,6 +277,7 @@ public class MainActivity extends Activity {
         if (savedInstanceState == null) receiveSharedText(getIntent());
         boolean homeHandoff = !workspace() && "home".equals(screen) && homeGesture.accept(getIntent());
         if (savedInstanceState != null && !homeHandoff) claude.restore(savedInstanceState.getBundle("claude_sidebar"));
+        if (savedInstanceState == null) showBriefPip(getIntent());
     }
 
     // Before Android 13 the two-argument registration is the platform-compatible overload.
@@ -295,6 +307,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        briefFailedSignature = "";
         homeResumed = true;
         claude.resume();
         if (stoppedDraft != null && "capture".equals(screen) && captureEditor != null && captureId == stoppedDraftId
@@ -321,6 +334,7 @@ public class MainActivity extends Activity {
         else if ("settings".equals(screen)) updateHomeStatus();
         else if ("notifications".equals(screen)) render();
         else if ("apps".equals(screen) || "assign".equals(screen)) ensureAppIndex();
+        if ("today".equals(screen) && "today".equals(workspaceTab)) refreshDailyBrief();
     }
 
     @Override protected void onStop() {
@@ -341,6 +355,8 @@ public class MainActivity extends Activity {
     @Override protected void onPause() { homeResumed = false; homeGesture.cancel(); claude.pause(); dismissNoteWheel(); persistDraft(); motion.settle(); super.onPause(); }
 
     @Override protected void onDestroy() {
+        if (briefSprite != null) briefSprite.destroy();
+        briefWorker.shutdownNow();
         navigation.destroy();
         claude.destroy();
         homeGesture.destroy();
@@ -391,6 +407,7 @@ public class MainActivity extends Activity {
         }
         claude.close();
         setIntent(intent);
+        if (showBriefPip(intent)) return;
         if (intent.hasExtra("workspace_tab")) { selectWorkspace(intent.getStringExtra("workspace_tab")); return; }
         if(intent.getLongExtra("pocket_task",0)>0){captureKind="task";openTask(intent.getLongExtra("pocket_task",0));return;}
         if(intent.getLongExtra("pocket_note",0)>0){openNote(intent.getLongExtra("pocket_note",0));return;}
@@ -413,6 +430,18 @@ public class MainActivity extends Activity {
     }
     private void openChat() {
         persistDraft(); dismissNoteWheel(); motion.settle(); claude.open();
+    }
+    private boolean showBriefPip(Intent intent) {
+        String context = intent.getStringExtra("pocket_brief_context");
+        if (context == null) return false;
+        intent.removeExtra("pocket_brief_context");
+        if (context.trim().isEmpty()) return false;
+        persistDraft();
+        ClaudeChatRepository repository = ClaudeChatRepository.get(this);
+        repository.newChat();
+        repository.draft("Help me choose one thing for today. Use only the facts below; ask when context is missing. Do not change anything.\n\n" + context.substring(0, Math.min(context.length(), 6000)));
+        repository.rename(repository.currentId(), "Daily brief · " + PlannerDates.today());
+        openChat(); return true;
     }
     private String backDestination() {
         if (trail.peek()!=null) return trail.peek().page;
@@ -534,6 +563,8 @@ public class MainActivity extends Activity {
         noteText = null; homeNoteId = 0; movementValues.clear(); movementStates.clear(); homeSlotIndices.clear();
         captureEditor = null;
         captureStepsEditor = null;planHost=null;todayFilters=todayActions=null;todayDate=null;todayFocusTitle="";planRequest++;
+        briefRequest++; briefPendingSignature = briefShownSignature = briefFailedSignature = ""; briefHost = briefFacts = null; briefAsk = briefTileValue = briefTileDetail = null;
+        if (briefSprite != null) { briefSprite.destroy(); briefSprite = null; }
         homeTiles.clear();
         homeIcons.clear();
         homeLabels.clear();
@@ -600,7 +631,7 @@ public class MainActivity extends Activity {
             viewport.setPadding(0,0,0,0);viewport.setOnApplyWindowInsetsListener(null);viewport.setTag(todayPage?"today_scroll":taskEditor?"task_editor_scroll":screen+"_scroll");
             shell.addView(scrollHost,new LinearLayout.LayoutParams(-1,0,1));if(todayPage)shell.addView(todayActions,new LinearLayout.LayoutParams(-1,-2));page=shell;
         }
-        motion.show(page, pageKey(screen)); if (appRowsReady || !"apps".equals(screen) && !"assign".equals(screen)) motion.dataReady(); page.requestApplyInsets();if(planHost!=null)refreshDayPlan();
+        motion.show(page, pageKey(screen)); if (appRowsReady || !"apps".equals(screen) && !"assign".equals(screen)) motion.dataReady(); page.requestApplyInsets();if(planHost!=null)refreshDayPlan();refreshDailyBrief();
         renderedOrganizer = "today".equals(screen) || "task_detail".equals(screen) || "thought_detail".equals(screen) || "search".equals(screen) ? organizerState() : "";
     }
     /** Each area has its own header artwork, so a page is recognisable before it is read. */
@@ -615,7 +646,8 @@ public class MainActivity extends Activity {
     private String organizerState() {
         return screen + ":" + captureId + ":" + workspaceTab + ":" + planner.tasksRevision() + ":" + planner.notesRevision() + ":" + getSharedPreferences("pocket_parking",0).getString("items","[]").hashCode() + ":" + PlannerDates.today() + ":" + taskFilter + ":" + organizerQuery
                 + ":" + ClockStore.prefs(this).getString("entries", "").hashCode() + ":" + planner.preferences().getLong("next_task", 0)
-                + ":" + planner.hasDraft("task", captureId) + ":" + TodayTiles.kinds(this);
+                + ":" + planner.hasDraft("task", captureId) + ":" + TodayTiles.kinds(this)
+                + ("today".equals(screen) && "today".equals(workspaceTab) ? ":" + DailyBriefLocal.signature(this, System.currentTimeMillis()) : "");
     }
 
     private TextView text(String label, float sp, int color) {
@@ -802,6 +834,7 @@ public class MainActivity extends Activity {
         content.addView(homeDay);
         if(romProfile&&!HomeChoice.active(this))action("use Pocket as home",14,accent(),this::chooseHome).setTag("home_setup");
         gap(romProfile ? 12 : 16);
+        renderDailyBrief();
         if (romProfile) renderDashboardAgenda();
 
         LinearLayout grid = new LinearLayout(this);
@@ -1310,6 +1343,7 @@ public class MainActivity extends Activity {
 
     private void updateHome() {
         if (clock == null) return;
+        refreshDailyBrief();
         updateTileNames();
         Locale locale = Locale.getDefault();
         Date now = new Date();
@@ -1430,6 +1464,7 @@ public class MainActivity extends Activity {
         section(content, "plan & think", true);
         // Today always opens its own task, the same as its tile, so Back behaves the same from both.
         action("today", 18, PRIMARY, () -> openPocket(OrganizerActivity.class));
+        action("daily brief", 18, PRIMARY, () -> openPocket(DailyBriefActivity.class));
         action("thoughts", 18, PRIMARY, () -> selectWorkspace("thoughts"));
         action("tasks", 18, PRIMARY, () -> selectWorkspace("tasks"));
         action("notes", 18, PRIMARY, () -> selectWorkspace("notes"));
@@ -1514,7 +1549,7 @@ public class MainActivity extends Activity {
             int index=i;TextView row=actionInto(pocketAppResults,tiles.label(slot),18,PRIMARY,()->openShortcut(index));
             row.setTag("all_shortcut_"+slot);row.setOnLongClickListener(v->{editShortcut(slot);return true;});
         }
-        String[][] groups={{"communicate","phone","messages","contacts"},{"plan & think","today","thoughts","tasks","notes","calendar","clock","pip"},{"capture & keep","camera","photos","paper"},{"body","movement","gym"},{"extras","calculator","dice"}};
+        String[][] groups={{"communicate","phone","messages","contacts"},{"plan & think","today","brief","thoughts","tasks","notes","calendar","clock","pip"},{"capture & keep","camera","photos","paper"},{"body","movement","gym"},{"extras","calculator","dice"}};
         for(String[] group:groups){boolean heading=false;for(int i=1;i<group.length;i++){String name=group[i];if(!AppSearch.matches(name,appQuery))continue;
             if(!heading){section(pocketAppResults,group[0],pocketAppResults.getChildCount()==0);heading=true;}
             actionInto(pocketAppResults,name,18,PRIMARY,()->{
@@ -1656,7 +1691,7 @@ public class MainActivity extends Activity {
         }
         if(daily)commands(content,"today_commands",new String[]{"+ task","+ note","focus"},new String[]{"today_add_task","today_add_note","today_focus"},0,
                 ()->openCapture("task",0,""),()->openCapture("note",0,""),()->navigate("focus"));
-        if(daily)renderTodayTiles();
+        if(daily){renderDailyBrief();renderTodayTiles();}
         section(content,"tasks",false).setTag("today_tasks_heading");
         todayFilters=new LinearLayout(this);todayFilters.setTag("today_filters");
         for(String name:new String[]{"Open","Today","Later","Done"}){
@@ -1674,6 +1709,86 @@ public class MainActivity extends Activity {
             section(content,"review",false);action("done tasks",14,SECONDARY,()->{taskFilter="Done";selectWorkspace("tasks");});action("today's activity",14,SECONDARY,()->openPocket(ReceiptActivity.class));}
         workspaceBottom(daily ? "capture" : "+ task", daily ? this::captureMenu : () -> openCapture("task",0,""));
         addFeedback();
+    }
+    private void renderDailyBrief() {
+        briefHost = new LinearLayout(this); briefHost.setOrientation(LinearLayout.VERTICAL); briefHost.setTag("daily_brief");
+        LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
+        briefSprite = new PixelLoadingView(this); briefSprite.setMinimumWidth(0); briefSprite.setMinimumHeight(0); briefSprite.setTag("brief_pip");
+        header.addView(briefSprite, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        TextView title = text("pip’s daily brief", 14, accent()); title.setTypeface(pixelTypeface); title.setPadding(dp(8), 0, 0, 0);
+        header.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1)); title.setGravity(Gravity.CENTER_VERTICAL);
+        briefHost.addView(header);
+        briefFacts = new LinearLayout(this); briefFacts.setOrientation(LinearLayout.VERTICAL); briefFacts.setTag("brief_compact_facts");
+        briefHost.addView(briefFacts, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout keys = commands(briefHost, "brief_commands", new String[]{"open brief", "ask pip"}, new String[]{"brief_open", "brief_ask_pip"}, -1,
+                () -> openPocket(DailyBriefActivity.class), () -> {
+                    if (briefCached != null && briefCachedSignature.equals(DailyBriefLocal.signature(this, System.currentTimeMillis()))) DailyBriefActivity.askPip(this, briefCached);
+                    else { refreshDailyBrief(); showFeedback("The brief is refreshing."); }
+                });
+        briefAsk = (TextView) keys.getChildAt(1); briefAsk.setEnabled(false);
+        briefHost.setVisibility(DailyBriefLocal.enabled(this) ? View.VISIBLE : View.GONE);
+        LinearLayout.LayoutParams card = new LinearLayout.LayoutParams(-1, -2); card.bottomMargin = dp(12); content.addView(briefHost, card);
+    }
+    /** One read per source revision/minute; background work cannot replace an editor or a newer page. */
+    private void refreshDailyBrief() {
+        if (destroyed || !appVisible || briefHost == null && briefTileValue == null) return;
+        if ("home".equals(screen) && homeGesture.pending()) return;
+        boolean enabled = DailyBriefLocal.enabled(this);
+        if (briefHost != null) briefHost.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        if (!enabled) {
+            briefRequest++; briefPendingSignature = "";
+            briefShownSignature = "";
+            if (briefTileValue != null) { briefTileValue.setText("off"); briefTileDetail.setText(""); }
+            if (briefAsk != null) briefAsk.setEnabled(false);
+            return;
+        }
+        String signature = DailyBriefLocal.signature(this, System.currentTimeMillis());
+        if (signature.equals(briefCachedSignature) && briefCached != null) { showDailyBrief(briefCached); return; }
+        if (signature.equals(briefFailedSignature) && android.os.SystemClock.uptimeMillis() < briefRetryAfter) return;
+        if (signature.equals(briefPendingSignature) && briefPendingPage == pageGeneration) return;
+        briefPendingSignature = signature; briefPendingPage = pageGeneration;
+        final int request = ++briefRequest, page = pageGeneration;
+        if (briefAsk != null) briefAsk.setEnabled(false);
+        Context app = getApplicationContext();
+        briefWorker.submit(() -> {
+            DailyBrief.Result result;
+            try { result = DailyBriefLocal.read(app, System.currentTimeMillis()); }
+            catch (RuntimeException error) {
+                appUi.post(() -> { if (!destroyed && appVisible && request == briefRequest && page == pageGeneration) {
+                    briefPendingSignature = ""; briefFailedSignature = signature; briefRetryAfter = android.os.SystemClock.uptimeMillis() + 5000;
+                    if (briefFacts != null) { briefFacts.removeAllViews(); briefFacts.addView(text("Brief unavailable", 14, SECONDARY)); }
+                } }); return;
+            }
+            appUi.post(() -> {
+                if (destroyed || request != briefRequest || page != pageGeneration) return;
+                briefPendingSignature = "";
+                briefFailedSignature = "";
+                if (!signature.equals(DailyBriefLocal.signature(app, System.currentTimeMillis()))) { if (appVisible) refreshDailyBrief(); return; }
+                briefCached = result; briefCachedSignature = signature;
+                if (!appVisible) return;
+                if ("home".equals(screen) && homeGesture.pending()) { requestHomeRefresh(false); return; }
+                showDailyBrief(result);
+            });
+        });
+    }
+    private void showDailyBrief(DailyBrief.Result brief) {
+        if (briefShownPage == pageGeneration && briefShownSignature.equals(briefCachedSignature)) return;
+        briefShownPage = pageGeneration; briefShownSignature = briefCachedSignature;
+        if (briefFacts != null) {
+            briefFacts.removeAllViews();
+            if (brief.facts.isEmpty()) briefFacts.addView(text(brief.text, 14, SECONDARY));
+            for (int i = 0; i < Math.min(3, brief.facts.size()); i++) {
+                DailyBrief.Fact fact = brief.facts.get(i);
+                TextView row = actionInto(briefFacts, fact.text, 14, PRIMARY, () -> {
+                    String error = DailyBriefActivity.openSource(this, fact); if (error != null) { showFeedback(error); refreshDailyBrief(); }
+                });
+                row.setTag("brief_fact_" + fact.id); row.setMaxLines(2); row.setEllipsize(TextUtils.TruncateAt.END);
+                row.setContentDescription(fact.text + ". Open " + DailyBriefActivity.source(fact.kind) + ".");
+            }
+            if (!brief.unavailable.isEmpty()) briefFacts.addView(text("Unavailable: " + String.join(", ", brief.unavailable), 12, SECONDARY));
+        }
+        if (briefTileValue != null) { briefTileValue.setText(brief.facts.size() + " facts"); briefTileDetail.setText(brief.day); }
+        if (briefAsk != null) briefAsk.setEnabled(true);
     }
     // ── Today tiles: a synced, editable set of live readings. Tapping one opens its app. ──
     private void renderTodayTiles() {
@@ -1700,6 +1815,7 @@ public class MainActivity extends Activity {
         TextView name = text(kind, 12, SECONDARY); name.setAllCaps(true); name.setLetterSpacing(.08f); name.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         TextView value = text(reading[0], 28, PRIMARY); value.setTypeface(PocketFonts.pixel(this)); value.setSingleLine(true); value.setEllipsize(TextUtils.TruncateAt.END);
         TextView detail = text(reading[1], 12, SECONDARY); detail.setMaxLines(2); detail.setEllipsize(TextUtils.TruncateAt.END);
+        if ("brief".equals(kind)) { briefTileValue = value; briefTileDetail = detail; }
         for (TextView part : new TextView[]{name, value, detail}) { part.setPadding(0, dp(2), 0, dp(2)); part.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO); tile.addView(part); }
         tile.setContentDescription(kind + ", " + reading[0] + ", " + reading[1] + ". Open. Hold to edit tile.");
         tile.setOnClickListener(v -> openTodayTile(kind));
@@ -1708,6 +1824,7 @@ public class MainActivity extends Activity {
     }
     private void openTodayTile(String kind) {
         switch (kind) {
+            case "brief": openPocket(DailyBriefActivity.class); break;
             case "tasks": case "thoughts": case "notes": selectWorkspace(kind); break;
             case "agenda": openPocket(AgendaActivity.class); break;
             case "movement": openPocket(MovementActivity.class); break;

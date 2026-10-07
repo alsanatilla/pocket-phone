@@ -19,12 +19,13 @@ import { gym, weekStart } from "./store.js";
 import { installRefresh } from "./retro-loading.js";
 import { initExtras, todayTiles, TODAY_CATALOG } from "./extras.js";
 import { agenda, clock as clockStore, mountAgenda, mountClock, startClockRuntime } from "./planner.js";
+import { mountBrief, readBrief, briefEnabled } from './daily-brief.js';
 import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const TOOLS = ["today", "thoughts", "tasks", "notes", "movement", "gym", "apps"];
-let content = null, notice = null, parkingDraft = "";
+let content = null, notice = null, parkingDraft = "", briefView = null;
 
 // ── DOM helpers ──
 function h(tag, props = {}, ...children) {
@@ -60,10 +61,11 @@ function shell() {
 }
 /** Clears the work area for one tool; toolbar actions sit at its top right. */
 function view(tool, actions = []) {
+  briefView?.(); briefView = null;
   zines.leave(); pip.leave(); shell(); closeDialog(); say("");
   content.querySelectorAll('.pixel-backdrop').forEach(canvas=>canvas.dispose?.());
   const pipEntry = document.getElementById("pip-entry"); pipEntry.classList.toggle("selected", tool === "pip"); pipEntry.setAttribute("aria-current", tool === "pip" ? "page" : "false");
-  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync", "calendar", "clock", "account"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
+  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync", "calendar", "clock", "account", "brief"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
   const activeTab = document.querySelector(".tab.active"), tabs = activeTab?.parentElement;
   if (tabs) tabs.scrollLeft = activeTab.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - activeTab.clientWidth) / 2;
   document.title = "pocket · " + (tool === "sync" ? "account" : tool);
@@ -100,6 +102,7 @@ const confirmBox = (title, ok) => dialog(title, null, [["cancel", false], [ok, t
 const plannerApi = { get h() { return h; }, add, rowButton, section, keys, split, say, go, confirm: confirmBox, title: (...args) => workspaceTitle(...args) };
 const pipHelpers = { h, go, say, ask, choose, dialog, closeDialog, confirm: confirmBox, markdown };
 function thinkWithPip(kind, uid, title, text, href) { guard(() => go("/pip/" + pip.withContext({ kind, uid: String(uid), title, text, href })))(); }
+const briefApi = { h, add, go, say, askPip: brief => guard(() => go('/pip/' + pip.withBrief(brief)))() };
 
 // The workspace follows the same decisions as the phone: capture, choose an action, do it, review.
 const source = item => item.note ? notes.get(item.note) : null;
@@ -121,6 +124,7 @@ const MINUTE = 60000;
 function tileReading(kind) {
   const now = Date.now();
   switch (kind) {
+    case "brief": return ["daily brief", briefEnabled() ? readBrief().summary : "disabled", "/brief"];
     case "tasks": { const open = tasks.list().filter(t => !t.done); return [open.length ? open.length + " open" : "clear", open[0]?.text || "nothing waiting", "/tasks"]; }
     case "agenda": {
       const next = agenda.all().find(event => event.when + event.minutes * MINUTE >= now);
@@ -172,6 +176,8 @@ async function editTiles() {
 function todayView() {
   const body = view("today", [["+ capture", capture], ["tiles", editTiles], ["search", () => go("/search")], ["pip", () => go("/pip")]]);
   workspaceTitle(body, "today", new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }));
+  const briefHost = h('div', { class: 'today-brief-host' }); add(body, briefHost);
+  briefView = mountBrief(briefHost, briefApi, { compact: true });
   add(body, tileGrid());
   const chosen = load("tasks.json").next?.uid, all = tasks.list(), due = all.filter(t => !t.done && (t.uid === chosen || t.due && t.due <= taskDay()));
   due.sort((a,b) => Number(b.uid === chosen) - Number(a.uid === chosen));
@@ -298,7 +304,7 @@ function searchView() {
 }
 function appsView() {
   const body=view("apps");workspaceTitle(body,"apps");
-  split(body,[section("THINK"),rowButton("pip","",()=>go("/pip")),section("PLAN"),rowButton("Calendar","",()=>go("/calendar")),rowButton("Clock","",()=>go("/clock")),section("REVIEW"),rowButton("Activity","",()=>go("/receipt")),section("CREATE & KEEP"),rowButton("Zines","",()=>go("/zines"))],
+  split(body,[section("THINK"),rowButton("pip","",()=>go("/pip")),rowButton("daily brief","",()=>go("/brief")),section("PLAN"),rowButton("Calendar","",()=>go("/calendar")),rowButton("Clock","",()=>go("/clock")),section("REVIEW"),rowButton("Activity","",()=>go("/receipt")),section("CREATE & KEEP"),rowButton("Zines","",()=>go("/zines"))],
     [section("BODY"),rowButton("Movement","",()=>go("/movement")),rowButton("Gym","",()=>go("/gym")),section("EXTRAS"),rowButton("Dice","",()=>go("/dice")),section("SETTINGS"),rowButton("Account & devices","",()=>go("/sync"))]);
 }
 
@@ -825,6 +831,7 @@ function route() {
   else if (name === "movement") movement.mount(view("movement"), { say });
   else if (name === "calendar") mountAgenda(view("calendar"), plannerApi);
   else if (name === "clock") mountClock(view("clock"), plannerApi);
+  else if (name === "brief") { const body=view('brief'); workspaceTitle(body,'daily brief'); briefView=mountBrief(body,briefApi); }
   else if (name === "gym") gymView.mount(view("gym"), arg, { h, add, say, section, rowButton, keys, split, go, ask, choose, confirm: confirmBox, title: workspaceTitle });
   else if (name === "thoughts" || name === "parking") parkingView(arg); else if (name === "tasks") tasksView(arg); else if (name === "apps") appsView(); else if (name === "search") searchView(); else if (name === "today") todayView(); else { history.replaceState(null, "", "#/today"); todayView(); }
 }
@@ -834,7 +841,10 @@ onStatus(() => {
   const state = document.getElementById("sync-status"); if (state) state.textContent = describe();
   const finished = lastState === "syncing" && status.state === "idle"; lastState = status.state;
   // Merged edits from the phone appear without a reload, unless the user is typing or a dialog is open.
-  if (finished && status.changed && !searchOpening && !["#/zines", "#/movement", "#/pip"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea")) { const text = notice?.textContent; route(); say(text); }
+  if (finished && status.changed && !searchOpening && !["#/zines", "#/movement", "#/pip"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea, select")) {
+    if (location.hash === '#/brief') { briefView?.refresh(); return; }
+    const text = notice?.textContent; route(); say(text);
+  }
 });
 addEventListener("keydown", event => {
   if (!dialogHost.hidden) { if (event.key === "Escape") closeDialog(); return; }
@@ -848,10 +858,10 @@ addEventListener("keydown", event => {
 // A COROS sign-in comes back to this page with ?code=…; finish it before drawing the Movement tab.
 if (coros.returning()) coros.finish().then(() => { route(); say("COROS connected."); }, error => { route(); say(error.message); });
 else route();
-cloud.init().then(() => { if (!document.activeElement?.matches('input, textarea')) route(); return syncNow(); }).catch(error => say(error.message));
+cloud.init().then(() => { if (!document.activeElement?.matches('input, textarea, select')) { if (location.hash === '#/brief') briefView?.refresh(); else route(); } return syncNow(); }).catch(error => say(error.message));
 initExtras();
 startClockRuntime();
 const refresh = installRefresh({ sync: syncNow, status, onStatus, describe, say });
 if ('serviceWorker' in navigator && !import.meta.env.DEV) navigator.serviceWorker.register('/sw.js').catch(() => {});
-addEventListener("pagehide", () => zines.leave());
+addEventListener("pagehide", () => { zines.leave(); briefView?.(); briefView=null; });
 addEventListener("pageshow", event => { if (event.persisted) route(); });

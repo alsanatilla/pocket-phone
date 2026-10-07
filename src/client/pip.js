@@ -37,6 +37,17 @@ export function withContext(source) {
   }).uid;
 }
 
+/** An explicit brief action starts an unsent draft; it never replaces another conversation. */
+export function withBrief(brief) {
+  const text = String(brief?.context || '').slice(0,6000);
+  if(!text.trim())throw new Error('The brief is unavailable.');
+  const chat = store.create();
+  return store.update(chat.uid, value => {
+    value.title = ('Daily brief · ' + String(brief.day || '')).slice(0,100);
+    value.draft = 'Help me choose one thing for today. Use only the facts below; ask when context is missing. Do not change anything.\n\n' + text;
+  }).uid;
+}
+
 export function mount(root, uid, helpers) {
   leave(); ui = helpers;
   try {

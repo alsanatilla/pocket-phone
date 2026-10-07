@@ -1,7 +1,7 @@
 import { storage } from './workspace-storage.js';
 import { importDocument } from './store.js';
 
-const PREFS = new Set(['appearance', 'dice', 'pip-defaults', 'today-tiles', 'camera', 'calculator', 'home-tiles']);
+const PREFS = new Set(['appearance', 'dice', 'pip-defaults', 'today-tiles', 'camera', 'calculator', 'home-tiles', 'daily-brief']);
 const KINDS = new Set(['note', 'task', 'thought', 'capture', 'appointment']);
 const SECRET = /^(?:key|api[_-]?key|key_value|key_endpoint|key_last4|password|credential|token|access[_-]?token|refresh[_-]?token|authorization|permission|permissions|alarm|boot)$/i;
 const clone = value => value === undefined ? null : JSON.parse(JSON.stringify(value));
@@ -33,12 +33,12 @@ export const drafts = {
 };
 export const preferences = {
   get: uid => clone(document('preferences.json').items.find(item => item.uid === uid && !item.deleted)?.value),
-  set(uid, value) { if (!PREFS.has(uid)) throw new Error('Unknown preference.'); return put('preferences.json', uid, value); },
+  set(uid, value) { if (!PREFS.has(uid)) throw new Error('Unknown preference.'); if(uid==='daily-brief'&&(!value||typeof value!=='object'||Array.isArray(value)||typeof value.enabled!=='boolean'||Object.keys(value).some(key=>key!=='enabled')))throw new Error('Check the brief setting.'); return put('preferences.json', uid, value); },
   clear(uid) { if (!PREFS.has(uid)) throw new Error('Unknown preference.'); return put('preferences.json', uid, null, {}, true); },
 };
-export const TODAY_CATALOG = Object.freeze(['tasks', 'agenda', 'thoughts', 'notes', 'movement', 'gym', 'pip', 'activity', 'focus', 'clock', 'paper', 'zines', 'dice']);
+export const TODAY_CATALOG = Object.freeze(['brief', 'tasks', 'agenda', 'thoughts', 'notes', 'movement', 'gym', 'pip', 'activity', 'focus', 'clock', 'paper', 'zines', 'dice']);
 export const TODAY_DEFAULTS = Object.freeze(['agenda', 'thoughts', 'tasks', 'activity'].map(kind => Object.freeze({ uid: kind, kind })));
-function tiles(value) { const seen = new Set(); return (Array.isArray(value) ? value : TODAY_DEFAULTS).filter(tile => tile && TODAY_CATALOG.includes(tile.kind) && !seen.has(tile.kind) && seen.add(tile.kind)).slice(0, 13).map(tile => ({ uid: String(tile.uid || tile.kind).slice(0, 100), kind: tile.kind, ...(typeof tile.label === 'string' && tile.label.trim() ? { label: tile.label.trim().slice(0, 40) } : {}) })); }
+function tiles(value) { const seen = new Set(); return (Array.isArray(value) ? value : TODAY_DEFAULTS).filter(tile => tile && TODAY_CATALOG.includes(tile.kind) && !seen.has(tile.kind) && seen.add(tile.kind)).slice(0, TODAY_CATALOG.length).map(tile => ({ uid: String(tile.uid || tile.kind).slice(0, 100), kind: tile.kind, ...(typeof tile.label === 'string' && tile.label.trim() ? { label: tile.label.trim().slice(0, 40) } : {}) })); }
 export const todayTiles = { catalog: TODAY_CATALOG, list: () => tiles(preferences.get('today-tiles')), save: value => preferences.set('today-tiles', tiles(value)) };
 
 function draftKey(key) {

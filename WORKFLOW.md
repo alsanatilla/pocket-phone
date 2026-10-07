@@ -36,6 +36,7 @@ flowchart LR
 | --- | --- | --- |
 | Home | What matters now, communication and quick access | Shows appointments, next action, latest note and Movement readings. Capture, Today, pip and Apps remain reachable. |
 | Today | A view of your day | Current/next appointment, overdue and due-today tasks, explicitly chosen next task, ready thoughts and review links. It does not own a second task list. |
+| Daily brief | Pip brings the day together | Saved recovery, calendar, chosen or due actions, ready thoughts and gym history on Home/Today. Tap a fact to open it, or ask Pip to prepare a fresh unsent conversation. Works offline; the hide setting syncs. |
 | Thoughts | Ideas you have not committed to | Keep, edit, optionally revisit, let go, or explicitly make a task. The task retains the thought and its source note. A revisit time does not create a task or give it a deadline. |
 | Tasks | Actions you have chosen | Dates, importance, steps, chosen next action, local reminders, planned time and Focus. Completion appears in Activity. |
 | Notes | Context you want to keep | Markdown, pins, drafts, source material and paper transcripts. `>>` captures a thought; “Task” lets you choose an action while keeping the source. Signed-in history and recently deleted recover earlier text. |

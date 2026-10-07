@@ -2,6 +2,12 @@
 
 Pip uses the API provider and model selected in settings. It has its own name across providers. Provider names remain visible in API and data-access settings so the destination of a request is clear.
 
+## Daily brief
+
+Home and Today show Pip’s brief of saved Pocket facts. The brief is generated locally, with matching Java/browser rules, and reads no provider or network service. Recovery uses actual saved sample dates; calendar uses local day boundaries; task priority respects your chosen next action. Only thoughts with an explicit revisit time appear as ready. Gym distinguishes finished sessions from a workout in progress.
+
+Each fact opens its source. **Think with Pip / ask Pip** starts a fresh unsent draft containing at most 6,000 characters of brief context, preserving other drafts. Send uses that chat’s configured provider and existing tool permissions. Reading the brief needs no key; disabling it is a synced account preference. Existing source records remain the authority, so no generated brief is uploaded or treated as a new task.
+
 ## Repetition and caching
 
 The concrete repetition bug was conversation history: Pocket joined a model's remarks before a lookup to its final answer and replayed that combined text on subsequent messages. Failed or stopped partial replies could also be replayed as ordinary answers.

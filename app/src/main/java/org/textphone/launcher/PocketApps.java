@@ -8,10 +8,10 @@ import android.app.Activity;
  */
 final class PocketApps {
     static final String[] IDS = {"phone", "messages", "contacts", "clock", "camera", "calculator",
-            "files", "today", "settings", "dice", "parking", "receipt", "journal", "movement", "gym"};
+            "files", "today", "brief", "settings", "dice", "parking", "receipt", "journal", "movement", "gym"};
     /** What a tile or group can be set to. */
     static final String[] CHOICES = {"phone", "messages", "contacts", "clock", "camera", "calculator",
-            "files", "today", "settings", "dice", "parking", "receipt", "journal", "movement", "gym"};
+            "files", "today", "brief", "settings", "dice", "parking", "receipt", "journal", "movement", "gym"};
     /** Pocket apps listed in Tools after the everyday ones. */
     static final String[] TOOLS = {"contacts", "files", "dice", "receipt", "journal", "movement", "gym"};
     static final int GROUP_ICON = 14, APP_ICON = 18;
@@ -28,6 +28,7 @@ final class PocketApps {
             case "calculator": return 11;
             case "files": return 12;
             case "today": return 13;
+            case "brief": return 13;
             case "settings": return 5;
             case "dice": return 15;
             case "parking": return 13;
@@ -49,6 +50,7 @@ final class PocketApps {
             case "calculator": return CalculatorActivity.class;
             case "files": return FilesActivity.class;
             case "today": return OrganizerActivity.class;
+            case "brief": return DailyBriefActivity.class;
             case "dice": return DiceActivity.class;
             case "parking": return ParkingActivity.class;
             case "receipt": return ReceiptActivity.class;

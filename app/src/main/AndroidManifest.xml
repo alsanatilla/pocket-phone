@@ -120,6 +120,7 @@
         <activity android:name=".ClockActivity" android:label="Pocket Clock" android:taskAffinity="org.textphone.launcher.clock" android:exported="false" />
         <activity android:name=".CalculatorActivity" android:label="Pocket Calculator" android:taskAffinity="org.textphone.launcher.calculator" android:exported="false" />
         <activity android:name=".OrganizerActivity" android:label="Pocket Today" android:taskAffinity="org.textphone.launcher.today" android:exported="false" android:launchMode="singleTop" />
+        <activity android:name=".DailyBriefActivity" android:label="Pocket Daily Brief" android:taskAffinity="org.textphone.launcher.brief" android:exported="false" />
         <activity android:name=".TaskCaptureActivity" android:label="Pocket Task" android:exported="false" />
         <activity android:name=".TaskReminderActivity" android:label="Pocket Reminder" android:exported="false" />
         <activity android:name=".TaskShareActivity" android:label="Pocket Task" android:exported="true" android:taskAffinity="org.textphone.launcher.capture">

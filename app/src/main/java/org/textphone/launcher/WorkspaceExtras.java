@@ -19,7 +19,7 @@ import java.util.Set;
 final class WorkspaceExtras {
     private static final Object LOCK = new Object();
     private static final String DRAFTS="drafts.json", PREFS="preferences.json";
-    private static final String[] PREFERENCE_IDS={"appearance","dice","pip-defaults","today-tiles","camera","calculator","home-tiles"};
+    private static final String[] PREFERENCE_IDS={"appearance","dice","pip-defaults","today-tiles","camera","calculator","home-tiles","daily-brief"};
     private static final List<SharedPreferences> WATCHED = new ArrayList<>();
     private static Context app;
     private static int applying;
@@ -51,7 +51,8 @@ final class WorkspaceExtras {
         return merged;
     }}
     static Object preference(Context c,String uid){synchronized(LOCK){JSONObject item=index(read(c,PREFS).optJSONArray("items")).get(uid);return item==null||item.optBoolean("deleted")?null:item.opt("value");}}
-    static void preference(Context c,String uid,Object value){start(c);synchronized(LOCK){if(!knownPreference(uid))throw new IllegalArgumentException("Unknown preference.");put(c,PREFS,uid,"","",value,false);}}
+    static void preference(Context c,String uid,Object value){start(c);synchronized(LOCK){if(!knownPreference(uid))throw new IllegalArgumentException("Unknown preference.");if(uid.equals("daily-brief")&&!validBrief(value))throw new IllegalArgumentException("Check the brief setting.");put(c,PREFS,uid,"","",value,false);}}
+    private static boolean validBrief(Object value){return value instanceof JSONObject&&((JSONObject)value).length()==1&&((JSONObject)value).opt("enabled") instanceof Boolean;}
     static void draft(Context c,String kind,String target,Object value){start(c);synchronized(LOCK){put(c,DRAFTS,kind+":"+(target.isEmpty()?"new":target),kind,target,value,false);}}
     private static void checkName(String name){if(!DRAFTS.equals(name)&&!PREFS.equals(name))throw new IllegalArgumentException("Unknown workspace collection.");}
     private static boolean knownPreference(String id){for(String known:PREFERENCE_IDS)if(known.equals(id))return true;return false;}
@@ -70,6 +71,8 @@ final class WorkspaceExtras {
     private static JSONObject valid(String name,JSONObject source)throws JSONException {if(source==null)return null;String uid=source.optString("uid");long updated=source.optLong("updated");
         if(!uid.matches("[A-Za-z0-9_:.-]{1,200}")||updated<0||updated>System.currentTimeMillis()+600000)return null;
         if(PREFS.equals(name)&&!knownPreference(uid))return null;
+        if(PREFS.equals(name)&&uid.equals("daily-brief")&&source.has("deleted")&&!(source.opt("deleted") instanceof Boolean))return null;
+        if(PREFS.equals(name)&&uid.equals("daily-brief")&&!source.optBoolean("deleted")&&!validBrief(source.opt("value")))return null;
         String kind=source.optString("kind");if(DRAFTS.equals(name)&&!kind.matches("note|task|thought|capture|appointment"))return null;
         JSONObject item=new JSONObject().put("uid",uid).put("updated",updated).put("deleted",source.optBoolean("deleted")).put("value",source.optBoolean("deleted")?JSONObject.NULL:safe(source.opt("value"),0));
         if(DRAFTS.equals(name))item.put("kind",kind).put("target_uid",clip(source.optString("target_uid"),100));return item;

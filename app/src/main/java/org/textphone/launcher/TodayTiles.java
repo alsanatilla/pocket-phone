@@ -15,7 +15,7 @@ import org.json.JSONObject;
  * ([{uid, kind, label?}]); the browser reads the same list. Zines only exist in the browser, so the phone keeps them but does not draw them.
  */
 final class TodayTiles {
-    static final String[] CATALOG = {"tasks", "agenda", "thoughts", "notes", "movement", "gym", "pip", "activity", "focus", "clock", "paper", "zines", "dice"};
+    static final String[] CATALOG = {"brief", "tasks", "agenda", "thoughts", "notes", "movement", "gym", "pip", "activity", "focus", "clock", "paper", "zines", "dice"};
     static final String[] DEFAULTS = {"agenda", "thoughts", "tasks", "activity"};
     private static final String PREFERENCE = "today-tiles";
 
@@ -60,6 +60,7 @@ final class TodayTiles {
     static String[] reading(Context c, PlannerStore planner, String kind) {
         long now = System.currentTimeMillis();
         switch (kind) {
+            case "brief": return new String[]{DailyBriefLocal.enabled(c) ? "today" : "off", ""};
             case "tasks": {
                 int open = 0; String next = "";
                 for (PlannerStore.Entry e : planner.entries()) if ("task".equals(e.kind) && !e.done) { open++; if (next.isEmpty()) next = ReadableRows.excerpt(e.text)[0]; }
