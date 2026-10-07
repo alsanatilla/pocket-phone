@@ -176,6 +176,14 @@ input[type=checkbox] { accent-color: var(--accent); }
 .pip-composer-actions > button:first-child { padding-left: 0; }
 .pip-model { max-width: 50%; font-size: 13px !important; }
 .pip-context-item { color: var(--thought); }
+.pip-plan { margin: 12px 0; }
+.pip-plan:empty, .pip-proposals:empty { display: none; }
+.pip-plan-step { display: flex; gap: 12px; padding: 5px 0; font-size: 13px; color: var(--muted); }
+.pip-plan-step.in_progress { color: var(--accent); }
+.pip-plan-step.done { color: var(--movement); }
+.pip-proposal { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.pip-proposal p { margin: 0; }
+.pip-proposal button { min-height: 48px; color: var(--accent); padding-left: 0; }
 .pip-loading { min-height: 48px; }
 .pip-loading .pip-mascot { height: 48px; width: 48px; }
 .pip-empty { min-height: 100px; padding: 16px 0; }

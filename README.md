@@ -1,6 +1,6 @@
 # Pocket Phone
 
-Pocket 0.17.0 is a native launcher and personal workspace for the Nothing Phone (3a), with an Astro browser app hosted on [Vercel](https://pocket-phone.vercel.app/). Warm Console connects both with cream monospace text, quiet color, pixel artwork and Pip's console sprite. The workflow is **capture → decide → plan → act → review**. See [WORKFLOW.md](WORKFLOW.md) for each app’s purpose and connections.
+Pocket 0.18.0 is a native launcher and personal workspace for the Nothing Phone (3a), with an Astro browser app hosted on [Vercel](https://pocket-phone.vercel.app/). Warm Console connects both with cream monospace text, quiet color, pixel artwork and Pip's console sprite. Pip can research across permitted Pocket content and the web, show a plan, and prepare editable proposals for your approval. The workflow is **capture → decide → plan → act → review**. See [WORKFLOW.md](WORKFLOW.md) for each app’s purpose and connections.
 
 **Today, Thoughts, Tasks and Notes** share a workspace. Thoughts stay undecided until you choose an action. Notes hold context; Tasks hold chosen actions. On the phone a task can reserve time in Pocket Calendar, start Focus and record completion in Activity. Movement and Gym stay separate. Camera leads to Photos; Paper leads to source-linked Notes; selected messages can lead to Tasks.
 
@@ -43,8 +43,8 @@ Use JDK 17 and Android SDK 35. Set the SDK path in an untracked local.properties
 
 The normal output is app/build/outputs/apk/rom/app-rom-unsigned.apk. This is a launcher/app build, not a full ROM image; Android owns Recents and system Home gestures.
 
-[GitHub Releases](https://github.com/alsanatilla/pocket-phone/releases) includes the unsigned APK, web source, complete source, checksums and build status. Another release agent handles signing. The existing certificate is needed to update an installed Pocket app while retaining its local data. See [USE-POCKET-0.11.0.md](USE-POCKET-0.11.0.md).
+[GitHub Releases](https://github.com/alsanatilla/pocket-phone/releases) includes the unsigned APK, web source, complete source, checksums and build status. Another release agent handles signing. The existing certificate is needed to update an installed Pocket app while retaining its local data. See [USE-POCKET-0.18.0.md](USE-POCKET-0.18.0.md).
 
-The Astro production build and Android APK build passed. Focused checks cover native workspace layouts and Pip with the keyboard open, plus browser tile persistence, note editing, task steps, explicit thought conversion and simulated tool/search activity. Responsive checks cover 320–1280 px; a readability audit found no undersized content, low-contrast text or excessive line lengths on its 40 seeded page views. The full suite is not a release gate; existing failures and the actual checks are recorded in [BUILD-STATUS.json](BUILD-STATUS.json). Physical passkey prompts and handset behavior remain unverified.
+The Astro production build and Android APK build passed. Focused checks cover agent budgets, parallel reads, permission-aware resume, proposal approval and persistence, native chat UI and phone/browser codecs. Browser flows exercise streamed research, editable proposals, Continue/Restart and two-way account sync on a throwaway local database, with layouts at 320–1280 px. Model/search traffic was simulated. The full suite and lint were skipped as requested; actual checks and limits are recorded in [BUILD-STATUS.json](BUILD-STATUS.json). Handset behavior remains unverified.
 
 Original code is MIT licensed. Dependency notices are in [THIRD_PARTY.md](THIRD_PARTY.md), third_party and the native Settings license screen. The visual starting point was Dumb.co’s public phone screen; its software and services are not included.

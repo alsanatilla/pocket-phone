@@ -1,16 +1,16 @@
 {
   "component": "Pocket Android launcher/apps and Astro browser workspace",
-  "version_name": "0.17.0",
-  "version_code": 44,
+  "version_name": "0.18.0",
+  "version_code": 45,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-07T16:31:28Z",
-  "build": "Android assembleRom and Astro production build passed. Focused browser and native checks passed. Lint and final full-suite rerun skipped.",
+  "checked_at_utc": "2026-10-07T17:10:35Z",
+  "build": "Android assembleRom and Astro production build passed. Focused agent checks passed. Full suite and lint skipped.",
   "commands": [
     "npm run build",
-    "./gradlew.bat :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain",
-    "./gradlew.bat -I tools/render-layouts.gradle :app:renderRomLayouts -PrenderCase=org.textphone.launcher.PipPreviewTest --console=plain"
+    "./gradlew.bat :app:testDebugUnitTest --tests org.textphone.launcher.PipPreviewTest --tests org.textphone.launcher.PipActionsTest --tests org.textphone.launcher.PocketChatToolsTest --tests org.textphone.launcher.ClaudeAgentTransportTest --console=plain",
+    "./gradlew.bat :app:testDebugUnitTest --tests org.textphone.launcher.ChatCloudCodecTest :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
   ],
   "build_environment": {
     "java": "17.0.20.1+1",
@@ -18,9 +18,9 @@
   },
   "apk": {
     "file": "app/build/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.17.0-unsigned.apk",
-    "bytes": 11133521,
-    "sha256": "2f446a6c983ba385d11d294955578183bae687e975763d6faaba570efbdfe22c",
+    "release_asset": "pocket-phone-0.18.0-unsigned.apk",
+    "bytes": 11155245,
+    "sha256": "8614da480e3d3096a0a1f9c80aabaaca2e5dfc1c162a11156547affcba286667",
     "signed": false,
     "installable_update": false,
     "signing": "Another release agent handles signing"
@@ -29,43 +29,40 @@
     "framework": "Astro server output",
     "hosting": "Vercel",
     "url": "https://pocket-phone.vercel.app/",
-    "release_asset": "pocket-web-0.17.0-source.zip",
-    "offline_worker": "pocket-astro-0170-warm",
+    "release_asset": "pocket-web-0.18.0-source.zip",
+    "offline_worker": "pocket-astro-0180-agent",
     "changed": true
   },
   "focused_verification": {
-    "browser": "Eight functional flows: missing and real cached COROS readings, Today order and add-tile persistence, task groups/steps/completion, explicit thought conversion, note autosave/navigation, Apps search/launch, and simulated OpenRouter/Firecrawl streaming with real Pocket note reads and cancellation. 65 layout checks over 13 routes at 320/360/390/768/1280 px: no horizontal overflow or browser page errors. Two independent browsers and a fictional account on a throwaway local database verified Notes/Tasks/Thoughts/Today preferences/Pip stored turns and drafts in both directions and their rendered UIs. No production data or paid requests.",
-    "native": "WarmConsolePreviewTest: 3 passed; PipPreviewTest: 6 passed. Covers COROS bars, unique chosen task, explicit thought promotion, task steps/completion, tiles and app tabs, large font at 320 dp, keyboard-constrained chat, inspectable execution and sources. Native screenshots inspected.",
-    "existing_failures": "Earlier broad debug run: 513 cases, 12 failures corresponding to seven cases also failing on committed 0.16.0; 2 obsolete Today layout cases skipped in favor of WarmConsolePreviewTest. This is not a passing suite.",
-    "handset": "No device attached to adb; physical handset behavior remains unverified.",
-    "readability": "40 seeded desktop/phone page views, 1191 text runs: minimum measured content size 13 px, minimum computed contrast 4.7:1, no findings under the audit rules. This covers rendered text, not every possible content/state or graphical contrast."
+    "browser_flows": "Real browser UI and executor completed five-round fictional research with plan and Note/Task/Appointment proposals. No writes before Save; Cancel wrote nothing; edited proposals saved real records. Fictional account and throwaway local libSQL database synced observations, proposals, applied markers and saved records A to B; duplicate approval reused one task, its edit synced B to A. Stop retained completed research; Continue reused the turn/cache; Restart sent a fresh request. Layouts at 320/360/390/1280 px had no horizontal overflow or page errors.",
+    "handset": "No physical Android device attached; handset and actual virtual-keyboard interaction remain unverified.",
+    "provider": "Model and Firecrawl traffic simulated. Local sync exercised its real API on an isolated database. No paid requests.",
+    "browser_engine": "20 fake-SSE/in-memory scenarios passed: multi-round research, concurrency/order, canonical cache, unknown tools, nine rounds without usage under the default token budget, call/data/web limits, cancellation/idle deadline, corrupt checkpoint retention, signed/server continuation, schemas, Firecrawl recency/domain filters, paged web cache, portable resume and grant revocation. No external requests.",
+    "native": "39 passed in two focused runs: ClaudeAgentTransportTest 12, PocketChatToolsTest 9, PipActionsTest 9, PipPreviewTest 7, ChatCloudCodecTest 2 (API 24 and 35). Covers nine-round synthesis, summed token caps without usage, ordered parallel reads, protocol IDs/encrypted continuation, 20-call/8-web/48k-data budgets, live permissions/cache/resume, atomic checkpoints, paging/query/schema validation, portable proposal IDs, idempotency/tombstones, actual cancel/edit/save/open UI and portable codec metadata. Native screenshots inspected."
   },
   "full_test_suite": {
-    "status": "Not rerun for final release",
-    "reason": "User requested skipping the suite; earlier agent run results retained honestly",
-    "earlier_cases": 513,
-    "earlier_failures": 12,
-    "pre_existing_failing_cases": 7,
-    "obsolete_layout_skips": 2
+    "status": "Skipped",
+    "prior_release_record": "v0.17.0 retained an earlier broad run with 513 cases, 12 failures corresponding to seven pre-existing failing cases, and two obsolete layout skips. No passing full suite is claimed.",
+    "reason": "User requested skipping the suite; only focused checks for changed agent behavior were run"
   },
   "changes": [
-    "Warm Console design shared across native and web screens",
-    "COROS bars lead Home and Today; chosen/due actions appear once; direct customizable tiles",
-    "Clear task groups with expandable steps; explicit thought conversion; note autosave and draft preservation",
-    "Oversized animated Pip navigation and inspectable tool/search activity with keyboard-aware composer",
-    "Pocket tool groups and Android Installed tab with scoped search",
-    "Plex Mono fonts bundled with license notices; header-only cached dithered artwork",
-    "Settings, setup and secondary screens inherit shared typography, colors and controls"
+    "Bounded multi-step research with three parallel independent reads and final synthesis",
+    "Paged Notes/web reads, task details, Calendar and combined permitted Pocket search",
+    "Domain and recency web filters, query-focused passages and visible cached results",
+    "Persisted plans and observations with permission/provider-aware Continue and fresh Restart",
+    "Editable Note/Task/Appointment proposals requiring explicit Save",
+    "Portable proposal IDs, duplicate prevention and deletion tombstones",
+    "Account sync of checkpoints, proposals, approval markers and saved content"
   ],
   "known_limits": [
     "APK requires signing before installation.",
-    "No physical handset or real virtual-keyboard interaction was available.",
-    "Provider responses were simulated for this pass; live paid-provider behavior was not checked.",
-    "Earlier broad test run has pre-existing failures; see focused_verification.existing_failures.",
-    "Browser Pip keys remain per tab by design.",
+    "No physical handset; external model/search traffic simulated.",
+    "Providers/endpoints must support streaming tool calls; free-provider availability is external to Pocket.",
+    "Agent runs are foreground requests; interrupted work resumes only through the user Continue action.",
+    "Provider keys stay on each device; browser keys remain per tab.",
     "Cloud storage has not gained end-to-end encryption."
   ],
   "physical_handset_checked": false,
   "full_custom_rom_compiled": false,
-  "previous_release": "v0.16.0"
+  "previous_release": "v0.17.0"
 }

@@ -32,6 +32,10 @@ final class ClaudeChatRepository {
     interface RequestFactory {
         ClaudeChatClient.Request create(Context context, ChatProvider.Config config, String chatId,
                 List<ClaudeChatClient.Message> history, int limit, ClaudeChatClient.Listener listener);
+        default ClaudeChatClient.Request resume(Context context, ChatProvider.Config config, String chatId,
+                List<ClaudeChatClient.Message> history, int limit, ClaudeChatClient.Listener listener, String activity, String partial) {
+            return new ClaudeChatClient.Call(context, config, chatId, history, limit, listener, activity, partial);
+        }
     }
 
     static final class Turn {
@@ -288,6 +292,33 @@ final class ClaudeChatRepository {
     }
 
     synchronized void stop() { if (busy == chat) stopRunning(); }
+    synchronized void continueReply() {
+        if (busy != null || chat.turns.size() < 2) return;
+        Turn reply = chat.turns.get(chat.turns.size() - 1), user = chat.turns.get(chat.turns.size() - 2);
+        if (!("failed".equals(reply.state) || "stopped".equals(reply.state))) return;
+        ChatProvider.Config selected = ChatProvider.get(context);
+        if (!validProvider(selected, "") || !matchesProvider(selected, "")) return;
+        chat.turns.set(chat.turns.size() - 1, new Turn(reply.id, "assistant", reply.text, "pending", reply.reasoning, reply.created, reply.context, reply.activity));
+        start(user.text, true, selected, reply.activity, reply.text);
+    }
+
+    synchronized String proposalUserId(String replyId) {
+        for (int i = 1; i < chat.turns.size(); i++) if (chat.turns.get(i).id.equals(replyId)) return chat.turns.get(i - 1).id;
+        throw new IllegalArgumentException("This reply is no longer available.");
+    }
+
+    synchronized void applied(String replyId, String eventId, String href) {
+        if (busy == chat) throw new IllegalStateException("Let Pip finish first.");
+        for (int i = 0; i < chat.turns.size(); i++) {
+            Turn turn = chat.turns.get(i); if (!turn.id.equals(replyId)) continue;
+            org.json.JSONArray events = ChatActivity.read(turn.activity);
+            try { for (int n = 0; n < events.length(); n++) { org.json.JSONObject row = events.getJSONObject(n);
+                if (eventId.equals(row.optString("id"))) row.put("applied_href", href).put("applied", System.currentTimeMillis());
+            } } catch (org.json.JSONException invalid) { throw new IllegalStateException("Could not save the proposal state.", invalid); }
+            chat.turns.set(i, turn.activity(events.toString())); persist(chat); changed(); return;
+        }
+        throw new IllegalArgumentException("This reply is no longer available.");
+    }
     synchronized void stopAll() { stopRunning(); }
 
     private void stopRunning() {
@@ -308,6 +339,10 @@ final class ClaudeChatRepository {
     synchronized void clear() { newChat(); }
 
     private void start(String original, boolean replacing, ChatProvider.Config selected) {
+        start(original, replacing, selected, "[]", "");
+    }
+
+    private void start(String original, boolean replacing, ChatProvider.Config selected, String previousActivity, String previousPartial) {
         final Chat target = chat;
         final long request = ++generation;
         final String replyId = target.turns.get(target.turns.size() - 1).id;
@@ -346,7 +381,9 @@ final class ClaudeChatRepository {
             }
             public void failed(String reason) { finish(request, replyId, original, composerRevision, "", reason, null); }
         };
-        ClaudeChatClient.Request call = requests.create(context, selected, target.id, messages, replyLimit, listener);
+        ClaudeChatClient.Request call = "[]".equals(previousActivity) && previousPartial.isEmpty()
+                ? requests.create(context, selected, target.id, messages, replyLimit, listener)
+                : requests.resume(context, selected, target.id, messages, replyLimit, listener, previousActivity, previousPartial);
         active = call;
         long revision = persist(target);
         lastStreamSave = SystemClock.elapsedRealtime();

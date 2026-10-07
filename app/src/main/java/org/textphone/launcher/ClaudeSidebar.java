@@ -69,7 +69,7 @@ final class ClaudeSidebar extends FrameLayout {
     private final LinearLayout panel, log, errorRow, loadingRow, empty, contextRow;
     private final ScrollView scroll;
     private final EditText composer;
-    private final Button back, settings, setup, send, retry, chats, newChat, openReply, modelPicker, toolsPicker, webPicker;
+    private final Button back, settings, setup, send, retry, continueRun, chats, newChat, openReply, modelPicker, toolsPicker, webPicker;
     private String shownContext="";
     private final TextView error, cacheStatus, loadingLabel, accessStatus, emptyText, conversationTitle;
     private final PixelLoadingView loading, emptyAvatar;
@@ -207,7 +207,10 @@ final class ClaudeSidebar extends FrameLayout {
                 .setMessage(error.getText()).setPositiveButton("close", null).create()));
         error.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         errorRow.addView(error, new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
-        retry = control("retry", this::retry);
+        continueRun = control("continue", () -> { if (!destroyed) { repository.continueReply(); render(); } });
+        PocketDesign.command(continueRun, true);
+        errorRow.addView(continueRun, new LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
+        retry = control("restart", this::retry);
         PocketDesign.command(retry, true);
         errorRow.addView(retry, new LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
         errorRow.setVisibility(View.GONE);
@@ -580,6 +583,7 @@ final class ClaudeSidebar extends FrameLayout {
         boolean retryAvailable = canRetry(snapshot);
         errorRow.setVisibility(failure.isEmpty() && !retryAvailable ? View.GONE : View.VISIBLE);
         retry.setVisibility(retryAvailable ? View.VISIBLE : View.GONE);
+        continueRun.setVisibility(retryAvailable ? View.VISIBLE : View.GONE);
         boolean hit = !snapshot.running && snapshot.cacheReadTokens > 0;
         cacheStatus.setText(hit ? "input reused" : "");
         cacheStatus.setContentDescription(hit ? NumberFormat.getIntegerInstance().format(snapshot.cacheReadTokens) + " input tokens read from the prompt cache" : null);
@@ -722,7 +726,7 @@ final class ClaudeSidebar extends FrameLayout {
         TextView description = label(recipient, 14, PocketDesign.MUTED);
         description.setPadding(0, 0, 0, dp(8));
         fields.addView(description, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-        String[] categories = {"notes", "thoughts", "tasks", "gym", "coros"}, names = {"Notes", "Thoughts", "Tasks", "Gym", "Movement · COROS cache"};
+        String[] categories = {"notes", "thoughts", "tasks", "calendar", "gym", "coros"}, names = {"Notes", "Thoughts", "Tasks", "Calendar", "Gym", "Movement · COROS cache"};
         CheckBox[] choices = new CheckBox[categories.length];
         for (int index = 0; index < categories.length; index++) {
             CheckBox choice = new CheckBox(activity);
@@ -1038,6 +1042,8 @@ final class ClaudeSidebar extends FrameLayout {
         final LinearLayout speaker = horizontal();
         final PixelLoadingView avatar = new PixelLoadingView(activity);
         final LinearLayout toolRows = new LinearLayout(activity);
+        final LinearLayout planRows = new LinearLayout(activity), proposalRows = new LinearLayout(activity);
+        String lastAgent;
         final Button activityToggle = control("activity", this::toggleActivity);
         final Button reasoningToggle = control("reasoning", this::toggleReasoning);
         final TextView reasoning = label("", 14, PocketDesign.MUTED);
@@ -1082,6 +1088,8 @@ final class ClaudeSidebar extends FrameLayout {
             }
             actions.addView(replyActions);
             root.addView(speaker, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+            planRows.setOrientation(LinearLayout.VERTICAL); proposalRows.setOrientation(LinearLayout.VERTICAL);
+            root.addView(planRows, new LinearLayout.LayoutParams(-1, -2));
             toolRows.setOrientation(LinearLayout.VERTICAL);
             PocketDesign.command(activityToggle, false); activityToggle.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META)); activityToggle.setMinHeight(dp(48)); activityToggle.setMaxLines(3);
             root.addView(activityToggle, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
@@ -1089,6 +1097,7 @@ final class ClaudeSidebar extends FrameLayout {
             root.addView(reasoningToggle, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(reasoning, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(body, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+            root.addView(proposalRows, new LinearLayout.LayoutParams(-1, -2));
             root.addView(sourcesToggle, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(sources, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
             root.addView(state, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
@@ -1106,6 +1115,7 @@ final class ClaudeSidebar extends FrameLayout {
             name.setTextColor(assistant ? PocketDesign.CREAM : PocketDesign.MUTED);
             if (!chosen) expanded = false;
             root.setTag("claude_turn_" + turn.id);
+            toolRows.setTag("pip_tool_rows_" + turn.id);
             root.setPadding(0, dp(24), 0, dp(16));
             if (!turn.text.equals(lastText) || !turn.state.equals(lastState) || assistant != lastAssistant) {
                 long now = SystemClock.elapsedRealtime();
@@ -1123,6 +1133,7 @@ final class ClaudeSidebar extends FrameLayout {
             body.setVisibility(body.length() == 0 ? View.GONE : View.VISIBLE);
             updateSources();
             updateActivity();
+            updateAgent();
             updateReasoning();
             String status = "stopped".equals(turn.state) ? "stopped" : "failed".equals(turn.state) && !turn.text.isEmpty() ? "incomplete" : "";
             state.setText(status);
@@ -1134,6 +1145,37 @@ final class ClaudeSidebar extends FrameLayout {
             actions.setVisibility(assistant && !turn.text.isEmpty() && !"pending".equals(turn.state) ? View.VISIBLE : View.GONE);
         }
         void toggleActivity() { activityChosen = true; activityExpanded = !activityExpanded; updateActivity(); }
+        void updateAgent() {
+            String signature = turn.activity + turn.state;
+            if (signature.equals(lastAgent)) return;
+            lastAgent = signature; planRows.removeAllViews(); proposalRows.removeAllViews();
+            org.json.JSONArray events = ChatActivity.read(turn.activity), plan = null;
+            for (int i = 0; i < events.length(); i++) {
+                org.json.JSONObject event = events.optJSONObject(i); if (event == null || !"done".equals(event.optString("state"))) continue;
+                try {
+                    org.json.JSONObject result = new org.json.JSONObject(event.optString("result", "{}"));
+                    if (result.optJSONArray("plan") != null) plan = result.getJSONArray("plan");
+                    org.json.JSONObject proposal = result.optJSONObject("proposal"); if (proposal == null || !java.util.Arrays.asList("note", "task", "appointment").contains(proposal.optString("kind")) || !(proposal.opt("title") instanceof String)) continue;
+                    TextView kind = label(proposal.optString("kind"), PocketDesign.META, PocketDesign.MUTED);
+                    TextView title = label(proposal.optString("title"), PocketDesign.BODY, PocketDesign.CREAM);
+                    proposalRows.addView(kind); proposalRows.addView(title);
+                    String href = event.optString("applied_href");
+                    Button review = control(href.isEmpty() ? "review " + proposal.optString("kind") : "open saved " + proposal.optString("kind"),
+                            () -> { if (href.isEmpty()) showProposal(turn.id, event, proposal); else openToolSource(href); });
+                    review.setEnabled(!"pending".equals(turn.state)); review.setTag("pip_proposal_" + event.optString("id"));
+                    PocketDesign.command(review, true); proposalRows.addView(review);
+                } catch (org.json.JSONException invalid) { }
+            }
+            if (plan != null) for (int i = 0; i < Math.min(8, plan.length()); i++) {
+                org.json.JSONObject step = plan.optJSONObject(i); if (step == null) continue;
+                if (!(step.opt("text") instanceof String) || !java.util.Arrays.asList("pending", "in_progress", "done").contains(step.optString("status"))) continue;
+                String status = step.optString("status"), mark = "done".equals(status) ? "□" : "in_progress".equals(status) ? "◌" : "◇";
+                TextView line = label(mark + "  " + step.optString("text"), PocketDesign.META, "in_progress".equals(status) ? PocketDesign.accent(activity) : "done".equals(status) ? PocketDesign.MOVEMENT : PocketDesign.MUTED);
+                line.setPadding(0, dp(4), 0, dp(4)); planRows.addView(line);
+            }
+            planRows.setVisibility(planRows.getChildCount() == 0 ? View.GONE : View.VISIBLE);
+            proposalRows.setVisibility(proposalRows.getChildCount() == 0 ? View.GONE : View.VISIBLE);
+        }
         void updateActivity() {
             org.json.JSONArray events = ChatActivity.read(turn.activity);
             boolean visible = "assistant".equals(turn.role) && events.length() > 0;
@@ -1235,13 +1277,15 @@ final class ClaudeSidebar extends FrameLayout {
     }
 
     private String activitySummary(org.json.JSONArray events) {
-        int reads = 0, searches = 0, pages = 0; boolean failed = false, stopped = false;
+        int reads = 0, searches = 0, pages = 0, plans = 0, proposals = 0; boolean failed = false, stopped = false;
         for (int i = 0; i < events.length(); i++) {
             org.json.JSONObject event = events.optJSONObject(i); if (event == null) continue;
             String state = event.optString("state"), name = event.optString("name");
             if ("running".equals(state) || "queued".equals(state)) return event.optString("title") + " · " + state;
             if ("web_search".equals(name) || "search_web".equals(name)) searches++;
             else if ("read_web_page".equals(name)) pages++;
+            else if ("update_plan".equals(name)) plans++;
+            else if ("propose_action".equals(name)) proposals++;
             else reads++;
             failed |= "failed".equals(state); stopped |= "stopped".equals(state);
         }
@@ -1249,6 +1293,8 @@ final class ClaudeSidebar extends FrameLayout {
         if (reads > 0) labels.add(reads + (reads == 1 ? " Pocket read" : " Pocket reads"));
         if (searches > 0) labels.add(searches + (searches == 1 ? " web search" : " web searches"));
         if (pages > 0) labels.add(pages + (pages == 1 ? " page read" : " page reads"));
+        if (plans > 0) labels.add(plans + (plans == 1 ? " plan" : " plans"));
+        if (proposals > 0) labels.add(proposals + (proposals == 1 ? " proposal" : " proposals"));
         return String.join(" · ", labels) + (failed ? " · failed" : stopped ? " · stopped" : "");
     }
     private String durationLabel(long elapsed) {
@@ -1300,10 +1346,22 @@ final class ClaudeSidebar extends FrameLayout {
             Intent intent;
             if (href.startsWith("/movement")) intent = new Intent(activity, MovementActivity.class);
             else if (href.startsWith("/gym/")) intent = new Intent(activity, GymActivity.class).putExtra("pocket_workout", href.substring(5));
+            else if (href.startsWith("/calendar/")) {
+                String uid = href.substring(10); AgendaStore.Event found = null;
+                for (AgendaStore.Event event : AgendaStore.list(activity)) if (uid.equals(event.uid) || uid.equals(String.valueOf(event.id))) { found = event; break; }
+                if (found == null) throw new IllegalArgumentException("Appointment unavailable");
+                intent = new Intent(activity, AgendaActivity.class).putExtra("appointment_id", found.id);
+            }
             else if (href.startsWith("/notes/") || href.startsWith("/tasks/") || href.startsWith("/thoughts/")) {
                 String[] parts = href.split("/"); if (parts.length != 3) return;
                 String kind = "notes".equals(parts[1]) ? "note" : "tasks".equals(parts[1]) ? "task" : "thought";
-                intent = new Intent(activity, OrganizerActivity.class).putExtra("pocket_" + kind, Long.parseLong(parts[2]));
+                long id = 0;
+                if ("thought".equals(kind)) id = Long.parseLong(parts[2]);
+                else { PlannerStore planner = new PlannerStore(activity.getSharedPreferences("pocket_planner", 0));
+                    for (PlannerStore.Entry entry : planner.entries()) if (kind.equals(entry.kind) && (parts[2].equals(String.valueOf(entry.id)) || parts[2].equals(planner.preferences().getString(kind + "_uid_" + entry.id, "")))) { id = entry.id; break; }
+                }
+                if (id == 0) throw new IllegalArgumentException("Source unavailable");
+                intent = new Intent(activity, OrganizerActivity.class).putExtra("pocket_" + kind, id);
             } else intent = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(href));
             activity.startActivity(intent);
         } catch (android.content.ActivityNotFoundException | IllegalArgumentException unavailable) { keepFailure("This source could not be opened."); }
@@ -1311,6 +1369,44 @@ final class ClaudeSidebar extends FrameLayout {
 
     private void keepFailure(String text) {
         showDialog(new AlertDialog.Builder(activity).setTitle(text).setPositiveButton("close", null).create());
+    }
+
+    private void showProposal(String replyId, org.json.JSONObject event, org.json.JSONObject proposal) {
+        String chatId = repository.snapshot().chatId;
+        LinearLayout fields = new LinearLayout(activity); fields.setOrientation(LinearLayout.VERTICAL); fields.setPadding(dp(20), dp(8), dp(20), dp(8));
+        EditText title = settingsField(fields, "title", proposal.optString("title"), "", false);
+        title.setFilters(new InputFilter[]{new InputFilter.LengthFilter(200)}); title.setTag("pip_proposal_title");
+        EditText text = settingsField(fields, "text", proposal.optString("text"), "", false); text.setSingleLine(false); text.setMinLines(3); text.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE); text.setFilters(new InputFilter[]{new InputFilter.LengthFilter(6000)}); text.setTag("pip_proposal_text");
+        String kind = proposal.optString("kind");
+        if ("appointment".equals(kind)) { text.setVisibility(GONE); fields.getChildAt(fields.indexOfChild(text) - 1).setVisibility(GONE); }
+        EditText due = null, steps = null, when = null, minutes = null;
+        if ("task".equals(kind)) {
+            due = settingsField(fields, "due", proposal.optString("due"), "YYYY-MM-DD", false); due.setTag("pip_proposal_due");
+            org.json.JSONArray supplied = proposal.optJSONArray("steps"); StringBuilder lines = new StringBuilder();
+            if (supplied != null) for (int i = 0; i < supplied.length(); i++) { if (i > 0) lines.append('\n'); lines.append(supplied.optString(i)); }
+            steps = settingsField(fields, "steps", lines.toString(), "", false); steps.setSingleLine(false); steps.setMinLines(3); steps.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE); steps.setFilters(new InputFilter[]{new InputFilter.LengthFilter(2500)}); steps.setTag("pip_proposal_steps");
+        } else if ("appointment".equals(kind)) {
+            long instant = System.currentTimeMillis() + 3600000;
+            try { instant = java.time.OffsetDateTime.parse(proposal.optString("when")).toInstant().toEpochMilli(); } catch (RuntimeException invalid) { }
+            when = settingsField(fields, "when", new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.ROOT).format(new java.util.Date(instant)), "YYYY-MM-DD HH:mm", false); when.setTag("pip_proposal_when");
+            minutes = settingsField(fields, "minutes", String.valueOf(proposal.optInt("minutes", 60)), "", false); minutes.setInputType(InputType.TYPE_CLASS_NUMBER); minutes.setTag("pip_proposal_minutes");
+        }
+        TextView failure = label("", PocketDesign.META, PocketDesign.WARNING); fields.addView(failure);
+        ScrollView scroll = new ScrollView(activity); scroll.addView(fields);
+        AlertDialog review = new AlertDialog.Builder(activity).setTitle(kind).setView(scroll).setNegativeButton("cancel", null).setPositiveButton("save " + kind, null).create();
+        final EditText dueField = due, stepsField = steps, whenField = when, minutesField = minutes;
+        review.setOnShowListener(ignored -> review.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            try {
+                if (!chatId.equals(repository.snapshot().chatId) || repository.snapshot().running) throw new IllegalStateException("Open the proposal again after Pip finishes.");
+                org.json.JSONObject chosen = new org.json.JSONObject(proposal.toString()).put("title", title.getText().toString()).put("text", text.getText().toString());
+                if (dueField != null) chosen.put("due", dueField.getText().toString().trim());
+                if (stepsField != null) { org.json.JSONArray selected = new org.json.JSONArray(); for (String line : stepsField.getText().toString().split("\n")) if (!line.trim().isEmpty()) selected.put(line.trim()); chosen.put("steps", selected); }
+                if (whenField != null) { java.text.SimpleDateFormat format = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.ROOT); format.setLenient(false); java.text.ParsePosition position = new java.text.ParsePosition(0); java.util.Date date = format.parse(whenField.getText().toString(), position); if (date == null || position.getIndex() != whenField.length()) throw new IllegalArgumentException("Choose a date and time."); chosen.put("when", date.toInstant().toString()).put("minutes", Integer.parseInt(minutesField.getText().toString())); }
+                String href = PipActions.apply(activity, chatId, repository.proposalUserId(replyId), event.optString("id"), chosen);
+                repository.applied(replyId, event.optString("id"), href); review.dismiss(); render();
+            } catch (org.json.JSONException | RuntimeException invalid) { failure.setText(invalid.getMessage()); }
+        }));
+        showDialog(review);
     }
 
     private void keepThought(String text) {

@@ -4,12 +4,15 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
@@ -17,9 +20,9 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-/** Opt-in, read-only local tools. No refresh, credentials, drafts or cloud writes. */
+/** Opt-in local reads and validated plan/proposal outputs. Never refreshes or saves workspace data. */
 final class PocketChatTools {
-    static final String NOTES = "notes", THOUGHTS = "thoughts", TASKS = "tasks", GYM = "gym", COROS = "coros";
+    static final String NOTES = "notes", THOUGHTS = "thoughts", TASKS = "tasks", CALENDAR = "calendar", GYM = "gym", COROS = "coros";
     private static final String PREFS = "pocket_chat_access";
     private static final int RESULT_LIMIT = 8000;
 
@@ -43,7 +46,7 @@ final class PocketChatTools {
         SharedPreferences.Editor edit = prefs.edit();
         String recipient = recipient(context);
         if (value && !recipient.equals(prefs.getString("recipient", "")))
-            edit.remove(NOTES).remove(THOUGHTS).remove(TASKS).remove(GYM).remove(COROS).putString("recipient", recipient);
+            edit.remove(NOTES).remove(THOUGHTS).remove(TASKS).remove(CALENDAR).remove(GYM).remove(COROS).putString("recipient", recipient);
         edit.putBoolean(category, value).apply();
     }
 
@@ -65,12 +68,9 @@ final class PocketChatTools {
                         + "All query words must match. An empty query lists recent notes. Read a result by its id when more text is needed.",
                         schema(json("query", stringProperty("Words to find; empty lists recent notes.", 200),
                                 "limit", integerProperty("Maximum matching notes to return.", 1, 5, 5)), new JSONArray())));
-                JSONObject id = json("description", "The id returned by search_notes.", "anyOf", new JSONArray()
-                        .put(json("type", "string", "pattern", "^[1-9][0-9]*$", "maxLength", 19))
-                        .put(json("type", "integer", "minimum", 1)));
-                result.add(new Definition("read_note", "Read one saved Pocket note, up to 6000 characters. "
-                        + "The truncated field indicates missing text. Drafts and tasks are excluded.",
-                        schema(json("id", id), new JSONArray().put("id"))));
+                result.add(new Definition("read_note", "Read a saved note in pages. Use next_offset to continue; drafts and tasks are excluded.",
+                        schema(json("id", idProperty(), "offset", integerProperty("Starting character offset.", 0, 200000, 0),
+                                "length", integerProperty("Maximum page characters.", 200, 6000, 6000)), new JSONArray().put("id"))));
             }
             for (String category : new String[]{THOUGHTS, TASKS}) if (enabled(context, category))
                 result.add(new Definition("search_" + category, "thoughts".equals(category)
@@ -78,6 +78,17 @@ final class PocketChatTools {
                         : "Search chosen Pocket tasks, including completion and due date. All query words must match; empty lists recent tasks. Read only; never edits or completes a task.",
                         schema(json("query", stringProperty("Words to match; empty lists recent records.", 200),
                                 "limit", integerProperty("Maximum results.", 1, 5, 5)), new JSONArray())));
+            if (enabled(context, TASKS))
+                result.add(new Definition("read_task", "Read a chosen task, its steps, source context, due date and completion. Never edits the task.",
+                        schema(json("id", idProperty()), new JSONArray().put("id"))));
+            if (enabled(context, CALENDAR))
+                result.add(new Definition("search_calendar", "Search saved Pocket appointments from today over the next 1–30 calendar days. All query words must match; empty lists upcoming appointments.",
+                        schema(json("query", stringProperty("Words to match; empty lists appointments.", 200),
+                                "days", integerProperty("Calendar days beginning today.", 1, 30, 7), "limit", integerProperty("Maximum results.", 1, 5, 5)), new JSONArray())));
+            if (workspaceAccess(context))
+                result.add(new Definition("search_pocket", "Search enabled Notes, Tasks, Thoughts and Calendar together. Includes only granted categories; thoughts remain separate from tasks.",
+                        schema(json("query", stringProperty("Words to match; empty lists recent records.", 200),
+                                "limit", integerProperty("Maximum results.", 1, 10, 10), "days", integerProperty("Upcoming calendar days beginning today.", 1, 30, 7)), new JSONArray())));
             if (enabled(context, GYM))
                 result.add(new Definition("gym_summary", "Read locally saved workouts and exercise sets from the last 1–30 calendar days. Use for questions about logged strength training. Results may be partial; check truncated. Read only; never edits a workout.",
                         schema(json("days", integerProperty("Calendar days ending today.", 1, 30, 7)), new JSONArray())));
@@ -86,34 +97,79 @@ final class PocketChatTools {
                         + "(default 7). Includes recent activities, daily HRV, resting heart rate, sleep and steps when available. "
                         + "Never refreshes COROS. Check last_updated and stale; Pocket scores are estimates for score_date.",
                         schema(json("days", integerProperty("Calendar days ending today in the phone's time zone.", 1, 30, 7)), new JSONArray())));
+            result.add(new Definition("update_plan", "Show or update a short visible working plan. Returns a validated plan; never changes saved Pocket data.",
+                    schema(json("steps", json("type", "array", "minItems", 1, "maxItems", 6, "items",
+                            schema(json("text", json("type", "string", "minLength", 1, "maxLength", 160),
+                                    "status", json("type", "string", "enum", new JSONArray().put("pending").put("in_progress").put("done"))), new JSONArray().put("text").put("status")))), new JSONArray().put("steps"))));
+            result.add(new Definition("propose_action", "Propose a new note, task or appointment for explicit user review. This tool never saves anything. The user must apply the proposal in Pocket.",
+                    schema(json("kind", json("type", "string", "enum", new JSONArray().put("note").put("task").put("appointment")),
+                            "title", json("type", "string", "minLength", 1, "maxLength", 200), "text", json("type", "string", "maxLength", 6000),
+                            "due", json("type", "string", "pattern", "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
+                            "steps", json("type", "array", "maxItems", 12, "items", json("type", "string", "minLength", 1, "maxLength", 160, "pattern", "^[^\\r\\n]+$")),
+                            "when", json("type", "string", "maxLength", 80, "description", "An ISO 8601 timestamp with UTC or an offset."),
+                            "minutes", integerProperty("Appointment duration in minutes.", 15, 480, 60)), new JSONArray().put("kind").put("title").put("text"))));
         } catch (JSONException impossible) { throw new IllegalStateException("Chat tools could not be described."); }
         return Collections.unmodifiableList(result);
     }
 
-    /** Pocket tools plus Firecrawl web search for providers without their own (Anthropic searches on its side). */
+    /** Firecrawl reading and filtered search are available alongside a provider's own search. */
     static List<Definition> definitions(Context context, ChatProvider.Config config) {
         if (!webTools(config)) return definitions(context);
         List<Definition> result = new ArrayList<>(definitions(context));
         try {
             result.add(new Definition("search_web", "Search the web for current information. Returns up to 5 results with title, url and description. Cite the urls you use.",
-                    schema(json("query", json("type", "string", "description", "What to search for.", "maxLength", 300),
-                            "limit", integerProperty("Maximum results.", 1, 5, 5)), new JSONArray().put("query"))));
-            result.add(new Definition("read_web_page", "Read the main text of one web page (up to 6000 characters), usually a url from search_web.",
-                    schema(json("url", json("type", "string", "description", "The page's https URL.", "maxLength", 2048)), new JSONArray().put("url"))));
+                    schema(json("query", json("type", "string", "minLength", 1, "maxLength", 300),
+                            "limit", integerProperty("Maximum results.", 1, 5, 5),
+                            "domains", json("type", "array", "maxItems", 5, "items", json("type", "string", "minLength", 1, "maxLength", 253)),
+                            "time_range", json("type", "string", "enum", new JSONArray().put("any").put("day").put("week").put("month").put("year"), "default", "any")), new JSONArray().put("query"))));
+            result.add(new Definition("read_web_page", "Read public page text in pages. Optional query finds matching passages at or after offset. Pages are cached only for this run; use next_offset to continue.",
+                    schema(json("url", json("type", "string", "minLength", 1, "maxLength", 2048),
+                            "offset", integerProperty("Starting character offset.", 0, 200000, 0),
+                            "length", integerProperty("Maximum page characters.", 200, 6000, 6000),
+                            "query", stringProperty("Words to locate in this page.", 200)), new JSONArray().put("url"))));
         } catch (JSONException impossible) { throw new IllegalStateException("Chat tools could not be described."); }
         return Collections.unmodifiableList(result);
     }
 
-    static boolean webTools(ChatProvider.Config config) { return "compatible".equals(config.provider) && config.webSearch; }
+    static boolean webTools(ChatProvider.Config config) { return config.webSearch; }
+
+    static String accessFingerprint(Context context) {
+        StringBuilder value = new StringBuilder();
+        for (String category : new String[]{NOTES, THOUGHTS, TASKS, CALENDAR, GYM, COROS})
+            value.append(enabled(context, category) ? '1' : '0');
+        return value.toString();
+    }
+
+    static boolean permitted(Context context, ChatProvider.Config config, String name, JSONObject args) {
+        if ("update_plan".equals(name) || "propose_action".equals(name)) return true;
+        if ("search_web".equals(name) || "read_web_page".equals(name)) return webTools(config) && webTools(ChatProvider.get(context));
+        if ("search_pocket".equals(name)) return workspaceAccess(context);
+        String category = toolCategory(name);
+        return category != null && enabled(context, category);
+    }
+
+    private static boolean workspaceAccess(Context context) {
+        return enabled(context, NOTES) || enabled(context, THOUGHTS) || enabled(context, TASKS) || enabled(context, CALENDAR);
+    }
 
     static String execute(Context context, String name, JSONObject arguments) {
+        return execute(context, name, arguments, new RunContext());
+    }
+
+    static String execute(Context context, String name, JSONObject arguments, RunContext run) {
         checkInterrupted();
-        if ("search_web".equals(name) || "read_web_page".equals(name)) return web(context, name, arguments);
+        if (run == null) run = new RunContext();
+        run.check();
+        JSONObject args = arguments == null ? new JSONObject() : arguments;
+        if (args.toString().length() > RESULT_LIMIT) return error("invalid_arguments", "Use arguments of up to 8000 characters.");
+        if ("search_web".equals(name) || "read_web_page".equals(name)) return web(context, name, args, run);
+        boolean universal = "update_plan".equals(name) || "propose_action".equals(name);
         String category = toolCategory(name);
-        if (category == null) return error("unknown_tool", "This tool is not available.");
-        if (!enabled(context, category)) return error("access_disabled", "Access to this category is disabled in Chat settings.");
+        if (!universal && category == null && !"search_pocket".equals(name)) return error("unknown_tool", "This tool is not available.");
+        if (!universal && !permitted(context, ChatProvider.get(context), name, args))
+            return error("access_disabled", "Access to this category is disabled in Chat settings.");
+        String access = accessFingerprint(context);
         try {
-            JSONObject args = arguments == null ? new JSONObject() : arguments;
             JSONObject result;
             switch (name) {
                 case "search_notes":
@@ -121,8 +177,8 @@ final class PocketChatTools {
                     result = searchNotes(context, query(args), integer(args, "limit", 5, 1, 5));
                     break;
                 case "read_note":
-                    keys(args, "id");
-                    result = readNote(context, id(args));
+                    keys(args, "id", "offset", "length");
+                    result = readNote(context, savedEntry(context, args, "note"), integer(args, "offset", 0, 0, 200000), integer(args, "length", 6000, 200, 6000));
                     break;
                 case "search_thoughts":
                     keys(args, "query", "limit");
@@ -132,6 +188,14 @@ final class PocketChatTools {
                     keys(args, "query", "limit");
                     result = searchTasks(context, query(args), integer(args, "limit", 5, 1, 5));
                     break;
+                case "read_task":
+                    keys(args, "id"); result = readTask(context, savedEntry(context, args, "task")); break;
+                case "search_calendar":
+                    keys(args, "query", "days", "limit"); result = searchCalendar(context, query(args), integer(args, "days", 7, 1, 30), integer(args, "limit", 5, 1, 5)); break;
+                case "search_pocket":
+                    keys(args, "query", "days", "limit"); result = searchPocket(context, query(args), integer(args, "days", 7, 1, 30), integer(args, "limit", 10, 1, 10)); break;
+                case "update_plan": result = plan(args); break;
+                case "propose_action": result = proposal(args); break;
                 case "gym_summary":
                     keys(args, "days");
                     result = gym(context, integer(args, "days", 7, 1, 30));
@@ -141,7 +205,10 @@ final class PocketChatTools {
                     result = coros(context, integer(args, "days", 7, 1, 30));
             }
             // A category can be switched off while a worker is reading its local snapshot.
-            if (!enabled(context, category)) return error("access_disabled", "Access to this category is disabled in Chat settings.");
+            run.check();
+            if (!universal && (!permitted(context, ChatProvider.get(context), name, args)
+                    || (("search_pocket".equals(name) || "read_task".equals(name)) && !access.equals(accessFingerprint(context)))))
+                return error("access_disabled", "Pocket access changed while this data was being read. Try again.");
             String encoded = result.toString();
             return encoded.length() <= RESULT_LIMIT ? encoded : error("result_too_large", "Use a narrower request.");
         } catch (CancellationException cancelled) {
@@ -169,32 +236,61 @@ final class PocketChatTools {
         for (PlannerStore.Entry note : notes) {
             checkInterrupted();
             if (found.length() >= limit) break;
-            JSONObject item = noteMetadata(note).put("excerpt", excerpt(note.text, query, 500))
+            JSONObject item = noteMetadata(context, note).put("excerpt", excerpt(note.text, query, 500))
                     .put("text_truncated", note.text.length() > 500);
             if (!append(result, found, item)) { result.put("truncated", true); break; }
         }
         return result;
     }
 
-    private static JSONObject readNote(Context context, long id) throws JSONException {
-        PlannerStore.Entry note = planner(context).find(id);
-        if (note == null || !"note".equals(note.kind))
+    private static JSONObject readNote(Context context, PlannerStore.Entry note, int offset, int length) throws JSONException {
+        if (note == null)
             return json("error", "note_not_found", "message", "That saved note is no longer available.");
-        JSONObject result = noteMetadata(note).put("truncated", note.text.length() > 6000);
-        String text = clip(note.text, 6000);
-        result.put("text", text);
-        // JSON escaping can be larger than the source text; keep the complete JSON within its budget.
-        while (result.toString().length() > RESULT_LIMIT && !text.isEmpty()) {
-            int excess = result.toString().length() - RESULT_LIMIT;
-            text = clip(text, Math.max(0, text.length() - Math.max(1, excess)));
-            result.put("text", text).put("truncated", true);
-        }
-        return result;
+        return pageResult(noteMetadata(context, note), note.text, offset, length);
     }
 
-    private static JSONObject noteMetadata(PlannerStore.Entry note) throws JSONException {
-        return json("source", "pocket:note:" + note.id, "id", Long.toString(note.id),
-                "title", title(note.text), "created", timestamp(note.created));
+    private static JSONObject noteMetadata(Context context, PlannerStore.Entry note) throws JSONException {
+        String id = entryId(context, note);
+        return json("source", "pocket:note:" + id, "id", id,
+                "title", title(note.text), "created", timestamp(note.created), "href", "/notes/" + id);
+    }
+
+    private static PlannerStore.Entry savedEntry(Context context, JSONObject args, String kind) {
+        String id = savedId(args);
+        for (PlannerStore.Entry entry : planner(context).entries()) {
+            checkInterrupted();
+            if (kind.equals(entry.kind) && (Long.toString(entry.id).equals(id) || entryId(context, entry).equals(id))) return entry;
+        }
+        return null;
+    }
+
+    private static String entryId(Context context, PlannerStore.Entry entry) {
+        String uid = context.getSharedPreferences("pocket_planner", Context.MODE_PRIVATE).getString(entry.kind + "_uid_" + entry.id, "");
+        return uid == null || uid.isEmpty() ? Long.toString(entry.id) : uid;
+    }
+
+    private static JSONObject readTask(Context context, PlannerStore.Entry task) throws JSONException {
+        if (task == null) return json("error", "task_not_found", "message", "That saved task is no longer available.");
+        String id = entryId(context, task);
+        JSONArray steps = new JSONArray();
+        for (PlannerStore.Step step : task.steps) { checkInterrupted(); steps.put(json("text", clip(step.text, 200), "done", step.done)); }
+        JSONObject result = json("source", "pocket:task:" + id, "id", id, "title", title(task.text), "text", clip(task.text, 6000),
+                "done", task.done, "completed", task.done, "due", task.due, "important", task.important, "created", timestamp(task.created), "steps", steps,
+                "completed_steps", task.completedSteps(), "href", "/tasks/" + id, "truncated", false);
+        if (task.source == null) return result.put("task_source", JSONObject.NULL);
+        TaskSource source = task.source;
+        // Note text has a separate read grant even when a task retains a source link.
+        if ("note".equals(source.kind) && !enabled(context, NOTES))
+            return result.put("task_source", json("kind", "note", "name", "", "text", "", "note_uid", "", "access_disabled", true));
+        String href = "";
+        if ("note".equals(source.kind)) {
+            PlannerStore.Entry note = planner(context).find(source.note);
+            if (note != null && "note".equals(note.kind)) href = "/notes/" + entryId(context, note);
+        } else {
+            try { href = publicUrl(source.link()).toString(); } catch (IllegalArgumentException invalid) { }
+        }
+        return result.put("task_source", json("kind", source.kind, "name", clip(source.name, 200), "text", clip(source.text, 1500),
+                "note_uid", href.startsWith("/notes/") ? href.substring(7) : "", "href", href, "truncated", source.text.length() > 1500));
     }
 
     private static JSONObject searchThoughts(Context context, String query, int limit) throws JSONException {
@@ -214,6 +310,7 @@ final class PocketChatTools {
             checkInterrupted();
             if (found.length() >= limit) break;
             JSONObject value = json("source", "pocket:thought:" + item.id, "id", Long.toString(item.id),
+                    "title", title(item.text), "href", "/thoughts/" + item.id,
                     "text", excerpt(item.text, query, 500), "text_truncated", item.text.length() > 500,
                     "created", timestamp(item.created), "due", timestamp(item.due), "state", "parked");
             if (!append(result, found, value)) { result.put("truncated", true); break; }
@@ -231,11 +328,134 @@ final class PocketChatTools {
         JSONObject result = json("source", "pocket:tasks", "matched", tasks.size(), "truncated", tasks.size() > limit, "tasks", found);
         for (PlannerStore.Entry task : tasks) {
             checkInterrupted(); if (found.length() >= limit) break;
-            JSONObject item = json("id", Long.toString(task.id), "text", excerpt(task.text, query, 500),
+            JSONObject item = json("source", "pocket:task:" + entryId(context, task), "id", entryId(context, task), "title", title(task.text),
+                    "href", "/tasks/" + entryId(context, task), "text", excerpt(task.text, query, 500),
                     "text_truncated", task.text.length() > 500, "done", task.done, "due", task.due);
             if (!append(result, found, item)) { result.put("truncated", true); break; }
         }
         return result;
+    }
+
+    private static JSONObject searchCalendar(Context context, String query, int days, int limit) throws JSONException {
+        List<AgendaStore.Event> events = calendar(context, query, days);
+        JSONArray found = new JSONArray();
+        JSONObject result = json("source", "pocket:calendar", "matched", events.size(), "truncated", events.size() > limit, "appointments", found);
+        for (AgendaStore.Event event : events) {
+            checkInterrupted(); if (found.length() >= limit) break;
+            String id = event.uid.isEmpty() ? Long.toString(event.id) : event.uid;
+            if (!append(result, found, json("id", id, "title", clip(event.title, 200), "when", timestamp(event.when), "minutes", event.minutes, "href", "/calendar/" + id))) {
+                result.put("truncated", true); break;
+            }
+        }
+        return result;
+    }
+
+    private static List<AgendaStore.Event> calendar(Context context, String query, int days) {
+        ZoneId zone = ZoneId.systemDefault();
+        long start = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli();
+        long end = LocalDate.now(zone).plusDays(days).atStartOfDay(zone).toInstant().toEpochMilli();
+        List<AgendaStore.Event> events = new ArrayList<>();
+        for (AgendaStore.Event event : AgendaStore.list(context)) {
+            checkInterrupted();
+            if (event.end() > start && event.when < end && matches(event.title, query)) events.add(event);
+        }
+        return events;
+    }
+
+    private static JSONObject searchPocket(Context context, String query, int days, int limit) throws JSONException {
+        List<JSONObject> rows = new ArrayList<>();
+        boolean notes = enabled(context, NOTES), tasks = enabled(context, TASKS);
+        if (notes || tasks) {
+            List<PlannerStore.Entry> entries = planner(context).entries();
+            Collections.sort(entries, (a, b) -> Long.compare(b.created, a.created));
+            for (PlannerStore.Entry entry : entries) {
+                checkInterrupted();
+                StringBuilder content = new StringBuilder(entry.text);
+                if ("task".equals(entry.kind)) for (PlannerStore.Step step : entry.steps) content.append('\n').append(step.text);
+                if (!((notes && "note".equals(entry.kind)) || (tasks && "task".equals(entry.kind))) || !matches(content.toString(), query)) continue;
+                String id = entryId(context, entry), href = "/" + ("note".equals(entry.kind) ? "notes" : "tasks") + "/" + id;
+                rows.add(workspaceRow(entry.kind, id, title(entry.text), excerpt(content.toString(), query, 400), href));
+            }
+        }
+        if (enabled(context, THOUGHTS)) {
+            List<ParkingStore.Item> items = ParkingStore.items(context);
+            Collections.sort(items, (a, b) -> Long.compare(b.created, a.created));
+            for (ParkingStore.Item item : items) {
+                checkInterrupted();
+                if (ParkingStore.PARKED.equals(item.state) && matches(item.text, query)) {
+                    String id = Long.toString(item.id);
+                    rows.add(workspaceRow("thought", id, title(item.text), excerpt(item.text, query, 400), "/thoughts/" + id));
+                }
+            }
+        }
+        if (enabled(context, CALENDAR)) for (AgendaStore.Event event : calendar(context, query, days)) {
+            String id = event.uid.isEmpty() ? Long.toString(event.id) : event.uid;
+            rows.add(workspaceRow("appointment", id, clip(event.title, 200), clip(event.title, 400), "/calendar/" + id));
+        }
+        JSONArray found = new JSONArray();
+        JSONObject result = json("source", "pocket:workspace", "matched", rows.size(), "truncated", rows.size() > limit, "results", found);
+        for (JSONObject row : rows) {
+            checkInterrupted(); if (found.length() >= limit) break;
+            if (!append(result, found, row)) { result.put("truncated", true); break; }
+        }
+        return result;
+    }
+
+    private static JSONObject workspaceRow(String kind, String id, String title, String excerpt, String href) throws JSONException {
+        return json("kind", kind, "type", kind, "id", id, "title", title, "excerpt", excerpt, "href", href, "route", href);
+    }
+
+    private static JSONObject plan(JSONObject args) throws JSONException {
+        keys(args, "steps");
+        Object raw = args.opt("steps");
+        if (!(raw instanceof JSONArray) || ((JSONArray) raw).length() < 1 || ((JSONArray) raw).length() > 6)
+            throw new IllegalArgumentException("steps must contain 1 to 6 plan steps.");
+        JSONArray steps = new JSONArray(), values = (JSONArray) raw;
+        for (int index = 0; index < values.length(); index++) {
+            Object value = values.opt(index);
+            if (!(value instanceof JSONObject)) throw new IllegalArgumentException("Each plan step must be an object.");
+            JSONObject step = (JSONObject) value;
+            keys(step, "text", "status");
+            String text = requiredText(step, "text", 160, false), status = requiredText(step, "status", 20, false);
+            if (!"pending".equals(status) && !"in_progress".equals(status) && !"done".equals(status))
+                throw new IllegalArgumentException("Plan status must be pending, in_progress or done.");
+            steps.put(json("text", text.trim(), "status", status));
+        }
+        return json("kind", "plan", "plan", steps);
+    }
+
+    private static JSONObject proposal(JSONObject args) throws JSONException {
+        keys(args, "kind", "title", "text", "due", "steps", "when", "minutes");
+        String kind = requiredText(args, "kind", 20, false);
+        if (!"note".equals(kind) && !"task".equals(kind) && !"appointment".equals(kind))
+            throw new IllegalArgumentException("kind must be note, task or appointment.");
+        String title = requiredText(args, "title", 200, false), text = requiredText(args, "text", 6000, true);
+        String due = optionalText(args, "due", 10), when = optionalText(args, "when", 80);
+        if (!due.isEmpty()) {
+            if (!due.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}")) throw new IllegalArgumentException("due must be a valid YYYY-MM-DD date.");
+            try { LocalDate.parse(due); } catch (DateTimeParseException invalid) { throw new IllegalArgumentException("due must be a valid YYYY-MM-DD date."); }
+        }
+        if ("appointment".equals(kind) && when.isEmpty()) throw new IllegalArgumentException("Appointments need an ISO date and time with timezone.");
+        if (!when.isEmpty()) {
+            if (!when.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2}(\\.[0-9]{1,3})?)?(Z|[+-][0-9]{2}:[0-9]{2})"))
+                throw new IllegalArgumentException("when must be an ISO timestamp with UTC or an offset.");
+            try { OffsetDateTime.parse(when); } catch (DateTimeParseException invalid) { throw new IllegalArgumentException("when must be a valid ISO timestamp."); }
+        }
+        JSONArray steps = new JSONArray();
+        if (args.has("steps")) {
+            Object raw = args.opt("steps");
+            if (!(raw instanceof JSONArray) || ((JSONArray) raw).length() > 12) throw new IllegalArgumentException("steps must be an array of at most 12 strings.");
+            JSONArray values = (JSONArray) raw;
+            for (int index = 0; index < values.length(); index++) {
+                Object value = values.opt(index);
+                if (!(value instanceof String) || ((String) value).trim().isEmpty() || ((String) value).length() > 160
+                        || ((String) value).contains("\n") || ((String) value).contains("\r"))
+                    throw new IllegalArgumentException("Each action step must be one nonempty line of up to 160 characters.");
+                steps.put(((String) value).trim());
+            }
+        }
+        return json("kind", "proposal", "proposal", json("kind", kind, "title", title, "text", text, "due", due, "steps", steps, "when", when,
+                "minutes", integer(args, "minutes", 60, 15, 480)), "requires_confirmation", true);
     }
 
     private static JSONObject gym(Context context, int days) throws JSONException {
@@ -348,46 +568,74 @@ final class PocketChatTools {
 
     private static final class WebRefused extends java.io.IOException { WebRefused(String message) { super(message); } }
 
-    private static String web(Context context, String name, JSONObject arguments) {
+    /** One invocation owns page text and the active request; neither survives cancellation or another run. */
+    static final class RunContext {
+        private final Map<String, WebPage> pages = new LinkedHashMap<>();
+        private final okhttp3.OkHttpClient client;
+        private okhttp3.Call active;
+        private boolean cancelled;
+        RunContext() { this(WEB); }
+        RunContext(okhttp3.OkHttpClient client) { this.client = client; }
+        synchronized void check() { checkInterrupted(); if (cancelled) throw new CancellationException(); }
+        synchronized void cancel() { cancelled = true; pages.clear(); if (active != null) active.cancel(); }
+        synchronized void begin(okhttp3.Call call) { check(); active = call; }
+        synchronized void end(okhttp3.Call call) { if (active == call) active = null; }
+        synchronized WebPage page(String url) { check(); return pages.get(url); }
+        synchronized void page(String url, WebPage page) {
+            check();
+            if (pages.size() >= 6 && !pages.containsKey(url)) pages.remove(pages.keySet().iterator().next());
+            pages.put(url, page);
+        }
+    }
+
+    private static final class WebPage {
+        final String title, text;
+        WebPage(String title, String text) { this.title = title; this.text = text; }
+    }
+
+    private static String web(Context context, String name, JSONObject args, RunContext run) {
         if (!webTools(ChatProvider.get(context))) return error("access_disabled", "Web search is off.");
+        String recipient = recipient(context);
         try {
-            JSONObject args = arguments == null ? new JSONObject() : arguments, result;
+            JSONObject result;
             if ("search_web".equals(name)) {
-                keys(args, "query", "limit");
-                Object raw = args.opt("query");
-                String query = raw instanceof String ? ((String) raw).trim() : "";
-                if (query.isEmpty() || query.length() > 300) throw new IllegalArgumentException("Use a short search query.");
+                keys(args, "query", "limit", "domains", "time_range");
+                String query = requiredText(args, "query", 300, false);
                 int limit = integer(args, "limit", 5, 1, 5);
-                JSONObject found = firecrawl(context, "/search", json("query", query, "limit", limit, "timeout", 20000));
+                JSONObject body = searchRequest(args, query, limit);
+                JSONObject found = firecrawl(context, "/search", body, run);
                 JSONArray list = found.optJSONArray("data");
                 if (list == null && found.optJSONObject("data") != null) list = found.optJSONObject("data").optJSONArray("web");
                 JSONArray results = new JSONArray();
                 if (list != null) for (int i = 0; i < list.length() && results.length() < limit; i++) {
+                    run.check();
                     JSONObject item = list.optJSONObject(i);
                     String url = item == null ? "" : item.optString("url");
-                    if (!(url.startsWith("https://") || url.startsWith("http://")) || url.length() > 2048) continue;
+                    try { url = publicUrl(url).toString(); } catch (IllegalArgumentException invalid) { continue; }
                     results.put(json("title", clip(item.optString("title", url), 160), "url", url, "description", clip(item.optString("description"), 400)));
                 }
                 result = json("source", "web:firecrawl", "query", query, "results", results);
             } else {
-                keys(args, "url");
-                String url = args.optString("url", "").trim();
-                java.net.URI uri;
-                try { uri = new java.net.URI(url); } catch (java.net.URISyntaxException invalid) { throw new IllegalArgumentException("Use a public https URL."); }
-                if (!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme())) || uri.getHost() == null
-                        || uri.getRawUserInfo() != null || url.length() > 2048) throw new IllegalArgumentException("Use a public https URL.");
-                JSONObject page = firecrawl(context, "/scrape", json("url", url, "formats", new JSONArray().put("markdown"),
-                        "onlyMainContent", true, "timeout", 20000)).optJSONObject("data");
-                if (page == null) page = new JSONObject();
-                JSONObject metadata = page.optJSONObject("metadata");
-                String text = page.optString("markdown", ""), title = metadata == null ? "" : metadata.optString("title", "");
-                if (title.isEmpty()) title = uri.getHost();
-                int keep = Math.min(text.length(), 6000);
-                do {
-                    result = json("source", url, "url", url, "title", clip(title, 160), "text", clip(text, keep), "truncated", keep < text.length());
-                    keep -= 500;
-                } while (result.toString().length() > RESULT_LIMIT && keep > 0);
+                keys(args, "url", "offset", "length", "query");
+                java.net.URI uri = publicUrl(requiredText(args, "url", 2048, false));
+                String url = uri.toString();
+                int offset = integer(args, "offset", 0, 0, 200000), length = integer(args, "length", 6000, 200, 6000);
+                String query = query(args);
+                WebPage saved = run.page(url);
+                if (saved == null) {
+                    JSONObject page = firecrawl(context, "/scrape", json("url", url, "formats", new JSONArray().put("markdown"),
+                            "onlyMainContent", true, "timeout", 20000), run).optJSONObject("data");
+                    if (page == null) page = new JSONObject();
+                    JSONObject metadata = page.optJSONObject("metadata");
+                    String title = metadata == null ? "" : metadata.optString("title", "");
+                    saved = new WebPage(clip(title.isEmpty() ? uri.getHost() : title, 160), page.optString("markdown", ""));
+                    run.page(url, saved);
+                }
+                result = webPageResult(url, saved, offset, length, query);
             }
+            run.check();
+            if (!webTools(ChatProvider.get(context)) || !recipient.equals(recipient(context)))
+                return error("access_disabled", "Web access changed while this page was being read. Try again.");
             String encoded = result.toString();
             return encoded.length() <= RESULT_LIMIT ? encoded : error("result_too_large", "Use a narrower request.");
         } catch (WebRefused refused) {
@@ -396,6 +644,7 @@ final class PocketChatTools {
             if (Thread.currentThread().isInterrupted()) throw new CancellationException();
             return error("web_unavailable", "Web search timed out. Retry.");
         } catch (java.io.IOException offline) {
+            run.check();
             return error("web_unavailable", "Web search could not connect.");
         } catch (IllegalArgumentException invalid) {
             return error("invalid_arguments", invalid.getMessage());
@@ -404,12 +653,146 @@ final class PocketChatTools {
         }
     }
 
-    private static JSONObject firecrawl(Context context, String path, JSONObject body) throws java.io.IOException, JSONException {
+    private static JSONObject searchRequest(JSONObject args, String query, int limit) throws JSONException {
+        JSONObject body = json("query", query, "limit", limit, "timeout", 20000);
+        if (args.has("domains")) {
+            Object raw = args.opt("domains");
+            if (!(raw instanceof JSONArray) || ((JSONArray) raw).length() > 5)
+                throw new IllegalArgumentException("domains must contain at most 5 public hostnames.");
+            JSONArray domains = new JSONArray(), values = (JSONArray) raw;
+            for (int index = 0; index < values.length(); index++) {
+                Object value = values.opt(index);
+                if (!(value instanceof String)) throw new IllegalArgumentException("domains must contain public hostnames.");
+                String host = ((String) value).trim().toLowerCase(Locale.ROOT);
+                if (host.length() > 253 || host.contains("/") || host.contains(":") || host.contains("@") || host.contains("?") || host.contains("#"))
+                    throw new IllegalArgumentException("Use domains without a protocol or path.");
+                publicUrl("https://" + host);
+                domains.put(host);
+            }
+            // Firecrawl v2 documented filters: includeDomains and tbs, not arbitrary query interpolation.
+            if (domains.length() > 0) body.put("includeDomains", domains);
+        }
+        String range = args.has("time_range") ? requiredText(args, "time_range", 10, false) : "any";
+        String filter;
+        switch (range) {
+            case "any": filter = ""; break;
+            case "day": filter = "qdr:d"; break;
+            case "week": filter = "qdr:w"; break;
+            case "month": filter = "qdr:m"; break;
+            case "year": filter = "qdr:y"; break;
+            default: throw new IllegalArgumentException("time_range must be any, day, week, month or year.");
+        }
+        if (!filter.isEmpty()) body.put("tbs", filter);
+        return body;
+    }
+
+    private static JSONObject webPageResult(String url, WebPage saved, int offset, int length, String query) throws JSONException {
+        int start = Math.min(offset, saved.text.length());
+        JSONArray passages = new JSONArray();
+        boolean matched = query.isEmpty();
+        if (!query.isEmpty()) {
+            String text = saved.text.toLowerCase(Locale.ROOT);
+            int position = text.indexOf(query, start);
+            if (position >= 0) {
+                int passageBudget = Math.min(800, length / 2);
+                int context = Math.min(100, Math.max(0, passageBudget - query.length()));
+                int beginning = Math.max(start, position - context);
+                if (beginning > 0 && Character.isLowSurrogate(saved.text.charAt(beginning))) beginning--;
+                if (query.length() <= passageBudget) {
+                    String passage = clip(saved.text.substring(beginning), passageBudget);
+                    passages.put(json("offset", beginning, "text", passage));
+                }
+                start = beginning; matched = true;
+            }
+        }
+        JSONObject result = json("source", url, "url", url, "title", saved.title);
+        if (!query.isEmpty()) result.put("query", query).put("query_found", matched).put("passages", passages);
+        // Reserve the passage bytes before choosing how much surrounding page text to return.
+        return pageResult(result, saved.text, start, length - passagesText(passages));
+    }
+
+    private static int passagesText(JSONArray passages) {
+        int count = 0;
+        for (int index = 0; index < passages.length(); index++) count += passages.optJSONObject(index).optString("text").length();
+        return count;
+    }
+
+    private static JSONObject pageResult(JSONObject result, String original, int offset, int length) throws JSONException {
+        int start = Math.min(offset, original.length());
+        if (start > 0 && start < original.length() && Character.isLowSurrogate(original.charAt(start))) start--;
+        String text = clip(original.substring(start), length);
+        result.put("offset", start).put("total_length", original.length()).put("text", text)
+                .put("truncated", start + text.length() < original.length())
+                .put("next_offset", start + text.length() < original.length() && start + text.length() <= 200000 ? start + text.length() : JSONObject.NULL);
+        // Escaping can exceed the character budget. Keep a usable continuation offset after reducing text.
+        while (result.toString().length() > RESULT_LIMIT && !text.isEmpty()) {
+            int excess = result.toString().length() - RESULT_LIMIT;
+            text = clip(text, Math.max(0, text.length() - Math.max(1, excess)));
+            result.put("text", text).put("truncated", start + text.length() < original.length())
+                    .put("next_offset", start + text.length() < original.length() && start + text.length() <= 200000 ? start + text.length() : JSONObject.NULL);
+        }
+        return result;
+    }
+
+    private static java.net.URI publicUrl(String value) {
+        try {
+            if (value == null || value.isEmpty() || value.length() > 2048 || !value.equals(value.trim())) throw new IllegalArgumentException();
+            java.net.URI uri = new java.net.URI(value);
+            String scheme = uri.getScheme(), host = uri.getHost();
+            if (!("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme)) || host == null || uri.getRawUserInfo() != null
+                    || uri.getPort() > 65535 || uri.getPort() == 0 || uri.getRawAuthority().endsWith(":")) throw new IllegalArgumentException();
+            host = host.toLowerCase(Locale.ROOT).replaceFirst("\\.$", "");
+            if (host.startsWith("[")) host = host.substring(1, host.length() - 1);
+            if (host.contains("%") || host.equals("localhost") || host.endsWith(".localhost") || host.endsWith(".local")
+                    || host.endsWith(".localdomain") || host.endsWith(".internal") || host.endsWith(".lan") || host.endsWith(".home")
+                    || host.endsWith(".test") || host.endsWith(".invalid"))
+                throw new IllegalArgumentException();
+            if (host.contains(":")) {
+                java.net.InetAddress address = java.net.InetAddress.getByName(host);
+                if (!publicAddress(address)) throw new IllegalArgumentException();
+            } else if (host.matches("[0-9.]+")) {
+                String[] octets = host.split("\\.", -1);
+                if (octets.length != 4) throw new IllegalArgumentException();
+                byte[] bytes = new byte[4];
+                for (int index = 0; index < 4; index++) {
+                    if (!octets[index].matches("0|[1-9][0-9]{0,2}")) throw new IllegalArgumentException();
+                    int octet = Integer.parseInt(octets[index]); if (octet > 255) throw new IllegalArgumentException(); bytes[index] = (byte) octet;
+                }
+                if (!publicAddress(java.net.InetAddress.getByAddress(bytes))) throw new IllegalArgumentException();
+            } else {
+                if (!host.contains(".") || host.length() > 253) throw new IllegalArgumentException();
+                for (String label : host.split("\\.", -1))
+                    if (!label.matches("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")) throw new IllegalArgumentException();
+            }
+            // Fragments do not change fetched page text and must not create separate run cache entries.
+            String normalized = uri.normalize().toString();
+            int fragment = normalized.indexOf('#');
+            return new java.net.URI(fragment < 0 ? normalized : normalized.substring(0, fragment));
+        } catch (java.net.URISyntaxException | java.net.UnknownHostException | IllegalArgumentException invalid) {
+            throw new IllegalArgumentException("Use a public http or https URL without credentials or private hosts.");
+        }
+    }
+
+    private static boolean publicAddress(java.net.InetAddress address) {
+        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress() || address.isSiteLocalAddress() || address.isMulticastAddress()) return false;
+        byte[] bytes = address.getAddress();
+        if (bytes.length == 4) {
+            int a = bytes[0] & 255, b = bytes[1] & 255;
+            return a != 0 && a != 127 && a < 224 && !(a == 100 && b >= 64 && b <= 127)
+                    && !(a == 192 && (b == 0 || b == 168)) && !(a == 198 && (b == 18 || b == 19));
+        }
+        return (bytes[0] & 0xfe) != 0xfc;
+    }
+
+    private static JSONObject firecrawl(Context context, String path, JSONObject body, RunContext run) throws java.io.IOException, JSONException {
         okhttp3.Request.Builder request = new okhttp3.Request.Builder().url(FIRECRAWL + path).header("User-Agent", "Pocket/pip")
                 .post(okhttp3.RequestBody.create(body.toString(), okhttp3.MediaType.parse("application/json; charset=utf-8")));
         String key = ChatProvider.firecrawlKey(context);
         if (!key.isEmpty()) request.header("Authorization", "Bearer " + key);
-        try (okhttp3.Response response = WEB.newCall(request.build()).execute()) {
+        okhttp3.Call call = run.client.newCall(request.build());
+        run.begin(call);
+        try (okhttp3.Response response = call.execute()) {
+            run.check();
             int code = response.code();
             if (code != 200) throw new WebRefused(code == 401 || code == 402 || code == 429
                     ? "Web search is unavailable right now (Firecrawl " + code + "). A Firecrawl key in Provider settings raises the limit."
@@ -417,8 +800,10 @@ final class PocketChatTools {
             if (response.body() == null) throw new WebRefused("Web search returned an empty reply.");
             okio.BufferedSource source = response.body().source();
             if (source.request(2_000_001)) throw new WebRefused("That page is too large to read.");
-            return new JSONObject(source.getBuffer().readUtf8());
-        }
+            JSONObject result = new JSONObject(source.getBuffer().readUtf8());
+            run.check();
+            return result;
+        } finally { run.end(call); }
     }
 
     private static void checkInterrupted() {
@@ -426,13 +811,14 @@ final class PocketChatTools {
     }
 
     private static boolean category(String value) {
-        return NOTES.equals(value) || THOUGHTS.equals(value) || TASKS.equals(value) || GYM.equals(value) || COROS.equals(value);
+        return NOTES.equals(value) || THOUGHTS.equals(value) || TASKS.equals(value) || CALENDAR.equals(value) || GYM.equals(value) || COROS.equals(value);
     }
 
     private static String toolCategory(String name) {
         if ("search_notes".equals(name) || "read_note".equals(name)) return NOTES;
         if ("search_thoughts".equals(name)) return THOUGHTS;
-        if ("search_tasks".equals(name)) return TASKS;
+        if ("search_tasks".equals(name) || "read_task".equals(name)) return TASKS;
+        if ("search_calendar".equals(name)) return CALENDAR;
         if ("gym_summary".equals(name)) return GYM;
         return "coros_summary".equals(name) ? COROS : null;
     }
@@ -464,12 +850,27 @@ final class PocketChatTools {
         return (int) number;
     }
 
-    private static long id(JSONObject args) {
+    private static String requiredText(JSONObject args, String key, int max, boolean empty) {
+        Object raw = args.opt(key);
+        if (!(raw instanceof String) || ((String) raw).length() > max || (!empty && ((String) raw).trim().isEmpty()))
+            throw new IllegalArgumentException(key + " must be " + (empty ? "text" : "nonempty text") + " of up to " + max + " characters.");
+        return "text".equals(key) ? (String) raw : ((String) raw).trim();
+    }
+
+    private static String optionalText(JSONObject args, String key, int max) {
+        return args.has(key) ? requiredText(args, key, max, true) : "";
+    }
+
+    private static String savedId(JSONObject args) {
         Object value = args.opt("id");
         String text = value instanceof String ? (String) value : value instanceof Number ? value.toString() : "";
-        if (!text.matches("[1-9][0-9]{0,18}")) throw new IllegalArgumentException("id must be a saved note id.");
-        try { return Long.parseLong(text); }
-        catch (NumberFormatException invalid) { throw new IllegalArgumentException("id must be a saved note id."); }
+        if (!text.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,79}") || (value instanceof Number && !text.matches("[1-9][0-9]{0,18}")))
+            throw new IllegalArgumentException("id must be an id returned by a Pocket search.");
+        if (text.matches("[0-9]+")) {
+            try { if (!text.matches("[1-9][0-9]{0,18}") || Long.parseLong(text) <= 0) throw new NumberFormatException(); }
+            catch (NumberFormatException invalid) { throw new IllegalArgumentException("id must be an id returned by a Pocket search."); }
+        }
+        return text;
     }
 
     private static boolean matches(String text, String query) {
@@ -514,6 +915,12 @@ final class PocketChatTools {
 
     private static JSONObject stringProperty(String description, int max) throws JSONException {
         return json("type", "string", "description", description, "maxLength", max, "default", "");
+    }
+
+    private static JSONObject idProperty() throws JSONException {
+        return json("description", "The id returned by a Pocket search.", "anyOf", new JSONArray()
+                .put(json("type", "string", "pattern", "^[A-Za-z0-9][A-Za-z0-9_-]*$", "maxLength", 80))
+                .put(json("type", "integer", "minimum", 1)));
     }
 
     private static JSONObject integerProperty(String description, int min, int max, int fallback) throws JSONException {

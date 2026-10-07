@@ -73,7 +73,7 @@ final class ChatCloudCodec {
                     .put("reasoning",old!=null&&clip(old.optString("reasoning"),ClaudeChatRepository.MAX_REASONING_CHARS).equals(reply.reasoning)?old.optString("reasoning"):reply.reasoning)
                     .put("context",new JSONArray(user.context)).put("activity",ChatActivity.read(reply.activity)).put("status",status);
             JSONObject a=copy(old),b=copy(turn);a.remove("updated");b.remove("updated");
-            if(old==null||!canonical(a).equals(canonical(b))){turn.put("updated",record.updated).put("owner",device(context));if(i+2==record.turns.size())turn.put("usage",usage(record.usage));}
+            if(old==null||!canonical(a).equals(canonical(b))){turn.put("updated",record.updated).put("owner",device(context));if(i+2==record.turns.size())turn.put("usage",mergeUsage(turn.optJSONObject("usage"),record.usage));}
             else turn.put("updated",old.optLong("updated",previous.optLong("updated")));
             turns.put(user.id,turn);
         }
@@ -81,6 +81,11 @@ final class ChatCloudCodec {
         return result.put("turns",new JSONArray(sorted)).put("usage",usage(record.usage));
     }
     private static JSONObject usage(ClaudeChatClient.Usage value) throws JSONException {return new JSONObject().put("inputTokens",value.inputTokens).put("outputTokens",value.outputTokens).put("cacheReadTokens",value.cacheReadTokens).put("cacheWriteTokens",value.cacheWriteTokens);}
+    private static JSONObject mergeUsage(JSONObject previous, ClaudeChatClient.Usage value) throws JSONException {
+        JSONObject result=copy(previous), counts=usage(value);
+        for(String key:new String[]{"inputTokens","outputTokens","cacheReadTokens","cacheWriteTokens"})result.put(key,counts.get(key));
+        return result;
+    }
     static ChatProvider.Config provider(JSONObject value) throws JSONException {JSONObject cfg=value.getJSONObject("config");ChatProvider.Config config=new ChatProvider.Config(cfg.getString("provider"),cfg.getString("model"),cfg.getString("baseUrl"),cfg.optInt("maxTokens",2048),true,cfg.optBoolean("webSearch"));config.validate();return config;}
     static ChatStore.Record decode(JSONObject value) throws JSONException {
         String uid=value.getString("uid");long updated=value.getLong("updated");if(!uid.matches("[a-zA-Z0-9_-]{1,100}")||updated<0)throw new JSONException("Invalid chat");

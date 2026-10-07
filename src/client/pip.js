@@ -7,6 +7,7 @@ import { mascot } from "./pip-pixels.js";
 import { backdrop } from "./pixel-backdrop.js";
 import { CATEGORIES, access, saveAccess, definitions, firecrawlKey, setFirecrawlKey } from "./pip-tools.js";
 import { activity, settle, mark, elapsed, activityTitle, phaseLabel } from "./pip-activity.js";
+import { applyProposal } from './pip-actions.js';
 
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, viewportCleanup = null;
@@ -110,6 +111,7 @@ function contextCards(items, remove = null) {
 }
 
 function replyComponent(turn, chat) {
+  const plan = ui.h('div', {class:'pip-plan'}), proposals = ui.h('div', {class:'pip-proposals'});
   const answer = ui.h("div", { class: "md pip-answer" });
   const reasoningText = ui.h("div", { class: "pip-reasoning-text", text: turn.reasoning });
   const reasoning = ui.h("details", { class: "pip-reasoning", hidden: !turn.reasoning }, ui.h("summary", { text: "reasoning summary" }), reasoningText);
@@ -119,10 +121,10 @@ function replyComponent(turn, chat) {
   const sourceTitle = ui.h("summary"), sourceList = ui.h("div");
   const sources = ui.h("details", { class: "pip-sources", "aria-label": "Reply sources", hidden: true }, sourceTitle, sourceList);
   const actions = ui.h("div", { class: "pip-reply-actions" });
-  const reply = ui.h("article", { class: "pip-reply", "aria-label": "pip reply" }, ui.h("div", { class: "pip-speaker", text: "pip" }), toolGroup, reasoning, answer, sources, phase, actions);
+  const reply = ui.h("article", { class: "pip-reply", "aria-label": "pip reply" }, ui.h("div", { class: "pip-speaker", text: "pip" }), plan, toolGroup, reasoning, answer, proposals, sources, phase, actions);
   const message = ui.h("section", { class: "pip-message", "data-turn": turn.uid },
     ui.h("p", { class: "pip-question" }, ui.h("span", { class: "accent", text: "> " }), turn.text), contextCards(turn.context || []), reply);
-  mounted.replies.set(turn.uid, { answer, reasoning, reasoningText, tools, toolGroup, toolTitle, sources, sourceTitle, sourceList, phase, actions, chat });
+  mounted.replies.set(turn.uid, { answer, reasoning, reasoningText, tools, toolGroup, toolTitle, sources, sourceTitle, sourceList, phase, actions, chat, plan, proposals });
   updateReply(turn); return message;
 }
 
@@ -138,6 +140,15 @@ function updateReply(turn) {
   if (parts.lastAnswer !== turn.answer) { parts.answer.replaceChildren(ui.markdown(turn.answer || "")); parts.lastAnswer = turn.answer; }
   parts.reasoning.hidden = !turn.reasoning; parts.reasoningText.textContent = turn.reasoning || "";
   const rows = !active && turn.status === "streaming" ? settle(turn.activity, "failed", "Interrupted") : activity(turn.activity), signature = JSON.stringify(rows);
+  if (parts.agentSignature !== signature + active) {
+    const decoded = rows.filter(row => row.state === 'done').flatMap(row => { try { return [{row,value:JSON.parse(row.result || '{}')}]; } catch { return []; } });
+    const lastPlan = (decoded.filter(item => Array.isArray(item.value.plan)).at(-1)?.value.plan || []).filter(step => step && typeof step.text === 'string' && ['pending','in_progress','done'].includes(step.status)).slice(0,8);
+    parts.plan.replaceChildren(...lastPlan.map(step => ui.h('div', {class:'pip-plan-step ' + step.status}, ui.h('span', {text:step.status === 'done' ? '□' : step.status === 'in_progress' ? '◌' : '◇'}), ui.h('span', {text:step.text}))));
+    parts.proposals.replaceChildren(...decoded.filter(item => ['note','task','appointment'].includes(item.value.proposal?.kind) && typeof item.value.proposal.title === 'string').map(({row,value}) => ui.h('section', {class:'pip-proposal','data-proposal':row.id},
+      caption(value.proposal.kind), ui.h('strong', {text:value.proposal.title}),
+      row.applied_href ? sourceLink({href:row.applied_href,title:'open saved ' + value.proposal.kind}) : button('review ' + value.proposal.kind, () => reviewProposal(parts.chat, turn, row, value.proposal), {disabled:active}))));
+    parts.agentSignature = signature + active;
+  }
   parts.toolGroup.hidden = !rows.length; parts.toolTitle.textContent = activityTitle(rows);
   if (parts.lastStatus !== turn.status) { parts.toolGroup.open = active; parts.lastStatus = turn.status; }
   if (parts.activitySignature !== signature) {
@@ -177,7 +188,7 @@ function updateReply(turn) {
         const task = tasks.create(value, { kind: "shared", name: "pip · " + parts.chat.title, text: text().slice(0, 8000) }); ui.go("/tasks/" + task.uid);
       }),
       button("copy", async () => { await navigator.clipboard.writeText(text()); ui.say("Copied."); })
-    ] : []), ...(turn.status !== "done" && parts.chat.turns.at(-1)?.uid === turn.uid ? [button("retry", () => runner.send(parts.chat.uid, { retry: turn.uid }), { disabled: Boolean(runner.active) })] : []));
+    ] : []), ...(turn.status !== "done" && parts.chat.turns.at(-1)?.uid === turn.uid ? [button("continue", () => runner.send(parts.chat.uid, { resume: turn.uid }), {disabled:Boolean(runner.active)}), button("restart", () => runner.send(parts.chat.uid, { retry: turn.uid }), { disabled: Boolean(runner.active) })] : []));
   } else parts.actions.replaceChildren();
   if (follow) thread.scrollTop = thread.scrollHeight;
 }
@@ -185,6 +196,38 @@ function updateReply(turn) {
 function sourceLink(item, title = item.title) {
   return item.href.startsWith("/") ? button(title, () => ui.go(item.href), { class: "pip-source" })
     : ui.h("a", { class: "pip-source", href: item.href, target: "_blank", rel: "noopener noreferrer", text: title });
+}
+
+async function reviewProposal(chat, turn, row, proposal) {
+  let saving = false;
+  const title = ui.h('input', {'aria-label':'Proposal title',maxlength:200,value:proposal.title});
+  const text = ui.h('textarea', {'aria-label':'Proposal text',maxlength:6000,rows:5}); text.value = proposal.text || '';
+  const due = ui.h('input', {type:'date','aria-label':'Task due date',value:proposal.due || ''});
+  const steps = ui.h('textarea', {'aria-label':'Task steps',rows:4}); steps.value = (proposal.steps || []).join('\n');
+  const when = ui.h('input', {type:'datetime-local','aria-label':'Appointment time'});
+  const initial = new Date(proposal.when || Date.now() + 3600000);
+  if (Number.isFinite(+initial)) when.value = new Date(+initial - initial.getTimezoneOffset() * 60000).toISOString().slice(0,16);
+  const minutes = ui.h('input', {type:'number',min:15,max:480,'aria-label':'Appointment minutes',value:proposal.minutes || 60});
+  const error = caption(''); error.classList.add('warn');
+  const form = ui.h('div', {class:'pip-settings'}, ui.h('label', {}, 'title', title), proposal.kind !== 'appointment' ? ui.h('label', {}, proposal.kind === 'task' ? 'context' : 'text', text) : null,
+    proposal.kind === 'task' ? [ui.h('label', {}, 'due', due), ui.h('label', {}, 'steps', steps)] : null,
+    proposal.kind === 'appointment' ? [ui.h('label', {}, 'when', when), ui.h('label', {}, 'minutes', minutes)] : null, error,
+    button('save ' + proposal.kind, async () => {
+      if (saving) return;
+      saving = true;
+      try {
+        const current = store.get(chat.uid), latest = current?.turns.find(t => t.uid === turn.uid), event = activity(latest?.activity).find(item => item.id === row.id);
+        if (!event || runner.active?.chatId === chat.uid) throw new Error('Let Pip finish first.');
+        if (event.applied_href) { ui.closeDialog(); return; }
+        const payload = {...proposal,title:title.value,text:text.value,due:due.value,steps:steps.value.split('\n').map(s=>s.trim()).filter(Boolean),minutes:Number(minutes.value),
+          ...(proposal.kind === 'appointment' ? {when:new Date(when.value).toISOString()} : {})};
+        const href = await applyProposal(chat.uid, turn.uid, row.id, payload);
+        store.update(chat.uid, c => { const saved = c.turns.find(t => t.uid === turn.uid)?.activity?.find(item => item.id === row.id); if (!saved) throw new Error('This reply is no longer available.'); saved.applied_href = href; saved.applied = Date.now(); });
+        ui.closeDialog(); render();
+      } catch (failure) { error.textContent = failure.message; }
+      finally { saving = false; }
+    }, {class:'accent'}));
+  await ui.dialog(proposal.kind, form, [['cancel', null]]);
 }
 
 async function pocketAccess(chat) {

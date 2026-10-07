@@ -2,6 +2,14 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.18.0 — Pip agent
+
+- Pip can plan and complete multi-step research on phone and web: eight tool continuations and a final synthesis, 20 client calls, eight web calls, 48,000 characters of tool data, three concurrent independent reads and five minutes. The configured reply token budget spans all rounds, including providers that omit token usage. Unoffered tools never execute.
+- Search across permitted Notes, Tasks, Thoughts and Calendar. Read task details and paged notes; filter web searches by domain and recency, and read matching passages or later pages. Cached reads are marked, and grants are checked before restoring observations, after reads and for cache hits.
+- Plans appear above the answer. Editable Note, Task and Appointment proposals require the user's Save. Saved proposals open their actual record. Portable IDs prevent duplicate approval, and tombstones prevent restoring deleted records. Thoughts remain separate from tasks.
+- **Continue** resumes the latest stopped or failed reply using completed observations; **Restart** begins again. Results, plans, proposals and approval markers persist and sync through the existing Pocket account. Native checkpoints save completion and result atomically.
+- Android and Astro builds passed, with focused native and browser checks covering transport, tools, approvals, real review UI, interruption and two-way account sync. Model/search traffic was simulated; no handset was attached. The full suite and lint were skipped as requested. The APK is unsigned for the signing agent.
+
 ## 0.17.0 — Warm Console
 
 - Phone and web share warm ink, cream IBM Plex Mono, VT323 headings and readings, amber actions, and restrained sage, blue, lilac and coral accents. Dithered artwork stays in headers; lists, editors and chat remain plain. Pip appears as a larger animated sprite in navigation without a text label.

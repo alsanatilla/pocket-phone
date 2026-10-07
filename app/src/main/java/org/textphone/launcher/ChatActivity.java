@@ -12,13 +12,20 @@ import org.json.JSONObject;
 final class ChatActivity {
     private final Map<String, JSONObject> rows = new LinkedHashMap<>();
     private final Consumer<String> changed;
+    private boolean deferred;
     ChatActivity(Consumer<String> changed) { this.changed = changed; }
 
-    void record(String id, String name, JSONObject input, String state, String summary, JSONArray sources) throws JSONException {
+    synchronized void restore(String raw) {
+        JSONArray saved = read(raw);
+        for (int i = 0; i < saved.length(); i++) { JSONObject row = saved.optJSONObject(i); if (row != null) rows.put(row.optString("id"), row); }
+        publish();
+    }
+
+    synchronized void record(String id, String name, JSONObject input, String state, String summary, JSONArray sources) throws JSONException {
         if (id == null || id.isEmpty()) return;
         JSONObject row = rows.get(id);
         if (row == null) {
-            if (rows.size() >= 32) return;
+            if (rows.size() >= 64) rows.remove(rows.keySet().iterator().next());
             row = new JSONObject().put("id", id).put("started", System.currentTimeMillis()); rows.put(id, row);
         }
         if (name != null) row.put("name", name).put("kind", isWeb(name) ? "web" : "tool");
@@ -26,7 +33,30 @@ final class ChatActivity {
         if (state != null) { row.put("state", state); if (!("queued".equals(state) || "running".equals(state))) row.put("ended", System.currentTimeMillis()); }
         if (summary != null) row.put("summary", summary);
         if (sources != null) row.put("sources", sources);
-        changed.accept(normalize(new JSONArray(rows.values()).toString()));
+        publish();
+    }
+
+    synchronized void result(String id, String result) throws JSONException {
+        JSONObject row = rows.get(id);
+        if (row == null || result == null || result.length() > 8000) return;
+        new JSONObject(result); row.put("result", result); publish();
+    }
+
+    /** A completed observation and its terminal state enter storage in the same listener snapshot. */
+    synchronized void complete(String id, String name, JSONObject input, String state, String summary, JSONArray sources, String result) throws JSONException {
+        if (result == null || result.length() > 8000) throw new JSONException("Invalid completed tool result.");
+        new JSONObject(result);
+        deferred = true;
+        try { record(id, name, input, state, summary, sources); result(id, result); }
+        finally { deferred = false; }
+        publish();
+    }
+
+    private void publish() {
+        if (deferred) return;
+        String raw = new JSONArray(rows.values()).toString();
+        while (raw.length() > 120000 && rows.size() > 1) { rows.remove(rows.keySet().iterator().next()); raw = new JSONArray(rows.values()).toString(); }
+        changed.accept(normalize(raw));
     }
 
     static JSONArray read(String raw) {
@@ -34,14 +64,13 @@ final class ChatActivity {
         try {
             if (raw == null || raw.length() > 128000) return clean;
             JSONArray values = new JSONArray(raw == null ? "[]" : raw);
-            if (values.length() > 32) return clean;
-            for (int i = 0; i < values.length(); i++) {
+            for (int i = Math.max(0, values.length() - 64); i < values.length(); i++) {
                 JSONObject row = values.optJSONObject(i); if (row == null || row.optString("id").isEmpty()) continue;
                 String state = row.optString("state");
                 if (!("queued".equals(state) || "running".equals(state) || "done".equals(state) || "failed".equals(state) || "stopped".equals(state))) continue;
                 JSONObject safe = new JSONObject().put("id", clip(row.optString("id"), 200)).put("kind", "web".equals(row.optString("kind")) || isWeb(row.optString("name")) ? "web" : "tool")
                         .put("name", clip(row.optString("name"), 80)).put("title", clip(row.optString("title"), 240))
-                        .put("input", clip(row.optString("input"), 1024)).put("state", state).put("summary", clip(row.optString("summary"), 500))
+                        .put("input", clip(row.optString("input"), 8000)).put("state", state).put("summary", clip(row.optString("summary"), 500))
                         .put("started", Math.max(0, row.optLong("started"))).put("ended", Math.max(0, row.optLong("ended")));
                 JSONArray links = new JSONArray(), supplied = row.optJSONArray("sources");
                 if (supplied != null) for (int n = 0; n < Math.min(8, supplied.length()); n++) {
@@ -49,7 +78,11 @@ final class ChatActivity {
                     JSONObject valid = source(link.optString("href", link.optString("url")), link.optString("title")); if (valid != null) links.put(valid);
                 }
                 safe.put("sources", links); clean.put(safe);
-                if (clean.toString().length() > 64000) { clean.remove(clean.length() - 1); break; }
+                String result = row.optString("result");
+                if (!result.isEmpty() && result.length() <= 8000) try { new JSONObject(result); safe.put("result", result); } catch (JSONException invalid) { }
+                JSONObject applied = source(row.optString("applied_href"), "");
+                if (applied != null && applied.optString("href").startsWith("/")) safe.put("applied_href", applied.optString("href")).put("applied", Math.max(0, row.optLong("applied")));
+                if (clean.toString().length() > 120000) { clean.remove(clean.length() - 1); break; }
             }
         } catch (JSONException | RuntimeException damaged) { return new JSONArray(); }
         return clean;
@@ -66,7 +99,7 @@ final class ChatActivity {
     static JSONObject source(String href, String title) {
         if (href == null || href.length() > 2048) return null;
         try {
-            if (!href.matches("^/(notes|tasks|thoughts|gym|movement)(/.*)?$")) {
+            if (!href.matches("^/(notes|tasks|thoughts|gym|movement|calendar)(/.*)?$")) {
                 URI uri = new URI(href);
                 if (!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme())) || uri.getHost() == null || uri.getUserInfo() != null) return null;
             }

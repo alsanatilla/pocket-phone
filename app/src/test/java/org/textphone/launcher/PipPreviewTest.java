@@ -123,7 +123,7 @@ public class PipPreviewTest {
         String id = repository.snapshot().turns.get(1).id;
         TextView toggle = root.findViewWithTag("pip_activity_" + id); assertTrue(toggle.getText().toString().contains("running"));
         toggle.performClick();
-        LinearLayout turn = root.findViewWithTag("claude_turn_" + id); ViewGroup events = (ViewGroup) turn.getChildAt(2);
+        ViewGroup events = root.findViewWithTag("pip_tool_rows_" + id);
         assertEquals(View.VISIBLE, events.getVisibility()); assertEquals(1, events.getChildCount());
         org.json.JSONArray sources = new org.json.JSONArray().put(ChatActivity.source("https://example.com/source", "Preview source"));
         trace.record("lookup", "search_web", null, "done", "1 result", sources);
@@ -137,6 +137,37 @@ public class PipPreviewTest {
         events.getChildAt(0).performClick(); AlertDialog details = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
         assertNotNull(details); assertTrue(details.isShowing());
         assertTrue("Execution preserves the actual query", containsText(details.getWindow().getDecorView(), "test-only source query"));
+    }
+    @Test public void proposalReviewRequiresExplicitSaveAndPersistsEditedTask() throws Exception {
+        repository.send("Research and propose one chosen action."); assertTrue(started.get(0).await(5, TimeUnit.SECONDS));
+        ChatActivity trace = new ChatActivity(listeners.get(0)::activity);
+        trace.record("plan", "update_plan", new org.json.JSONObject(), "done", "1 step", null);
+        trace.result("plan", new org.json.JSONObject().put("kind", "plan").put("plan", new org.json.JSONArray().put(new org.json.JSONObject().put("text", "Compare ferry options").put("status", "done"))).toString());
+        org.json.JSONObject proposal = new org.json.JSONObject().put("kind", "task").put("title", "Book ferry").put("text", "Research source context").put("due", "2026-10-10").put("steps", new org.json.JSONArray().put("Check departure"));
+        trace.record("proposal", "propose_action", new org.json.JSONObject(), "done", "Book ferry", null);
+        trace.result("proposal", new org.json.JSONObject().put("kind", "proposal").put("proposal", proposal).put("requires_confirmation", true).toString());
+        listeners.get(0).text("One proposal is ready."); listeners.get(0).done(ClaudeChatRepository.MODEL, ClaudeChatClient.Usage.EMPTY);
+        open(); View root = save(controller.get(), "pocket-agent-proposal.png");
+        assertTrue(containsText(root, "Compare ferry options"));
+        assertFalse("Plans are not labelled as data reads", containsText(root, "Pocket read"));
+        String reply = repository.snapshot().turns.get(1).id, uid = PipActions.id(repository.currentId(), repository.proposalUserId(reply), "proposal");
+        PlannerStore planner = new PlannerStore(context.getSharedPreferences("pocket_planner", 0)); assertNull(TaskSync.byUid(planner, uid));
+        root.findViewWithTag("pip_proposal_proposal").performClick();
+        AlertDialog dialog = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick(); assertNull(TaskSync.byUid(planner, uid));
+        root.findViewWithTag("pip_proposal_proposal").performClick(); dialog = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+        ((android.widget.EditText) dialog.findViewById(android.R.id.content).findViewWithTag("pip_proposal_title")).setText("Book the morning ferry");
+        ((android.widget.EditText) dialog.findViewById(android.R.id.content).findViewWithTag("pip_proposal_steps")).setText("Compare prices\nPay for ticket");
+        saveView(dialog.getWindow().getDecorView(), "pocket-agent-review-task.png");
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+        PlannerStore.Entry saved = TaskSync.byUid(planner, uid); assertNotNull(saved); assertEquals("Book the morning ferry", saved.text); assertEquals(2, saved.steps.size()); assertEquals("2026-10-10", saved.due);
+        org.json.JSONObject event = ChatActivity.read(repository.snapshot().turns.get(1).activity).getJSONObject(1);
+        assertEquals("/tasks/" + uid, event.getString("applied_href"));
+        sidebar.closeImmediately(); sidebar.open(); root = save(controller.get(), "pocket-agent-proposal-saved.png");
+        assertTrue(containsText(root, "open saved task"));
+        root.findViewWithTag("pip_proposal_proposal").performClick();
+        android.content.Intent opened = Shadows.shadowOf(controller.get()).getNextStartedActivity();
+        assertNotNull(opened); assertEquals(saved.id, opened.getLongExtra("pocket_task", -1));
     }
     private boolean containsText(View view, String value) {
         if (view instanceof TextView && ((TextView) view).getText().toString().contains(value)) return true;
