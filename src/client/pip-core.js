@@ -19,7 +19,7 @@ export function config(value = DEFAULT_CONFIG) {
   if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) throw new Error("Use an HTTPS API base URL without credentials, a query or a fragment.");
   const maxTokens = Number(value.maxTokens);
   if (!Number.isInteger(maxTokens) || maxTokens < 64 || maxTokens > 8192) throw new Error("Choose a reply limit from 64 to 8,192 tokens.");
-  return { provider: value.provider, model, baseUrl: url.href.replace(/\/+$/, ""), maxTokens, thinking: Boolean(value.thinking), webSearch: value.provider === "anthropic" && Boolean(value.webSearch) };
+  return { provider: value.provider, model, baseUrl: url.href.replace(/\/+$/, ""), maxTokens, thinking: Boolean(value.thinking), webSearch: Boolean(value.webSearch) };
 }
 export const identity = value => [value.provider, value.baseUrl, value.model].join("|");
 export const keyName = value => value.provider === "anthropic" ? "pocket:claude-key" : "pocket:pip-key:" + value.baseUrl;
@@ -106,7 +106,7 @@ export function requestBody(chat, turn) {
   const messages = [...pairs, { role: "user", content: prompt(turn) }], value = chat.config;
   const body = { model: value.model, max_tokens: value.maxTokens, stream: true, messages };
   const reads = definitions(value), system = SYSTEM + (reads.length ? " Read only the Pocket categories offered by your tools." : " No Pocket access is enabled; read only attached context.")
-    + (value.webSearch ? " Web search is available; use it for current information and cite its URLs." : " Web search is off. Do not claim to browse or search the web.");
+    + (value.webSearch ? " Web search is available; use it for current information and cite its URLs." + (value.provider === "anthropic" ? "" : " Use search_web to find pages and read_web_page to read one.") : " Web search is off. Do not claim to browse or search the web.");
   if (value.provider === "anthropic") {
     body.system = system;
     const tools = [...reads, ...(value.webSearch ? [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }] : [])];

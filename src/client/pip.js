@@ -5,7 +5,7 @@ import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings,
 import { notes, tasks, parking, noteTitle, receipt, KIND } from "./store.js";
 import { mascot } from "./pip-pixels.js";
 import { backdrop } from "./pixel-backdrop.js";
-import { CATEGORIES, access, saveAccess, definitions } from "./pip-tools.js";
+import { CATEGORIES, access, saveAccess, definitions, firecrawlKey, setFirecrawlKey } from "./pip-tools.js";
 import { activity, settle, mark, elapsed, activityTitle, phaseLabel } from "./pip-activity.js";
 
 const store = new ChatStore();
@@ -172,11 +172,11 @@ function composer(chat) {
   const activeHere = runner.active?.chatId === chat.uid;
   const capabilities = ui.h("div", { class: "pip-capabilities" },
     button("□ tools [" + definitions(chat.config).length + "]", () => pocketAccess(chat), { title: "Choose Pocket sources Pip can read" }),
-    button(chat.config.provider === "anthropic" ? "△ web · " + (chat.config.webSearch ? "on" : "off") : "△ web · unavailable", () => {
+    button("△ web · " + (chat.config.webSearch ? "on" : "off"), () => {
       if (runner.active) runner.stop();
       const value = config({ ...chat.config, webSearch: !chat.config.webSearch });
       store.update(chat.uid, c => { c.config = value; }); saveSettings(value); render();
-    }, { disabled: chat.config.provider !== "anthropic", "aria-pressed": String(chat.config.webSearch), title: "Provider web search" }));
+    }, { "aria-pressed": String(chat.config.webSearch), title: chat.config.provider === "anthropic" ? "Anthropic web search" : "Web search through Firecrawl" }));
   const actions = ui.h("div", { class: "pip-composer-actions" },
     button("+ context", () => attachSource(chat.uid)),
     button(chat.config.model, () => apiSettings(chat.config), { class: "pip-model", title: "Model and API settings" }),
@@ -225,17 +225,18 @@ async function apiSettings(current) {
   const key = ui.h("input", { "aria-label": "API key", type: "password", autocomplete: "off", placeholder: "API key · leave blank to keep" });
   const limit = ui.h("input", { "aria-label": "Reply token limit", type: "number", min:64, max:8192 }); limit.value = current.maxTokens;
   const thinking = ui.h("input", { type: "checkbox", "aria-label": "Provider reasoning summary" }); thinking.checked = current.thinking;
+  const crawl = ui.h("input", { "aria-label": "Firecrawl key", type: "password", autocomplete: "off", placeholder: firecrawlKey() ? "set · leave blank to keep" : "optional · fc-…" });
   const destination = caption(""), error = caption(""); error.classList.add("warn");
   const refresh = () => { endpoint.disabled = provider.value === "anthropic"; thinking.disabled = provider.value !== "anthropic"; destination.textContent = provider.value === "anthropic" ? "Key · this tab · shared with Paper" : "Key · this endpoint and tab · CORS required"; };
   provider.onchange = () => { model.value = provider.value === "anthropic" ? DEFAULT_CONFIG.model : ""; endpoint.value = provider.value === "anthropic" ? DEFAULT_CONFIG.baseUrl : ""; key.value = ""; refresh(); }; refresh();
   const form = ui.h("div", { class:"pip-settings" },
     ui.h("label", {}, "Provider", provider), ui.h("label", {}, "Model", model), ui.h("label", {}, "API base URL", endpoint), ui.h("label", {}, "Key", key), destination,
-    ui.h("label", {}, "Reply limit (tokens)", limit), ui.h("label", { class:"check-label" }, thinking, "Reasoning summary"), error,
+    ui.h("label", {}, "Firecrawl key · web search for this API", crawl), ui.h("label", {}, "Reply limit (tokens)", limit), ui.h("label", { class:"check-label" }, thinking, "Reasoning summary"), error,
     button("forget this endpoint’s key", () => { const value=config({provider:provider.value,model:model.value,baseUrl:endpoint.value,maxTokens:limit.value,thinking:thinking.checked}); if (runner.active) runner.stop(); sessionStorage.removeItem(keyName(value)); destination.textContent="Key forgotten for this endpoint."; }, {class:"row-button"}),
     button("save settings", () => {
       try {
         const value=config({provider:provider.value,model:model.value,baseUrl:endpoint.value,maxTokens:limit.value,thinking:thinking.checked,webSearch:current.webSearch && provider.value===current.provider});
-        if (runner.active) runner.stop(); if (key.value.trim()) setKey(value,key.value); saveSettings(value);
+        if (runner.active) runner.stop(); if (key.value.trim()) setKey(value,key.value); if (crawl.value.trim()) setFirecrawlKey(crawl.value); saveSettings(value);
         const chat=mounted ? store.get(mounted.uid) : null;
         if (!chat) { const next=store.create(value); ui.closeDialog(); ui.go("/pip/"+next.uid); return; }
         if (identity(value) !== identity(chat.config) && chat.turns.length) {

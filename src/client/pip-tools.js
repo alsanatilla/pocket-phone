@@ -1,6 +1,13 @@
 import { storage as localStorage } from './workspace-storage.js';
 import { notes, tasks, parking, gym, noteTitle } from "./store.js";
 
+// Web search for providers without their own: Firecrawl search and page reading. Works without a key at low volume;
+// a Firecrawl key (API settings) raises the limits. The key stays in this tab, like provider keys.
+const FIRECRAWL = "https://api.firecrawl.dev/v2", FIRECRAWL_KEY = "pocket:firecrawl-key";
+export const firecrawlKey = (storage = sessionStorage) => storage.getItem(FIRECRAWL_KEY) || "";
+export function setFirecrawlKey(key, storage = sessionStorage) { const value = String(key || "").trim(); if (value.length > 200 || /\s/.test(value)) throw new Error("Check the Firecrawl key."); if (value) storage.setItem(FIRECRAWL_KEY, value); else storage.removeItem(FIRECRAWL_KEY); }
+export const webTools = value => value.provider !== "anthropic" && Boolean(value.webSearch);
+
 export const CATEGORIES = [["notes", "Notes"], ["thoughts", "Thoughts"], ["tasks", "Tasks"], ["gym", "Gym"], ["coros", "Movement · COROS cache"]];
 const permissionKey = value => "pocket:pip-access:" + value.provider + "|" + value.baseUrl;
 export function access(value, storage = localStorage) {
@@ -22,7 +29,31 @@ const TOOLS = [
   tool("gym", "gym_summary", "Read locally saved workouts and their exercise sets from the last 1–30 days. Never edits a workout.", days),
   tool("coros", "coros_summary", "Read COROS readings already cached in Movement. Never refreshes or calls COROS. Check last_updated and stale; missing data is not a zero reading.", days)
 ];
-export const definitions = value => TOOLS.filter(t => access(value).includes(t.category)).map(({ category, ...definition }) => structuredClone(definition));
+const WEB = [
+  { name: "search_web", description: "Search the web for current information. Returns up to 5 results with title, url and description. Cite the urls you use.", input_schema: { type: "object", properties: { query: { type: "string", description: "What to search for.", maxLength: 300 }, limit: integer("Maximum results.", 1, 5, 5) }, required: ["query"], additionalProperties: false } },
+  { name: "read_web_page", description: "Read the main text of one web page (up to 6000 characters), usually a url from search_web.", input_schema: { type: "object", properties: { url: { type: "string", description: "The page's https URL.", maxLength: 2048 } }, required: ["url"], additionalProperties: false } },
+];
+export const definitions = value => [...TOOLS.filter(t => access(value).includes(t.category)).map(({ category, ...definition }) => structuredClone(definition)), ...(webTools(value) ? structuredClone(WEB) : [])];
+async function web(value, name, args, signal) {
+  if (!webTools(value)) return failure("access_disabled", "Web search is off.");
+  const key = firecrawlKey(), headers = { "content-type": "application/json", ...(key ? { authorization: "Bearer " + key } : {}) };
+  const post = (path, body) => fetch(FIRECRAWL + path, { method: "POST", headers, body: JSON.stringify(body), signal, credentials: "omit", referrerPolicy: "no-referrer" });
+  const refused = status => failure("web_unavailable", status === 401 || status === 402 || status === 429 ? "Web search is unavailable right now (Firecrawl " + status + "). A Firecrawl key in API settings raises the limit." : "Web search failed (Firecrawl " + status + ").");
+  if (name === "search_web") {
+    const query = typeof args.query === "string" ? args.query.trim() : "", limit = args.limit ?? 5;
+    if (!query || query.length > 300 || !Number.isInteger(limit) || limit < 1 || limit > 5) return failure("invalid_arguments", "Use a short query and 1–5 results.");
+    const response = await post("/search", { query, limit, timeout: 20000 });
+    if (!response.ok) return refused(response.status);
+    const found = await response.json(), list = Array.isArray(found.data) ? found.data : found.data?.web || [];
+    return { source: "web:firecrawl", query, results: list.slice(0, limit).filter(item => /^https?:\/\//.test(item.url || "")).map(item => ({ title: String(item.title || item.url).slice(0, 160), url: String(item.url).slice(0, 2048), description: String(item.description || "").slice(0, 400) })) };
+  }
+  let url; try { url = new URL(args.url); } catch { return failure("invalid_arguments", "Use an https URL."); }
+  if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return failure("invalid_arguments", "Use a public https URL.");
+  const response = await post("/scrape", { url: url.href, formats: ["markdown"], onlyMainContent: true, timeout: 20000 });
+  if (!response.ok) return refused(response.status);
+  const page = (await response.json()).data || {}, text = String(page.markdown || "");
+  return { source: url.href, url: url.href, title: String(page.metadata?.title || url.hostname).slice(0, 160), text: text.slice(0, 6000), truncated: text.length > 6000 };
+}
 const failure = (error, message) => ({ error, message });
 const matches = (value, query) => query.toLowerCase().trim().split(/\s+/).filter(Boolean).every(word => value.toLowerCase().includes(word));
 const excerpt = (value, query) => { const at = query.trim() ? value.toLowerCase().indexOf(query.trim().split(/\s+/)[0].toLowerCase()) : 0; return value.slice(Math.max(0, at - 100), Math.max(0, at - 100) + 500); };
@@ -30,6 +61,7 @@ const recent = (items, query) => items.filter(item => matches(item.text, query))
 const cached = key => { try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; } };
 export async function execute(value, name, args = {}, signal) {
   if (signal?.aborted) throw new DOMException("Stopped", "AbortError");
+  if (name === "search_web" || name === "read_web_page") return web(value, name, args || {}, signal);
   const definition = TOOLS.find(t => t.name === name);
   if (!definition || !access(value).includes(definition.category)) return failure("access_disabled", "Access to this Pocket source is off.");
   if (!args || typeof args !== "object" || Array.isArray(args) || Object.keys(args).some(key => !(key in definition.input_schema.properties))) return failure("invalid_arguments", "Unrecognized tool arguments.");
@@ -73,7 +105,8 @@ export async function execute(value, name, args = {}, signal) {
 }
 export function label(name, input = {}) {
   const query = typeof input?.query === "string" ? input.query.slice(0, 200) : "";
-  if (name === "web_search") return "search web" + (query ? " · “" + query + "”" : "");
+  if (name === "web_search" || name === "search_web") return "search web" + (query ? " · “" + query + "”" : "");
+  if (name === "read_web_page") { try { return "read page · " + new URL(input.url).hostname; } catch { return "read page"; } }
   if (name.startsWith("search_")) return "search " + name.slice(7) + (query ? " · “" + query + "”" : "");
   if (name === "read_note") return "read note";
   if (name === "coros_summary") return "read COROS cache · " + (input.days || 7) + " days";
@@ -84,6 +117,8 @@ export function summary(name, result) {
   if (result.error) return result.message || result.error;
   if (result.available === false) return result.message || "No cached data";
   if (name === "read_note") return result.title || "Note read";
+  if (name === "search_web") return (result.results?.length || 0) + " results";
+  if (name === "read_web_page") return result.title || "Page read";
   if (name === "coros_summary") return (result.stale ? "stale cache" : "cached readings") + (result.last_updated ? " · " + result.last_updated.slice(0, 10) : "");
   const count = result.matched || 0; return count + (name === "gym_summary" ? " workouts" : " matches") + (result.truncated ? " · partial" : "");
 }
@@ -91,6 +126,8 @@ export function sources(name, result) {
   if (result.error || result.available === false) return [];
   if (name === "coros_summary") return [{ title: "Movement · COROS cache", href: "/movement" }];
   if (name === "read_note") return [{ title: result.title, href: "/notes/" + encodeURIComponent(result.id) }];
+  if (name === "search_web") return (result.results || []).map(item => ({ title: item.title, href: item.url }));
+  if (name === "read_web_page") return [{ title: result.title, href: result.url }];
   const kind = name === "search_notes" ? "notes" : name === "search_thoughts" ? "thoughts" : name === "search_tasks" ? "tasks" : "gym";
   const items = result[kind] || result.workouts || [];
   return items.slice(0, 5).map(item => ({ title: item.title || item.text?.slice(0, 80) || new Date(item.started).toLocaleDateString(), href: "/" + kind + "/" + (kind === "gym" ? "w:" : "") + encodeURIComponent(item.id) }));

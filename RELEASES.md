@@ -2,6 +2,12 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.14.0 — OpenRouter that answers, web search everywhere
+
+- **Free OpenRouter models.** With OpenRouter's `openrouter/free` or any `:free` model, pip sends a fallback list (NVIDIA Nemotron 3 Super, Ling 3.0 Flash, then the free router). OpenRouter moves to the next one when a model is rate-limited. The free router alone sometimes picked a safety-classifier model that returned no reply. A busy provider (HTTP 429, 502 or 503) is retried twice before pip gives up. Nothing has been generated at that point, so nothing is charged twice.
+- **Web search with any provider.** The web toggle now works with OpenAI-compatible APIs too. Pip gets two tools, `search_web` and `read_web_page`, both served by [Firecrawl](https://firecrawl.dev). Searches and pages show up in the activity list with their links. Firecrawl works without a key at low volume. An optional Firecrawl key goes in API settings (browser) or Provider & model (phone); the phone stores it encrypted, the browser keeps it in the tab session. Anthropic keeps its own server-side search.
+- Astro and Android builds passed. In the browser, a live OpenRouter run with `openrouter/free` and web search on sent the fallback list and both tools, called Firecrawl search and page reading, and answered with a cited source. The test suite is skipped as requested and the handset was not available, so the phone side is compiled only. The APK is unsigned for the release agent.
+
 ## 0.13.0 — PlayStation pip
 
 - **pip in 3D.** The 2D sprites are replaced by a low-poly 3D pip rendered with PS1 traits: wobbling vertices, swimming textures, painter-sorted triangles and the console's 15-bit dither. He is a little handheld console with a hand-textured face (glowing eyes, d-pad, buttons) and back (battery cover, screws, label), stubby limbs and a glowing antenna, standing on a small stage. Six keyed activities: wave, walk (across the stage and back), juggle, read (a book with a turning page), hop (squash and stretch) and write (pencil and notepad), plus a crouch while you pull to refresh.

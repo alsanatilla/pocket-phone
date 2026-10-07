@@ -519,9 +519,8 @@ final class ClaudeSidebar extends FrameLayout {
         emptyText.setVisibility(View.GONE);
         chats.setText("chats ["+repository.chats().size()+"]");modelPicker.setText(provider.model);
         toolsPicker.setText("□ tools [" + PocketChatTools.definitions(activity).size() + "]");
-        boolean searchAvailable = "anthropic".equals(provider.provider);
-        webPicker.setText(searchAvailable ? "△ web · " + (provider.webSearch ? "on" : "off") : "△ web · unavailable");
-        webPicker.setEnabled(searchAvailable); webPicker.setTextColor(provider.webSearch ? PocketDesign.accent(activity) : PocketDesign.MUTED);
+        webPicker.setText("△ web · " + (provider.webSearch ? "on" : "off"));
+        webPicker.setEnabled(true); webPicker.setTextColor(provider.webSearch ? PocketDesign.accent(activity) : PocketDesign.MUTED);
         String context=ChatContext.write(repository.context());if(!context.equals(shownContext)){shownContext=context;contextRow.removeAllViews();addContextRows(contextRow,repository.context(),true);}
         StringBuilder access = new StringBuilder();
         String[] categories = {PocketChatTools.NOTES, PocketChatTools.COROS};
@@ -736,7 +735,6 @@ final class ClaudeSidebar extends FrameLayout {
 
     private void toggleWebSearch() {
         ChatProvider.Config current = ChatProvider.get(activity);
-        if (!"anthropic".equals(current.provider)) return;
         try {
             repository.stopAll();
             ChatProvider.save(activity, new ChatProvider.Config(current.provider, current.model, current.baseUrl,
@@ -772,6 +770,11 @@ final class ClaudeSidebar extends FrameLayout {
         url.setContentDescription("HTTPS API base URL");
         fields.addView(url, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         EditText key = settingsField(fields, "API key", "", "Leave blank to keep this endpoint’s key", true);
+        LinearLayout crawlBox = new LinearLayout(activity);
+        crawlBox.setOrientation(LinearLayout.VERTICAL);
+        EditText crawl = settingsField(crawlBox, "Firecrawl key · web search", "",
+                ChatProvider.firecrawlPresent(activity) ? "Saved · leave blank to keep" : "Optional · fc-…", true);
+        fields.addView(crawlBox);
         TextView validation = label("", 14, PocketDesign.WARNING);
         validation.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         fields.addView(validation);
@@ -781,6 +784,7 @@ final class ClaudeSidebar extends FrameLayout {
         boolean initialCustom = initial == 1;
         urlLabel.setVisibility(initialCustom ? View.VISIBLE : View.GONE);
         url.setVisibility(initialCustom ? View.VISIBLE : View.GONE);
+        crawlBox.setVisibility(initialCustom ? View.VISIBLE : View.GONE);
         picker.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 if (position != selected[0]) {
@@ -794,6 +798,7 @@ final class ClaudeSidebar extends FrameLayout {
                 boolean custom = position == 1;
                 urlLabel.setVisibility(custom ? View.VISIBLE : View.GONE);
                 url.setVisibility(custom ? View.VISIBLE : View.GONE);
+                crawlBox.setVisibility(custom ? View.VISIBLE : View.GONE);
                 key.setHint(custom ? "New endpoint needs its own key" : "sk-ant-… or leave blank to keep");
             }
             @Override public void onNothingSelected(AdapterView<?> parent) { }
@@ -825,9 +830,10 @@ final class ClaudeSidebar extends FrameLayout {
                     try {
                         boolean changed = !ChatProvider.get(activity).identity.equals(next.identity);
                         if (changed || !replacement.isEmpty()) repository.stopAll();
+                        if ("compatible".equals(kind)) ChatProvider.saveFirecrawlKey(activity, crawl.getText().toString());
                         ChatProvider.save(activity, next, replacement);
                         if (changed && !repository.acceptsProvider(next)) repository.newChat();
-                        key.setText("");
+                        key.setText(""); crawl.setText("");
                         providerDialog.dismiss();
                         render();
                     } catch (IllegalArgumentException | IllegalStateException failure) {

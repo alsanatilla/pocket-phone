@@ -6,6 +6,16 @@ const httpError = code => code === 401 || code === 403 ? "The provider rejected 
   : code >= 500 ? "The provider is temporarily unavailable. Retry when you’re ready."
   : "The provider could not accept this request (" + code + "). Check its model, tools and search settings.";
 
+const FREE_CHAIN = ["nvidia/nemotron-3-super-120b-a12b:free", "inclusionai/ling-3.0-flash-sante:free", "openrouter/free"];
+/** OpenRouter tries these in order when a free model is rate-limited; the free router alone sometimes picks a model that cannot chat. */
+export function freeFallbacks(value) {
+  let host = ""; try { host = new URL(value.baseUrl).hostname; } catch {}
+  if (value.provider !== "compatible" || host !== "openrouter.ai" || !(value.model.endsWith(":free") || value.model === "openrouter/free")) return null;
+  const chain = value.model === "openrouter/free" ? FREE_CHAIN : [value.model, ...FREE_CHAIN.filter(m => m !== value.model)];
+  return chain.slice(0, 3);
+}
+const pause = (ms, signal) => new Promise((resolve, reject) => { const t = setTimeout(resolve, ms); signal.addEventListener("abort", () => { clearTimeout(t); reject(new DOMException("Stopped", "AbortError")); }, { once: true }); });
+
 export async function streamChat(chat, turn, { value, body, readSse, key, signal, onUpdate = () => {}, fetcher = fetch, timeoutMs = 90000 } = {}) {
   const controller = new AbortController(), abort = () => controller.abort();
   signal?.addEventListener("abort", abort, { once: true }); if (signal?.aborted) controller.abort();
@@ -34,6 +44,7 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
       for (const row of result.activity.filter(row => row.kind === "web" && row.state === "queued")) { record(row.id, { state: "running" }); result.phase = "searching web"; }
       const request = structuredClone(body), allowance = offered.size && round < 2 && calls < 4 ? Math.max(1, Math.floor(tokens / (3 - round))) : tokens;
       request.max_tokens = allowance;
+      const fallbacks = freeFallbacks(value); if (fallbacks) { request.model = fallbacks[0]; request.models = fallbacks; }
       if (value.provider === "compatible" && new URL(value.baseUrl).hostname === "api.openai.com") { request.max_completion_tokens = allowance; delete request.max_tokens; request.stream_options = { include_usage: true }; }
       if (round && JSON.stringify(request.messages).length > 131072) throw new Error("The tool continuation is too large. Ask a narrower question.");
       // A final round produces the answer, with no more client reads or server searches.
@@ -41,9 +52,15 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
       const headers = { "content-type": "application/json" };
       if (value.provider === "anthropic") Object.assign(headers, { "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" });
       else headers.authorization = "Bearer " + key;
-      const response = await fetcher(value.baseUrl + (value.provider === "anthropic" ? "/messages" : "/chat/completions"), {
-        method: "POST", headers, body: JSON.stringify(request), signal: controller.signal, redirect: "error", credentials: "omit", referrerPolicy: "no-referrer"
-      });
+      let response;
+      for (let attempt = 0; ; attempt++) {
+        response = await fetcher(value.baseUrl + (value.provider === "anthropic" ? "/messages" : "/chat/completions"), {
+          method: "POST", headers, body: JSON.stringify(request), signal: controller.signal, redirect: "error", credentials: "omit", referrerPolicy: "no-referrer"
+        });
+        // A busy provider often answers a moment later; try twice more before giving up.
+        if (![429, 502, 503].includes(response.status) || attempt >= 2) break;
+        result.phase = "provider busy · retrying"; publish(); await pause(1500 * (attempt + 1) ** 2, controller.signal); clock();
+      }
       check(); if (!response.ok) throw new Error(httpError(response.status));
       if (!response.body || !response.headers.get("content-type")?.includes("text/event-stream")) throw new Error("This endpoint did not return a chat stream. Check its browser and streaming support.");
       let terminal = false, stop = "", text = "", output = 0;

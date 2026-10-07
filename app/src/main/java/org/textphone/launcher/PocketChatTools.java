@@ -90,8 +90,25 @@ final class PocketChatTools {
         return Collections.unmodifiableList(result);
     }
 
+    /** Pocket tools plus Firecrawl web search for providers without their own (Anthropic searches on its side). */
+    static List<Definition> definitions(Context context, ChatProvider.Config config) {
+        if (!webTools(config)) return definitions(context);
+        List<Definition> result = new ArrayList<>(definitions(context));
+        try {
+            result.add(new Definition("search_web", "Search the web for current information. Returns up to 5 results with title, url and description. Cite the urls you use.",
+                    schema(json("query", json("type", "string", "description", "What to search for.", "maxLength", 300),
+                            "limit", integerProperty("Maximum results.", 1, 5, 5)), new JSONArray().put("query"))));
+            result.add(new Definition("read_web_page", "Read the main text of one web page (up to 6000 characters), usually a url from search_web.",
+                    schema(json("url", json("type", "string", "description", "The page's https URL.", "maxLength", 2048)), new JSONArray().put("url"))));
+        } catch (JSONException impossible) { throw new IllegalStateException("Chat tools could not be described."); }
+        return Collections.unmodifiableList(result);
+    }
+
+    static boolean webTools(ChatProvider.Config config) { return "compatible".equals(config.provider) && config.webSearch; }
+
     static String execute(Context context, String name, JSONObject arguments) {
         checkInterrupted();
+        if ("search_web".equals(name) || "read_web_page".equals(name)) return web(context, name, arguments);
         String category = toolCategory(name);
         if (category == null) return error("unknown_tool", "This tool is not available.");
         if (!enabled(context, category)) return error("access_disabled", "Access to this category is disabled in Chat settings.");
@@ -322,6 +339,86 @@ final class PocketChatTools {
 
     private static PlannerStore planner(Context context) {
         return new PlannerStore(context.getSharedPreferences("pocket_planner", Context.MODE_PRIVATE));
+    }
+
+    private static final String FIRECRAWL = "https://api.firecrawl.dev/v2";
+    private static final okhttp3.OkHttpClient WEB = new okhttp3.OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS).readTimeout(40, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(45, java.util.concurrent.TimeUnit.SECONDS).build();
+
+    private static final class WebRefused extends java.io.IOException { WebRefused(String message) { super(message); } }
+
+    private static String web(Context context, String name, JSONObject arguments) {
+        if (!webTools(ChatProvider.get(context))) return error("access_disabled", "Web search is off.");
+        try {
+            JSONObject args = arguments == null ? new JSONObject() : arguments, result;
+            if ("search_web".equals(name)) {
+                keys(args, "query", "limit");
+                Object raw = args.opt("query");
+                String query = raw instanceof String ? ((String) raw).trim() : "";
+                if (query.isEmpty() || query.length() > 300) throw new IllegalArgumentException("Use a short search query.");
+                int limit = integer(args, "limit", 5, 1, 5);
+                JSONObject found = firecrawl(context, "/search", json("query", query, "limit", limit, "timeout", 20000));
+                JSONArray list = found.optJSONArray("data");
+                if (list == null && found.optJSONObject("data") != null) list = found.optJSONObject("data").optJSONArray("web");
+                JSONArray results = new JSONArray();
+                if (list != null) for (int i = 0; i < list.length() && results.length() < limit; i++) {
+                    JSONObject item = list.optJSONObject(i);
+                    String url = item == null ? "" : item.optString("url");
+                    if (!(url.startsWith("https://") || url.startsWith("http://")) || url.length() > 2048) continue;
+                    results.put(json("title", clip(item.optString("title", url), 160), "url", url, "description", clip(item.optString("description"), 400)));
+                }
+                result = json("source", "web:firecrawl", "query", query, "results", results);
+            } else {
+                keys(args, "url");
+                String url = args.optString("url", "").trim();
+                java.net.URI uri;
+                try { uri = new java.net.URI(url); } catch (java.net.URISyntaxException invalid) { throw new IllegalArgumentException("Use a public https URL."); }
+                if (!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme())) || uri.getHost() == null
+                        || uri.getRawUserInfo() != null || url.length() > 2048) throw new IllegalArgumentException("Use a public https URL.");
+                JSONObject page = firecrawl(context, "/scrape", json("url", url, "formats", new JSONArray().put("markdown"),
+                        "onlyMainContent", true, "timeout", 20000)).optJSONObject("data");
+                if (page == null) page = new JSONObject();
+                JSONObject metadata = page.optJSONObject("metadata");
+                String text = page.optString("markdown", ""), title = metadata == null ? "" : metadata.optString("title", "");
+                if (title.isEmpty()) title = uri.getHost();
+                int keep = Math.min(text.length(), 6000);
+                do {
+                    result = json("source", url, "url", url, "title", clip(title, 160), "text", clip(text, keep), "truncated", keep < text.length());
+                    keep -= 500;
+                } while (result.toString().length() > RESULT_LIMIT && keep > 0);
+            }
+            String encoded = result.toString();
+            return encoded.length() <= RESULT_LIMIT ? encoded : error("result_too_large", "Use a narrower request.");
+        } catch (WebRefused refused) {
+            return error("web_unavailable", refused.getMessage());
+        } catch (java.io.InterruptedIOException stopped) {
+            if (Thread.currentThread().isInterrupted()) throw new CancellationException();
+            return error("web_unavailable", "Web search timed out. Retry.");
+        } catch (java.io.IOException offline) {
+            return error("web_unavailable", "Web search could not connect.");
+        } catch (IllegalArgumentException invalid) {
+            return error("invalid_arguments", invalid.getMessage());
+        } catch (JSONException damaged) {
+            return error("web_unavailable", "Web search returned an unreadable reply.");
+        }
+    }
+
+    private static JSONObject firecrawl(Context context, String path, JSONObject body) throws java.io.IOException, JSONException {
+        okhttp3.Request.Builder request = new okhttp3.Request.Builder().url(FIRECRAWL + path).header("User-Agent", "Pocket/pip")
+                .post(okhttp3.RequestBody.create(body.toString(), okhttp3.MediaType.parse("application/json; charset=utf-8")));
+        String key = ChatProvider.firecrawlKey(context);
+        if (!key.isEmpty()) request.header("Authorization", "Bearer " + key);
+        try (okhttp3.Response response = WEB.newCall(request.build()).execute()) {
+            int code = response.code();
+            if (code != 200) throw new WebRefused(code == 401 || code == 402 || code == 429
+                    ? "Web search is unavailable right now (Firecrawl " + code + "). A Firecrawl key in Provider settings raises the limit."
+                    : "Web search failed (Firecrawl " + code + ").");
+            if (response.body() == null) throw new WebRefused("Web search returned an empty reply.");
+            okio.BufferedSource source = response.body().source();
+            if (source.request(2_000_001)) throw new WebRefused("That page is too large to read.");
+            return new JSONObject(source.getBuffer().readUtf8());
+        }
     }
 
     private static void checkInterrupted() {

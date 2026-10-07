@@ -75,7 +75,10 @@ final class ChatActivity {
     }
     static String title(String name, JSONObject input) {
         String query = clip(input.optString("query"), 200), label;
-        if ("web_search".equals(name)) label = "search web";
+        if ("web_search".equals(name) || "search_web".equals(name)) label = "search web";
+        else if ("read_web_page".equals(name)) {
+            try { return "read page · " + new URI(input.optString("url")).getHost(); } catch (java.net.URISyntaxException invalid) { return "read page"; }
+        }
         else if (name.startsWith("search_")) label = "search " + name.substring(7);
         else if ("read_note".equals(name)) return "read note";
         else if ("coros_summary".equals(name)) return "read COROS cache · " + input.optInt("days", 7) + " days";
@@ -86,6 +89,8 @@ final class ChatActivity {
     static String summary(String name, JSONObject result) {
         if (result.has("error") || !result.optBoolean("available", true)) return result.optString("message", result.optString("error", "No cached data"));
         if ("read_note".equals(name)) return result.optString("title", "Note read");
+        if ("search_web".equals(name)) { JSONArray found = result.optJSONArray("results"); return (found == null ? 0 : found.length()) + " results"; }
+        if ("read_web_page".equals(name)) return result.optString("title", "Page read") + (result.optBoolean("truncated") ? " · partial" : "");
         if ("coros_summary".equals(name)) return (result.optBoolean("stale") ? "stale cache" : "cached readings") + " · " + result.optString("last_updated");
         return result.optInt("matched") + ("gym_summary".equals(name) ? " workouts" : " matches") + (result.optBoolean("truncated") ? " · partial" : "");
     }
@@ -98,7 +103,7 @@ final class ChatActivity {
             if ("running".equals(state)) return mark(state) + " " + row.optString("title");
             if ("queued".equals(state) && pending == null) pending = row;
             String name = row.optString("name");
-            names.add("web_search".equals(name) ? "Web" : name.contains("note") ? "Notes" : name.contains("thought") ? "Thoughts" : name.contains("task") ? "Tasks" : name.contains("gym") ? "Gym" : name.contains("coros") ? "COROS" : row.optString("title"));
+            names.add(name.contains("web") ? "Web" : name.contains("note") ? "Notes" : name.contains("thought") ? "Thoughts" : name.contains("task") ? "Tasks" : name.contains("gym") ? "Gym" : name.contains("coros") ? "COROS" : row.optString("title"));
             failed |= "failed".equals(state); stopped |= "stopped".equals(state);
         }
         if (pending != null) return mark("queued") + " " + pending.optString("title");
@@ -113,6 +118,15 @@ final class ChatActivity {
         if (result.has("error") || !result.optBoolean("available", true)) return links;
         if ("coros_summary".equals(name)) { links.put(source("/movement", "Movement · COROS cache")); return links; }
         if ("read_note".equals(name)) { links.put(source("/notes/" + result.optString("id"), result.optString("title"))); return links; }
+        if ("read_web_page".equals(name)) { JSONObject link = source(result.optString("url"), result.optString("title")); if (link != null) links.put(link); return links; }
+        if ("search_web".equals(name)) {
+            JSONArray found = result.optJSONArray("results");
+            if (found != null) for (int i = 0; i < Math.min(5, found.length()); i++) {
+                JSONObject item = found.optJSONObject(i); if (item == null) continue;
+                JSONObject link = source(item.optString("url"), item.optString("title")); if (link != null) links.put(link);
+            }
+            return links;
+        }
         String kind = "search_notes".equals(name) ? "notes" : "search_thoughts".equals(name) ? "thoughts" : "search_tasks".equals(name) ? "tasks" : "gym";
         JSONArray items = result.optJSONArray("gym".equals(kind) ? "workouts" : kind);
         if (items != null) for (int i = 0; i < Math.min(5, items.length()); i++) {

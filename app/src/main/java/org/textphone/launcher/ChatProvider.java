@@ -34,7 +34,7 @@ final class ChatProvider {
             this.baseUrl = "anthropic".equals(provider) ? ANTHROPIC_URL : normalize(baseUrl);
             this.maxTokens = maxTokens;
             this.promptCaching = promptCaching;
-            this.webSearch = "anthropic".equals(provider) && webSearch;
+            this.webSearch = webSearch;
             identity = provider + "|" + this.baseUrl + "|" + this.model;
         }
 
@@ -129,6 +129,39 @@ final class ChatProvider {
         if (!prefs(context).edit().remove("key_value").remove("key_endpoint").remove("key_last4").commit())
             throw new IllegalStateException("Could not remove the API key.");
     }
+
+    /** Optional Firecrawl key for web search with non-Anthropic providers. Without one Firecrawl allows low volume. */
+    static String firecrawlKey(Context context) {
+        String[] sealed = prefs(context).getString("firecrawl_value", "").split(":", 2);
+        if (sealed.length != 2) return "";
+        try {
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, secret(), new GCMParameterSpec(128, Base64.decode(sealed[0], Base64.NO_WRAP)));
+            cipher.updateAAD(FIRECRAWL);
+            return new String(cipher.doFinal(Base64.decode(sealed[1], Base64.NO_WRAP)), StandardCharsets.UTF_8);
+        } catch (java.security.GeneralSecurityException | java.io.IOException | RuntimeException unavailable) { return ""; }
+    }
+
+    static boolean firecrawlPresent(Context context) { return prefs(context).contains("firecrawl_value"); }
+
+    /** A blank key keeps the saved one. */
+    static void saveFirecrawlKey(Context context, String newKey) {
+        String value = newKey == null ? "" : newKey.trim();
+        if (value.isEmpty()) return;
+        if (!value.matches("[\\x21-\\x7E]{8,200}")) throw new IllegalArgumentException("Check the Firecrawl key.");
+        try {
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, secret());
+            cipher.updateAAD(FIRECRAWL);
+            String sealed = Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP) + ":"
+                    + Base64.encodeToString(cipher.doFinal(value.getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP);
+            if (!prefs(context).edit().putString("firecrawl_value", sealed).commit())
+                throw new IllegalStateException("Could not save the Firecrawl key.");
+        } catch (java.security.GeneralSecurityException | java.io.IOException unavailable) {
+            throw new IllegalStateException("This phone could not encrypt the Firecrawl key.");
+        }
+    }
+    private static final byte[] FIRECRAWL = "firecrawl".getBytes(StandardCharsets.UTF_8);
 
     private static String normalize(String input) {
         String value = input == null ? "" : input.trim();
