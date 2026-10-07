@@ -1,0 +1,85 @@
+{
+  "version_name": "0.17.0",
+  "version_code": 44,
+  "package": "org.textphone.launcher",
+  "component": "Launcher and native apps for existing Android/Nothing OS",
+  "source_commit": "65123e292cc51573fafe04bd11fda88331557e46",
+  "signed_at_utc": "2026-10-07T16:37:58.005420+00:00",
+  "source_worktree_clean": true,
+  "input": {
+    "release": "https://github.com/alsanatilla/pocket-phone/releases/tag/v0.17.0",
+    "file": "pocket-phone-0.17.0-unsigned.apk",
+    "bytes": 11133521,
+    "sha256": "2f446a6c983ba385d11d294955578183bae687e975763d6faaba570efbdfe22c",
+    "published_checksum_verified": true
+  },
+  "source_snapshot": {
+    "published_checksum_verified": true,
+    "tagged_source_matches": true,
+    "tracked_files": 405,
+    "line_ending_normalization": "CRLF to LF",
+    "files_with_only_line_ending_differences": 374
+  },
+  "apk": {
+    "file": "pocket-phone-0.17.0.apk",
+    "bytes": 11157136,
+    "sha256": "07354a94be8457d630671f2033e45d968fa9c8ece5dbda4441bd8b7eb3b00da5",
+    "certificate_sha256": "883592cb9d2dbcb5817e28b3bb7df39d81f340d3ae2eca07134181fcf6d3e059",
+    "certificate_sha1": "57651e7742d17aa12af0e1c823bd5f73759e9dbf",
+    "signature_schemes": [
+      "v1",
+      "v2",
+      "v3"
+    ],
+    "signed": true,
+    "same_signer_as_0_13_0": true,
+    "installable_update": true,
+    "zip_alignment_16_kib_verified": true,
+    "upstream_apk_entry_contents_unchanged": true
+  },
+  "download_zip": {
+    "file": "pocket-phone-0.17.0.zip",
+    "bytes": 11157280,
+    "sha256": "2c2f20999c1df372f1849cb3163bf567fa36b5f2eb495c9e463c8a084bd40f8a",
+    "entries": [
+      "pocket-phone-0.17.0.apk"
+    ]
+  },
+  "android": {
+    "min_sdk": 24,
+    "target_sdk": 35
+  },
+  "permissions": {
+    "count": 27,
+    "added_since_0_13_0": [],
+    "removed_since_0_13_0": []
+  },
+  "final_app_test_suite": {
+    "status": "Not run",
+    "source": "Upstream BUILD-STATUS.json records an explicit instruction to skip the final suite"
+  },
+  "final_lint": {
+    "status": "Not run"
+  },
+  "release_checks": {
+    "artifact_checksums": "Passed",
+    "archive_integrity": "Passed",
+    "tagged_source_snapshot": "Passed after line-ending normalization",
+    "unchanged_apk_payload": "Passed",
+    "package_and_version": "Passed",
+    "original_signing_certificate": "Passed",
+    "signature_verification": "Passed",
+    "zip_alignment": "Passed",
+    "no_added_permissions": "Passed"
+  },
+  "prior_upstream_checks": {},
+  "prior_checks_are_not_final_build_results": true,
+  "physical_handset_tested": false,
+  "live_api_requests_made_in_signing_step": 0,
+  "unverified": [
+    "Final functional test suite and lint",
+    "Physical Nothing Phone Home/Recents and animation smoothness",
+    "Real camera frames, cellular delivery and live account synchronization"
+  ],
+  "signing_key_in_downloads": false
+}
