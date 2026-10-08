@@ -4,6 +4,7 @@ import * as sharing from './travel-sharing.js';
 import { mountWorkspace } from './travel-workspace.js';
 import { daysBetween, addDays, removeStop } from '../shared/travel-planning.js';
 import { locationPicker } from './travel-location-picker.js';
+import { countryCode } from './travel-geocoding.js';
 
 let cleanup = [], editBase = null, editRevision = null, epoch = 0;
 export function leave() { epoch++; cleanup.forEach(stop => stop()); cleanup = []; editBase = null; editRevision = null; travelStore.stopLive(); }
@@ -226,7 +227,13 @@ function stopEditor(host, trip, stop, api) {
   const place = textInput('Place', current.place, 'Cusco', { maxlength: 140, required: true });
   const country = textInput('Country', current.country, 'Peru', { maxlength: 80, required: true });
   const locateHost = el('div');
-  const locate = locationPicker(locateHost, () => ({ place: place.value, country: country.value }), current.location, api, cleanup);
+  const locate = locationPicker(locateHost, () => ({ place: place.value, country: country.value }), current.location, api, cleanup, { input: place, kind: 'stop',
+    apply: choice => {
+      place.value = choice.main.slice(0, 140);
+      // Google's country, unless the field already names the same country in its own spelling.
+      const named = choice.types.includes('country') ? choice.main : choice.secondary.split(',').map(part => part.trim()).filter(Boolean).at(-1) || '';
+      if (named && !(countryCode(country.value) && countryCode(country.value) === countryCode(named))) country.value = named.slice(0, 80);
+    } });
   place.addEventListener('input', locate.clear); country.addEventListener('input', locate.clear);
   const arrival = el('input', { type: 'date', 'aria-label': 'Arrival date' }); arrival.value = current.arrival || '';
   const departure = el('input', { type: 'date', 'aria-label': 'Departure date' }); departure.value = current.departure || '';
@@ -293,7 +300,12 @@ function stayEditor(host, trip, stop, stay, api) {
   const reference = textInput('Booking reference', current.bookingRef, 'Reservation code', { maxlength: 120 });
   const address = textInput('Address', current.address, 'Street, neighborhood, pin for the taxi', { maxlength: 240 });
   const locateHost = el('div');
-  const locate = locationPicker(locateHost, () => ({ place: address.value, country: stop.country }), current.location, api, cleanup);
+  const locate = locationPicker(locateHost, () => ({ place: address.value, country: stop.country }), current.location, api, cleanup, { input: name, kind: 'stay', near: () => stop,
+    apply: choice => {
+      // A hotel or other listed place fills its name and address; an address suggestion fills the address only.
+      if (choice.types.some(type => ['lodging', 'establishment', 'point_of_interest'].includes(type))) { name.value = choice.main.slice(0, 140); address.value = (choice.secondary || choice.text).slice(0, 240); }
+      else address.value = choice.text.slice(0, 240);
+    } });
   address.addEventListener('input', locate.clear);
   const note = textArea('Stay note', current.note, 'Room request, cancellation terms, who owes whom…', 3, 800);
   const form = el('form', { class: 'travel-form', onsubmit: event => {
@@ -306,7 +318,8 @@ function stayEditor(host, trip, stop, stay, api) {
     saveAndReturn({ ...trip, stops }, api, `${routePath(trip.uid)}/stays/${stop.uid}`);
   } },
     el('div', { class: 'travel-form-grid' }, field('NAME', name), field('LINK', url), field('TOTAL PRICE', total), field('CURRENCY', currency), field('STATUS', status), field('CHECK-IN', checkIn), field('CHECK-OUT', checkOut)),
-    moreFields('Booking details', el('div', { class: 'travel-form-grid' }, field('PRICE PER NIGHT', nightly), field('TYPE', kind), field('CANCEL BY', cancelBy), field('REFERENCE', reference)), field('ADDRESS', address), locateHost, field('NOTES', note), field('YOUR RATING', rating)),
+    locateHost,
+    moreFields('Booking details', el('div', { class: 'travel-form-grid' }, field('PRICE PER NIGHT', nightly), field('TYPE', kind), field('CANCEL BY', cancelBy), field('REFERENCE', reference)), field('ADDRESS', address), field('NOTES', note), field('YOUR RATING', rating)),
     el('div', { class: 'travel-form-actions' }, commitButton('save stay')));
   host.append(button('‹ stays', () => go(api, `${routePath(trip.uid)}/stays/${stop.uid}`), { class: 'travel-back' }),
     formHeading('', fresh ? 'Add stay · ' + stop.place : current.name, ''), form);

@@ -5,6 +5,12 @@
 .travel-location-results { flex-basis: 100%; display: grid; gap: 4px; }
 .travel-location-results button { min-height: 44px; text-align: left; padding-left: 0; overflow-wrap: anywhere; }
 .travel-location-attribution { font: 12px/1.5 Arial, sans-serif; color: var(--text); padding: 8px 0; }
+.travel-location-picker [hidden] { display: none !important; }
+.travel-place-suggestions { flex-basis: 100%; display: grid; border-top: 1px solid var(--line); }
+.travel-place-option { display: grid; gap: 2px; min-height: 52px; padding: 8px 0; text-align: left; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.travel-place-option > span:first-child { color: var(--text); }
+.travel-place-secondary { color: var(--muted); font: 13px/1.5 var(--mono); }
+.travel-place-option:hover > span:first-child, .travel-place-option:focus-visible > span:first-child { color: var(--accent); }
 .travel-option.is-map-selected { border-left: 2px solid var(--accent); padding-left: 16px; }
 .travel-map-status-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .travel-map-status-row span { color: var(--muted); font: 13px/1.6 var(--mono); }
