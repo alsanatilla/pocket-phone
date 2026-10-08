@@ -1,4 +1,14 @@
 .travel-workspace { max-width: 1040px; margin: 0 auto; }
+.travel-location-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
+.travel-location-picker > button { color: var(--accent); padding-left: 0; }
+.travel-location-state { font: 13px/1.6 var(--mono); color: var(--muted); }
+.travel-location-results { flex-basis: 100%; display: grid; gap: 4px; }
+.travel-location-results button { min-height: 44px; text-align: left; padding-left: 0; overflow-wrap: anywhere; }
+.travel-location-attribution { font: 12px/1.5 Arial, sans-serif; color: var(--text); padding: 8px 0; }
+.travel-option.is-map-selected { border-left: 2px solid var(--accent); padding-left: 16px; }
+.travel-map-status-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.travel-map-status-row span { color: var(--muted); font: 13px/1.6 var(--mono); }
+.travel-map-status-row button { padding-left: 0; color: var(--accent); }
 .travel-crumb { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 20px; margin-top: 10px; }
 .travel-crumb button { padding-left: 0; color: var(--muted); }
 .travel-crumb select { max-width: min(100%, 260px); font-size: 13px; min-height: 44px; }

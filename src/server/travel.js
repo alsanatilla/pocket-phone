@@ -83,12 +83,19 @@ function connection(value, path, returning = false) {
   if (value.needsReview !== undefined && typeof value.needsReview !== 'boolean') throw invalid(`Invalid ${path}.needsReview.`);
   if (!returning) enumField(value.mode, MODES, `${path}.mode`);
 }
+function location(value, path) {
+  if (value === undefined || value === null) return;
+  object(value, ['placeId', 'query'], path);
+  text(value.placeId, 300, `${path}.placeId`, true);
+  text(value.query, 600, `${path}.query`, true);
+}
 function stay(value, path) {
-  object(value, ['uid', 'name', 'kind', 'url', 'rating', 'status', 'nightlyCost', 'totalCost', 'currency', 'checkIn', 'checkOut', 'cancelBy', 'bookingRef', 'address', 'note'], path);
+  object(value, ['uid', 'name', 'kind', 'url', 'rating', 'status', 'nightlyCost', 'totalCost', 'currency', 'checkIn', 'checkOut', 'cancelBy', 'bookingRef', 'address', 'note', 'location'], path);
   uid(value.uid, `${path}.uid`); text(value.name, 140, `${path}.name`, true);
   strings(value, { bookingRef: 120, address: 240, note: 800 }, path); dates(value, ['checkIn', 'checkOut', 'cancelBy'], path); url(value.url, `${path}.url`);
   enumField(value.kind, KINDS, `${path}.kind`); enumField(value.status, STAY_STATUSES, `${path}.status`); enumField(value.currency, CURRENCIES, `${path}.currency`);
   number(value.rating, 5, `${path}.rating`); number(value.nightlyCost, 1e9, `${path}.nightlyCost`, true); number(value.totalCost, 1e9, `${path}.totalCost`, true);
+  location(value.location, `${path}.location`);
 }
 function activity(value, path) {
   object(value, ['uid', 'text', 'done', 'optional'], path); uid(value.uid, `${path}.uid`); text(value.text, 240, `${path}.text`, true);
@@ -99,11 +106,12 @@ function moment(value, path) {
   text(value.detail, 600, `${path}.detail`); enumField(value.kind, MOMENTS, `${path}.kind`); day(value.day, `${path}.day`); timestamp(value.created, `${path}.created`);
 }
 function stop(value, path) {
-  object(value, ['uid', 'place', 'country', 'arrival', 'departure', 'nights', 'currency', 'guidance', 'activities', 'stays', 'moments', 'connection'], path);
+  object(value, ['uid', 'place', 'country', 'arrival', 'departure', 'nights', 'currency', 'guidance', 'activities', 'stays', 'moments', 'connection', 'location'], path);
   uid(value.uid, `${path}.uid`); text(value.place, 140, `${path}.place`, true); strings(value, { country: 80, guidance: 700 }, path);
   dates(value, ['arrival', 'departure'], path); number(value.nights, 90, `${path}.nights`); enumField(value.currency, CURRENCIES, `${path}.currency`);
   array(value.activities, 60, activity, `${path}.activities`); array(value.stays, 20, stay, `${path}.stays`); array(value.moments, 100, moment, `${path}.moments`);
   connection(value.connection, `${path}.connection`);
+  location(value.location, `${path}.location`);
 }
 export function validateTravelTrip(value) {
   object(value, ['uid', 'title', 'status', 'departure', 'returnDate', 'homeArrival', 'homeCity', 'countries', 'travelers', 'currency', 'budget', 'intention', 'returnPlan', 'returnJourney', 'stops', 'moments', 'created', 'updated'], 'trip');

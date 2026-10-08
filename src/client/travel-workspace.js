@@ -4,6 +4,7 @@ import * as sharing from './travel-sharing.js';
 import { withTravel } from './pip.js';
 import { mapsSearchUrl, mapsDirectionsUrl } from './travel-links.js';
 import { stayCoverage, stayTotals, tripCosts, reorderTrip, currentStop } from '../shared/travel-planning.js';
+import { mapsEnabled, mapsStatus } from './google-maps.js';
 import './travel-workspace.css';
 
 const path = trip => `/travel/${trip.uid}`;
@@ -36,6 +37,39 @@ const link = (text, url) => {
 const localDay = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; };
 const initials = name => String(name || '?').trim().split(/\s+/u).slice(0, 2).map(part => [...part][0]).join('').toUpperCase();
 const overlap = (left, right) => !left.checkIn || !left.checkOut || !right.checkIn || !right.checkOut || left.checkIn < right.checkOut && right.checkIn < left.checkOut;
+// A stay pin tapped on the route map opens Stays with that stay marked.
+let focusStay = '';
+
+/**
+ * Google's map when a browser key is configured and the device is online; otherwise the bundled offline overview.
+ * Stays need Google's geocoding, so without it that map makes way for a short status line.
+ */
+function travelMap(host, trip, selectedUID, onSelect, helpers, options = {}) {
+  let alive = true, dispose = null;
+  helpers.cleanup.push(() => { alive = false; dispose?.(); dispose = null; });
+  const settled = () => host.setAttribute('aria-busy', 'false');
+  const offline = () => {
+    if (!alive || !host.isConnected) return;
+    dispose?.(); dispose = null; settled();
+    if (options.focusStays) {
+      const status = mapsStatus();
+      if (status.state === 'disabled') { host.remove(); return; }
+      host.replaceChildren(el('div', { class: 'travel-map-status-row' }, el('span', { text: 'map unavailable' }), status.retryable ? btn('retry', options.retry) : null));
+      return;
+    }
+    host.replaceChildren();
+    import('./travel-map.js').then(({ mountRouteMap }) => {
+      if (alive && host.isConnected) dispose = mountRouteMap(host, trip, selectedUID, onSelect);
+    }).catch(() => { if (alive && host.isConnected) host.replaceChildren(meta('Map unavailable.')); });
+  };
+  const google = () => import('./travel-google-map.js').then(({ mountGoogleRouteMap }) => {
+    if (!alive || !host.isConnected) return;
+    dispose = mountGoogleRouteMap(host, trip, selectedUID, onSelect, { ...options, onUnavailable: offline });
+    dispose.ready.then(settled, offline);
+  }).catch(offline);
+  if (globalThis.navigator?.onLine === false) offline();
+  else mapsEnabled().then(enabled => { if (alive) (enabled === false ? offline : google)(); });
+}
 
 function coverageText(stop) {
   const cover = stayCoverage(stop);
@@ -148,7 +182,7 @@ export function mountWorkspace(host, trip, route, api, helpers) {
       if (stay.status === 'chosen') actions.append(btn('mark booked', () => statusChange(stay, 'booked')), btn('unchoose', () => statusChange(stay, 'shortlist')));
       actions.append(btn('edit', () => go(stayPath(stay))));
     }
-    return el('article', { class: 'travel-option' },
+    return el('article', { class: 'travel-option', 'data-stay-uid': stay.uid },
       el('div', { class: 'travel-option-top' }, el('h3', { text: stay.name }), el('strong', { class: 'travel-price', text: money(stayTotals(stay, selected), stay.currency) })),
       el('div', { class: 'travel-option-meta' }, el('span', { class: ['chosen', 'booked', 'included'].includes(stay.status) ? 'travel-stay-confirmed' : '', text: statuses[stay.status] }),
         el('span', { text: stay.address || 'location unknown' }), el('span', { text: stay.cancelBy ? 'cancel by ' + day(stay.cancelBy) : 'cancellation unknown' })),
@@ -157,8 +191,18 @@ export function mountWorkspace(host, trip, route, api, helpers) {
 
   if (stays) {
     panel.append(destinations, el('div', { class: 'travel-stays-heading' }, el('div', {}, el('h2', { text: selected.place }), meta(coverageText(selected))), !viewer ? btn('+ stay', addStay) : null));
+    const mark = uid => {
+      const rows = [...panel.querySelectorAll('.travel-option[data-stay-uid]')], row = rows.find(node => node.dataset.stayUid === uid);
+      rows.forEach(node => node.classList.toggle('is-map-selected', node === row));
+      row?.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    };
+    if (selected.stays.some(stay => stay.address.trim())) {
+      const map = el('div', { class: 'travel-route-map travel-stays-map', 'aria-busy': 'true' }); panel.append(map);
+      travelMap(map, trip, selected.uid, pick, helpers, { focusStays: true, onStaySelect: mark, retry: () => go(location.hash.slice(1)) });
+    }
     if (selected.stays.length) selected.stays.forEach(stay => panel.append(stayRow(stay)));
     else panel.append(meta('No stays saved.'));
+    if (focusStay) { const uid = focusStay; focusStay = ''; requestAnimationFrame(() => { if (alive) mark(uid); }); }
     const actions = el('div', { class: 'travel-secondary-actions' }, btn('find stays with Pip', () => ask('find')));
     if (selected.stays.length > 1) {
       const columns = ['Stay', 'Total', 'Location', 'Cancellation', 'Status'];
@@ -170,10 +214,10 @@ export function mountWorkspace(host, trip, route, api, helpers) {
   } else {
     if (!travelling) {
       const map = el('div', { class: 'travel-route-map', 'aria-busy': 'true' }); panel.append(map);
-      import('./travel-map.js').then(({ mountRouteMap }) => {
-        if (!alive || !map.isConnected) return;
-        helpers.cleanup.push(mountRouteMap(map, trip, selected.uid, pick)); map.setAttribute('aria-busy', 'false');
-      }).catch(() => { if (alive && map.isConnected) { map.setAttribute('aria-busy', 'false'); map.append(meta('Map unavailable.')); } });
+      travelMap(map, trip, selected.uid, pick, helpers, {
+        onStaySelect: uid => { focusStay = uid; go(selectedPath(selected, 'stays')); },
+        onLocateStop: viewer ? undefined : uid => go(`${path(trip)}/stop/${uid}/edit`),
+      });
     }
     panel.append(destinations);
     const confirmed = selected.stays.filter(stay => ['booked', 'included'].includes(stay.status));

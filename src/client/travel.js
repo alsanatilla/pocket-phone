@@ -3,6 +3,7 @@ import * as travelStore from './travel-store.js';
 import * as sharing from './travel-sharing.js';
 import { mountWorkspace } from './travel-workspace.js';
 import { daysBetween, addDays, removeStop } from '../shared/travel-planning.js';
+import { locationPicker } from './travel-location-picker.js';
 
 let cleanup = [], editBase = null, editRevision = null, epoch = 0;
 export function leave() { epoch++; cleanup.forEach(stop => stop()); cleanup = []; editBase = null; editRevision = null; travelStore.stopLive(); }
@@ -224,6 +225,9 @@ function stopEditor(host, trip, stop, api) {
   const current = stop ? plainClone(stop) : blankStop(trip, previous);
   const place = textInput('Place', current.place, 'Cusco', { maxlength: 140, required: true });
   const country = textInput('Country', current.country, 'Peru', { maxlength: 80, required: true });
+  const locateHost = el('div');
+  const locate = locationPicker(locateHost, () => ({ place: place.value, country: country.value }), current.location, api, cleanup);
+  place.addEventListener('input', locate.clear); country.addEventListener('input', locate.clear);
   const arrival = el('input', { type: 'date', 'aria-label': 'Arrival date' }); arrival.value = current.arrival || '';
   const departure = el('input', { type: 'date', 'aria-label': 'Departure date' }); departure.value = current.departure || '';
   const nights = el('input', { type: 'number', min: 0, max: 90, step: 1, 'aria-label': 'Nights' }); nights.value = String(current.nights ?? 1);
@@ -250,7 +254,7 @@ function stopEditor(host, trip, stop, api) {
     if (activities.value.split('\n').map(value => value.trim()).filter(Boolean).length > MAX_ACTIVITIES) { api.say('A stop holds up to 60 ideas.'); return; }
     const ideasByText = new Map(current.activities.map(item => [item.text, item]));
     const ideas = activities.value.split('\n').map(value => value.trim()).filter(Boolean).slice(0, MAX_ACTIVITIES).map(value => ({ ...(ideasByText.get(value) || { uid: id(), done: false }), text: value }));
-    const updated = { ...current, place: place.value, country: country.value, arrival: arrival.value, departure: departure.value,
+    const updated = { ...current, place: place.value, country: country.value, location: locate.value(), arrival: arrival.value, departure: departure.value,
       nights: Number(nights.value), currency: currency.value, guidance: guidance.value, activities: ideas,
       connection: { ...connection, mode: mode.value, label: connectionLabel.value, date: connectionDate.value, url: connectionUrl.value,
         cost: connectionCost.value, currency: connectionCurrency.value, status: connectionStatus.value, reference: reference.value } };
@@ -258,6 +262,7 @@ function stopEditor(host, trip, stop, api) {
     saveAndReturn({ ...trip, stops }, api, stopPath(trip, updated));
   } },
     el('div', { class: 'travel-form-grid' }, field('DESTINATION', place), field('COUNTRY', country), field('NIGHTS', nights), field('ARRIVAL', arrival), field('DEPARTURE', departure)),
+    locateHost,
     moreFields('Ideas & notes', field('CURRENCY', currency), field('NOTES', guidance), field('IDEAS', activities)),
     moreFields('Arrival connection',
       el('div', { class: 'travel-form-grid' }, field('TYPE OF CONNECTION', mode), field('ROUTE / OPERATOR', connectionLabel), field('TRAVEL DATE', connectionDate), field('BOOKING LINK', connectionUrl), field('COST', connectionCost), field('CURRENCY', connectionCurrency), field('STATUS', connectionStatus), field('BOOKING REFERENCE', reference))),
@@ -287,18 +292,21 @@ function stayEditor(host, trip, stop, stay, api) {
   const cancelBy = el('input', { type: 'date', 'aria-label': 'Free cancellation date' }); cancelBy.value = current.cancelBy || '';
   const reference = textInput('Booking reference', current.bookingRef, 'Reservation code', { maxlength: 120 });
   const address = textInput('Address', current.address, 'Street, neighborhood, pin for the taxi', { maxlength: 240 });
+  const locateHost = el('div');
+  const locate = locationPicker(locateHost, () => ({ place: address.value, country: stop.country }), current.location, api, cleanup);
+  address.addEventListener('input', locate.clear);
   const note = textArea('Stay note', current.note, 'Room request, cancellation terms, who owes whom…', 3, 800);
   const form = el('form', { class: 'travel-form', onsubmit: event => {
     event.preventDefault(); if (!form.reportValidity()) return;
     if (checkIn.value && checkOut.value && checkOut.value < checkIn.value) { checkOut.setCustomValidity('Check-out needs to be on or after check-in.'); checkOut.reportValidity(); checkOut.setCustomValidity(''); return; }
     const updated = { ...current, name: name.value, kind: kind.value, url: url.value, rating: Number(rating.value), status: status.value,
       nightlyCost: nightly.value, totalCost: total.value, currency: currency.value, checkIn: checkIn.value, checkOut: checkOut.value,
-      cancelBy: cancelBy.value, bookingRef: reference.value, address: address.value, note: note.value };
+      cancelBy: cancelBy.value, bookingRef: reference.value, address: address.value, note: note.value, location: locate.value() };
     const stops = trip.stops.map(item => item.uid !== stop.uid ? item : { ...item, stays: fresh ? [...item.stays, updated] : item.stays.map(old => old.uid === stay.uid ? updated : old) });
     saveAndReturn({ ...trip, stops }, api, `${routePath(trip.uid)}/stays/${stop.uid}`);
   } },
     el('div', { class: 'travel-form-grid' }, field('NAME', name), field('LINK', url), field('TOTAL PRICE', total), field('CURRENCY', currency), field('STATUS', status), field('CHECK-IN', checkIn), field('CHECK-OUT', checkOut)),
-    moreFields('Booking details', el('div', { class: 'travel-form-grid' }, field('PRICE PER NIGHT', nightly), field('TYPE', kind), field('CANCEL BY', cancelBy), field('REFERENCE', reference)), field('ADDRESS', address), field('NOTES', note), field('YOUR RATING', rating)),
+    moreFields('Booking details', el('div', { class: 'travel-form-grid' }, field('PRICE PER NIGHT', nightly), field('TYPE', kind), field('CANCEL BY', cancelBy), field('REFERENCE', reference)), field('ADDRESS', address), locateHost, field('NOTES', note), field('YOUR RATING', rating)),
     el('div', { class: 'travel-form-actions' }, commitButton('save stay')));
   host.append(button('‹ stays', () => go(api, `${routePath(trip.uid)}/stays/${stop.uid}`), { class: 'travel-back' }),
     formHeading('', fresh ? 'Add stay · ' + stop.place : current.name, ''), form);

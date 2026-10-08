@@ -1,0 +1,47 @@
+.travel-google-route-map { width: 100%; min-width: 0; margin: 18px 0 0; }
+.travel-google-viewport { position: relative; height: clamp(320px, 44vw, 410px); overflow: hidden; border-radius: 3px; background: #202f32; isolation: isolate; }
+.travel-google-canvas { width: 100%; height: 100%; min-width: 0; }
+.travel-google-loading { position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; gap: 6px; background: #202f32; }
+.travel-google-loading span { display: block; width: 8px; height: 8px; background: var(--accent, #ecc981); animation: travel-google-loading .8s steps(2, end) infinite; }
+.travel-google-loading span:nth-child(2) { animation-delay: .12s; }
+.travel-google-loading span:nth-child(3) { animation-delay: .24s; }
+@keyframes travel-google-loading { 50% { transform: translateY(-8px); opacity: .5; } }
+.travel-google-fit, .travel-google-stay-area, .travel-google-zoom { position: absolute; z-index: 5; top: 10px; }
+.travel-google-fit, .travel-google-stay-area { min-height: 44px; padding: 5px 12px; color: #f0e9dd; background: #1e1c18 !important; font: 12px/1.5 var(--mono, monospace); }
+.travel-google-fit { left: 10px; }
+.travel-google-stay-area { left: 108px; }
+.travel-google-zoom { right: 10px; display: flex; flex-direction: column; gap: 3px; }
+.travel-google-zoom button { width: 44px; min-width: 44px; min-height: 44px; padding: 0; background: #1e1c18 !important; color: #f0e9dd; font: 22px/1 var(--mono, monospace); }
+.travel-google-zoom button:disabled, .travel-google-fit:disabled { opacity: .45; cursor: default; }
+.travel-google-pin { position: absolute; transform: translate(-15px, calc(-100% - 4px)); pointer-events: auto; z-index: 2; }
+.travel-google-pin-button { position: relative; display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 7px 8px 7px 0; border: 0; border-radius: 2px; background: transparent; color: #f0e9dd; white-space: nowrap; cursor: pointer; font: 12px/1.4 var(--mono, monospace); }
+.travel-google-pin-number { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border: 2px solid #e0c995; border-radius: 50%; background: #1b1915; color: #f0e9dd; font: 13px/1 var(--mono, monospace); }
+.travel-google-pin-number::after { content: ''; position: absolute; left: 12px; bottom: 3px; width: 5px; height: 5px; background: #e0c995; transform: rotate(45deg); }
+.travel-google-pin-name { max-width: 172px; overflow: hidden; text-overflow: ellipsis; text-shadow: -1px -1px #25251e, 1px -1px #25251e, -1px 1px #25251e, 1px 1px #25251e; }
+.travel-google-pin.is-selected { z-index: 4; }
+.travel-google-pin.is-selected .travel-google-pin-number { background: var(--accent, #ecc981); border-color: #f0e9dd; color: #12110f; }
+.travel-google-pin.is-selected .travel-google-pin-name { color: #ffe0a3; }
+/* A city is always an area; only a stay address can be uncertain. */
+.travel-google-pin.is-stay.is-approximate .travel-google-pin-number { border-style: dashed; }
+.travel-google-pin-button:focus-visible { outline: 2px solid var(--accent, #ecc981); outline-offset: 2px; background: #1e1c18 !important; }
+.travel-google-pin:focus-within { z-index: 7; }
+.travel-google-pin.is-wide-view:not(.is-selected) .travel-google-pin-name { display: none; }
+.travel-google-pin.is-stay { z-index: 3; }
+.travel-google-pin.is-stay .travel-google-pin-number { border-radius: 3px; font-size: 20px; border-color: #a69c88; }
+.travel-google-pin.is-booked .travel-google-pin-number { border-color: #adbf9c; background: #adbf9c; color: #162010; }
+.travel-google-pin.is-booked .travel-google-pin-number::after { background: #adbf9c; }
+.travel-google-pin.is-chosen .travel-google-pin-number { border-color: #ecc981; background: #ecc981; color: #12110f; }
+.travel-google-caption { margin-top: 4px; color: var(--muted, #b6ac9d); font: 10px/1.5 var(--mono, monospace); }
+.travel-google-missing { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 18px; margin-top: 8px; min-width: 0; font: 12px/1.5 var(--mono, monospace); }
+.travel-google-missing-label, .travel-google-location-status { color: var(--muted, #b6ac9d); }
+.travel-google-missing-stop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.travel-google-missing-stop button { min-height: 44px; padding: 5px 0; font: inherit; text-align: left; overflow-wrap: anywhere; }
+.travel-google-missing-stop button[aria-pressed=true], .travel-google-locate { color: var(--accent, #ecc981); }
+.travel-google-route-map[data-map-state=unavailable] .travel-google-viewport { height: 100px; }
+.travel-google-route-map[data-map-state=unavailable] .travel-google-fit, .travel-google-route-map[data-map-state=unavailable] .travel-google-zoom, .travel-google-route-map[data-map-state=unavailable] .travel-google-stay-area { display: none; }
+.travel-google-route-map [hidden] { display: none !important; }
+@media (max-width: 460px) {
+  .travel-google-viewport { height: 350px; }
+  .travel-google-pin-name { max-width: 140px; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) { .travel-google-loading span { animation: none; } }

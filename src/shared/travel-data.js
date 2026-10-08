@@ -18,6 +18,14 @@ const day = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val
   && new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value;
 const list = (value, limit) => Array.isArray(value) ? value.slice(0, limit) : [];
 
+// Only an explicitly selected place identifier is part of the shared trip.
+// Provider coordinates and response content stay out of backups and sync.
+export function normalizeTravelLocation(value) {
+  if (!record(value)) return null;
+  const placeId = text(value.placeId, 300), query = text(value.query, 600);
+  return placeId && query ? { placeId, query } : null;
+}
+
 function identifier() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   if (globalThis.crypto?.getRandomValues) {
@@ -57,7 +65,7 @@ function normalizeStay(value, stopCurrency) {
     nightlyCost: amount(current.nightlyCost), totalCost: amount(current.totalCost), currency: currency(current.currency || stopCurrency),
     checkIn: day(current.checkIn) ? current.checkIn : '', checkOut: day(current.checkOut) ? current.checkOut : '',
     cancelBy: day(current.cancelBy) ? current.cancelBy : '', bookingRef: text(current.bookingRef, 120),
-    address: text(current.address, 240), note: text(current.note, 800),
+    address: text(current.address, 240), note: text(current.note, 800), location: normalizeTravelLocation(current.location),
   };
 }
 
@@ -82,7 +90,7 @@ function normalizeStop(value, now) {
   const current = record(value) ? value : {};
   const country = text(current.country, 80), stopCurrency = currency(current.currency || STOP_CURRENCY[country]);
   return {
-    uid: text(current.uid, 100) || identifier(), place: text(current.place, 140), country,
+    uid: text(current.uid, 100) || identifier(), place: text(current.place, 140), country, location: normalizeTravelLocation(current.location),
     arrival: day(current.arrival) ? current.arrival : '', departure: day(current.departure) ? current.departure : '',
     nights: Math.max(0, Math.min(90, Math.round(Number(current.nights) || 0))), currency: stopCurrency,
     guidance: text(current.guidance, 700),
@@ -141,6 +149,11 @@ export function mergeTrip(base, local, remote) {
   const conflict = path => conflicts.add(path || 'trip');
 
   function merge(baseValue, localValue, remoteValue, path, key = '') {
+    if (key === 'location') {
+      if (baseValue === MISSING) baseValue = null;
+      if (localValue === MISSING) localValue = null;
+      if (remoteValue === MISSING) remoteValue = null;
+    }
     // Before route review existed, an absent flag meant no review was needed.
     // Treat that old representation as false so an older queued edit does not
     // conflict merely because the other copy now carries the explicit default.
