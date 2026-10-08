@@ -33,7 +33,7 @@
     "hosting": "Vercel",
     "url": "https://pocket-phone.vercel.app/",
     "release_asset": "pocket-web-0.19.0-source.zip",
-    "offline_worker": "pocket-astro-0190-profile-names",
+    "offline_worker": "pocket-astro-0190-travel-planner",
     "changed": true
   },
   "full_test_suite": {
@@ -96,6 +96,27 @@
       "Hardware passkey creation was not performed; actual server registration options and signed context were checked, with a fixture browser ceremony",
       "All verification accounts and writes were local fixtures; no production user data was changed",
       "The full test suite was not rerun for this web-only update"
+    ]
+  },
+  "travel_redesign_update": {
+    "checked_at_utc": "2026-10-08T09:18:53Z",
+    "scope": "Web Travel redesign; Android artifact remains unchanged",
+    "behavior": "Route/Stays tabs, compact forms, interactive route overview, stay comparison and chosen status, exact booking-night coverage, selected costs, reorder connection review, during-trip view, shared names beside the title and unsent Pip trip-context drafts",
+    "build": "Astro production build passed",
+    "verification": [
+      "node scripts/travel-planning-check.mjs: seven groups passed for dates/nights, current stop, split/partial/unknown/overlapping bookings, selected costs, reorder/delete review and legacy merge compatibility",
+      "node --experimental-vm-modules scripts/travel-context-check.mjs: six groups passed including actual chat persistence/cloud sanitization and explicit-send runner with a local provider fixture",
+      "node --experimental-vm-modules scripts/test-travel-store.mjs: ten existing offline, migration, conflict, concurrency and account-isolation groups passed",
+      "node scripts/travel-server-check.mjs: existing isolated API, permission, invite, merge, retry and input-validation checks passed",
+      "node scripts/http-failure-check.mjs: numeric BetterAuth status conversion, malformed status handling and private error masking passed",
+      "Edge browser flow passed on an isolated localhost database: create trip/stops/stays, dates/nights, map and tab navigation, comparison/coverage/costs, reload, unsent Pip draft, reorder/review, real invite/join, concurrent partner edits, memories, during-trip mode, member rename, viewer guards and 390/701/1280 layouts; zero page errors or API 500 responses",
+      "Map component checks passed for pointer/keyboard/touch/pinch selection and navigation, viewport restoration, route changes, unknown destinations, instance disposal and Google Maps URL encoding",
+      "Compiled production static bundle passed an Edge offline check with the actual service-worker controller and cached lazy map chunk: created stay and correct coverage survive offline Route/Stays reloads, with no 390px overflow, page errors or external requests"
+    ],
+    "limitations": [
+      "Verification used local fixture accounts only; no production user data or real invitations were changed",
+      "Bundled map covers ten verified destinations; unknown destinations use selectable route order. Google Maps links are available without a key; embedded Maps/geocoding is not configured",
+      "The full suite was not rerun for this web-only update"
     ]
   },
   "travel_update": {

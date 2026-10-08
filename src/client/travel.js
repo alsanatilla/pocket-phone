@@ -1,26 +1,25 @@
 import { activeAccount } from './workspace-storage.js';
 import * as travelStore from './travel-store.js';
 import * as sharing from './travel-sharing.js';
+import { mountWorkspace } from './travel-workspace.js';
+import { daysBetween, addDays, removeStop } from '../shared/travel-planning.js';
 
 let cleanup = [], editBase = null, editRevision = null, epoch = 0;
 export function leave() { epoch++; cleanup.forEach(stop => stop()); cleanup = []; editBase = null; editRevision = null; travelStore.stopLive(); }
 const MAX_ACTIVITIES = 60;
+const MAX_MOMENTS = 100;
 const CURRENCIES = ['EUR', 'USD', 'PEN', 'BOB', 'CLP', 'BRL'];
 const STOP_CURRENCY = { Peru: 'PEN', Bolivien: 'BOB', Chile: 'CLP', Brasilien: 'BRL' };
-const STAY_STATUS = { idea: 'researching', shortlist: 'shortlist', booked: 'booked', included: 'in the tour' };
+const STAY_STATUS = { idea: 'saved', shortlist: 'shortlist', chosen: 'chosen', booked: 'booked', included: 'included' };
 const TRANSFER_STATUS = { idea: 'to figure out', shortlist: 'option saved', booked: 'booked', included: 'in the tour' };
 const STAY_KIND = { hotel: 'hotel', guesthouse: 'guesthouse', apartment: 'apartment', hostel: 'hostel', tour: 'tour lodging', camp: 'camp', other: 'somewhere else' };
 const MOMENTS = { detour: '↗', taste: '✳', sound: '♫', person: '⌂', tiny: '·', weather: '☼', other: '✷' };
-const PROMPTS = [
-  'What sound will take you straight back here?',
-  'Where did the day go beautifully off-plan?',
-  'What did you eat twice?',
-  'What detail would never make it into a guidebook?',
-  'What did the light look like when you finally stopped?',
-];
-
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
+  if (tag === 'form') node.addEventListener('invalid', event => {
+    let ancestor = event.target.parentElement;
+    while (ancestor && ancestor !== node) { if (ancestor.tagName === 'DETAILS') ancestor.open = true; ancestor = ancestor.parentElement; }
+  }, true);
   for (const [key, value] of Object.entries(attrs || {})) {
     if (value == null || value === false) continue;
     if (key === 'class') node.className = value;
@@ -28,12 +27,6 @@ function el(tag, attrs = {}, ...children) {
     else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
     else node.setAttribute(key, value === true ? '' : value);
   }
-  node.append(...children.flat(Infinity).filter(child => child != null && child !== false));
-  return node;
-}
-function svg(tag, attrs = {}, ...children) {
-  const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const [key, value] of Object.entries(attrs)) if (value != null) node.setAttribute(key, String(value));
   node.append(...children.flat(Infinity).filter(child => child != null && child !== false));
   return node;
 }
@@ -120,10 +113,6 @@ const has = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, ke
 const id = () => globalThis.crypto?.randomUUID?.() || `trip-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 const isDay = value => !value || typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(new Date(value + 'T12:00:00').getTime());
 const cleanCurrency = value => CURRENCIES.includes(value) ? value : 'EUR';
-const safeUrl = value => {
-  if (typeof value !== 'string' || !value.trim()) return '';
-  try { const url = new URL(value.trim()); return ['https:', 'http:'].includes(url.protocol) ? url.href : ''; } catch { return ''; }
-};
 const plainClone = value => JSON.parse(JSON.stringify(value));
 
 function readTrips() {
@@ -153,29 +142,6 @@ const dateRange = (start, end) => {
   if (!end || start === end) return dateLabel(start || end, { day: 'numeric', month: 'short', year: 'numeric' });
   return `${dateLabel(start)} — ${dateLabel(end, { day: 'numeric', month: 'short', year: 'numeric' })}`;
 };
-const money = (value, currency) => {
-  if (value === '' || value == null || !Number.isFinite(Number(value))) return 'no price saved';
-  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cleanCurrency(currency), maximumFractionDigits: 2 }).format(Number(value)); }
-  catch { return `${currency} ${Number(value).toFixed(2)}`; }
-};
-const nightsTotal = trip => trip.stops.reduce((sum, stop) => sum + stop.nights, 0);
-const bookedStayCount = trip => trip.stops.filter(stop => stop.stays.some(stay => ['booked', 'included'].includes(stay.status))).length;
-const stayCost = (stay, stop) => stay.totalCost !== '' ? Number(stay.totalCost) : stay.nightlyCost !== '' ? Number(stay.nightlyCost) * stop.nights : 0;
-const transferCost = connection => connection?.cost === '' ? 0 : Number(connection?.cost || 0);
-const balance = trip => {
-  const result = new Map();
-  const add = (currency, value, confirmed) => {
-    if (!(value > 0)) return;
-    const item = result.get(currency) || { booked: 0, planned: 0 };
-    item[confirmed ? 'booked' : 'planned'] += value; result.set(currency, item);
-  };
-  for (const stop of trip.stops) {
-    add(stop.connection.currency, transferCost(stop.connection), ['booked', 'included'].includes(stop.connection.status));
-    for (const stay of stop.stays) add(stay.currency, stayCost(stay, stop), ['booked', 'included'].includes(stay.status));
-  }
-  add(trip.returnJourney.currency, transferCost(trip.returnJourney), ['booked', 'included'].includes(trip.returnJourney.status));
-  return [...result.entries()].sort(([a], [b]) => a.localeCompare(b));
-};
 const currencySelect = (label, value) => {
   const field = el('select', { 'aria-label': label }, ...CURRENCIES.map(code => el('option', { value: code, text: code })));
   field.value = cleanCurrency(value); return field;
@@ -185,7 +151,7 @@ const options = (labels, value, label) => {
   control.value = has(labels, value) ? value : Object.keys(labels)[0]; return control;
 };
 function field(labelText, control, hint = '') {
-  return el('label', { class: 'travel-field' }, el('span', { text: labelText }), control, hint ? el('small', { text: hint }) : null);
+  return el('label', { class: 'travel-field' }, el('span', { text: labelText }), control);
 }
 function textInput(label, value, placeholder = '', attrs = {}) {
   const input = el('input', { type: 'text', 'aria-label': label, placeholder, ...attrs }); input.value = value ?? ''; return input;
@@ -197,15 +163,10 @@ function textArea(label, value, placeholder = '', rows = 3, limit = 900) {
   const area = el('textarea', { 'aria-label': label, maxlength: limit, placeholder, rows }); area.value = value || ''; return area;
 }
 function formHeading(kicker, title, sub) {
-  return el('div', { class: 'travel-form-heading' }, el('span', { class: 'travel-kicker', text: kicker }), el('h2', { class: 'travel-editor-title', text: title }), el('p', { text: sub }));
+  return el('div', { class: 'travel-form-heading' }, el('h2', { class: 'travel-editor-title', text: title }));
 }
+const moreFields = (label, ...children) => el('details', { class: 'travel-disclosure' }, el('summary', { text: label }), children);
 function commitButton(label) { return el('button', { type: 'submit', class: 'travel-commit', text: label }); }
-function safeAnchor(label, href, className = 'travel-external-link') {
-  const url = safeUrl(href);
-  if (!url) return null;
-  return el('a', { class: className, href: url, target: '_blank', rel: 'noopener noreferrer', text: label });
-}
-
 function tripEditor(host, trip, api) {
   const fresh = !trip;
   const current = trip ? plainClone(trip) : { uid: id(), title: '', departure: '', returnDate: '', homeArrival: '', homeCity: '', countries: '', travelers: '', currency: 'EUR', budget: '', intention: '', returnPlan: '', returnJourney: { label: '', date: '', url: '', cost: '', currency: 'EUR', status: 'idea', reference: '' }, stops: [], moments: [], created: Date.now() };
@@ -234,19 +195,18 @@ function tripEditor(host, trip, api) {
       const saved = saveTrip({ ...current, title: title.value, departure: departure.value, returnDate: returnDate.value, homeArrival: homeArrival.value,
         homeCity: homeCity.value, countries: countries.value, travelers: travelers.value, currency: currency.value, budget: budget.value,
         intention: intention.value, returnPlan: returnPlan.value,
-        returnJourney: { label: returnLabel.value, date: returnDateInput.value, url: returnUrl.value, cost: returnCost.value, currency: returnCurrency.value, status: returnStatus.value, reference: returnJourney.reference || '' } });
+        returnJourney: { ...returnJourney, label: returnLabel.value, date: returnDateInput.value, url: returnUrl.value, cost: returnCost.value, currency: returnCurrency.value, status: returnStatus.value, reference: returnJourney.reference || '' } });
       go(api, routePath(saved.uid));
     } catch (error) { api.say(error.message); }
   } },
-    el('div', { class: 'travel-form-grid' }, field('NAME THE TRIP', title), field('STARTING FROM', homeCity), field('LEAVE HOME', departure), field('LEAVE THE LAST STOP', returnDate),
-      field('LAND BACK HOME', homeArrival), field('COUNTRIES', countries), field('TRAVEL CREW', travelers), field('DEFAULT CURRENCY', currency), field('TRIP BUDGET TARGET', budget)),
-    field('THE HOPE FOR THIS TRIP', intention), field('THE WAY HOME', returnPlan),
-    el('div', { class: 'travel-form-section' }, el('span', { class: 'travel-kicker', text: 'LAST LEG · SAVE THE BUFFER TOO' }),
-      field('RETURN ROUTE', returnLabel), el('div', { class: 'travel-form-grid' }, field('TRAVEL DATE', returnDateInput), field('BOOKING LINK', returnUrl),
+    el('div', { class: 'travel-form-grid' }, field('TRIP NAME', title), field('FROM', homeCity), field('START', departure), field('END', returnDate)),
+    moreFields('More details', el('div', { class: 'travel-form-grid' }, field('HOME ARRIVAL', homeArrival), field('COUNTRIES', countries), field('TRAVELERS', travelers), field('CURRENCY', currency), field('BUDGET', budget)),
+      field('NOTES', intention), field('RETURN NOTES', returnPlan)),
+    moreFields('Journey home', field('RETURN ROUTE', returnLabel), el('div', { class: 'travel-form-grid' }, field('DATE', returnDateInput), field('BOOKING LINK', returnUrl),
         field('COST', returnCost), field('CURRENCY', returnCurrency), field('STATUS', returnStatus))),
     el('div', { class: 'travel-form-actions' }, commitButton(fresh ? 'save this trip' : 'save trip changes')));
   host.append(button(fresh ? '‹ travel' : '‹ trip route', () => go(api, fresh ? '/travel' : routePath(current.uid)), { class: 'travel-back' }),
-    formHeading(fresh ? 'A NEW ROUTE' : 'TRIP DETAILS', fresh ? 'start somewhere' : current.title, fresh ? 'The route, the rough dates, and all the little details can live in one place.' : 'Keep the flights, return buffer, budget and reason for going together.'), form);
+    formHeading('', fresh ? 'New trip' : current.title, ''), form);
   if (!fresh && travelStore.getRecord(current.uid)?.role === 'owner') host.append(el('button', { class: 'travel-delete', text: 'delete trip', onclick: async () => {
     if (!await api.confirm('Delete this trip for everyone sharing it?', 'delete')) return;
     try { travelStore.deleteTrip(current.uid, editRevision); go(api, '/travel'); } catch (error) { api.say(error.message); }
@@ -258,6 +218,7 @@ function blankStop(trip, previous) {
     connection: { mode: 'transfer', label: '', date: '', url: '', cost: '', currency: previous?.currency || trip.currency || 'EUR', status: 'idea', reference: '' } };
 }
 function stopEditor(host, trip, stop, api) {
+  if (!stop && trip.stops.length >= 80) { api.say('A trip holds up to 80 stops.'); go(api, routePath(trip.uid)); return; }
   const index = stop ? trip.stops.findIndex(item => item.uid === stop.uid) : trip.stops.length;
   const previous = index > 0 ? trip.stops[index - 1] : null;
   const current = stop ? plainClone(stop) : blankStop(trip, previous);
@@ -266,6 +227,9 @@ function stopEditor(host, trip, stop, api) {
   const arrival = el('input', { type: 'date', 'aria-label': 'Arrival date' }); arrival.value = current.arrival || '';
   const departure = el('input', { type: 'date', 'aria-label': 'Departure date' }); departure.value = current.departure || '';
   const nights = el('input', { type: 'number', min: 0, max: 90, step: 1, 'aria-label': 'Nights' }); nights.value = String(current.nights ?? 1);
+  const alignDates = () => { if (arrival.value && nights.value !== '') departure.value = addDays(arrival.value, Number(nights.value)); };
+  arrival.addEventListener('change', alignDates); nights.addEventListener('change', alignDates);
+  departure.addEventListener('change', () => { const count = daysBetween(arrival.value, departure.value); if (count != null && count >= 0) nights.value = count; });
   const currency = currencySelect('Local currency', current.currency || STOP_CURRENCY[current.country]);
   const guidance = textArea('Local note', current.guidance, 'A practical reminder for this stop…', 3, 700);
   const activities = textArea('Activity ideas', current.activities.map(item => item.text).join('\n'), 'One idea per line. Keep an empty afternoon if you want one.', 6, 4000);
@@ -281,29 +245,33 @@ function stopEditor(host, trip, stop, api) {
   const form = el('form', { class: 'travel-form', onsubmit: event => {
     event.preventDefault(); if (!form.reportValidity()) return;
     if (arrival.value && departure.value && departure.value < arrival.value) { departure.setCustomValidity('Departure needs to be on or after arrival.'); departure.reportValidity(); departure.setCustomValidity(''); return; }
+    const datedNights = daysBetween(arrival.value, departure.value);
+    if (datedNights != null && datedNights !== Number(nights.value)) { api.say('Check the dates and number of nights.'); return; }
+    if (activities.value.split('\n').map(value => value.trim()).filter(Boolean).length > MAX_ACTIVITIES) { api.say('A stop holds up to 60 ideas.'); return; }
     const ideasByText = new Map(current.activities.map(item => [item.text, item]));
     const ideas = activities.value.split('\n').map(value => value.trim()).filter(Boolean).slice(0, MAX_ACTIVITIES).map(value => ({ ...(ideasByText.get(value) || { uid: id(), done: false }), text: value }));
     const updated = { ...current, place: place.value, country: country.value, arrival: arrival.value, departure: departure.value,
       nights: Number(nights.value), currency: currency.value, guidance: guidance.value, activities: ideas,
-      connection: { mode: mode.value, label: connectionLabel.value, date: connectionDate.value, url: connectionUrl.value,
+      connection: { ...connection, mode: mode.value, label: connectionLabel.value, date: connectionDate.value, url: connectionUrl.value,
         cost: connectionCost.value, currency: connectionCurrency.value, status: connectionStatus.value, reference: reference.value } };
     const stops = [...trip.stops]; if (stop) stops[index] = updated; else stops.push(updated);
     saveAndReturn({ ...trip, stops }, api, stopPath(trip, updated));
   } },
-    el('div', { class: 'travel-form-grid' }, field('WAYPOINT', place), field('COUNTRY', country), field('ARRIVE', arrival), field('MOVE ON', departure), field('NIGHTS HERE', nights), field('LOCAL CURRENCY', currency)),
-    field('LOCAL FIELD NOTE', guidance), field('THINGS TO DO / MAYBE DO', activities, 'One line per idea. “Optional” is a perfectly good status.'),
-    el('div', { class: 'travel-form-section' }, el('span', { class: 'travel-kicker', text: previous ? `GETTING HERE · ${previous.place.toUpperCase()} → ${current.place || 'THIS STOP'}` : `GETTING HERE · ${trip.homeCity || 'HOME'} → FIRST STOP` }),
+    el('div', { class: 'travel-form-grid' }, field('DESTINATION', place), field('COUNTRY', country), field('NIGHTS', nights), field('ARRIVAL', arrival), field('DEPARTURE', departure)),
+    moreFields('Ideas & notes', field('CURRENCY', currency), field('NOTES', guidance), field('IDEAS', activities)),
+    moreFields('Arrival connection',
       el('div', { class: 'travel-form-grid' }, field('TYPE OF CONNECTION', mode), field('ROUTE / OPERATOR', connectionLabel), field('TRAVEL DATE', connectionDate), field('BOOKING LINK', connectionUrl), field('COST', connectionCost), field('CURRENCY', connectionCurrency), field('STATUS', connectionStatus), field('BOOKING REFERENCE', reference))),
-    el('div', { class: 'travel-form-actions' }, commitButton(stop ? 'save waypoint' : 'add waypoint')));
+    el('div', { class: 'travel-form-actions' }, commitButton(stop ? 'save stop' : 'add stop')));
   host.append(button(stop ? '‹ waypoint' : '‹ trip route', () => go(api, stop ? stopPath(trip, stop) : routePath(trip.uid)), { class: 'travel-back' }),
-    formHeading(stop ? 'EDIT THE ROUTE' : 'ADD A STOP', stop ? current.place : 'another somewhere', 'Arrival, departure, the way you get there, and the little things you might do.'), form);
+    formHeading('', stop ? current.place : 'Add stop', ''), form);
   if (stop) host.append(el('button', { class: 'travel-delete', text: 'remove this waypoint', onclick: async () => {
     if (!await api.confirm(`Remove ${current.place} and its hotel options from this trip?`, 'remove')) return;
-    saveAndReturn({ ...trip, stops: trip.stops.filter(item => item.uid !== stop.uid) }, api, routePath(trip.uid));
+    saveAndReturn(removeStop(trip, stop.uid).trip, api, routePath(trip.uid));
   } }));
 }
 
 function stayEditor(host, trip, stop, stay, api) {
+  if (!stay && stop.stays.length >= 20) { api.say('A stop holds up to 20 stays.'); go(api, `${routePath(trip.uid)}/stays/${stop.uid}`); return; }
   const fresh = !stay;
   const current = stay ? plainClone(stay) : { uid: id(), name: '', kind: 'hotel', url: '', rating: 0, status: 'idea', nightlyCost: '', totalCost: '', currency: stop.currency, checkIn: stop.arrival, checkOut: stop.departure, cancelBy: '', bookingRef: '', address: '', note: '' };
   const name = textInput('Property name', current.name, 'The tiny hotel with the rooftop plants', { maxlength: 140, required: true });
@@ -314,8 +282,8 @@ function stayEditor(host, trip, stop, stay, api) {
   const nightly = numberInput('Price per night', current.nightlyCost);
   const total = numberInput('Whole stay total', current.totalCost);
   const currency = currencySelect('Price currency', current.currency || stop.currency);
-  const checkIn = el('input', { type: 'date', 'aria-label': 'Check in' }); checkIn.value = current.checkIn || stop.arrival;
-  const checkOut = el('input', { type: 'date', 'aria-label': 'Check out' }); checkOut.value = current.checkOut || stop.departure;
+  const checkIn = el('input', { type: 'date', 'aria-label': 'Check in' }); checkIn.value = current.checkIn || '';
+  const checkOut = el('input', { type: 'date', 'aria-label': 'Check out' }); checkOut.value = current.checkOut || '';
   const cancelBy = el('input', { type: 'date', 'aria-label': 'Free cancellation date' }); cancelBy.value = current.cancelBy || '';
   const reference = textInput('Booking reference', current.bookingRef, 'Reservation code', { maxlength: 120 });
   const address = textInput('Address', current.address, 'Street, neighborhood, pin for the taxi', { maxlength: 240 });
@@ -327,20 +295,44 @@ function stayEditor(host, trip, stop, stay, api) {
       nightlyCost: nightly.value, totalCost: total.value, currency: currency.value, checkIn: checkIn.value, checkOut: checkOut.value,
       cancelBy: cancelBy.value, bookingRef: reference.value, address: address.value, note: note.value };
     const stops = trip.stops.map(item => item.uid !== stop.uid ? item : { ...item, stays: fresh ? [...item.stays, updated] : item.stays.map(old => old.uid === stay.uid ? updated : old) });
-    saveAndReturn({ ...trip, stops }, api, stopPath(trip, stop));
+    saveAndReturn({ ...trip, stops }, api, `${routePath(trip.uid)}/stays/${stop.uid}`);
   } },
-    el('div', { class: 'travel-form-grid' }, field('PROPERTY / TOUR NAME', name), field('KIND OF STAY', kind), field('BOOKING PAGE', url), field('YOUR RATING', rating), field('STATUS', status), field('PRICE CURRENCY', currency)),
-    el('div', { class: 'travel-form-grid' }, field('PRICE PER NIGHT', nightly, `For ${stop.nights} ${stop.nights === 1 ? 'night' : 'nights'} · optional if you only know the total.`), field('TOTAL FOR THIS STAY', total, 'If entered, this total is used in the trip cost summary.'),
-      field('CHECK-IN', checkIn), field('CHECK-OUT', checkOut), field('FREE CANCELLATION UNTIL', cancelBy), field('BOOKING REFERENCE', reference)),
-    field('ADDRESS / NEIGHBORHOOD', address), field('THE IMPORTANT BITS', note),
-    el('div', { class: 'travel-form-actions' }, commitButton(fresh ? 'save this stay' : 'save stay changes')));
-  host.append(button('‹ ' + stop.place, () => go(api, stopPath(trip, stop)), { class: 'travel-back' }),
-    formHeading(fresh ? `A PLACE TO SLEEP · ${stop.place.toUpperCase()}` : 'STAY DETAILS', fresh ? 'where are we sleeping?' : current.name, 'Keep the link, price, rating and cancellation date attached to the exact nights.'), form);
+    el('div', { class: 'travel-form-grid' }, field('NAME', name), field('LINK', url), field('TOTAL PRICE', total), field('CURRENCY', currency), field('STATUS', status), field('CHECK-IN', checkIn), field('CHECK-OUT', checkOut)),
+    moreFields('Booking details', el('div', { class: 'travel-form-grid' }, field('PRICE PER NIGHT', nightly), field('TYPE', kind), field('CANCEL BY', cancelBy), field('REFERENCE', reference)), field('ADDRESS', address), field('NOTES', note), field('YOUR RATING', rating)),
+    el('div', { class: 'travel-form-actions' }, commitButton('save stay')));
+  host.append(button('‹ stays', () => go(api, `${routePath(trip.uid)}/stays/${stop.uid}`), { class: 'travel-back' }),
+    formHeading('', fresh ? 'Add stay · ' + stop.place : current.name, ''), form);
   if (!fresh) host.append(el('button', { class: 'travel-delete', text: 'remove this stay', onclick: async () => {
     if (!await api.confirm(`Remove ${current.name} from ${stop.place}?`, 'remove')) return;
     const stops = trip.stops.map(item => item.uid === stop.uid ? { ...item, stays: item.stays.filter(old => old.uid !== stay.uid) } : item);
-    saveAndReturn({ ...trip, stops }, api, stopPath(trip, stop));
+    saveAndReturn({ ...trip, stops }, api, `${routePath(trip.uid)}/stays/${stop.uid}`);
   } }));
+}
+
+function connectionEditor(host, trip, stop, returnStop, api) {
+  const returning = !stop, connection = stop?.connection || trip.returnJourney;
+  const index = stop ? trip.stops.findIndex(item => item.uid === stop.uid) : trip.stops.length;
+  const previous = trip.stops[index - 1];
+  const destination = stop?.place || trip.homeCity || 'Home';
+  const label = textInput('Connection', connection.label, `${previous?.place || trip.homeCity || 'Home'} → ${destination}`, { maxlength: returning ? 240 : 160 });
+  const mode = returning ? null : options({ flight: 'flight', train: 'train', bus: 'bus', ferry: 'ferry', transfer: 'transfer', tour: 'tour', other: 'other' }, connection.mode, 'Transport');
+  const date = el('input', { type: 'date', 'aria-label': 'Travel date' }); date.value = connection.date || '';
+  const status = options(TRANSFER_STATUS, connection.status, 'Connection status');
+  const url = el('input', { type: 'url', 'aria-label': 'Connection booking link', placeholder: 'https://…' }); url.value = connection.url || '';
+  const reference = textInput('Booking reference', connection.reference, '', { maxlength: 120 });
+  const cost = numberInput('Connection cost', connection.cost), currency = currencySelect('Connection currency', connection.currency);
+  const reviewed = el('input', { type: 'checkbox', 'aria-label': 'Connection reviewed' });
+  const back = returnStop ? stopPath(trip, returnStop) : routePath(trip.uid);
+  const form = el('form', { class: 'travel-form', onsubmit: event => {
+    event.preventDefault(); if (!form.reportValidity()) return;
+    const updated = { ...connection, label: label.value, date: date.value, status: status.value, url: url.value, reference: reference.value, cost: cost.value, currency: currency.value, needsReview: Boolean(connection.needsReview && !reviewed.checked) };
+    if (mode) updated.mode = mode.value;
+    saveAndReturn(returning ? { ...trip, returnJourney: updated } : { ...trip, stops: trip.stops.map(item => item.uid === stop.uid ? { ...item, connection: updated } : item) }, api, back);
+  } }, field('CONNECTION', label), el('div', { class: 'travel-form-grid' }, mode ? field('TRANSPORT', mode) : null, field('DATE', date), field('STATUS', status)),
+    moreFields('Booking details', el('div', { class: 'travel-form-grid' }, field('LINK', url), field('REFERENCE', reference), field('COST', cost), field('CURRENCY', currency))),
+    connection.needsReview ? el('label', { class: 'check-label' }, reviewed, 'connection reviewed') : null,
+    el('div', { class: 'travel-form-actions' }, commitButton('save connection')));
+  host.append(button('‹ route', () => go(api, back), { class: 'travel-back' }), formHeading('', `${previous?.place || trip.homeCity || 'Home'} → ${destination}`, ''), form);
 }
 
 function momentEditor(host, trip, stop, api) {
@@ -356,203 +348,7 @@ function momentEditor(host, trip, stop, api) {
   } }, field('KIND OF KEEPSAKE', kind), field('THE MOMENT', title), field('WHAT MADE IT STICK', detail), field('WHEN?', day),
     el('div', { class: 'travel-form-actions' }, commitButton('keep this little moment')));
   host.append(button('‹ ' + stop.place, () => go(api, stopPath(trip, stop)), { class: 'travel-back' }),
-    formHeading('A MEMORY IS NOT A CHECKBOX', `a little ${stop.place} story`, 'The best souvenir might be a sound, a meal, or a completely accidental turn.'), form);
-}
-
-function routeArt(trip, selectedIndex) {
-  const count = Math.max(2, trip.stops.length), pts = [];
-  for (let index = 0; index < count; index++) {
-    const x = 12 + index * (396 / (count - 1)), y = 58 + Math.sin(index * 1.55) * 24 + Math.sin(index * .64) * 10;
-    pts.push([x, y]);
-  }
-  const commands = pts.map(([x, y], index) => `${index ? 'L' : 'M'} ${x} ${y}`).join(' ');
-  const art = svg('svg', { viewBox: '0 0 420 108', role: 'img', 'aria-label': `${trip.stops.length} waypoints from ${trip.homeCity || 'home'} through ${trip.countries || 'the route'}` },
-    svg('path', { d: commands, class: 'travel-map-thread' }), svg('path', { d: commands, class: 'travel-map-route' }),
-    ...pts.map(([x, y], index) => svg('circle', { cx: x, cy: y, r: index === selectedIndex ? 6 : 4, class: 'travel-map-stop' + (index === selectedIndex ? ' selected' : '') })));
-  return el('div', { class: 'travel-route-art' }, art, el('div', { class: 'travel-route-ends' }, el('span', { text: trip.homeCity || 'home' }), el('span', { text: trip.stops.map(stop => stop.country).filter((country, index, list) => list.indexOf(country) === index).join(' → ') }), el('span', { text: trip.homeArrival ? `back ${dateLabel(trip.homeArrival, { day: 'numeric', month: 'short' })}` : 'home again' })));
-}
-
-function costLedger(trip) {
-  const totals = balance(trip);
-  if (!totals.length && trip.budget === '') return el('div', { class: 'travel-cost-empty' }, el('span', { class: 'travel-kicker', text: 'COSTS SO FAR' }), el('p', { text: 'No prices yet. Add a stay or connection and the trip sums itself, currency by currency.' }));
-  const ledger = el('div', { class: 'travel-cost-ledger' }, el('span', { class: 'travel-kicker', text: 'KNOWN COSTS · KEPT IN ORIGINAL CURRENCIES' }));
-  if (trip.budget !== '') ledger.append(el('p', { class: 'travel-budget-target', text: `trip target · ${money(trip.budget, trip.currency)}` }));
-  if (totals.length) ledger.append(el('div', { class: 'travel-cost-groups' }, totals.map(([currency, values]) => el('div', { class: 'travel-cost-currency' },
-    el('span', { class: 'travel-cost-code', text: currency }),
-    el('span', {}, el('strong', { text: money(values.booked, currency) }), el('small', { text: 'booked / included' })),
-    el('span', {}, el('strong', { text: money(values.planned, currency) }), el('small', { text: 'saved options' }))))));
-  else ledger.append(el('p', { class: 'travel-cost-emptyline', text: 'No hotel or connection prices saved yet.' }));
-  return ledger;
-}
-
-function tripHeader(host, trip, selectedIndex, api) {
-  const totalNights = nightsTotal(trip), stayStops = bookedStayCount(trip);
-  const header = el('section', { class: 'travel-trip-header' },
-    el('div', { class: 'travel-trip-overline' }, el('span', { class: 'travel-kicker', text: trip.status.toUpperCase() }),
-      button('edit trip details', () => go(api, `${routePath(trip.uid)}/edit`), { class: 'travel-envelope-action' })),
-    el('div', { class: 'travel-trip-titleline' }, el('div', {}, el('h2', { class: 'travel-trip-title', text: trip.title }),
-      el('p', { class: 'travel-trip-subtitle', text: `${trip.countries || 'your route'}${trip.homeCity ? ` · ${trip.homeCity} out and back` : ''}` })),
-      el('span', { class: 'travel-postmark', 'aria-label': `${trip.stops.length} waypoints` }, el('span', { text: String(trip.stops.length).padStart(2, '0') }), el('small', { text: 'waypoints' }))),
-    el('p', { class: 'travel-trip-dates', text: `${dateRange(trip.departure, trip.returnDate)}${trip.homeArrival ? ` · home ${dateLabel(trip.homeArrival, { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}${trip.travelers ? ` · ${trip.travelers}` : ''}` }),
-    routeArt(trip, selectedIndex),
-    el('div', { class: 'travel-metrics' },
-      el('div', {}, el('strong', { text: String(trip.stops.length).padStart(2, '0') }), el('span', { text: 'waypoints' })),
-      el('div', {}, el('strong', { text: String(totalNights).padStart(2, '0') }), el('span', { text: 'nights on the road' })),
-      el('div', {}, el('strong', { text: `${stayStops}/${trip.stops.length}` }), el('span', { text: 'stops with booked / included stays' }))),
-    costLedger(trip));
-  if (trip.intention) header.append(el('p', { class: 'travel-intention' }, el('span', { class: 'travel-kicker', text: 'THE REASON FOR THIS ROUTE' }), el('span', { text: trip.intention })));
-  host.append(header);
-}
-
-function journeyIndex(trip, selected, api) {
-  const index = el('aside', { class: 'travel-index', 'aria-label': 'Trip waypoints' });
-  index.append(el('div', { class: 'travel-index-head' }, el('div', {}, el('span', { class: 'travel-kicker', text: 'THE ROUTE, IN ORDER' }), el('span', { class: 'travel-index-sub', text: 'where the next pin lands' })),
-    button('+ stop', () => go(api, `${routePath(trip.uid)}/stop/new`), { class: 'travel-inline-add' })));
-  trip.stops.forEach((stop, position) => {
-    const stayCount = stop.stays.length, booked = stop.stays.some(stay => ['booked', 'included'].includes(stay.status));
-    const row = el('div', { class: 'travel-index-row' });
-    row.append(button('', () => go(api, stopPath(trip, stop)), { class: 'travel-index-trip' + (stop.uid === selected.uid ? ' selected' : ''), 'aria-current': stop.uid === selected.uid ? 'true' : 'false' },
-      el('span', { class: 'travel-index-number', text: `${String(position + 1).padStart(2, '0')} · ${stop.country.toUpperCase()}` }),
-      el('span', { class: 'travel-index-name', text: stop.place }),
-      el('span', { class: 'travel-index-meta', text: `${dateRange(stop.arrival, stop.departure)} · ${stop.nights} ${stop.nights === 1 ? 'night' : 'nights'}` }),
-      el('span', { class: 'travel-index-stay' + (booked ? ' booked' : ''), text: booked ? 'stay sorted' : stayCount ? `${stayCount} stay ${stayCount === 1 ? 'option' : 'options'}` : `${stop.nights} ${stop.nights === 1 ? 'night' : 'nights'} · find a bed` })));
-    const order = el('div', { class: 'travel-reorder' },
-      button('↑', () => reorderStop(trip, position, position - 1, api), { disabled: position === 0, 'aria-label': `Move ${stop.place} earlier` }),
-      button('↓', () => reorderStop(trip, position, position + 1, api), { disabled: position === trip.stops.length - 1, 'aria-label': `Move ${stop.place} later` }));
-    row.append(order); index.append(row);
-  });
-  index.append(el('p', { class: 'travel-local-note', text: 'Move a pin · the dates and nights stay attached.' }));
-  return index;
-}
-function reorderStop(trip, from, to, api) {
-  if (to < 0 || to >= trip.stops.length) return;
-  const stops = [...trip.stops]; [stops[from], stops[to]] = [stops[to], stops[from]];
-  saveAndReturn({ ...trip, stops }, api, stopPath(trip, stops[to]));
-}
-
-function transferBlock(trip, stop, index, api) {
-  const previous = index > 0 ? trip.stops[index - 1] : null;
-  const leg = stop.connection;
-  const label = leg.label || (previous ? `${previous.place} → ${stop.place}` : `${trip.homeCity || 'home'} → ${stop.place}`);
-  const source = previous ? previous.place : trip.homeCity || 'home';
-  return el('section', { class: 'travel-transfer' },
-    el('div', { class: 'travel-section-heading' }, el('div', {}, el('span', { class: 'travel-kicker', text: 'GETTING TO THIS PIN' }), el('h3', { text: label })),
-      button('edit leg', () => go(api, `${routePath(trip.uid)}/stop/${stop.uid}/edit`), { class: 'travel-inline-add' })),
-    el('div', { class: 'travel-transfer-summary' }, el('span', { class: 'travel-transfer-glyph', text: leg.mode === 'train' ? '═' : leg.mode === 'flight' ? '✈' : leg.mode === 'ferry' ? '≈' : leg.mode === 'tour' ? '↗' : '→' }),
-      el('div', {}, el('span', { class: 'travel-beat-when', text: `${source} → ${stop.place} · ${dateLabel(leg.date || stop.arrival)}` }),
-        el('span', { class: 'travel-beat-meta', text: `${leg.mode} · ${TRANSFER_STATUS[leg.status]}${leg.reference ? ' · ref ' + leg.reference : ''}` }),
-        leg.cost !== '' ? el('span', { class: 'travel-beat-meta', text: money(leg.cost, leg.currency) }) : null),
-      safeAnchor('booking / timetable ↗', leg.url)));
-}
-
-function ratingControl(stay, trip, stop, api) {
-  return el('div', { class: 'travel-stars', role: 'group', 'aria-label': `Your rating for ${stay.name}` },
-    ...Array.from({ length: 5 }, (_, index) => button(index < stay.rating ? '★' : '☆', () => {
-      const rating = stay.rating === index + 1 ? 0 : index + 1;
-      const updated = { ...trip, stops: trip.stops.map(item => item.uid === stop.uid ? { ...item, stays: item.stays.map(old => old.uid === stay.uid ? { ...old, rating } : old) } : item) };
-      saveAndReturn(updated, api, stopPath(trip, stop));
-    }, { class: 'travel-star' + (index < stay.rating ? ' active' : ''), 'aria-label': `Rate ${stay.name} ${index + 1} out of 5`, 'aria-pressed': String(index < stay.rating) })));
-}
-
-function stayCard(host, trip, stop, stay, api) {
-  const total = stayCost(stay, stop), hasMoney = total > 0, rate = stay.rating ? `${stay.rating} / 5` : 'not rated yet';
-  const costLine = hasMoney ? `${money(total, stay.currency)} total${stay.totalCost === '' && stay.nightlyCost !== '' ? ` · ${money(stay.nightlyCost, stay.currency)} / night` : ''}` : 'price not entered yet';
-  host.append(el('article', { class: 'travel-stay' },
-    el('div', { class: 'travel-stay-head' }, el('div', {}, el('span', { class: 'travel-stay-kind', text: `${STAY_KIND[stay.kind]} · ${STAY_STATUS[stay.status]}` }),
-      el('h4', { text: stay.name }), el('span', { class: 'travel-stay-price', text: costLine })),
-      el('div', { class: 'travel-stay-actions' }, button('edit', () => go(api, `${routePath(trip.uid)}/stay/${stop.uid}/${stay.uid}`), { class: 'travel-text-action' }),
-        button('remove', async () => {
-          if (!await api.confirm(`Remove ${stay.name} from your stay options?`, 'remove')) return;
-          const stops = trip.stops.map(item => item.uid === stop.uid ? { ...item, stays: item.stays.filter(old => old.uid !== stay.uid) } : item);
-          saveAndReturn({ ...trip, stops }, api, stopPath(trip, stop));
-        }, { class: 'travel-text-action' }))),
-    el('div', { class: 'travel-stay-meta' }, ratingControl(stay, trip, stop, api), el('span', { class: 'travel-stay-rating-text', text: rate }),
-      stay.checkIn || stay.checkOut ? el('span', { text: `${dateLabel(stay.checkIn)} → ${dateLabel(stay.checkOut)}` }) : null,
-      stay.cancelBy ? el('span', { class: 'travel-cancel', text: `free cancellation until ${dateLabel(stay.cancelBy, { day: 'numeric', month: 'short', year: 'numeric' })}` }) : null),
-    stay.address ? el('p', { class: 'travel-stay-address', text: stay.address }) : null,
-    stay.bookingRef ? el('p', { class: 'travel-stay-ref', text: `booking ref · ${stay.bookingRef}` }) : null,
-    stay.note ? el('p', { class: 'travel-stay-note', text: stay.note }) : null,
-    safeAnchor(stay.url ? 'open property / booking link ↗' : '', stay.url)));
-}
-
-function staySection(host, trip, stop, api) {
-  const stays = el('section', { class: 'travel-stays' });
-  stays.append(el('div', { class: 'travel-section-heading' }, el('div', {}, el('span', { class: 'travel-kicker', text: 'THE BED FOR THESE NIGHTS' }),
-    el('h3', { text: 'where we’re staying' })), button('+ stay option', () => go(api, `${routePath(trip.uid)}/stay/${stop.uid}`), { class: 'travel-inline-add' })));
-  if (stop.guidance) stays.append(el('p', { class: 'travel-stop-guidance' }, el('span', { class: 'travel-guidance-mark', text: '!' }), el('span', { text: stop.guidance })));
-  if (!stop.stays.length) stays.append(el('div', { class: 'travel-no-stay' }, el('span', { class: 'travel-no-stay-mark', text: '⌂' }),
-    el('p', { text: `No stay saved for these ${stop.nights} ${stop.nights === 1 ? 'night' : 'nights'} yet.` }),
-    el('span', { class: 'travel-no-stay-hint', text: 'Add a hotel, guesthouse, tour lodging, booking link, rating and price.' }),
-    button('+ save a place to stay', () => go(api, `${routePath(trip.uid)}/stay/${stop.uid}`), { class: 'travel-inline-add' })));
-  else {
-    const list = el('div', { class: 'travel-stay-list' }); stop.stays.forEach(stay => stayCard(list, trip, stop, stay, api)); stays.append(list);
-  }
-  host.append(stays);
-}
-
-function activitySection(host, trip, stop, api) {
-  const section = el('section', { class: 'travel-activities' });
-  section.append(el('div', { class: 'travel-section-heading' }, el('div', {}, el('span', { class: 'travel-kicker', text: 'THINGS THIS PIN COULD HOLD' }), el('h3', { text: 'activity ideas' })),
-    button('edit ideas', () => go(api, `${routePath(trip.uid)}/stop/${stop.uid}/edit`), { class: 'travel-inline-add' })));
-  if (!stop.activities.length) section.append(el('p', { class: 'travel-empty-hint', text: 'No activity ideas yet. Leave a day blank on purpose if that feels good.' }));
-  else {
-    const list = el('div', { class: 'travel-activity-list' });
-    stop.activities.forEach(activity => {
-      list.append(el('div', { class: 'travel-activity-row' }, button(activity.done ? '☑' : '□', () => {
-        const stops = trip.stops.map(item => item.uid === stop.uid ? { ...item, activities: item.activities.map(old => old.uid === activity.uid ? { ...old, done: !old.done } : old) } : item);
-        saveAndReturn({ ...trip, stops }, api, stopPath(trip, stop));
-      }, { class: 'travel-activity-check', 'aria-label': `${activity.done ? 'Unmark' : 'Mark'} ${activity.text}`, 'aria-pressed': String(activity.done) }),
-      el('span', { class: 'travel-activity-text' + (activity.done ? ' done' : ''), text: activity.text }),
-      activity.optional || /OPTIONAL/.test(activity.text) ? el('span', { class: 'travel-activity-tag', text: 'optional' }) : null));
-    }); section.append(list);
-  }
-  host.append(section);
-}
-
-function memorySection(host, trip, stop, api) {
-  const section = el('section', { class: 'travel-memory-section' });
-  section.append(el('div', { class: 'travel-section-heading' }, el('div', {}, el('span', { class: 'travel-kicker', text: 'THE BIT THAT WON’T FIT IN YOUR BAG' }),
-    el('h3', { text: stop.moments.length ? 'little moments' : 'one day, future-you' })), button('+ keep a moment', () => go(api, `${routePath(trip.uid)}/moment/${stop.uid}`), { class: 'travel-inline-add' })));
-  if (!stop.moments.length) {
-    const prompt = el('p', { class: 'travel-memory-prompt', 'aria-live': 'polite' });
-    section.append(el('p', { class: 'travel-memory-tease', text: 'Not a checklist. Just a place to keep a sound, a meal, or the wrong turn that became the whole story.' }),
-      button('give me a memory prompt', () => { prompt.textContent = PROMPTS[Math.floor(Math.random() * PROMPTS.length)]; }, { class: 'travel-prompt-button' }), prompt);
-  } else {
-    const list = el('div', { class: 'travel-moments' });
-    stop.moments.forEach(moment => list.append(el('article', { class: 'travel-moment' }, el('span', { class: 'travel-moment-glyph', 'aria-hidden': 'true', text: MOMENTS[moment.kind] || MOMENTS.other }),
-      el('div', {}, el('span', { class: 'travel-moment-meta', text: `${moment.kind} · ${dateLabel(moment.day)}` }), el('h4', { text: moment.title }), moment.detail ? el('p', { text: moment.detail }) : null))));
-    section.append(list);
-  }
-  host.append(section);
-}
-
-function stopDetail(host, trip, stop, api) {
-  const index = trip.stops.findIndex(item => item.uid === stop.uid);
-  const prior = index > 0 ? trip.stops[index - 1] : null;
-  const mapHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${stop.place}, ${stop.country}`)}`;
-  const detail = el('article', { class: 'travel-stop-detail' },
-    el('div', { class: 'travel-stop-heading' }, el('div', {}, el('span', { class: 'travel-kicker', text: `${String(index + 1).padStart(2, '0')} / ${String(trip.stops.length).padStart(2, '0')} WAYPOINT · ${stop.country.toUpperCase()}` }),
-      el('h2', { class: 'travel-stop-title', text: stop.place }), el('p', { class: 'travel-stop-dates', text: `${dateRange(stop.arrival, stop.departure)} · ${stop.nights} ${stop.nights === 1 ? 'night' : 'nights'}` })),
-      el('div', { class: 'travel-stop-actions' }, safeAnchor('open map ↗', mapHref, 'travel-text-action'), button('edit stop', () => go(api, `${routePath(trip.uid)}/stop/${stop.uid}/edit`), { class: 'travel-text-action' }))),
-    el('div', { class: 'travel-stop-stats' }, el('div', {}, el('span', { class: 'travel-kicker', text: 'ARRIVE' }), el('strong', { text: dateLabel(stop.arrival, { day: 'numeric', month: 'short', year: 'numeric' }) })),
-      el('div', {}, el('span', { class: 'travel-kicker', text: 'MOVE ON' }), el('strong', { text: dateLabel(stop.departure, { day: 'numeric', month: 'short', year: 'numeric' }) })),
-      el('div', {}, el('span', { class: 'travel-kicker', text: 'NIGHTS' }), el('strong', { text: String(stop.nights) }))),
-    transferBlock(trip, stop, index, api));
-  if (prior) detail.insertBefore(el('p', { class: 'travel-between-stops', text: `next pin after ${prior.place}` }), detail.children[1]);
-  else detail.insertBefore(el('p', { class: 'travel-between-stops', text: `first stop after leaving ${trip.homeCity || 'home'}` }), detail.children[1]);
-  staySection(detail, trip, stop, api); activitySection(detail, trip, stop, api); memorySection(detail, trip, stop, api);
-  host.append(detail);
-}
-
-function summaryNotes(host, trip, api) {
-  const section = el('section', { class: 'travel-return' }, el('span', { class: 'travel-kicker', text: 'DON’T LET THE LAST DAY GET WEIRD' }),
-    el('h3', { text: 'the way home' }), el('p', { text: trip.returnPlan || 'Keep the final transfer and the international flight together here.' }));
-  const journey = trip.returnJourney;
-  section.append(el('div', { class: 'travel-return-leg' }, el('div', {}, el('span', { class: 'travel-beat-when', text: `${journey.label || 'Add the last transfer and flight'} · ${dateLabel(journey.date || trip.returnDate, { day: 'numeric', month: 'short', year: 'numeric' })}` }),
-    el('span', { class: 'travel-beat-meta', text: `${TRANSFER_STATUS[journey.status]}${journey.reference ? ' · ref ' + journey.reference : ''}${journey.cost !== '' ? ' · ' + money(journey.cost, journey.currency) : ''}` })),
-    safeAnchor('open return booking ↗', journey.url), button('edit trip', () => go(api, `${routePath(trip.uid)}/edit`), { class: 'travel-text-action' })));
-  if (journey.cost !== '' || journey.url) section.append(el('p', { class: 'travel-return-note', text: `${journey.cost !== '' ? `return leg · ${money(journey.cost, journey.currency)}` : 'No transfer price entered.'} ${journey.url ? ' · booking link saved.' : ''}` }));
-  host.append(section);
+    formHeading('', 'Add moment · ' + stop.place, ''), form);
 }
 
 function library(host, trips, api) {
@@ -597,14 +393,14 @@ export function mount(host, route, api) {
   const trips = readTrips(), rawId = route.tripId || '', tripId = travelStore.lookupAlias(rawId);
   if (tripId && tripId !== rawId) history.replaceState(null, '', location.hash.replace('/' + rawId, '/' + tripId));
   const trip = trips.find(item => item.uid === tripId) || null;
-  const editor = route.sub === 'edit' || route.sub === 'stay' || route.sub === 'moment' || route.sub === 'stop' && (route.leaf === 'new' || route.extra === 'edit');
+  const editor = route.sub === 'edit' || route.sub === 'stay' || route.sub === 'moment' || route.sub === 'connection' || route.sub === 'stop' && (route.leaf === 'new' || route.extra === 'edit');
   editBase = trip ? plainClone(trip) : null;
   editRevision = trip ? travelStore.getRecord(trip.uid)?.revision : null;
   const fingerprint = () => {
     if (rawId === 'recovery') return JSON.stringify(travelStore.recoveryEntries());
     if (!tripId) return JSON.stringify(readTrips().map(item => { const record = travelStore.getRecord(item.uid); return [item.uid, item.title, item.updated, record?.role, record?.members?.length, Boolean(record?.conflict)]; })) + ':' + travelStore.recoveryEntries().length;
     const record = travelStore.getRecord(tripId);
-    return JSON.stringify([record?.value, record?.role, Boolean(record?.conflict)]);
+    return JSON.stringify([record?.value, record?.role, record?.members, Boolean(record?.conflict)]);
   };
   let signature = fingerprint(), queued = false;
   const mountedEpoch = epoch;
@@ -623,7 +419,7 @@ export function mount(host, route, api) {
   if (rawId === 'join') { sharing.mountInvitation(host, route.sub, api); return; }
   if (rawId === 'recovery') { recovery(host, api); return; }
   if (!tripId) { library(host, trips, api); return; }
-  if (rawId === 'new') { api.title(host, 'new trip', '', 'travel'); tripEditor(host, null, api); return; }
+  if (rawId === 'new') { tripEditor(host, null, api); return; }
   if (!trip) {
     api.title(host, 'travel', '', 'travel');
     host.append(el('p', { text: 'This trip is no longer available.' }), button('‹ trips', () => go(api, '/travel')));
@@ -636,8 +432,7 @@ export function mount(host, route, api) {
   const viewer = travelStore.getRecord(trip.uid)?.role === 'viewer';
   host.classList.toggle('travel-readonly', viewer);
   if (viewer && editor) { go(api, routePath(trip.uid)); return; }
-  sharing.controls(host, trip, api);
-  api.title(host, 'travel', `${trip.stops.length} stops · ${nightsTotal(trip)} nights`, 'travel');
+  if (editor) sharing.controls(host, trip, api);
   if (sub === 'edit') { tripEditor(host, trip, api); return; }
   if (sub === 'stop' && leaf === 'new') { stopEditor(host, trip, null, api); return; }
   if (sub === 'stop' && leaf && extra === 'edit') {
@@ -651,13 +446,9 @@ export function mount(host, route, api) {
   if (sub === 'moment' && leaf) {
     const stop = trip.stops.find(item => item.uid === leaf); if (stop) { momentEditor(host, trip, stop, api); return; }
   }
-  const selectedStop = trip.stops.find(item => item.uid === (sub === 'stop' ? leaf : '')) || trip.stops[0];
-  if (!selectedStop) { host.append(el('h2', { class: 'travel-editor-title', text: trip.title }), el('p', { class: 'travel-empty-hint', text: 'No stops yet.' })); if (!viewer) host.append(button('+ add a stop', () => go(api, `${routePath(trip.uid)}/stop/new`), { class: 'travel-commit' })); return; }
-  const selectedIndex = trip.stops.findIndex(item => item.uid === selectedStop.uid);
-  tripHeader(host, trip, selectedIndex, api);
-  const layout = el('div', { class: 'travel-planner-grid' }, journeyIndex(trip, selectedStop, api));
-  const detail = el('div', { class: 'travel-detail-column' }); stopDetail(detail, trip, selectedStop, api); layout.append(detail); host.append(layout);
-  summaryNotes(host, trip, api);
-  if (viewer) host.querySelectorAll('.travel-star, .travel-activity-check').forEach(control => { control.disabled = true; });
-  host.append(el('div', { class: 'travel-bottom-actions' }, button('+ another trip', () => go(api, '/travel/new'), { class: 'travel-inline-add' })));
+  if (sub === 'connection' && leaf) {
+    const stop = leaf === 'home' ? null : trip.stops.find(item => item.uid === leaf);
+    if (leaf === 'home' || stop) { connectionEditor(host, trip, stop, trip.stops.find(item => item.uid === extra), api); return; }
+  }
+  mountWorkspace(host, trip, route, api, { saveTrip, go, cleanup });
 }

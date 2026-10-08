@@ -8,6 +8,7 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
 const CURRENCIES = ['EUR', 'USD', 'PEN', 'BOB', 'CLP', 'BRL'];
 const STATUSES = ['idea', 'shortlist', 'booked', 'included'];
+const STAY_STATUSES = ['idea', 'shortlist', 'chosen', 'booked', 'included'];
 const MODES = ['flight', 'train', 'bus', 'ferry', 'transfer', 'tour', 'other'];
 const KINDS = ['hotel', 'guesthouse', 'apartment', 'hostel', 'tour', 'camp', 'other'];
 const MOMENTS = ['detour', 'taste', 'sound', 'person', 'tiny', 'weather', 'other'];
@@ -75,17 +76,18 @@ function array(value, max, validate, path) {
 }
 function connection(value, path, returning = false) {
   if (value === undefined) return;
-  object(value, ['label', 'date', 'url', 'cost', 'currency', 'status', 'reference', ...(returning ? [] : ['mode'])], path);
+  object(value, ['label', 'date', 'url', 'cost', 'currency', 'status', 'reference', 'needsReview', ...(returning ? [] : ['mode'])], path);
   strings(value, { label: returning ? 240 : 160, reference: 120 }, path);
   day(value.date, `${path}.date`); url(value.url, `${path}.url`); number(value.cost, 1e9, `${path}.cost`, true);
   enumField(value.currency, CURRENCIES, `${path}.currency`); enumField(value.status, STATUSES, `${path}.status`);
+  if (value.needsReview !== undefined && typeof value.needsReview !== 'boolean') throw invalid(`Invalid ${path}.needsReview.`);
   if (!returning) enumField(value.mode, MODES, `${path}.mode`);
 }
 function stay(value, path) {
   object(value, ['uid', 'name', 'kind', 'url', 'rating', 'status', 'nightlyCost', 'totalCost', 'currency', 'checkIn', 'checkOut', 'cancelBy', 'bookingRef', 'address', 'note'], path);
   uid(value.uid, `${path}.uid`); text(value.name, 140, `${path}.name`, true);
   strings(value, { bookingRef: 120, address: 240, note: 800 }, path); dates(value, ['checkIn', 'checkOut', 'cancelBy'], path); url(value.url, `${path}.url`);
-  enumField(value.kind, KINDS, `${path}.kind`); enumField(value.status, STATUSES, `${path}.status`); enumField(value.currency, CURRENCIES, `${path}.currency`);
+  enumField(value.kind, KINDS, `${path}.kind`); enumField(value.status, STAY_STATUSES, `${path}.status`); enumField(value.currency, CURRENCIES, `${path}.currency`);
   number(value.rating, 5, `${path}.rating`); number(value.nightlyCost, 1e9, `${path}.nightlyCost`, true); number(value.totalCost, 1e9, `${path}.totalCost`, true);
 }
 function activity(value, path) {

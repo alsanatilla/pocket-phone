@@ -9,6 +9,7 @@ import { CATEGORIES, access, saveAccess, definitions, firecrawlKey, setFirecrawl
 import { activity, settle, mark, elapsed, activityTitle, phaseLabel } from "./pip-activity.js";
 import { applyProposal, applyChange, applyCoros } from './pip-actions.js';
 import { corosAction, corosCourse, corosDated, corosDate, corosProblem, corosTitle, courseLines, sportName } from '../shared/coros-course.js';
+import { travelDraft } from '../shared/travel-context.js';
 
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, viewportCleanup = null;
@@ -72,6 +73,17 @@ export function withBrief(brief) {
   return store.update(chat.uid, value => {
     value.title = ('Daily brief · ' + String(brief.day || '')).slice(0,100);
     value.draft = 'Help me choose one thing for today. Use only the facts below; ask when context is missing. Do not change anything.\n\n' + text;
+  }).uid;
+}
+
+/** Travel prepares a separate draft; only the composer's Send starts a provider request. */
+export function withTravel(trip, stop, action = 'find') {
+  const prepared = travelDraft(trip, stop, action);
+  const chat = store.create();
+  return store.update(chat.uid, value => {
+    value.title = prepared.title;
+    value.draft = prepared.draft;
+    value.context = [prepared.context];
   }).uid;
 }
 

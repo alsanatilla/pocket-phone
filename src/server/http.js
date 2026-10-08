@@ -1,8 +1,11 @@
 export const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 export function failure(error) {
-  const status = error.status || 500;
-  if (status >= 500) console.error('Pocket API failed:', error.code || error.name);
-  return json({ error: status >= 500 ? 'Pocket storage is unavailable. Try again.' : error.message }, status);
+  // BetterAuth errors use symbolic `status` and a numeric `statusCode`.
+  // Passing the symbolic value to Response would throw and hide the API error.
+  const status = [error?.statusCode, error?.status].find(value => Number.isInteger(value) && value >= 400 && value <= 599) || 500;
+  if (status >= 500) console.error('Pocket API failed:', error?.code || error?.name || 'UnknownError');
+  const message = typeof error?.message === 'string' && error.message ? error.message : 'Request failed.';
+  return json({ error: status >= 500 ? 'Pocket storage is unavailable. Try again.' : message }, status);
 }
 export function sameOrigin(request) {
   const origin = request.headers.get('origin');

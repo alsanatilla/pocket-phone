@@ -36,7 +36,7 @@ export function installRefresh({ sync, status, onStatus, describe, say }) {
   const scrollTop = () => document.scrollingElement?.scrollTop || 0;
   const topAt = target => { for (let p = target; p && p !== document.body; p = p.parentElement) if (p.scrollHeight > p.clientHeight + 2 && getComputedStyle(p).overflowY.match(/auto|scroll/) && p.scrollTop > 0) return false; return scrollTop() <= 0; };
   const reset = () => { distance = 0; dragging = false; document.getElementById('app').style.transform = ''; if (status.state !== 'syncing') { indicator.hidden = true; indicator.running(false); } };
-  document.addEventListener('touchstart', e => { if (e.touches.length !== 1 || status.state === 'syncing') return; const t = e.touches[0]; x = t.clientX; y = t.clientY; eligible = topAt(e.target) && !e.target.closest('input,textarea,select,[contenteditable],canvas,.dialog'); dragging = false; }, { passive: true });
+  document.addEventListener('touchstart', e => { if (e.touches.length !== 1 || status.state === 'syncing') return; const t = e.touches[0]; x = t.clientX; y = t.clientY; eligible = topAt(e.target) && !e.target.closest('input,textarea,select,[contenteditable],canvas,.dialog,.travel-map-viewport'); dragging = false; }, { passive: true });
   document.addEventListener('touchmove', e => {
     if (!eligible || e.touches.length !== 1) return;
     const t = e.touches[0], dx = t.clientX - x, dy = t.clientY - y;

@@ -3,6 +3,7 @@
 const CURRENCIES = ['EUR', 'USD', 'PEN', 'BOB', 'CLP', 'BRL'];
 const STOP_CURRENCY = { Peru: 'PEN', Bolivien: 'BOB', Chile: 'CLP', Brasilien: 'BRL' };
 const STATUS = ['idea', 'shortlist', 'booked', 'included'];
+const STAY_STATUS = ['idea', 'shortlist', 'chosen', 'booked', 'included'];
 const STAY_KINDS = ['hotel', 'guesthouse', 'apartment', 'hostel', 'tour', 'camp', 'other'];
 const MOMENT_KINDS = ['detour', 'taste', 'sound', 'person', 'tiny', 'weather', 'other'];
 const MODES = ['flight', 'train', 'bus', 'ferry', 'transfer', 'tour', 'other'];
@@ -43,7 +44,7 @@ function normalizeConnection(value, stopCurrency, arrival) {
     mode: choice(current.mode, MODES, 'transfer'), label: text(current.label, 160),
     date: day(current.date) ? current.date : day(arrival) ? arrival : '',
     url: url(current.url), cost: amount(current.cost), currency: currency(current.currency || stopCurrency),
-    status: choice(current.status, STATUS), reference: text(current.reference, 120),
+    status: choice(current.status, STATUS), reference: text(current.reference, 120), needsReview: current.needsReview === true,
   };
 }
 
@@ -52,7 +53,7 @@ function normalizeStay(value, stopCurrency) {
   return {
     uid: text(current.uid, 100) || identifier(), name: text(current.name, 140),
     kind: choice(current.kind, STAY_KINDS), url: url(current.url),
-    rating: Math.max(0, Math.min(5, Math.round(Number(current.rating) || 0))), status: choice(current.status, STATUS),
+    rating: Math.max(0, Math.min(5, Math.round(Number(current.rating) || 0))), status: choice(current.status, STAY_STATUS),
     nightlyCost: amount(current.nightlyCost), totalCost: amount(current.totalCost), currency: currency(current.currency || stopCurrency),
     checkIn: day(current.checkIn) ? current.checkIn : '', checkOut: day(current.checkOut) ? current.checkOut : '',
     cancelBy: day(current.cancelBy) ? current.cancelBy : '', bookingRef: text(current.bookingRef, 120),
@@ -107,7 +108,7 @@ export function normalizeTrip(value) {
     returnJourney: {
       label: text(journey.label, 240), date: day(journey.date) ? journey.date : day(value.returnDate) ? value.returnDate : '',
       url: url(journey.url), cost: amount(journey.cost), currency: currency(journey.currency || 'BRL'),
-      status: choice(journey.status, STATUS), reference: text(journey.reference, 120),
+      status: choice(journey.status, STATUS), reference: text(journey.reference, 120), needsReview: journey.needsReview === true,
     },
     stops: list(value.stops, 80).map(item => normalizeStop(item, now)).filter(item => item.place),
     moments: list(value.moments, 100).map(item => normalizeMoment(item, now)).filter(item => item.title),
@@ -140,6 +141,14 @@ export function mergeTrip(base, local, remote) {
   const conflict = path => conflicts.add(path || 'trip');
 
   function merge(baseValue, localValue, remoteValue, path, key = '') {
+    // Before route review existed, an absent flag meant no review was needed.
+    // Treat that old representation as false so an older queued edit does not
+    // conflict merely because the other copy now carries the explicit default.
+    if (key === 'needsReview') {
+      if (baseValue === MISSING) baseValue = false;
+      if (localValue === MISSING) localValue = false;
+      if (remoteValue === MISSING) remoteValue = false;
+    }
     // Editing a timestamp does not compete with editing travel content.
     if (key === 'updated') {
       const times = [baseValue, localValue, remoteValue].filter(value => typeof value === 'number' && Number.isFinite(value));
