@@ -31,8 +31,8 @@
 .travel-google-pin.is-booked .travel-google-pin-number { border-color: #adbf9c; background: #adbf9c; color: #162010; }
 .travel-google-pin.is-booked .travel-google-pin-number::after { background: #adbf9c; }
 .travel-google-pin.is-chosen .travel-google-pin-number { border-color: #ecc981; background: #ecc981; color: #12110f; }
-.travel-google-caption { margin-top: 4px; color: var(--muted, #b6ac9d); font: 10px/1.5 var(--mono, monospace); }
-.travel-google-missing { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 18px; margin-top: 8px; min-width: 0; font: 12px/1.5 var(--mono, monospace); }
+.travel-google-caption { margin-top: 6px; color: var(--muted, #b6ac9d); font: 13px/1.5 var(--mono, monospace); }
+.travel-google-missing { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 18px; margin-top: 8px; min-width: 0; font: 13px/1.5 var(--mono, monospace); }
 .travel-google-missing-label, .travel-google-location-status { color: var(--muted, #b6ac9d); }
 .travel-google-missing-stop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .travel-google-missing-stop button { min-height: 44px; padding: 5px 0; font: inherit; text-align: left; overflow-wrap: anywhere; }
@@ -45,3 +45,10 @@
   .travel-google-pin-name { max-width: 140px; font-size: 11px; }
 }
 @media (prefers-reduced-motion: reduce) { .travel-google-loading span { animation: none; } }
+/* Names that would cover another pin or name step back; a shared spot shows all its numbers. */
+.travel-google-pin.is-label-hidden .travel-google-pin-name { display: none; }
+.travel-google-pin.is-group .travel-google-pin-number { width: auto; min-width: 30px; padding: 0 7px; border-radius: 15px; }
+/* Pip walking the route. Below the pins, never in the way of a tap. */
+.travel-google-pip { position: absolute; width: 44px; height: 44px; image-rendering: pixelated; pointer-events: none; transform: translate(-50%, -92%); z-index: 1; }
+.travel-google-pip.is-west { transform: translate(-50%, -92%) scaleX(-1); }
+.travel-google-pip.is-resting { transform: translate(-112%, -86%); }

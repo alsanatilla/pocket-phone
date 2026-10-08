@@ -1,5 +1,6 @@
 import { loadGoogleMaps, onMapsAuthFailure } from './google-maps.js';
 import { resolveLocation } from './travel-geocoding.js';
+import { sheet, drawFrame, SIZE, stepMs } from './sprite-player.js';
 import './travel-google-map.css';
 
 const WARM_MAP_STYLE = [
@@ -23,7 +24,21 @@ const WARM_MAP_STYLE = [
   { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#202f32' }] },
   { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#93abad' }] },
 ];
+// Close up (a stay's street) the map shows everything; for a whole trip only land, water, borders and countries,
+// so the stops are the only names on it.
+const DETAIL_STYLE = [...WARM_MAP_STYLE,
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ visibility: 'on' }, { color: '#384631' }] },
+  { featureType: 'landscape', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] }];
+const QUIET_STYLE = [...DETAIL_STYLE,
+  ...['administrative.locality', 'administrative.neighborhood', 'administrative.province', 'road', 'water', 'landscape'].map(featureType => ({ featureType, elementType: 'labels', stylers: [{ visibility: 'off' }] })),
+  ...['road.arterial', 'road.local', 'transit', 'administrative.land_parcel'].map(featureType => ({ featureType, stylers: [{ visibility: 'off' }] })),
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#433d2e' }] },
+  { featureType: 'administrative.country', elementType: 'labels.text.fill', stylers: [{ color: '#8f8676' }] }];
+const DETAIL_ZOOM = 11;
 const viewports = new Map();
+// Pip walks a trip's route once per visit, then from stop to stop; this remembers where Pip last stood.
+const walked = new Set(), pipAt = new Map();
 // One SDK map survives detached route redraws; adapter overlays/listeners do not.
 // This avoids constructing another billable map on every stop/tab/live update.
 let retainedMap = null;
@@ -85,7 +100,7 @@ function centerOf(map) {
   return validLocation(value) ? value : null;
 }
 function acquireMap(maps, viewport) {
-  const options = { center: { lat: 0, lng: 0 }, zoom: 2, minZoom: 2, maxZoom: 18, styles: WARM_MAP_STYLE,
+  const options = { center: { lat: 0, lng: 0 }, zoom: 2, minZoom: 2, maxZoom: 18, styles: QUIET_STYLE,
     gestureHandling: 'cooperative', disableDefaultUI: true, keyboardShortcuts: true, clickableIcons: false,
     mapTypeId: 'roadmap', backgroundColor: '#202f32' };
   if (retainedMap && !retainedMap.active && !retainedMap.broken && retainedMap.maps === maps) {
@@ -121,6 +136,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
   let savedViewport = null, currentStayPromise = Promise.resolve([]), fitScope = options.focusStays ? 'stays' : 'trip';
   const mapListeners = [], stopOverlays = [], stayOverlays = [], lines = [], pendingTimers = new Set();
   const resolvedStays = new Map();
+  let pip = null, walkFrame = 0, styled = null, PipOverlay;
   const wrapper = el('div', { class: 'travel-google-route-map', 'data-map-provider': 'google', 'aria-busy': 'true' });
   const viewport = el('div', { class: 'travel-google-viewport' });
   const loading = el('div', { class: 'travel-google-loading', role: 'status', 'aria-label': 'Loading map' },
@@ -153,6 +169,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
     for (const timer of pendingTimers) clearTimeout(timer); pendingTimers.clear();
     if (stayTimer != null) clearTimeout(stayTimer);
     if (frame) cancelAnimationFrame(frame); frame = 0;
+    if (walkFrame) cancelAnimationFrame(walkFrame); walkFrame = 0; pip?.setMap(null); pip = null;
     for (const handle of mapListeners.splice(0)) handle.remove?.();
     removeOverlays(stopOverlays); removeOverlays(stayOverlays);
     for (const line of lines.splice(0)) line.setMap(null);
@@ -223,6 +240,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
   function updateSelection() {
     for (const overlay of stopOverlays) overlay.setSelected(String(overlay.stopUID) === selected);
     for (const node of unavailable.querySelectorAll('[data-stop-uid]')) node.setAttribute('aria-pressed', String(node.getAttribute('data-stop-uid') === selected));
+    declutter();
   }
   function select(uid, notify = false) {
     if (disposed || failed || !stops.some(stop => String(stop.uid) === String(uid))) return;
@@ -241,21 +259,22 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
     PinOverlay = class extends maps.OverlayView {
       constructor(point, kind, activate) {
         super(); this.point = point; this.kind = kind; this.stopUID = point.stop?.uid;
+        this.pixel = null; this.merged = false; this.group = null; this.numberWidth = 30;
         this.element = el('div', { class: `travel-google-pin ${kind === 'stay' ? 'is-stay' : 'is-stop'}` });
         const name = kind === 'stay' ? point.stay.name || 'Stay' : point.stop.place || 'Destination';
         const status = kind === 'stay' ? point.stay.status : '';
-        const descriptor = kind === 'stay' ? `${name}${status ? ', ' + status : ''}` : `${point.order + 1}. ${name}${point.stop.country ? ', ' + point.stop.country : ''}`;
-        this.button = el('button', { type: 'button', class: 'travel-google-pin-button', 'aria-label': `${kind === 'stay' ? 'Open stay ' : 'Select '}${descriptor}${kind === 'stay' && point.location.approximate ? '. Approximate location.' : ''}`,
-          'data-stop-uid': point.stop?.uid, 'data-stay-uid': point.stay?.uid },
-          el('span', { class: 'travel-google-pin-number', 'aria-hidden': 'true' }, kind === 'stay' ? '⌂' : String(point.order + 1)),
-          el('span', { class: 'travel-google-pin-name' }, name));
+        this.nameText = name;
+        this.descriptor = kind === 'stay' ? `${name}${status ? ', ' + status : ''}` : `${point.order + 1}. ${name}${point.stop.country ? ', ' + point.stop.country : ''}`;
+        this.number = el('span', { class: 'travel-google-pin-number', 'aria-hidden': 'true' }, kind === 'stay' ? '⌂' : String(point.order + 1));
+        this.button = el('button', { type: 'button', class: 'travel-google-pin-button', 'aria-label': `${kind === 'stay' ? 'Open stay ' : 'Select '}${this.descriptor}${kind === 'stay' && point.location.approximate ? '. Approximate location.' : ''}`,
+          'data-stop-uid': point.stop?.uid, 'data-stay-uid': point.stay?.uid }, this.number, el('span', { class: 'travel-google-pin-name' }, name));
         this.element.classList.toggle('is-approximate', Boolean(point.location.approximate));
         if (kind === 'stay') this.element.classList.add(['booked', 'included'].includes(status) ? 'is-booked' : status === 'chosen' ? 'is-chosen' : 'is-saved');
-        this.element.append(this.button); listen(this.button, 'click', event => { event.preventDefault(); if (!disposed && !failed) activate(); });
+        this.element.append(this.button); listen(this.button, 'click', event => { event.preventDefault(); if (!disposed && !failed) activate(this); });
         listen(this.button, 'keydown', event => {
           if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
           event.preventDefault(); event.stopPropagation();
-          const collection = kind === 'stay' ? stayOverlays : stopOverlays, index = collection.indexOf(this);
+          const collection = (kind === 'stay' ? stayOverlays : stopOverlays).filter(overlay => !overlay.merged), index = collection.indexOf(this);
           collection[(index + (['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1) + collection.length) % collection.length]?.button.focus();
         });
         maps.OverlayView.preventMapHitsAndGesturesFrom?.(this.element);
@@ -264,8 +283,9 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
       draw() {
         if (disposed || failed) return;
         const pixel = this.getProjection()?.fromLatLngToDivPixel(locationPoint(this.point.location));
-        if (!pixel || !Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) { this.element.hidden = true; return; }
-        this.element.hidden = false; this.element.style.left = `${pixel.x}px`; this.element.style.top = `${pixel.y}px`;
+        if (!pixel || !Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) { this.pixel = null; this.element.hidden = true; return; }
+        this.pixel = { x: pixel.x, y: pixel.y };
+        this.element.hidden = this.merged; this.element.style.left = `${pixel.x}px`; this.element.style.top = `${pixel.y}px`;
         this.element.classList.toggle('is-wide-view', (map.getZoom?.() || 0) < 7);
         // Address pins share a city's position at continent zoom; the Stay area
         // control exposes them at a useful scale without inventing offsets.
@@ -276,7 +296,111 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
         this.element.classList.toggle('is-selected', active);
         if (this.kind === 'stop') this.button.setAttribute('aria-pressed', String(active));
       }
+      /** Leads a shared spot (members), stands alone (one member) or is drawn by another pin (null). */
+      setGroup(members) {
+        this.merged = !members; this.group = members; this.element.hidden = this.merged || !this.pixel;
+        if (!members) return;
+        const label = members.map(overlay => overlay.point.order + 1).join('·');
+        this.number.textContent = label; this.numberWidth = Math.max(30, label.length * 8 + 12);
+        this.element.classList.toggle('is-group', members.length > 1);
+        this.button.setAttribute('aria-label', members.length > 1 ? 'Select ' + members.map(overlay => overlay.descriptor).join(' or ') : 'Select ' + this.descriptor);
+      }
     };
+  }
+  // Stops at one spot (a trip that starts and ends at the airport) share one pin; tapping it moves between them.
+  // A name that would cover another pin or name is left out; the selected stop always keeps its name.
+  function declutter() {
+    if (!map || disposed || failed) return;
+    const groups = [];
+    for (const overlay of stopOverlays) {
+      if (!overlay.pixel) { overlay.setGroup(null); continue; }
+      const near = groups.find(group => Math.hypot(group[0].pixel.x - overlay.pixel.x, group[0].pixel.y - overlay.pixel.y) < 26);
+      if (near) near.push(overlay); else groups.push([overlay]);
+    }
+    const leads = groups.map(group => {
+      const lead = group.find(overlay => String(overlay.stopUID) === selected) || group[0];
+      for (const overlay of group) overlay.setGroup(overlay === lead ? group : null);
+      return lead;
+    });
+    const hits = (a, b) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2;
+    const taken = leads.map(({ pixel, numberWidth }) => ({ x1: pixel.x - 15, y1: pixel.y - 41, x2: pixel.x - 15 + numberWidth, y2: pixel.y - 11 }));
+    const wide = (map.getZoom?.() || 0) < 7, isSelected = overlay => overlay.group?.some(member => String(member.stopUID) === selected);
+    for (const lead of [...leads].sort((a, b) => Number(isSelected(b)) - Number(isSelected(a)))) {
+      const left = lead.pixel.x - 15 + lead.numberWidth + 6;
+      const label = { x1: left, y1: lead.pixel.y - 35, x2: left + Math.min(172, lead.nameText.length * 7.3), y2: lead.pixel.y - 17 };
+      const fits = isSelected(lead) || !wide && !taken.some(other => hits(label, other));
+      lead.element.classList.toggle('is-label-hidden', !fits);
+      if (fits) taken.push(label);
+    }
+  }
+  const choose = overlay => {
+    const members = overlay.group?.length ? overlay.group : [overlay], index = members.findIndex(member => String(member.stopUID) === selected);
+    select(members[(index + 1) % members.length].stopUID, true);
+  };
+
+  // ── Pip walks the route: the whole way once per visit, then to each stop you choose. ──
+  function createPipClass() {
+    PipOverlay = class extends maps.OverlayView {
+      constructor() {
+        super(); this.position = null; this.facing = 1; this.resting = true; this.frame = 0;
+        this.canvas = el('canvas', { class: 'travel-google-pip', 'aria-hidden': 'true', width: String(SIZE), height: String(SIZE) });
+        this.context = this.canvas.getContext('2d');
+      }
+      onAdd() { this.getPanes()?.overlayLayer?.append(this.canvas); }
+      draw() {
+        const pixel = this.position && this.getProjection()?.fromLatLngToDivPixel(this.position);
+        if (!pixel || !Number.isFinite(pixel.x)) { this.canvas.hidden = true; return; }
+        this.canvas.hidden = false; this.canvas.style.left = `${pixel.x}px`; this.canvas.style.top = `${pixel.y}px`;
+        this.canvas.classList.toggle('is-resting', this.resting); this.canvas.classList.toggle('is-west', this.facing < 0);
+      }
+      onRemove() { this.canvas.remove(); }
+      paint(activity, frame) { drawFrame(this.context, 'pip', 'yellow', activity, frame); }
+    };
+  }
+  async function startPip() {
+    const located = points.filter(point => point.location);
+    if (options.focusStays || !located.length || pip) return;
+    try { await sheet('pip', 'yellow'); } catch { return; }
+    const geometry = await maps.importLibrary?.('geometry').catch(() => null);
+    if (disposed || failed || pip) return;
+    createPipClass(); pip = new PipOverlay(); pip.setMap(map);
+    const target = located.find(point => String(point.stop.uid) === selected) || located[0];
+    const from = located.find(point => String(point.stop.uid) === pipAt.get(trip.uid));
+    const rest = point => {
+      if (walkFrame) cancelAnimationFrame(walkFrame); walkFrame = 0;
+      pip.resting = true; pip.position = locationPoint(point.location); pip.paint(0, 2); pip.draw(); pipAt.set(trip.uid, String(point.stop.uid));
+    };
+    const between = (a, b) => { const i = located.indexOf(a), j = located.indexOf(b), path = located.slice(Math.min(i, j), Math.max(i, j) + 1); return i <= j ? path : path.reverse(); };
+    const walk = path => {
+      if (path.length < 2) { rest(path[0]); return; }
+      const zoom = map.getZoom?.() || 2, legs = [];
+      for (let i = 1; i < path.length; i++) {
+        const a = locationPoint(path[i - 1].location), b = locationPoint(path[i].location);
+        const meters = geometry ? geometry.spherical.computeDistanceBetween(a, b) : Math.hypot(a.lat - b.lat, a.lng - b.lng) * 111000;
+        const pixels = meters / (156543.03392 * Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180) / 2 ** zoom);
+        legs.push({ a, b, ms: clamp(pixels / 0.16, 450, 1600), facing: b.lng < a.lng && Math.abs(b.lng - a.lng) < 180 ? -1 : 1 });
+      }
+      const total = legs.reduce((sum, leg) => sum + leg.ms, 0), scale = total > 12000 ? 12000 / total : 1;
+      let leg = 0, started = performance.now(), painted = 0;
+      pip.resting = false;
+      const step = now => {
+        walkFrame = 0;
+        if (disposed || failed || !pip) return;
+        const current = legs[leg], t = Math.min(1, (now - started) / (current.ms * scale));
+        pip.position = geometry ? geometry.spherical.interpolate(current.a, current.b, t) : { lat: current.a.lat + (current.b.lat - current.a.lat) * t, lng: current.a.lng + (current.b.lng - current.a.lng) * t };
+        pip.facing = current.facing;
+        if (now - painted >= stepMs('pip', 1)) { painted = now; pip.frame = (pip.frame + 1) % 16; pip.paint(1, pip.frame); }
+        pip.draw();
+        if (t >= 1 && ++leg >= legs.length) { rest(path.at(-1)); return; }
+        if (t >= 1) started = now;
+        walkFrame = requestAnimationFrame(step);
+      };
+      walkFrame = requestAnimationFrame(step);
+    };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { rest(target); return; }
+    if (!walked.has(trip.uid)) { walked.add(trip.uid); rest(located[0]); walk(located); }
+    else if (from && from !== target) { rest(from); walk(between(from, target)); }
+    else rest(target);
   }
   function drawStays(rows) {
     removeOverlays(stayOverlays);
@@ -319,6 +443,9 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
     if (disposed || failed || !map) return;
     zoomIn.disabled = (map.getZoom?.() || 0) >= 18; zoomOut.disabled = (map.getZoom?.() || 0) <= 2;
     for (const overlay of [...stopOverlays, ...stayOverlays]) overlay.draw();
+    const style = (map.getZoom?.() || 0) >= DETAIL_ZOOM ? DETAIL_STYLE : QUIET_STYLE;
+    if (style !== styled) { styled = style; map.setOptions({ styles: style }); }
+    declutter(); pip?.draw();
   }
   const ready = (async () => {
     try {
@@ -335,12 +462,14 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
       instance = acquireMap(maps, viewport); map = instance.map;
       createOverlayClass();
       for (const point of points.filter(point => point.location)) {
-        const overlay = new PinOverlay(point, 'stop', () => select(point.stop.uid, true));
+        const overlay = new PinOverlay(point, 'stop', choose);
         stopOverlays.push(overlay); overlay.setMap(map);
       }
       for (let i = 1; i < points.length; i++) if (points[i - 1].location && points[i].location) {
         const line = new maps.Polyline({ map, path: [locationPoint(points[i - 1].location), locationPoint(points[i].location)], geodesic: true, strokeOpacity: 0,
-          clickable: false, icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: .85, strokeColor: '#ecc981', scale: 2 }, offset: '0', repeat: '12px' }] });
+          clickable: false, icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: .85, strokeColor: '#ecc981', scale: 2 }, offset: '0', repeat: '12px' },
+            // which way the route runs
+            { icon: { path: maps.SymbolPath?.FORWARD_CLOSED_ARROW ?? 1, scale: 2.6, strokeColor: '#ecc981', strokeOpacity: .95, fillColor: '#ecc981', fillOpacity: .95 }, offset: '55%' }] });
         lines.push(line);
       }
       drawMissing(); updateSelection(); loading.remove();
@@ -375,6 +504,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
       while (!disposed && !failed) { await pending; if (pending === currentStayPromise) break; pending = currentStayPromise; }
       if (disposed || failed || controller.signal.aborted) throw abortError();
       complete = true; wrapper.setAttribute('aria-busy', 'false'); wrapper.dataset.mapState = 'ready';
+      void startPip();
       return { provider: 'google', resolvedStops: points.filter(point => point.location).length, unmappedStops: points.filter(point => !point.location).map(point => ({ uid: point.stop.uid, status: point.status })) };
     } catch (error) {
       if (disposed) throw abortError();
