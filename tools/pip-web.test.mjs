@@ -195,3 +195,17 @@ test('search_web forwards news and research filters to Firecrawl',async()=>{
     assert.ok(result.results.some(item=>item.url.includes('news.example')));
   }finally{globalThis.fetch=savedFetch;globalThis.localStorage=savedLocal;globalThis.sessionStorage=savedSession;}
 });
+test('replayed history tells Pip which proposals it already prepared',()=>{
+  const {chat}=ready();
+  chat.turns=[
+    {uid:'t1',text:'Research the car industry and save a note',status:'done',answer:'I prepared a note.',activity:[
+      {id:'r1',name:'propose_action',state:'done',applied_href:'/notes/abc',result:JSON.stringify({kind:'proposal',proposal:{kind:'note',title:'Car industry turmoil',text:'…'}})},
+      {id:'r2',name:'propose_change',state:'done',result:JSON.stringify({kind:'change',change:{change:'append_note'},before:{title:'Trip'}})},
+    ]},
+    {uid:'t2',text:'which stock should I buy?',context:[],status:'open',answer:''},
+  ];
+  const body=requestBody({...chat,config:config({...DEFAULT_CONFIG})},chat.turns[1]);
+  const assistant=body.messages.find(message=>message.role==='assistant');
+  assert.ok(assistant,'the finished turn is replayed');
+  assert.match(assistant.content,/\[Pip prepared: note "Car industry turmoil" \(saved by the user\); append_note on "Trip" \(not applied\)\]/);
+});
