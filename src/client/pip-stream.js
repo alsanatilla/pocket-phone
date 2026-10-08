@@ -119,16 +119,19 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
               if (web) { if (!offered.has(block.name) || !value.webSearch || block.name !== "web_search") throw new Error("The provider requested an unavailable search."); webRows.set(block.id, activityId(block.id)); if (final || ++searches > RESEARCH_LIMITS.webCalls) return finishFromObservations("The web research limit was reached."); result.phase = "searching web"; }
             }
             if (block.type === "web_search_tool_result") {
-              // Anthropic can resolve a server search in a later round than its server_tool_use
-              // (pause_turn), so match the search by the provider's id rather than this round's.
-              const rowId = webRows.get(block.tool_use_id);
-              if (!rowId) throw new Error("The provider returned an unmatched search result.");
+              // A search can resolve in a later round than its server_tool_use (pause_turn), so it is
+              // remembered by the provider's id. If a provider omits or reuses an id, attach the
+              // result to the newest unfinished search rather than ending the whole run.
+              const pending = result.activity.find(row => row.kind === "web" && ["running", "queued"].includes(row.state));
+              const key = typeof block.tool_use_id === "string" ? block.tool_use_id : "";
+              const rowId = webRows.get(key) || pending?.id || activityId(key);
+              if (key) webRows.set(key, rowId);
               const error = !Array.isArray(block.content) && block.content?.type === "web_search_tool_result_error";
               const found = (Array.isArray(block.content) ? block.content : []).map(source).filter(Boolean);
               const observation = { source: "web:anthropic", results: found.slice(0, 3), matched: found.length, truncated: found.length > 3, request_identity: checkpointIdentity(value), access_fingerprint: accessFingerprint(value), ...(error ? { error: block.content.error_code || "web_unavailable", message: "Search failed" } : {}) }, content = JSON.stringify(observation);
               if (toolData + content.length > RESEARCH_LIMITS.toolData) return finishFromObservations("The research data limit was reached.");
               toolData += content.length; completed.push({ name: "web_search", answer: observation });
-              record(rowId, { state: error ? "failed" : "done", summary: error ? "Search failed · " + (block.content.error_code || "unavailable") : found.length + " results", result: content, sources: found, ended: Date.now() });
+              record(rowId, { kind: "web", name: "web_search", state: error ? "failed" : "done", summary: error ? "Search failed · " + (block.content.error_code || "unavailable") : found.length + " results", result: content, sources: found, ended: Date.now() });
               result.phase = "preparing reply";
             }
           }

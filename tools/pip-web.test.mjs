@@ -134,3 +134,18 @@ test('a web search that resolves after a paused turn updates its own search',asy
   const web=result.activity.filter(row=>row.kind==='web');
   assert.equal(web.length,1);assert.equal(web[0].state,'done');assert.equal(web[0].summary,'1 results');
 });
+test('a web result the client cannot match no longer ends the run',async()=>{
+  // Defensive: whatever id a provider uses, a search result must not abort the whole reply.
+  const {chat}=ready(), value=config({...DEFAULT_CONFIG,webSearch:true});
+  const body={model:value.model,max_tokens:value.maxTokens,stream:true,messages:[{role:'user',content:'x'}],tools:[{name:'web_search'}]};
+  const wire=event({type:'message_start',message:{model:'m',usage:{input_tokens:10}}})
+    +event({type:'content_block_start',index:0,content_block:{type:'web_search_tool_result',tool_use_id:'srvtoolu_orphan',content:[{type:'web_search_result',url:'https://example.com/x',title:'X'}]}})
+    +event({type:'content_block_stop',index:0})
+    +event({type:'content_block_delta',index:1,delta:{type:'text_delta',text:'Done'}})
+    +event({type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:10}})
+    +event({type:'message_stop'});
+  const result=await streamChat(chat,turn,{value,body,readSse:sse,key:'k',fetcher:async()=>response(wire)});
+  assert.equal(result.answer,'Done');
+  const web=result.activity.filter(row=>row.kind==='web');
+  assert.equal(web.length,1);assert.equal(web[0].state,'done');
+});
