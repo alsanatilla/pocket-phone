@@ -118,7 +118,8 @@ async function access(userId, locked, force = false) {
   if (!saved.rows.length) throw fault('COROS connection changed.', 409);
   return session.access;
 }
-function rpcClient(userId, locked) {
+/** Raw clients (Pip) get COROS's own error text back, so the model can correct a request; the refresh keeps generic errors. */
+function rpcClient(userId, locked, raw = false) {
   let next = 0;
   const rpc = async (method, params, retry = true) => {
     if (Date.now() > locked.deadline) throw fault('COROS refresh timed out.');
@@ -128,16 +129,28 @@ function rpcClient(userId, locked) {
     if (response.status === 401) throw new Reconnect();
     if (!response.ok) throw fault('COROS could not read the requested data.');
     const text = await response.text(), payload = JSON.parse((response.headers.get('content-type') || '').includes('text/event-stream') ? text.split(/\r?\n/).filter(line => line.startsWith('data:')).at(-1)?.slice(5) || '{}' : text || '{}');
-    if (payload.error) throw fault('COROS could not read the requested data.');
+    if (payload.error) throw raw ? fault('COROS refused the request: ' + String(payload.error.message || 'invalid request').slice(0, 600), 422) : fault('COROS could not read the requested data.');
     return payload.result;
   };
   let ready;
-  return async (name, args) => {
-    ready ??= rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'pocket', version: '0.10.0' } }); await ready;
+  const start = async () => { ready ??= rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'pocket', version: '0.20.0' } }); await ready; };
+  const call = async (name, args) => {
+    await start();
     const result = await rpc('tools/call', { name, arguments: args });
+    const text = unwrap((result?.content || []).filter(part => part.type === 'text').map(part => part.text).join('\n'));
+    if (raw) return { text, error: Boolean(result?.isError) };
     if (result?.isError) throw fault('COROS could not read ' + name + '.');
-    return unwrap((result?.content || []).filter(part => part.type === 'text').map(part => part.text).join('\n'));
+    return text;
   };
+  call.list = async () => {
+    await start(); const tools = [];
+    for (let cursor, page = 0; page < 10; page++) {
+      const result = await rpc('tools/list', cursor ? { cursor } : {});
+      tools.push(...(result?.tools || [])); cursor = result?.nextCursor; if (!cursor) break;
+    }
+    return tools;
+  };
+  return call;
 }
 function dates(zone) {
   const date = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -199,6 +212,83 @@ export async function corosDetail(userId, activityId, sport) {
 export async function saveCorosDetail(userId, activityId, value) {
   if (!value || !Array.isArray(value.detail) || JSON.stringify(value).length > 1000000 || 'fitUrl' in value) throw fault('Invalid activity cache.', 400);
   await execute({ sql: 'INSERT INTO pocket_coros_details (user_id, activity_id, payload, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, activity_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at RETURNING user_id', args: [userId, activityId, JSON.stringify(value), Date.now()] });
+}
+// Pip's live COROS access. Reads go straight to COROS; writes are made only from a Pip proposal the user applied.
+// Training plans stay read-only here: a plan's payload is larger than Pip's whole reply budget.
+export const COROS_READS = new Set(['queryActivityLapData', 'queryCustomActivityLapData', 'getActivityDetail', 'analyzeActivityDetail', 'queryDailyHealthData', 'querySleepOverview', 'queryDevices',
+  'queryFitnessAssessmentOverview', 'queryTrainingLoadAssessment', 'queryRecoveryStatus', 'queryMenstruationCycles', 'querySportRecords', 'queryAvgHeartRate', 'queryRestingHeartRate', 'querySleepHrv',
+  'queryStressLevel', 'queryHealthCheckTimeSeries', 'queryStressTimeSeries', 'queryScheduledWorkoutDetails', 'queryTrainingPlanDetails', 'queryTrainingPlanLibrary', 'queryTrainingSchedule',
+  'queryWorkoutDetails', 'queryWorkoutLibrary', 'queryUserInfo', 'queryActivityFitFileDownloadUrls']);
+export const COROS_WRITES = new Set(['createScheduledWorkout', 'scheduleWorkout', 'createSingleWorkout', 'updateScheduledWorkout', 'updateWorkoutDetails']);
+const PIP_TEXT = 60000, catalogs = new Map();
+/** Runs one Pip request under the refresh lock, waiting briefly while a scheduled refresh finishes. */
+async function withSession(userId, operation) {
+  const until = Date.now() + 15000;
+  for (;;) {
+    const saved = await row(userId);
+    if (!saved?.credentials) throw fault('Connect COROS in Movement first.', 409);
+    if (saved.needs_auth) throw fault('Reconnect COROS in Movement.', 409);
+    const locked = await lease(userId, true);
+    if (locked) {
+      try { return await operation(rpcClient(userId, locked, true)); }
+      catch (error) {
+        if (!(error instanceof Reconnect)) throw error;
+        await execute({ sql: 'UPDATE pocket_coros SET needs_auth = 1, error = ? WHERE user_id = ? AND generation = ? AND lock_owner = ? RETURNING user_id', args: [error.message, userId, locked.generation, locked.owner] });
+        throw fault(error.message, 409);
+      } finally { await execute({ sql: 'UPDATE pocket_coros SET lock_owner = NULL, lock_until = 0 WHERE user_id = ? AND generation = ? AND lock_owner = ? RETURNING user_id', args: [userId, locked.generation, locked.owner] }); }
+    }
+    if (Date.now() > until) throw fault('COROS is refreshing. Try again in a moment.', 409);
+    await new Promise(resolve => setTimeout(resolve, 700));
+  }
+}
+const plain = value => value && typeof value === 'object' && !Array.isArray(value);
+function requestArguments(value, limit) {
+  if (!plain(value) || JSON.stringify(value).length > limit) throw fault('Check the COROS request arguments.', 400);
+  return structuredClone(value);
+}
+/** COROS's live tool list, per COROS region, cached for six hours. Not user data. */
+async function catalog(userId) {
+  const saved = await row(userId); if (!saved?.credentials) throw fault('Connect COROS in Movement first.', 409);
+  const issuer = open(userId, saved.credentials).issuer, kept = catalogs.get(issuer);
+  if (kept && Date.now() - kept.at < 6 * 3600000) return kept.tools;
+  const listed = await withSession(userId, call => call.list());
+  const tools = new Map(listed.filter(tool => COROS_READS.has(tool.name) || COROS_WRITES.has(tool.name)).map(tool => [tool.name, { name: tool.name, description: String(tool.description || ''), inputSchema: plain(tool.inputSchema) ? tool.inputSchema : {} }]));
+  catalogs.set(issuer, { at: Date.now(), tools }); return tools;
+}
+export async function corosCatalog(userId, names) {
+  if (!Array.isArray(names) || !names.length || names.length > 5 || names.some(name => !COROS_READS.has(name) && !COROS_WRITES.has(name))) throw fault('Unknown COROS tool.', 400);
+  const tools = await catalog(userId);
+  return { tools: names.map(name => tools.get(name)).filter(Boolean) };
+}
+export async function corosTool(userId, name, args) {
+  if (!COROS_READS.has(name)) throw fault('Unknown COROS tool.', 400);
+  const value = requestArguments(args, 4000);
+  // COROS lists optional filters as required; an absent one is sent as null, as the scheduled refresh does.
+  for (const key of (await catalog(userId)).get(name)?.inputSchema?.required || []) if (!(key in value)) value[key] = null;
+  const result = await withSession(userId, call => call(name, value));
+  return { text: result.text.slice(0, PIP_TEXT), truncated: result.text.length > PIP_TEXT, error: result.error };
+}
+/**
+ * Applies an approved Pip change once per proposal key: a repeated apply (double tap, another device) returns the first
+ * result instead of creating a second workout. A refused or failed attempt can be applied again.
+ */
+export async function corosWrite(userId, key, name, args) {
+  if (!COROS_WRITES.has(name)) throw fault('Unknown COROS change.', 400);
+  if (typeof key !== 'string' || !/^[A-Za-z0-9:_-]{8,200}$/.test(key)) throw fault('Invalid COROS change.', 400);
+  const value = requestArguments(args, 16000), now = Date.now();
+  const claimed = await execute({ sql: "INSERT INTO pocket_coros_writes (user_id, key, tool, state, result, updated_at) VALUES (?, ?, ?, 'pending', '', ?) ON CONFLICT(user_id, key) DO UPDATE SET tool = excluded.tool, state = 'pending', result = '', updated_at = excluded.updated_at WHERE pocket_coros_writes.state = 'failed' OR (pocket_coros_writes.state = 'pending' AND pocket_coros_writes.updated_at < ?) RETURNING user_id", args: [userId, key, name, now, now - 300000] });
+  if (!claimed.rows.length) {
+    const kept = (await execute({ sql: 'SELECT state, result FROM pocket_coros_writes WHERE user_id = ? AND key = ?', args: [userId, key] })).rows[0];
+    if (kept?.state === 'done') return { text: String(kept.result), repeated: true };
+    throw fault('This change is already being saved to COROS.', 409);
+  }
+  const finish = (state, text) => execute({ sql: 'UPDATE pocket_coros_writes SET state = ?, result = ?, updated_at = ? WHERE user_id = ? AND key = ? RETURNING user_id', args: [state, String(text).slice(0, 20000), Date.now(), userId, key] });
+  let result;
+  try { result = await withSession(userId, call => call(name, value)); }
+  catch (error) { await finish('failed', error.message || ''); throw error; }
+  await finish(result.error ? 'failed' : 'done', result.text);
+  if (result.error) throw fault('COROS did not accept this: ' + result.text.slice(0, 600), 422);
+  return { text: result.text.slice(0, 20000) };
 }
 export async function runCorosJob() {
   const due = await execute({ sql: 'SELECT user_id FROM pocket_coros WHERE credentials IS NOT NULL AND needs_auth = 0 AND next_attempt <= ? ORDER BY last_success LIMIT 10', args: [Date.now()] });

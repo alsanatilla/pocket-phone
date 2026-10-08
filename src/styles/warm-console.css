@@ -184,6 +184,10 @@ input[type=checkbox] { accent-color: var(--accent); }
 .pip-proposal { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 16px 0; border-bottom: 1px solid var(--line); }
 .pip-proposal p { margin: 0; }
 .pip-proposal button { min-height: 48px; color: var(--accent); padding-left: 0; }
+.pip-course { margin: 4px 0 8px; }
+.pip-course p { margin: 4px 0; line-height: 1.5; }
+.pip-course .nested { padding-left: 3ch; }
+.pip-before p { white-space: pre-wrap; max-height: 14em; overflow: auto; margin: 4px 0 8px; }
 .pip-loading { min-height: 48px; }
 .pip-loading .pip-mascot { height: 48px; width: 48px; }
 .pip-empty { min-height: 100px; padding: 16px 0; }

@@ -7,7 +7,8 @@ import { mascot } from "./pip-pixels.js";
 import { backdrop } from "./pixel-backdrop.js";
 import { CATEGORIES, access, saveAccess, definitions, firecrawlKey, setFirecrawlKey, changeName, changeTarget } from "./pip-tools.js";
 import { activity, settle, mark, elapsed, activityTitle, phaseLabel } from "./pip-activity.js";
-import { applyProposal, applyChange } from './pip-actions.js';
+import { applyProposal, applyChange, applyCoros } from './pip-actions.js';
+import { corosAction, corosCourse, corosDated, corosDate, corosProblem, corosTitle, courseLines, sportName } from '../shared/coros-course.js';
 
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, viewportCleanup = null;
@@ -149,7 +150,10 @@ function updateReply(turn) {
       row.applied_href ? sourceLink({href:row.applied_href,title:'open saved ' + value.proposal.kind}) : button('review ' + value.proposal.kind, () => reviewProposal(parts.chat, turn, row, value.proposal), {disabled:active}))),
       ...decoded.filter(item => item.value.kind === 'change' && typeof item.value.change?.change === 'string' && typeof item.value.before?.title === 'string').map(({row,value}) => ui.h('section', {class:'pip-proposal','data-proposal':row.id},
         caption(changeName(value.change.change)), ui.h('strong', {text:value.before.title}),
-        row.applied_href ? sourceLink({href:row.applied_href,title:'open ' + changeTarget(value.change.change)}) : button('review change', () => reviewChange(parts.chat, turn, row, value), {disabled:active}))));
+        row.applied_href ? sourceLink({href:row.applied_href,title:'open ' + changeTarget(value.change.change)}) : button('review change', () => reviewChange(parts.chat, turn, row, value), {disabled:active}))),
+      ...decoded.filter(item => item.value.kind === 'coros' && typeof item.value.coros?.tool === 'string' && typeof item.value.title === 'string').map(({row,value}) => ui.h('section', {class:'pip-proposal','data-proposal':row.id},
+        caption(corosAction(value.coros.tool) + (corosDated(value.coros.tool) && corosDate(value.coros.arguments?.date) ? ' · ' + corosDate(value.coros.arguments.date) : '')), ui.h('strong', {text:value.title}),
+        row.applied_href ? sourceLink({href:row.applied_href,title:'saved to COROS'}) : button('review workout', () => reviewCoros(parts.chat, turn, row, value), {disabled:active}))));
     parts.agentSignature = signature + active;
   }
   parts.toolGroup.hidden = !rows.length; parts.toolTitle.textContent = activityTitle(rows);
@@ -275,12 +279,46 @@ async function reviewChange(chat, turn, row, value) {
   await ui.dialog(before.title, form, [['cancel', null]]);
 }
 
+/** A COROS workout change: the date, name and sections as they will appear in COROS. Nothing is sent until the button. */
+async function reviewCoros(chat, turn, row, value) {
+  const tool = value.coros.tool, args = structuredClone(value.coros.arguments), error = caption('');
+  let saving = false;
+  error.classList.add('warn');
+  const iso = raw => /^\d{8}$/.test(raw || '') ? raw.slice(0, 4) + '-' + raw.slice(4, 6) + '-' + raw.slice(6, 8) : '';
+  const day = corosDated(tool) ? ui.h('input', { type: 'date', 'aria-label': 'Workout date', value: iso(args.date) }) : null;
+  const name = corosCourse(tool) ? ui.h('input', { 'aria-label': 'Workout name', maxlength: 100, value: args.course.courseName }) : null;
+  const notes = corosCourse(tool) ? ui.h('textarea', { 'aria-label': 'Workout description', rows: 3, maxlength: 1000 }) : null;
+  if (notes) notes.value = args.course.courseDescription || '';
+  const course = corosCourse(tool) ? ui.h('div', { class: 'pip-course' }, caption(sportName(args.course)), ...courseLines(args.course).map(line => ui.h('p', { class: 'small' + (line.nested ? ' nested' : ''), text: line.text }))) : null;
+  const form = ui.h('div', { class: 'pip-settings' }, caption(value.coros.summary),
+    value.before ? ui.h('details', { class: 'pip-before' }, ui.h('summary', { class: 'meta muted', text: tool === 'scheduleWorkout' ? 'workout' : 'now' }), ui.h('p', { class: 'small muted', text: value.before })) : null,
+    day ? ui.h('label', {}, 'date', day) : null, name ? ui.h('label', {}, 'name', name) : null, notes ? ui.h('label', {}, 'description', notes) : null, course,
+    caption('remove it later in the COROS app'), error,
+    button(corosAction(tool), async () => {
+      if (saving) return;
+      saving = true;
+      try {
+        const current = store.get(chat.uid), latest = current?.turns.find(t => t.uid === turn.uid), event = activity(latest?.activity).find(item => item.id === row.id);
+        if (!event || runner.active?.chatId === chat.uid) throw new Error('Let Pip finish first.');
+        if (event.applied_href) { ui.closeDialog(); return; }
+        if (day) args.date = day.value.replaceAll('-', '');
+        if (name) { args.course.courseName = name.value.trim(); args.course.courseDescription = notes.value.trim(); }
+        const problem = corosProblem(tool, args); if (problem) throw new Error(problem);
+        const href = await applyCoros(chat.uid, turn.uid, row.id, tool, args);
+        store.update(chat.uid, c => { const saved = c.turns.find(t => t.uid === turn.uid)?.activity?.find(item => item.id === row.id); if (!saved) throw new Error('This reply is no longer available.'); saved.applied_href = href; saved.applied = Date.now(); });
+        ui.closeDialog(); render();
+      } catch (failure) { error.textContent = failure.message; }
+      finally { saving = false; }
+    }, { class: 'accent' }));
+  await ui.dialog(corosTitle(tool, args), form, [['cancel', null]]);
+}
+
 async function pocketAccess(chat) {
   const enabled = access(chat.config), fields = CATEGORIES.map(([key, title]) => {
     const input = ui.h("input", { type: "checkbox" }); input.checked = enabled.includes(key);
     return { key, input, view: ui.h("label", { class: "check-label" }, input, title) };
   });
-  await ui.dialog("Pocket tools · read only", ui.h("div", { class: "pip-settings" }, caption(new URL(chat.config.baseUrl).hostname), fields.map(field => field.view),
+  await ui.dialog("Pocket tools", ui.h("div", { class: "pip-settings" }, caption(new URL(chat.config.baseUrl).hostname), fields.map(field => field.view),
     button("save access", () => {
       if (runner.active) runner.stop(); saveAccess(chat.config, fields.filter(f => f.input.checked).map(f => f.key)); ui.closeDialog(); render();
     }, { class: "row-button accent" })), [["cancel", null]]);

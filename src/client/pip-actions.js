@@ -95,3 +95,17 @@ export function applyChange(change) {
   }
   throw new Error('Choose a supported change.');
 }
+
+/**
+ * Sends an approved workout change to COROS through the Pocket account. The proposal id makes it idempotent on the
+ * server: applying again, here or on the phone, returns the first result instead of adding a second workout.
+ */
+export async function applyCoros(chatId, turnId, eventId, tool, args) {
+  if (!activeAccount()) throw new Error('Sign in to Pocket to save to COROS.');
+  const key = await proposalId(chatId, turnId, eventId);
+  const response = await fetch('/api/coros/write', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accountId: activeAccount(), key, name: tool, arguments: args }) });
+  let value = {}; try { value = await response.json(); } catch { /* reported below */ }
+  if (!response.ok) throw new Error(String(value.error || 'COROS did not answer. Try again.'));
+  return '/movement';
+}

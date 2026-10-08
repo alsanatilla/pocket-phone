@@ -1,4 +1,5 @@
-import { storage as localStorage, tabStorage as sessionStorage } from './workspace-storage.js';
+import { storage as localStorage, tabStorage as sessionStorage, activeAccount } from './workspace-storage.js';
+import { corosAction, corosProblem, corosTitle } from '../shared/coros-course.js';
 import { notes, tasks, parking, gym, noteTitle, NOTE_LIMIT } from "./store.js";
 import { agenda } from './planner.js';
 
@@ -9,7 +10,7 @@ export const firecrawlKey = (storage = sessionStorage) => storage.getItem(FIRECR
 export function setFirecrawlKey(key, storage = sessionStorage) { const value = String(key || "").trim(); if (value.length > 200 || /\s/.test(value)) throw new Error("Check the Firecrawl key."); if (value) storage.setItem(FIRECRAWL_KEY, value); else storage.removeItem(FIRECRAWL_KEY); }
 export const webTools = value => Boolean(value.webSearch);
 
-export const CATEGORIES = [["notes", "Notes"], ["thoughts", "Thoughts"], ["tasks", "Tasks"], ["calendar", "Calendar"], ["gym", "Gym"], ["coros", "Movement · COROS cache"]];
+export const CATEGORIES = [["notes", "Notes"], ["thoughts", "Thoughts"], ["tasks", "Tasks"], ["calendar", "Calendar"], ["gym", "Gym"], ["coros", "COROS"]];
 const permissionKey = value => "pocket:pip-access:" + value.provider + "|" + value.baseUrl;
 export function access(value, storage = localStorage) {
   try { const allowed = JSON.parse(storage?.getItem(permissionKey(value)) || "[]"); return CATEGORIES.map(([key]) => key).filter(key => Array.isArray(allowed) && allowed.includes(key)); } catch { return []; }
@@ -24,6 +25,18 @@ const days = { days: integer("Calendar days ending today.", 1, 30, 7) };
 const paging = { offset: integer("Character offset; use next_offset to continue.", 0, 200000, 0), length: integer("Characters to read.", 200, 6000, 6000) };
 const recordId = { type: "string", description: "The id returned by a Pocket search.", maxLength: 80, minLength: 1, pattern: "^[A-Za-z0-9_-]+$" };
 const tool = (category, name, description, properties, required = []) => ({ category, name, description, input_schema: { type: "object", properties, required, additionalProperties: false } });
+// Live COROS (MCP through the Pocket account). Training plans stay read-only: a plan is larger than a whole reply budget.
+const COROS_READS = ["querySportRecords", "getActivityDetail", "analyzeActivityDetail", "queryActivityLapData", "queryCustomActivityLapData", "queryActivityFitFileDownloadUrls", "queryDailyHealthData", "querySleepOverview", "querySleepHrv", "queryRestingHeartRate", "queryAvgHeartRate", "queryStressLevel", "queryStressTimeSeries", "queryHealthCheckTimeSeries", "queryRecoveryStatus", "queryTrainingLoadAssessment", "queryFitnessAssessmentOverview", "queryMenstruationCycles", "queryTrainingSchedule", "queryScheduledWorkoutDetails", "queryWorkoutLibrary", "queryWorkoutDetails", "queryTrainingPlanLibrary", "queryTrainingPlanDetails", "queryUserInfo", "queryDevices"];
+const COROS_WRITES = ["createScheduledWorkout", "scheduleWorkout", "createSingleWorkout", "updateScheduledWorkout", "updateWorkoutDetails"];
+const COROS_INDEX = [
+  "querySportRecords(startDate, endDate, sportTypeCodes, minDistanceKm, maxDistanceKm, minDurationMinutes, maxDurationMinutes, maxAveragePace, locationKeyword, limit): activities with filters",
+  "getActivityDetail / analyzeActivityDetail(labelId, sportType[, focus]) · queryActivityLapData(labelId, sportType) · queryCustomActivityLapData(labelId, sportType, startTimestamp, endTimestamp): one activity",
+  "queryDailyHealthData(days) · querySleepOverview / querySleepHrv / queryAvgHeartRate / queryHealthCheckTimeSeries / queryStressTimeSeries(startDate, endDate, days) · queryRestingHeartRate / queryStressLevel(days): health",
+  "queryRecoveryStatus() · queryTrainingLoadAssessment(days) · queryFitnessAssessmentOverview(): recovery, load, VO2max and race predictions",
+  "queryTrainingSchedule(startDate, endDate) · queryScheduledWorkoutDetails(date, idInPlan) · queryWorkoutLibrary(sportType, courseType) · queryWorkoutDetails(workoutId): planned and saved workouts",
+  "queryTrainingPlanLibrary(statusList, planType, weeks, cursor) · queryTrainingPlanDetails(planId, startDay, endDay) · queryMenstruationCycles(startDay, endDay) · queryUserInfo() · queryDevices() · queryActivityFitFileDownloadUrls(startDate, endDate, sportType, labelId, limit)"
+].join("\n");
+const COROS_ARGUMENTS = { coros_read: 4000, propose_coros: 6000 };
 const TOOLS = [
   tool("notes", "search_notes", "Search saved Pocket notes. All query words must match. Read a result by id for its text; drafts are excluded.", search),
   tool("notes", "read_note", "Read a saved Pocket note in pages. Use next_offset for more text. No drafts or writes.", { id: recordId, ...paging }, ["id"]),
@@ -36,7 +49,10 @@ const TOOLS = [
   tool("universal", "propose_action", "Prepare a note, task or appointment for the user to review and save with a tap. Never saves or changes data. Appointment proposals need when; task due is YYYY-MM-DD.", { kind: { type: "string", enum: ["note", "task", "appointment"] }, title: { type: "string", minLength: 1, maxLength: 200 }, text: { type: "string", maxLength: 6000 }, due: { type: "string", maxLength: 10 }, steps: { type: "array", maxItems: 12, items: { type: "string", minLength: 1, maxLength: 160, pattern: "^[^\\r\\n]+$" } }, when: { type: "string", maxLength: 40 }, minutes: integer("Appointment duration in minutes.", 15, 480, 60) }, ["kind", "title", "text"]),
   tool("changes", "propose_change", "Prepare a change to an existing record for the user to review and apply with a tap: complete_task, update_task (title, due YYYY-MM-DD or empty to clear, add_steps), append_note (text) or move_appointment (when, minutes). Use ids from Pocket searches or reads. Never applies the change.", { change: { type: "string", enum: ["complete_task", "update_task", "append_note", "move_appointment"] }, id: recordId, title: { type: "string", minLength: 1, maxLength: 200 }, due: { type: "string", maxLength: 10 }, add_steps: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 160, pattern: "^[^\\r\\n]+$" } }, text: { type: "string", minLength: 1, maxLength: 4000 }, when: { type: "string", maxLength: 40, description: "An ISO 8601 timestamp with UTC or an offset." }, minutes: integer("Appointment duration in minutes.", 15, 480, 60), reason: { type: "string", maxLength: 300, description: "One short line on why, shown in the review." } }, ["change", "id"]),
   tool("gym", "gym_summary", "Read locally saved workouts and their exercise sets from the last 1–30 days. Never edits a workout.", days),
-  tool("coros", "coros_summary", "Read COROS readings already cached in Movement. Never refreshes or calls COROS. Check last_updated and stale; missing data is not a zero reading.", days)
+  tool("coros", "coros_summary", "Read COROS readings already cached in Movement. Never refreshes or calls COROS. Check last_updated and stale; missing data is not a zero reading.", days),
+  tool("coros", "coros_read", "Read live data from the user's COROS account, in pages. Tools and arguments (dates yyyyMMdd; sport codes 1 run, 2 ride, 5 trail run):\n" + COROS_INDEX + "\nIf COROS refuses a request, read coros_format for that tool.", { tool: { type: "string", enum: COROS_READS }, arguments: { type: "object", description: "The COROS tool's arguments as an object; {} when it takes none." }, ...paging }, ["tool"]),
+  tool("coros", "coros_format", "Read COROS's exact rules and arguments for one COROS tool, in pages. Read every page for a change tool before propose_coros.", { tool: { type: "string", enum: [...COROS_READS, ...COROS_WRITES] }, ...paging }, ["tool"]),
+  tool("coros", "propose_coros", "Prepare a COROS workout change for the user to review and apply with a tap: createScheduledWorkout (new workout on a date), scheduleWorkout (a library workout on a date), createSingleWorkout (new library workout), updateScheduledWorkout or updateWorkoutDetails. arguments must follow coros_format for that tool exactly. Never applies anything. COROS cannot remove a workout through Pocket, so check the date and sections.", { tool: { type: "string", enum: COROS_WRITES }, arguments: { type: "object", description: "Exactly the arguments coros_format describes for this tool." }, summary: { type: "string", minLength: 1, maxLength: 300, description: "One line for the review: what changes and why." } }, ["tool", "arguments", "summary"])
 ];
 const WEB = [
   { name: "search_web", description: "Search current web information. Optionally limit to five domains and a time range. Cite the urls you use.", input_schema: { type: "object", properties: { query: { type: "string", minLength: 1, description: "What to search for.", maxLength: 300 }, limit: integer("Maximum results.", 1, 5, 5), domains: { type: "array", maxItems: 5, items: { type: "string", maxLength: 253 } }, time_range: { type: "string", enum: ["any", "day", "week", "month", "year"], default: "any" } }, required: ["query"], additionalProperties: false } },
@@ -44,7 +60,7 @@ const WEB = [
 ];
 const pocketCategories = ["notes", "tasks", "thoughts", "calendar"];
 /** Tools that show or prepare something instead of reading: never cached, run one at a time, never replayed as observations. */
-export const STATE_TOOLS = ["update_plan", "propose_action", "propose_change"];
+export const STATE_TOOLS = ["update_plan", "propose_action", "propose_change", "propose_coros"];
 const CHANGE_CATEGORY = { complete_task: "tasks", update_task: "tasks", append_note: "notes", move_appointment: "calendar" };
 const CHANGE_NAMES = { complete_task: "complete task", update_task: "update task", append_note: "add to note", move_appointment: "move appointment" };
 export const changeName = change => CHANGE_NAMES[change] || "change";
@@ -56,6 +72,8 @@ export const accessFingerprint = value => { const granted = access(value); retur
 export const cacheKey = (name, args) => name + ":" + JSON.stringify(canonical(args));
 function canonical(value) { return Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value; }
 function valid(value, schema) {
+  // An object schema without properties is a free-form argument object (COROS requests); its size is checked per tool.
+  if (schema.type === "object" && !schema.properties) return Boolean(value) && typeof value === "object" && !Array.isArray(value);
   if (schema.type === "object") return value && typeof value === "object" && !Array.isArray(value) && (!schema.required || schema.required.every(key => Object.hasOwn(value, key))) && Object.keys(value).every(key => Object.hasOwn(schema.properties, key) && valid(value[key], schema.properties[key]));
   if (schema.type === "array") return Array.isArray(value) && value.length >= (schema.minItems || 0) && value.length <= (schema.maxItems ?? Infinity) && value.every(item => valid(item, schema.items));
   if (schema.type === "integer") return Number.isInteger(value) && value >= schema.minimum && value <= schema.maximum;
@@ -145,11 +163,65 @@ function changeProposal(value, args) {
   if (!args.when || !validInstant(args.when)) return failure("invalid_arguments", "Use an ISO date and time with timezone.");
   return ready({ id: item.uid, when: args.when, minutes: args.minutes ?? item.minutes }, { title: item.title, when: new Date(item.when).toISOString(), minutes: item.minutes });
 }
+/** Live COROS goes through the signed-in Pocket account, which holds the COROS connection. */
+async function corosApi(action, body, signal) {
+  if (!activeAccount()) return { failed: failure("coros_unavailable", "Sign in to Pocket and connect COROS in Movement to use live COROS data.") };
+  let response, value = {};
+  try { response = await fetch("/api/coros/" + action, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, accountId: activeAccount() }), signal }); }
+  catch (error) { if (error?.name === "AbortError") throw error; return { failed: failure("coros_unavailable", "Pocket could not reach COROS. Try again shortly.") }; }
+  try { value = await response.json(); } catch { /* reported below */ }
+  if (!response.ok) return { failed: failure(response.status === 422 ? "coros_refused" : "coros_unavailable", String(value.error || "COROS is unavailable.").slice(0, 800)) };
+  return { value };
+}
+/** A page that still fits the 8,000-character result limit after JSON escaping (COROS formats are full of quotes). */
+function fitted(text, args, fields) {
+  for (let length = args.length ?? 6000; ; length = Math.floor(length * 0.8)) {
+    const result = { ...fields, ...pageText(text, { ...args, length }) };
+    if (JSON.stringify(result).length <= 7600 || length <= 200) return result;
+  }
+}
+const formats = new Map();
+const firstSentence = text => (String(text).match(/^[\s\S]*?\.(?:\s|$)/)?.[0] || String(text)).trim();
+const slimSchema = value => Array.isArray(value) ? value.map(slimSchema) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, key === "description" && typeof item === "string" ? firstSentence(item) : slimSchema(item)])) : value;
+async function corosFormat(args, signal) {
+  let text = formats.get(args.tool);
+  if (!text) {
+    const { failed, value } = await corosApi("catalog", { names: [args.tool] }, signal); if (failed) return failed;
+    const found = value.tools?.[0]; if (!found) return failure("coros_unavailable", "COROS does not offer this tool right now.");
+    // COROS's own rules in full; per-field notes keep their first sentence, since the rules repeat them.
+    text = found.description + "\n\nArguments (JSON schema):\n" + JSON.stringify(slimSchema(found.inputSchema)); formats.set(args.tool, text);
+  }
+  return fitted(text, args, { source: "coros:format", tool: args.tool });
+}
+async function corosRead(args, signal, context) {
+  const request = args.arguments || {}, key = "coros-text:" + cacheKey(args.tool, request);
+  let text = context.cache?.get(key);
+  if (typeof text !== "string") {
+    const { failed, value } = await corosApi("tool", { name: args.tool, arguments: request }, signal); if (failed) return failed;
+    if (value.error) return failure("coros_refused", "COROS: " + String(value.text || "the request was refused").slice(0, 800));
+    text = String(value.text || ""); context.cache?.set(key, text);
+  }
+  return fitted(text, args, { source: "coros:" + args.tool, tool: args.tool });
+}
+/** Checks the shape and, for updates and library workouts, reads what is there now. Nothing is written to COROS here. */
+async function corosProposal(args, signal) {
+  const problem = corosProblem(args.tool, args.arguments); if (problem) return failure("invalid_arguments", problem);
+  const lookup = args.tool === "updateScheduledWorkout" ? ["queryScheduledWorkoutDetails", { date: args.arguments.date, idInPlan: String(args.arguments.idInPlan) }]
+    : args.tool === "updateWorkoutDetails" || args.tool === "scheduleWorkout" ? ["queryWorkoutDetails", { workoutId: args.arguments.workoutId }] : null;
+  let before = "";
+  if (lookup) {
+    const { failed, value } = await corosApi("tool", { name: lookup[0], arguments: lookup[1] }, signal); if (failed) return failed;
+    if (value.error) return failure("workout_not_found", "COROS: " + String(value.text || "that workout was not found").slice(0, 600));
+    before = String(value.text || "").slice(0, 1200);
+  }
+  return { kind: "coros", coros: { tool: args.tool, arguments: structuredClone(args.arguments), summary: args.summary.trim() }, title: corosTitle(args.tool, args.arguments), ...(before ? { before } : {}), requires_confirmation: true };
+}
 export async function execute(value, name, args = {}, signal, context = {}) {
   if (signal?.aborted) throw new DOMException("Stopped", "AbortError");
   const definition = TOOLS.find(t => t.name === name) || WEB.find(t => t.name === name);
   if (!definition || !permitted(value, definition)) return failure("access_disabled", "Access to this source is off or this tool is unavailable.");
   if (!valid(args, definition.input_schema)) return failure("invalid_arguments", "Check the tool arguments and their limits.");
+  if (COROS_ARGUMENTS[name] && JSON.stringify(args.arguments ?? {}).length > COROS_ARGUMENTS[name]) return failure("invalid_arguments", "Keep the COROS arguments under " + COROS_ARGUMENTS[name] + " characters.");
   const cache = context.cache, entryKey = cacheKey(name, args), signature = grantSignature(value, name), reuse = !STATE_TOOLS.includes(name), saved = reuse && cache?.get(entryKey);
   if (saved && saved.permissions === signature) return bounded({ ...structuredClone(saved.result), cached: true });
   const query = args.query ?? "", limit = args.limit ?? (name === "search_pocket" ? 10 : 5), window = args.days ?? 7;
@@ -161,6 +233,9 @@ export async function execute(value, name, args = {}, signal, context = {}) {
     if (!args.title.trim() || args.steps?.some(step => !step.trim()) || due && !validDay(due) || when && !validInstant(when) || args.kind === "appointment" && !when) return failure("invalid_arguments", "Use a title, valid date and time, and nonempty steps. Appointments need an ISO date and time with timezone.");
     result = { kind: "proposal", proposal: { kind: args.kind, title: args.title.trim(), text: args.text, due, steps: (args.steps || []).map(step => step.trim()), when, minutes: args.minutes ?? 60 }, requires_confirmation: true };
   } else if (name === "propose_change") result = changeProposal(value, args);
+  else if (name === "coros_read") result = await corosRead(args, signal, context);
+  else if (name === "coros_format") result = await corosFormat(args, signal);
+  else if (name === "propose_coros") result = await corosProposal(args, signal);
   else if (name === "search_calendar") {
     const found = calendarItems(window).filter(item => matches(item.title, query));
     result = { source: "pocket:calendar", days: window, matched: found.length, truncated: found.length > limit, appointments: found.slice(0, limit).map(item => ({ id: item.uid, title: item.title, when: new Date(item.when).toISOString(), minutes: item.minutes, task_uid: item.task_uid || "", href: "/calendar/" + encodeURIComponent(item.uid) })) };
@@ -214,6 +289,8 @@ export async function execute(value, name, args = {}, signal, context = {}) {
   if (reuse && !result.error) cache?.set(entryKey, { permissions: signature, result: structuredClone(result) });
   return result;
 }
+/** "querySleepHrv" → "sleep hrv" for activity labels. */
+const corosName = tool => String(tool || "").replace(/^(query|get)/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().slice(0, 60) || "data";
 export function label(name, input = {}) {
   const query = typeof input?.query === "string" ? input.query.slice(0, 200) : "";
   if (name === "web_search" || name === "search_web") return "search web" + (query ? " · “" + query + "”" : "");
@@ -226,6 +303,9 @@ export function label(name, input = {}) {
   if (name === "propose_action") return "prepare " + (input.kind || "action");
   if (name === "propose_change") return "prepare " + changeName(input.change);
   if (name === "coros_summary") return "read COROS cache · " + (input.days || 7) + " days";
+  if (name === "coros_read") return "read COROS · " + corosName(input.tool);
+  if (name === "coros_format") return "read COROS format · " + corosName(input.tool);
+  if (name === "propose_coros") return "prepare " + corosAction(input.tool);
   if (name === "gym_summary") return "read Gym · " + (input.days || 7) + " days";
   return name.replaceAll("_", " ");
 }
@@ -239,12 +319,16 @@ function resultSummary(name, result) {
   if (name === "search_web") return (result.results?.length || 0) + " results";
   if (name === "read_web_page") return result.title || "Page read";
   if (name === "coros_summary") return (result.stale ? "stale cache" : "cached readings") + (result.last_updated ? " · " + result.last_updated.slice(0, 10) : "");
+  if (name === "coros_read" || name === "coros_format") return result.total_length + " characters" + (result.truncated ? " · more" : "");
+  if (name === "propose_coros") return result.title + " · ready to review";
   const count = result.matched || 0; return count + (name === "gym_summary" ? " workouts" : " matches") + (result.truncated ? " · partial" : "");
 }
 export const summary = (name, result) => (result.cached ? "cached · " : "") + resultSummary(name, result);
 export function sources(name, result) {
   if (result.error || result.available === false) return [];
   if (name === "coros_summary") return [{ title: "Movement · COROS cache", href: "/movement" }];
+  if (name === "coros_read") return [{ title: "COROS · " + corosName(result.tool), href: "/movement" }];
+  if (name === "coros_format") return [];
   if (name === "read_note") return [{ title: result.title, href: "/notes/" + encodeURIComponent(result.id) }];
   if (name === "read_task") return [{ title: result.title, href: "/tasks/" + encodeURIComponent(result.id) }];
   if (name === "search_calendar") return (result.appointments || []).map(item => ({ title: item.title, href: item.href }));
