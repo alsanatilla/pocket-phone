@@ -41,9 +41,9 @@ Pip's upper-corner pixel glow stays inside the header. The transcript and compos
 
 | Role | Size | Face |
 | --- | --- | --- |
-| Section label, metadata | 13 sp medium | IBM Plex Mono |
+| Section label, metadata | 13 sp medium | Atkinson Hyperlegible Mono |
 | Row metadata, commands, soft keys, header buttons | 14 sp | Monospace |
-| Body, chat, steps | 16 sp | IBM Plex Mono regular |
+| Body, chat, steps | 16 sp | Atkinson Hyperlegible Mono regular |
 | Row title, setting name, editors | 18 sp | Monospace |
 | Item page title (task) | 20 sp bold | Monospace |
 | Page title | 24 sp | Pixel |
@@ -59,7 +59,7 @@ Every page is built from these and nothing else.
 | Component | Use | Anatomy |
 | --- | --- | --- |
 | Header | Top of every page, including chat and camera | `back` (muted) · centered lowercase pixel title · one action: `home`, `settings`, or an accent commit such as `save` |
-| Section | Separates groups on a page | Pixel heading with 24 dp above; compact metadata uses 13 sp Plex |
+| Section | Separates groups on a page | Pixel heading with 24 dp above; compact metadata uses 13 sp Atkinson |
 | Row | Anything that opens something | 18 sp title, optional 14 sp muted second line, whole row is the target |
 | Value row | Settings and task details | Name on the left, value in accent on the right |
 | Tabs | Switching views of one page (Clock, Today filters, Agenda, Dice) | Equal cells, muted labels, the selected one bold accent above a short accent bar |
