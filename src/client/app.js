@@ -6,6 +6,8 @@ import { clearWorkspace, activeAccount, guestHasData } from "./workspace-storage
 import { FILES, importDocument, merge } from "./store.js";
 import { validDocument } from '../shared/workspace.js';
 import { SEARCH_KINDS, documentRows, chatRows, localSearch } from '../shared/search.js';
+import { markdownNode } from '../shared/markdown.js';
+import { noteProseLines } from '../shared/note-lines.js';
 import { ChatStore } from './pip-core.js';
 import * as reader from "./reader.js";
 import * as pip from "./pip.js";
@@ -590,7 +592,7 @@ async function askKey() {
 }
 /** Under a note's title: the date and a plain-text snippet, then its thoughts marked like the preview, by state. */
 function summary(n) {
-  const lines = n.text.split("\n").filter(l => l.trim()).slice(1), found = lines.filter(l => thought(l));
+  const lines = noteProseLines(n.text).map(item => item.line).filter(l => l.trim()).slice(1), found = lines.filter(l => thought(l));
   const text = lines.filter(l => !thought(l)).map(l => l.replace(/^\s*(#+|>|[-*+]\s+(\[[ xX]\]\s*)?|\d+[.)])\s*/, "")).join(" ").slice(0, 60);
   const chips = found.slice(0, 3).map(line => {
     const state = thoughtStatus(n.uid, line), done = /cleared|let go|made into a task/.test(state);
@@ -615,10 +617,10 @@ function editor(note, onSaved = () => {}) {
   // so a half-typed ">> cal" never parks; revisiting an old line without changing it never parks it again.
   let seen = new Map();
   // A line counts as handled only if its thought exists in Parking; anything else parks once the line is finished.
-  for (const line of area.value.split("\n")) { const t = thought(line); if (t && thoughtParked(uid, t.key)) seen.set(t.key, (seen.get(t.key) || 0) + 1); }
+  for (const {line} of noteProseLines(area.value)) { const t = thought(line); if (t && thoughtParked(uid, t.key)) seen.set(t.key, (seen.get(t.key) || 0) + 1); }
   const parkFinished = finished => {
     const cursor = area.value.slice(0, area.selectionStart).split("\n").length - 1, counts = new Map(), fresh = [];
-    area.value.split("\n").forEach((line, i) => {
+    noteProseLines(area.value).forEach(({line, index: i}) => {
       const t = thought(line); if (!t) return;
       const n = counts.get(t.key) || 0, known = seen.get(t.key) || 0;
       if (!finished && i === cursor) { if (n < known) counts.set(t.key, n + 1); return; }
@@ -665,33 +667,14 @@ function editor(note, onSaved = () => {}) {
   if (!previewing) setTimeout(() => { if (area.isConnected) area.focus({ preventScroll: true }); }, 0);
   return [bar, area, preview, paperPane];
 }
-/** A small Markdown renderer for what the phone's editor writes. Text is escaped before any formatting. */
-function markdown(source, uid = null) {
-  const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
-  const inline = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>").replace(/~~([^~]+)~~/g, "<del>$1</del>")
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-  const out = []; let list = null, code = null;
-  const close = () => { if (list) { out.push(`</${list}>`); list = null; } };
-  // Lines read from a journal page remember where they sit on the photo.
+/** Native Satteri preview, retaining thought status and handwriting handles. */
+function markdown(source, uid = null, options = {}) {
   const page = journal.forNote(uid);
-  const at = line => { const l = journal.lineFor(page, line); return l ? ` data-top="${+l.top}" data-bottom="${+l.bottom}"` : ""; };
-  for (const line of source.split("\n")) {
-    if (line.startsWith("```")) { if (code === null) { close(); code = []; } else { out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`); code = null; } continue; }
-    if (code !== null) { code.push(line); continue; }
-    let m; const t = uid ? thought(line) : null;
-    if (t) { close(); out.push(`<p class="thought-line"${at(line)}><span class="accent">»</span> ${inline(t.text)} <span class="meta muted">· ${esc(thoughtStatus(uid, line))}</span></p>`); }
-    else if ((m = line.match(/^(#{1,3})\s+(.*)/))) { close(); out.push(`<h${m[1].length + 1}${at(line)}>${inline(m[2])}</h${m[1].length + 1}>`); }
-    else if ((m = line.match(/^\s*[-*]\s+\[( |x|X)\]\s+(.*)/))) { if (list !== "ul") { close(); out.push('<ul class="tasks">'); list = "ul"; } out.push(`<li${at(line)}>${m[1] === " " ? "[ ]" : "[x]"} ${inline(m[2])}</li>`); }
-    else if ((m = line.match(/^\s*[-*]\s+(.*)/))) { if (list !== "ul") { close(); out.push("<ul>"); list = "ul"; } out.push(`<li${at(line)}>${inline(m[1])}</li>`); }
-    else if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) { if (list !== "ol") { close(); out.push("<ol>"); list = "ol"; } out.push(`<li${at(line)}>${inline(m[1])}</li>`); }
-    else if ((m = line.match(/^>\s?(.*)/))) { close(); out.push(`<blockquote${at(line)}>${inline(m[1])}</blockquote>`); }
-    else if (!line.trim()) close();
-    else { close(); out.push(`<p${at(line)}>${inline(line)}</p>`); }
-  }
-  if (code !== null) out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`);
-  close();
-  const node = document.createElement("div"); node.innerHTML = out.join("");
+  const annotations = uid ? String(source ?? '').replace(/\r\n?/g, '\n').split('\n').flatMap((line, index) => {
+    const t = thought(line), l = journal.lineFor(page, line);
+    return t || l ? [{ line: index + 1, ...(t ? { thought: { text: t.text, status: thoughtStatus(uid, line) } } : {}), ...(l ? { strip: { top: +l.top, bottom: +l.bottom } } : {}) }] : [];
+  }).slice(0,1000) : [];
+  const onRender = (node, previous) => {
   // Each such line gets a small handle that unfolds its strip of handwriting underneath.
   if (page) for (const el of node.querySelectorAll("[data-top]")) {
     const toggle = h("button", { class: "strip-toggle", title: "Show the handwriting", "aria-label": "Show the handwriting of this line" }, "▸");
@@ -702,7 +685,9 @@ function markdown(source, uid = null) {
     };
     el.prepend(toggle);
   }
-  return node;
+  options.onRender?.(node, previous);
+  };
+  return markdownNode(source, { ...options, annotations, onRender });
 }
 
 // ── Paper photos: loaded from Pocket once per page and kept for this visit. ──

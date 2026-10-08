@@ -147,12 +147,26 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 .editor-bar button { font-size: 14px; min-height: 44px; }
 .note-editor { min-height: calc(100vh - 240px); font-size: 17px; line-height: 1.65; max-width: 68ch; resize: none; padding: 12px 0; }
 .md { min-height: calc(100vh - 240px); max-width: 68ch; font-size: 17px; line-height: 1.65; overflow-wrap: anywhere; }
-.md h2, .md h3, .md h4 { font-family: var(--pixel); font-weight: normal; margin: 18px 0 6px; line-height: 1.1; }
+.md h2, .md h3, .md h4, .md h5, .md h6 { font-family: var(--pixel); font-weight: normal; margin: 18px 0 6px; line-height: 1.1; }
 .md h2 { font-size: 34px; } .md h3 { font-size: 28px; } .md h4 { font-size: 24px; }
 .md p { margin: .85em 0; } .md ul, .md ol { padding-left: 24px; margin: .85em 0; } .md li { margin: .25em 0; } .md ul.tasks { list-style: none; padding-left: 0; }
 .md code { color: var(--accent); } .md pre { background: #0c0c0c; padding: 12px; overflow-x: auto; }
 .md blockquote { margin: 8px 0; padding-left: 12px; color: var(--muted); box-shadow: inset 2px 0 0 var(--line); }
 .md a { color: var(--accent); }
+.md h5, .md h6 { font-size: 22px; }
+.md pre { background: var(--surface, #25221f); border-radius: 3px; }
+.md pre code { white-space: pre; color: var(--text); font: 14px/1.6 var(--mono); }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
+.md .md-table { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; margin: 16px 0; }
+.md table { border-collapse: collapse; min-width: 100%; font-size: 14px; line-height: 1.5; }
+.md th, .md td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; min-width: 100px; }
+.md th { font-weight: 500; color: var(--accent); }
+.md [data-align="right"] { text-align: right; }
+.md [data-align="center"] { text-align: center; }
+.md .footnotes { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; }
+.md .footnotes p { margin: .4em 0; }
+.md .md-pending { white-space: pre-wrap; }
+.md .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* Dice */
 .result { font: 72px/1 var(--display); text-align: center; min-height: 160px; display: flex; align-items: center; justify-content: center; overflow-wrap: anywhere; }
@@ -588,8 +602,10 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 .pip-loading { display: flex; align-items: center; gap: 12px; min-height: 64px; }
 .pip-reasoning { color: var(--muted); font-size: 14px; margin: 6px 0 14px; }
 .pip-reasoning summary, .pip-context summary, .pip-navigation > summary { min-height: 44px; padding: 12px 0; cursor: pointer; overflow-wrap: anywhere; }
-.pip-reasoning-text { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px 0; }
+.pip-reasoning-text.md { min-height: 0; font-size: 14px; overflow-wrap: anywhere; padding: 8px 0; }
 .pip-activity { margin: 4px 0 12px; }
+/* Reasoning, activity and sources keep the answer's reading measure. */
+.pip-reasoning, .pip-activity, .pip-sources { max-width: 68ch; }
 .pip-activity-title, .pip-sources > summary { font-size: 13px; min-height: 44px; padding: 12px 0; cursor: pointer; color: var(--accent); overflow-wrap: anywhere; }
 .pip-activity-title { list-style: none; display: flex; justify-content: space-between; gap: 12px; }
 .pip-activity-title::after { content: "+"; flex-shrink: 0; }

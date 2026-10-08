@@ -2,6 +2,13 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## Web updates after 0.19.0
+
+- Pip replies, reasoning summaries and note previews now render with Astro 7's native Satteri engine. CommonMark and GFM formatting includes nested lists, tables, reference links, footnotes and code blocks. Handwriting handles and thought status remain attached to their source lines.
+- Streaming text stays visible while formatting catches up. Completed previews have a bounded account-scoped offline cache; uncached text remains readable offline. Stale responses cannot overwrite a newer draft or another account's workspace. Raw HTML is escaped and images become links.
+- The web note editor no longer parks thought markers inside fenced or indented code, and the note index excludes those code markers from its thought chips.
+- This is a web-only update; Android stays on the 0.19.0 release. The native Markdown boundary and browser lifecycle checks passed, followed by an Astro production build.
+
 ## 0.19.0 — Pip changes what you already have
 
 - Pip can now prepare changes to existing records, not only new ones: complete a task, update a task's title, due date or steps, add text to the end of a note, or move an appointment. Each change appears as a card under the reply. **review change** shows the record as it is now, Pip's reason and the editable change. Nothing changes until you tap apply.

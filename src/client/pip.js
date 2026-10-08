@@ -30,6 +30,7 @@ const button = (text, run, props = {}) => ui.h("button", { onclick: safely(run),
 const caption = text => ui.h("p", { class: "meta muted", text });
 
 export function leave() {
+  for (const reply of mounted?.replies.values() || []) { reply.answer.firstElementChild?.disposeMarkdown?.(); reply.reasoningText.firstElementChild?.disposeMarkdown?.(); }
   mounted?.root.querySelectorAll(".pip-mascot, .pixel-backdrop").forEach(c=>c.dispose?.());
   clearTimeout(paintTimer); clearInterval(phaseTimer); paintTimer = phaseTimer = 0; mounted = null;
   viewportCleanup?.(); viewportCleanup = null;
@@ -114,7 +115,7 @@ function contextCards(items, remove = null) {
 function replyComponent(turn, chat) {
   const plan = ui.h('div', {class:'pip-plan'}), proposals = ui.h('div', {class:'pip-proposals'});
   const answer = ui.h("div", { class: "md pip-answer" });
-  const reasoningText = ui.h("div", { class: "pip-reasoning-text", text: turn.reasoning });
+  const reasoningText = ui.h("div", { class: "md pip-reasoning-text" });
   const reasoning = ui.h("details", { class: "pip-reasoning", hidden: !turn.reasoning }, ui.h("summary", { text: "reasoning summary" }), reasoningText);
   const phase = ui.h("p", { class: "meta muted pip-phase", role: "status" });
   const toolTitle = ui.h("summary", { class: "pip-activity-title" }), tools = ui.h("div", { class: "pip-activity-steps" });
@@ -138,8 +139,14 @@ function updateReply(turn) {
   const parts = mounted?.replies.get(turn.uid); if (!parts) return;
   const active = runner.active?.turnId === turn.uid;
   const thread = mounted.thread, follow = thread && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 70;
-  if (parts.lastAnswer !== turn.answer) { parts.answer.replaceChildren(ui.markdown(turn.answer || "")); parts.lastAnswer = turn.answer; }
-  parts.reasoning.hidden = !turn.reasoning; parts.reasoningText.textContent = turn.reasoning || "";
+  const formatting = { streaming: active,
+    onBeforeRender: () => mounted?.thread === thread && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 70,
+    onRender: (node, follow) => { if (follow && mounted?.thread === thread) thread.scrollTop = thread.scrollHeight; } };
+  if (!parts.answer.firstElementChild) parts.answer.append(ui.markdown(turn.answer || "", null, formatting));
+  else parts.answer.firstElementChild.updateMarkdown(turn.answer || "", formatting);
+  parts.reasoning.hidden = !turn.reasoning;
+  if (!parts.reasoningText.firstElementChild) parts.reasoningText.append(ui.markdown(turn.reasoning || "", null, formatting));
+  else parts.reasoningText.firstElementChild.updateMarkdown(turn.reasoning || "", formatting);
   const rows = !active && turn.status === "streaming" ? settle(turn.activity, "failed", "Interrupted") : activity(turn.activity), signature = JSON.stringify(rows);
   if (parts.agentSignature !== signature + active) {
     const decoded = rows.filter(row => row.state === 'done').flatMap(row => { try { return [{row,value:JSON.parse(row.result || '{}')}]; } catch { return []; } });
@@ -354,7 +361,9 @@ function render() {
   if (!mounted?.root.isConnected) return;
   const chat = store.get(mounted.uid); if (!chat) return;
   mounted.root.querySelectorAll(".pip-mascot, .pixel-backdrop").forEach(c=>c.dispose?.());
-  clearInterval(phaseTimer); mounted.replies.clear(); mounted.latest = null;
+  clearInterval(phaseTimer);
+  for (const reply of mounted.replies.values()) { reply.answer.firstElementChild?.disposeMarkdown?.(); reply.reasoningText.firstElementChild?.disposeMarkdown?.(); }
+  mounted.replies.clear(); mounted.latest = null;
   const thread = ui.h("div", { class: "pip-thread", tabindex: 0, "aria-label": "Conversation" }); mounted.thread = thread;
   if (chat.turns.length) thread.append(...chat.turns.map(turn => replyComponent(turn, chat)));
   else thread.append(ui.h("div", { class: "pip-empty" }, mascot()));

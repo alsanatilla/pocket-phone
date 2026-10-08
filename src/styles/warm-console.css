@@ -129,7 +129,8 @@ input[type=checkbox] { accent-color: var(--accent); }
 .empty-title { color: var(--muted); }
 .note-editor, .md { font-size: 16px; line-height: 1.65; background: transparent; }
 .md pre { background: var(--plane); }
-.md h2, .md h3, .md h4 { font-family: var(--mono); font-size: 18px; line-height: 1.5; font-weight: 500; }
+.md h2, .md h3, .md h4, .md h5, .md h6 { font-family: var(--mono); font-size: 18px; line-height: 1.5; font-weight: 500; }
+.md h4, .md h5, .md h6 { font-size: 16px; }
 .editor-bar { flex-wrap: wrap; border-bottom: 1px solid var(--line); }
 .editor-bar button { font-size: 13px; }
 .app-search { display: flex; gap: 12px; max-width: 440px; align-items: center; margin: 2px 0 14px; }

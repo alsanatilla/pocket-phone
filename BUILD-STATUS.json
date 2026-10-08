@@ -33,7 +33,7 @@
     "hosting": "Vercel",
     "url": "https://pocket-phone.vercel.app/",
     "release_asset": "pocket-web-0.19.0-source.zip",
-    "offline_worker": "pocket-astro-0190-changes",
+    "offline_worker": "pocket-astro-0190-markdown",
     "changed": true
   },
   "full_test_suite": {
@@ -66,5 +66,19 @@
     "browser": "5 change-proposal checks (access gating, live validation, no writes before apply, idempotent apply, agent loop) and 25 agent checks pass. Edge drove the review, apply and open flow on the dev server with no page errors. No provider traffic.",
     "native": "PocketChatTools, PipActions and Pip preview suites pass, including change gating/validation, idempotent apply with reminder shift and the review dialog (cancel, edit, apply, open).",
     "handset": "No device attached; physical handset behavior remains unverified."
+  },
+  "web_update": {
+    "checked_at_utc": "2026-10-08T06:42:34.3410809Z",
+    "description": "Web-only native Satteri Markdown update after the COROS web changes; Android remains the released 0.19.0 artifact described above.",
+    "framework_version": "Astro 7.3.6",
+    "renderer": "Satteri 0.10.5 native server engine",
+    "build": "npm run build passed",
+    "verification": [
+      "node scripts/markdown-check.mjs: 20 focused native compiler, endpoint and local note checks passed",
+      "14 browser checks passed against the isolated Astro workspace: actual Pip/notes native formatting, table layouts at 320/390/1280, footnote routes, streaming, offline cache, stale responses, account isolation, corrupt cache and code-block thought saving. 16 native render requests; zero page errors; no external service calls."
+    ],
+    "full_test_suite": "Not rerun for this web-only update",
+    "external_services": "No model, web-search or COROS requests made for Markdown verification",
+    "offline": "Up to 20 completed previews within 600000 cache characters per account; uncached text remains plain and readable without the renderer."
   }
 }

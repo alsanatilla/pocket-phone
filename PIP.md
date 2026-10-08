@@ -66,6 +66,14 @@ Phone and browser drafts can explicitly attach up to three Thought, Task or Note
 
 Conversations and drafts save locally first, then sync to the signed-in account on phone and browser; each reply merges by its own edit time, so two devices can continue the same chat. Guest chats can be copied into the account when signing in; provider keys are not copied. Keys use tab session storage; Anthropic's key is shared with Paper in the same tab, and compatible API keys are bound to their endpoints. Requests go directly to the chosen provider. Compatible endpoints must allow browser requests through CORS and support function tools when Pocket access is enabled. Explicit retry replaces one unfinished reply; changing provider starts a separate conversation. Clearing browser data removes guest chats; account chats are restored on the next sync. The browser replays at most 20 completed pairs within a 60,000-character history budget. Its read-only tools read the browser's saved/synced Pocket records; they cannot reach device-only records.
 
+## Markdown on the web
+
+Pip answers, reasoning summaries and note previews use the native Satteri 0.10.5 engine included with Astro 7.3.6. Nested lists, tables, task lists, reference links, footnotes, code blocks and headings render in the Warm Console layout. Thoughts and handwriting crops keep their existing note handles; code blocks remain literal. Rendering never changes a note or creates a task.
+
+The browser posts text to Pocket's `/api/markdown` renderer, which neither stores nor logs it. The native compiler produces a tree; only allowed text, tags and links become HTML. Raw HTML stays visible as text, images become links, and footnotes scroll inside their own reply without changing the workspace route. Input, body, tree depth and output limits bound each request.
+
+Streaming text appears immediately. Formatting is throttled and stale responses cannot replace a newer draft or paint another account's workspace. Up to 20 completed previews fit in a 600,000-character cache in that account's browser storage, separate from sync. Cached previews work offline; new or evicted text stays readable as plain text until the renderer is reachable. This pass updates the web only; Android remains at its released build.
+
 ## Search and account access
 
 Pocket's global search finds saved Pip questions and answers on phone and web, including messages beyond the API's replay budget. Selecting a hit opens that conversation. Search uses the signed-in account's index and saved local records; it does not make a paid provider request.
