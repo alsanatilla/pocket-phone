@@ -34,6 +34,16 @@ The browser uploads after local changes, reconnecting and returning to the tab, 
 
 Email is an account identifier. Pocket does not send verification or password-reset mail. A passkey created on one device may be available on another through its password manager or the browser’s nearby-device prompt; otherwise use an existing account password or an already-authorized browser to link the phone.
 
+## Shared trips on the web
+
+Travel uses `/api/travel` and separate trip tables in libSQL. The owner controls invitations and deletion; editors change trip details, stops, stays, activity ideas and moments; viewers can only read. Members can leave a trip. Each invitation is a single-use link that expires after seven days, can be bound to an email, and can be revoked. The server stores a hash of the link token. An unauthenticated preview contains only the trip title, inviter name, permission and expiry. No invitation emails are sent.
+
+Another person signs into their own Pocket account and joins from the link. Notes, tasks, chats, COROS and the rest of either person's workspace stay private. Sharing checks membership on every read and write; removing a member blocks subsequent requests and replayed mutations.
+
+Edits first enter an account-specific local operation journal. Travel polls every five seconds while its page is visible, pauses when hidden, refreshes on return, and also participates in global sync and pull to refresh. This is polling, not a WebSocket connection. Field-level three-way merges preserve independent edits, including separate additions to stay lists. Editing the same field, incompatible route ordering, or deleting a remotely changed trip requires explicit review. Exact mutation retries are idempotent. A form keeps its opening baseline so saving it cannot silently reverse unrelated incoming edits.
+
+The old `pocket:travel-v2` copy is retained and imported with stable identifiers. A stale copy on another device cannot overwrite the canonical trip; differences become local recovery copies. Pending edits to deleted trips or trips with revoked editing access are also kept for download or as a new private trip. Recovery artifacts never upload automatically. Backups contain trip values and recovery copies without membership grants or invite tokens; restored trips become private copies. Android has no Travel screen or sharing client in this pass.
+
 ## Search and note recovery
 
 Search covers Notes, Tasks and their steps/source text, parked Thoughts, Paper transcripts and Pip messages. Server results are scoped to the signed-in account; saved local records remain searchable offline. Phone appointments are local search results. Saves, deletions and the server search index change together in one transaction. Existing account records are indexed on their first search.
@@ -65,7 +75,7 @@ In the browser, **import from Drive** reads the existing seven collections and P
 
 GitHub Pages and Vercel are different browser origins. Open the [old Pages URL](https://alsanatilla.github.io/pocket-phone/) in the browser that holds the old copy, choose **download this browser’s workspace**, then use **restore backup** in the Vercel app. That export contains the seven workspace JSON collections. Existing chats and zines stay in the old origin’s storage; this export does not transfer them.
 
-**Download backup** exports the seven workspace collections, including deletion markers. Restoring merges records using the usual timestamps. Backups exclude photo bytes, chats, zines, passwords and provider keys. **Forget this browser’s copy** removes only the current account’s local storage; server records and other accounts remain. Signed-in chats and zines are restored from the account after clearing browser data; guest copies are not.
+**Download backup** exports the current workspace JSON collections, including deletion markers, plus Travel values and local recovery artifacts. Restoring merges workspace records and creates new private trip copies; it never rewrites a shared trip or restores an invitation. Recovery artifacts stay local. Backups exclude photo bytes, chats, zines, passwords and provider keys. **Forget this browser’s copy** removes only the current account’s local storage; server records and other accounts remain. Signed-in chats, zines and trips are restored from the account after clearing browser data; guest copies are not.
 
 ## Merge rules
 

@@ -1,0 +1,29 @@
+.travel-share-controls, .travel-library-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 12px 0; }
+.travel-share-controls button, .travel-library-actions button { min-height: 44px; padding: 6px 0; }
+.travel-live-state { color: var(--movement, var(--accent)); font-size: 12px; }
+.travel-share-controls .travel-live-state { margin-right: auto; }
+.travel-library { margin: 12px 0 24px; }
+.travel-library-trip { display: block; width: 100%; min-height: 96px; text-align: left; border-bottom: 1px solid var(--line); padding: 16px 0; }
+.travel-library-trip h2, .travel-recovery-row h2 { font: 32px/1.2 var(--pixel); margin: 0 0 6px; }
+.travel-sharing, .travel-conflicts { max-width: 760px; padding-bottom: 24px; }
+.travel-person-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); padding: 12px 0; }
+.travel-person-row > div { min-width: 0; overflow-wrap: anywhere; }
+.travel-person-row p { margin: 4px 0 0; }
+.travel-person-row button { flex: none; min-height: 44px; }
+.travel-invite-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 20px; margin: 28px 0 12px; }
+.travel-invite-form input { border-bottom: 1px solid var(--line); }
+.travel-invite-form .travel-commit { grid-column: 1 / -1; justify-self: start; }
+.travel-invite-link { display: flex; gap: 12px; align-items: center; margin-bottom: 28px; }
+.travel-invite-link input { min-width: 0; flex: 1; font-size: 13px; }
+.travel-invite-link button { flex: none; min-height: 44px; }
+.travel-conflict-row, .travel-recovery-row { border-bottom: 1px solid var(--line); padding: 16px 0; overflow-wrap: anywhere; }
+.travel-conflict-row strong { font-size: 14px; }
+.travel-recovery-row button { margin-right: 24px; min-height: 44px; }
+.tool-travel > .travel-commit { margin: 12px 24px 12px 0; }
+.travel-readonly .travel-reorder, .travel-readonly .travel-stop-actions button, .travel-readonly .travel-inline-add, .travel-readonly .travel-envelope-action, .travel-readonly .travel-stay-actions, .travel-readonly .travel-return .travel-text-action { display: none; }
+.travel-readonly .travel-star:disabled, .travel-readonly .travel-activity-check:disabled { opacity: 1; cursor: default; }
+@media (max-width: 520px) {
+  .travel-invite-form { grid-template-columns: minmax(0, 1fr); }
+  .travel-invite-link { flex-wrap: wrap; }
+  .travel-invite-link input { flex-basis: 100%; }
+}

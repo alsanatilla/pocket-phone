@@ -1,7 +1,10 @@
-import { storage } from './workspace-storage.js';
+import { activeAccount } from './workspace-storage.js';
+import * as travelStore from './travel-store.js';
+import * as sharing from './travel-sharing.js';
 
-const KEY = 'pocket:travel-v2';
-const MAX_TRIPS = 80, MAX_STOPS = 80, MAX_STAYS = 20, MAX_ACTIVITIES = 60, MAX_MOMENTS = 100;
+let cleanup = [], editBase = null, editRevision = null, epoch = 0;
+export function leave() { epoch++; cleanup.forEach(stop => stop()); cleanup = []; editBase = null; editRevision = null; travelStore.stopLive(); }
+const MAX_ACTIVITIES = 60;
 const CURRENCIES = ['EUR', 'USD', 'PEN', 'BOB', 'CLP', 'BRL'];
 const STOP_CURRENCY = { Peru: 'PEN', Bolivien: 'BOB', Chile: 'CLP', Brasilien: 'BRL' };
 const STAY_STATUS = { idea: 'researching', shortlist: 'shortlist', booked: 'booked', included: 'in the tour' };
@@ -114,99 +117,20 @@ const starter = {
 };
 
 const has = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
-const trim = (value, limit = 500) => typeof value === 'string' ? value.trim().slice(0, limit) : '';
 const id = () => globalThis.crypto?.randomUUID?.() || `trip-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 const isDay = value => !value || typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(new Date(value + 'T12:00:00').getTime());
 const cleanCurrency = value => CURRENCIES.includes(value) ? value : 'EUR';
-const cleanStatus = (value, list) => has(list, value) ? value : Object.keys(list)[0];
 const safeUrl = value => {
   if (typeof value !== 'string' || !value.trim()) return '';
   try { const url = new URL(value.trim()); return ['https:', 'http:'].includes(url.protocol) ? url.href : ''; } catch { return ''; }
 };
 const plainClone = value => JSON.parse(JSON.stringify(value));
 
-function cleanConnection(value, stopCurrency, arrival) {
-  const current = value && typeof value === 'object' ? value : {};
-  return {
-    mode: ['flight', 'train', 'bus', 'ferry', 'transfer', 'tour', 'other'].includes(current.mode) ? current.mode : 'transfer',
-    label: trim(current.label, 160), date: isDay(current.date) ? current.date : arrival,
-    url: safeUrl(current.url), cost: Number.isFinite(Number(current.cost)) && Number(current.cost) >= 0 && current.cost !== '' ? Number(current.cost) : '',
-    currency: cleanCurrency(current.currency || stopCurrency), status: cleanStatus(current.status, TRANSFER_STATUS), reference: trim(current.reference, 120),
-  };
-}
-function cleanStay(value, stopCurrency, index) {
-  const current = value && typeof value === 'object' ? value : {};
-  const money = input => Number.isFinite(Number(input)) && Number(input) >= 0 && input !== '' ? Number(input) : '';
-  return {
-    uid: trim(current.uid, 100) || `stay-${index}-${id()}`, name: trim(current.name, 140),
-    kind: has(STAY_KIND, current.kind) ? current.kind : 'hotel', url: safeUrl(current.url),
-    rating: Math.max(0, Math.min(5, Math.round(Number(current.rating) || 0))), status: cleanStatus(current.status, STAY_STATUS),
-    nightlyCost: money(current.nightlyCost), totalCost: money(current.totalCost), currency: cleanCurrency(current.currency || stopCurrency),
-    checkIn: isDay(current.checkIn) ? current.checkIn : '', checkOut: isDay(current.checkOut) ? current.checkOut : '',
-    cancelBy: isDay(current.cancelBy) ? current.cancelBy : '', bookingRef: trim(current.bookingRef, 120),
-    address: trim(current.address, 240), note: trim(current.note, 800),
-  };
-}
-function cleanActivity(value, index) {
-  const current = typeof value === 'string' ? { text: value } : value && typeof value === 'object' ? value : {};
-  return { uid: trim(current.uid, 100) || `idea-${index}-${id()}`, text: trim(current.text, 240), done: Boolean(current.done), optional: Boolean(current.optional) };
-}
-function cleanMoment(value, index) {
-  const current = value && typeof value === 'object' ? value : {};
-  return { uid: trim(current.uid, 100) || `moment-${index}-${id()}`, kind: has(MOMENTS, current.kind) ? current.kind : 'other',
-    title: trim(current.title, 240), detail: trim(current.detail, 600), day: isDay(current.day) ? current.day : '', created: Number(current.created) || Date.now() };
-}
-function cleanStop(value, index) {
-  const current = value && typeof value === 'object' ? value : {};
-  const country = trim(current.country, 80), currency = cleanCurrency(current.currency || STOP_CURRENCY[country]);
-  return {
-    uid: trim(current.uid, 100) || `stop-${index}-${id()}`, place: trim(current.place, 140), country,
-    arrival: isDay(current.arrival) ? current.arrival : '', departure: isDay(current.departure) ? current.departure : '',
-    nights: Math.max(0, Math.min(90, Math.round(Number(current.nights) || 0))), currency,
-    guidance: trim(current.guidance, 700), activities: (Array.isArray(current.activities) ? current.activities : []).slice(0, MAX_ACTIVITIES).map(cleanActivity).filter(item => item.text),
-    stays: (Array.isArray(current.stays) ? current.stays : []).slice(0, MAX_STAYS).map((stay, stayIndex) => cleanStay(stay, currency, stayIndex)).filter(item => item.name),
-    moments: (Array.isArray(current.moments) ? current.moments : []).slice(0, MAX_MOMENTS).map(cleanMoment).filter(item => item.title),
-    connection: cleanConnection(current.connection, currency, current.arrival),
-  };
-}
-function normalizeTrip(value) {
-  if (!value || typeof value !== 'object' || typeof value.uid !== 'string' || !value.uid || !trim(value.title, 100)) return null;
-  const returnJourney = value.returnJourney && typeof value.returnJourney === 'object' ? value.returnJourney : {};
-  const amount = input => Number.isFinite(Number(input)) && Number(input) >= 0 && input !== '' ? Number(input) : '';
-  return {
-    uid: trim(value.uid, 100), title: trim(value.title, 100), status: ['draft', 'active', 'done'].includes(value.status) ? value.status : 'draft',
-    departure: isDay(value.departure) ? value.departure : '', returnDate: isDay(value.returnDate) ? value.returnDate : '', homeArrival: isDay(value.homeArrival) ? value.homeArrival : '',
-    homeCity: trim(value.homeCity, 100), countries: trim(value.countries, 180), travelers: trim(value.travelers, 160), currency: cleanCurrency(value.currency), budget: amount(value.budget),
-    intention: trim(value.intention, 900), returnPlan: trim(value.returnPlan, 900),
-    returnJourney: { label: trim(returnJourney.label, 240), date: isDay(returnJourney.date) ? returnJourney.date : value.returnDate,
-      url: safeUrl(returnJourney.url), cost: amount(returnJourney.cost), currency: cleanCurrency(returnJourney.currency || 'BRL'),
-      status: cleanStatus(returnJourney.status, TRANSFER_STATUS), reference: trim(returnJourney.reference, 120) },
-    stops: (Array.isArray(value.stops) ? value.stops : []).slice(0, MAX_STOPS).map(cleanStop).filter(stop => stop.place),
-    moments: (Array.isArray(value.moments) ? value.moments : []).slice(0, MAX_MOMENTS).map(cleanMoment).filter(item => item.title),
-    created: Number(value.created) || Date.now(), updated: Number(value.updated) || Date.now(),
-  };
-}
-
 function readTrips() {
-  const raw = storage.getItem(KEY);
-  if (raw === null) {
-    const initial = normalizeTrip(starter);
-    storage.setItem(KEY, JSON.stringify({ v: 2, trips: [initial] }));
-    return [initial];
-  }
-  try {
-    const doc = JSON.parse(raw);
-    return Array.isArray(doc?.trips) ? doc.trips.map(normalizeTrip).filter(Boolean) : [];
-  } catch { return []; }
+  return travelStore.readTrips(activeAccount() ? undefined : starter);
 }
-function writeTrips(trips) { storage.setItem(KEY, JSON.stringify({ v: 2, trips })); }
 function saveTrip(value) {
-  const trip = normalizeTrip({ ...value, updated: Math.max(Date.now(), Number(value.updated || 0) + 1), created: value.created || Date.now() });
-  if (!trip) throw new Error('Add a trip name before saving.');
-  const trips = readTrips(), index = trips.findIndex(item => item.uid === trip.uid);
-  if (index < 0) { if (trips.length >= MAX_TRIPS) throw new Error(`The travel shelf holds up to ${MAX_TRIPS} trips.`); trips.unshift(trip); }
-  else trips[index] = trip;
-  writeTrips(trips); return trip;
+  return travelStore.saveTrip(value, editBase?.uid === value.uid ? editBase : undefined);
 }
 function saveAndReturn(trip, api, path) {
   try { saveTrip(trip); go(api, path); }
@@ -323,9 +247,9 @@ function tripEditor(host, trip, api) {
     el('div', { class: 'travel-form-actions' }, commitButton(fresh ? 'save this trip' : 'save trip changes')));
   host.append(button(fresh ? '‹ travel' : '‹ trip route', () => go(api, fresh ? '/travel' : routePath(current.uid)), { class: 'travel-back' }),
     formHeading(fresh ? 'A NEW ROUTE' : 'TRIP DETAILS', fresh ? 'start somewhere' : current.title, fresh ? 'The route, the rough dates, and all the little details can live in one place.' : 'Keep the flights, return buffer, budget and reason for going together.'), form);
-  if (!fresh) host.append(el('button', { class: 'travel-delete', text: 'delete trip', onclick: async () => {
-    if (!await api.confirm('Delete this trip and all its saved stays and links from this browser?', 'delete')) return;
-    writeTrips(readTrips().filter(item => item.uid !== current.uid)); go(api, '/travel');
+  if (!fresh && travelStore.getRecord(current.uid)?.role === 'owner') host.append(el('button', { class: 'travel-delete', text: 'delete trip', onclick: async () => {
+    if (!await api.confirm('Delete this trip for everyone sharing it?', 'delete')) return;
+    try { travelStore.deleteTrip(current.uid, editRevision); go(api, '/travel'); } catch (error) { api.say(error.message); }
   } }));
 }
 
@@ -464,7 +388,7 @@ function costLedger(trip) {
 function tripHeader(host, trip, selectedIndex, api) {
   const totalNights = nightsTotal(trip), stayStops = bookedStayCount(trip);
   const header = el('section', { class: 'travel-trip-header' },
-    el('div', { class: 'travel-trip-overline' }, el('span', { class: 'travel-kicker', text: `${trip.status.toUpperCase()} · SAVED ON THIS BROWSER` }),
+    el('div', { class: 'travel-trip-overline' }, el('span', { class: 'travel-kicker', text: trip.status.toUpperCase() }),
       button('edit trip details', () => go(api, `${routePath(trip.uid)}/edit`), { class: 'travel-envelope-action' })),
     el('div', { class: 'travel-trip-titleline' }, el('div', {}, el('h2', { class: 'travel-trip-title', text: trip.title }),
       el('p', { class: 'travel-trip-subtitle', text: `${trip.countries || 'your route'}${trip.homeCity ? ` · ${trip.homeCity} out and back` : ''}` })),
@@ -631,19 +555,89 @@ function summaryNotes(host, trip, api) {
   host.append(section);
 }
 
+function library(host, trips, api) {
+  api.title(host, 'travel', '', 'travel');
+  host.append(el('div', { class: 'travel-library-actions' },
+    button('+ new trip', () => go(api, '/travel/new'), { class: 'travel-commit' }),
+    el('span', { class: 'travel-live-state', 'data-travel-state': '', role: 'status', text: sharing.syncLabel() })));
+  const list = el('div', { class: 'travel-library' });
+  for (const trip of trips) {
+    const record = travelStore.getRecord(trip.uid), people = record?.members?.length || 1;
+    list.append(button('', () => go(api, routePath(trip.uid)), { class: 'travel-library-trip' },
+      el('h2', { text: trip.title }),
+      el('span', { class: 'meta muted', text: [dateRange(trip.departure, trip.returnDate), `${trip.stops.length} stops`, people > 1 ? `shared · ${people} people` : 'private', record?.role === 'viewer' ? 'view only' : '', record?.conflict ? 'needs review' : ''].filter(Boolean).join(' · ') })));
+  }
+  if (!trips.length) list.append(el('p', { class: 'muted', text: 'No trips yet.' }));
+  host.append(list);
+  if (travelStore.recoveryEntries().length) host.append(button('saved recovery copies', () => go(api, '/travel/recovery')));
+}
+
+function recovery(host, api) {
+  host.append(button('‹ trips', () => go(api, '/travel'), { class: 'travel-back' }));
+  api.title(host, 'recovery copies', '', 'travel');
+  for (const entry of travelStore.recoveryEntries()) {
+    const row = el('section', { class: 'travel-recovery-row' }, el('h2', { text: entry.value?.title || 'Trip copy' }), el('p', { class: 'meta muted', text: entry.reason }));
+    row.append(button('download copy', () => {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(entry, null, 2)], { type: 'application/json' }));
+      el('a', { href: url, download: 'pocket-travel-recovery.json' }).click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }));
+    if (entry.value?.title) row.append(button('save as a private trip', () => {
+      try {
+        const trip = travelStore.saveTrip({ ...entry.value, uid: id(), title: entry.value.title.slice(0, 92) + ' · copy', created: Date.now() });
+        go(api, routePath(trip.uid));
+      } catch (error) { api.say(error.message); }
+    }));
+    host.append(row);
+  }
+}
+
 export function mount(host, route, api) {
-  const trips = readTrips();
-  const tripId = route.tripId || '';
-  if (tripId === 'new') { api.title(host, 'travel', 'a new route · saved on this browser', 'travel'); tripEditor(host, null, api); return; }
-  const trip = trips.find(item => item.uid === tripId) || trips[0] || null;
+  leave();
+  const trips = readTrips(), rawId = route.tripId || '', tripId = travelStore.lookupAlias(rawId);
+  if (tripId && tripId !== rawId) history.replaceState(null, '', location.hash.replace('/' + rawId, '/' + tripId));
+  const trip = trips.find(item => item.uid === tripId) || null;
+  const editor = route.sub === 'edit' || route.sub === 'stay' || route.sub === 'moment' || route.sub === 'stop' && (route.leaf === 'new' || route.extra === 'edit');
+  editBase = trip ? plainClone(trip) : null;
+  editRevision = trip ? travelStore.getRecord(trip.uid)?.revision : null;
+  const fingerprint = () => {
+    if (rawId === 'recovery') return JSON.stringify(travelStore.recoveryEntries());
+    if (!tripId) return JSON.stringify(readTrips().map(item => { const record = travelStore.getRecord(item.uid); return [item.uid, item.title, item.updated, record?.role, record?.members?.length, Boolean(record?.conflict)]; })) + ':' + travelStore.recoveryEntries().length;
+    const record = travelStore.getRecord(tripId);
+    return JSON.stringify([record?.value, record?.role, Boolean(record?.conflict)]);
+  };
+  let signature = fingerprint(), queued = false;
+  const mountedEpoch = epoch;
+  cleanup.push(travelStore.subscribe(() => {
+    if (!host.isConnected || epoch !== mountedEpoch) return;
+    host.querySelectorAll('[data-travel-state]').forEach(node => { node.textContent = sharing.syncLabel(node.dataset.travelState); });
+    const next = fingerprint(); if (next === signature || queued) return;
+    const record = tripId && travelStore.getRecord(tripId);
+    // A form keeps the captured baseline until it is saved. Remote edits merge
+    // with just the fields changed by this form rather than replacing its draft.
+    if (record?.value && !(record.role === 'viewer' && editor) && (editor || route.sub === 'share' || document.activeElement?.matches('input, textarea, select') || !document.getElementById('dialog')?.hidden)) return;
+    signature = next; queued = true;
+    setTimeout(() => { if (epoch === mountedEpoch && host.isConnected) dispatchEvent(new Event('hashchange')); }, 0);
+  }));
+  travelStore.startLive();
+  if (rawId === 'join') { sharing.mountInvitation(host, route.sub, api); return; }
+  if (rawId === 'recovery') { recovery(host, api); return; }
+  if (!tripId) { library(host, trips, api); return; }
+  if (rawId === 'new') { api.title(host, 'new trip', '', 'travel'); tripEditor(host, null, api); return; }
   if (!trip) {
-    api.title(host, 'travel', 'your local trip notebook', 'travel');
-    host.append(el('section', { class: 'travel-empty-library' }, el('span', { class: 'travel-kicker', text: 'THE MAP IS A BLANK PAGE' }), el('h2', { text: 'Let’s give it a somewhere.' }),
-      el('p', { text: 'Start with a place. Add where you’ll sleep, how you’ll get there and every helpful link.' }), button('+ plan the first trip', () => go(api, '/travel/new'), { class: 'travel-commit' })));
+    api.title(host, 'travel', '', 'travel');
+    host.append(el('p', { text: 'This trip is no longer available.' }), button('‹ trips', () => go(api, '/travel')));
+    if (travelStore.recoveryEntries().length) host.append(button('saved recovery copies', () => go(api, '/travel/recovery')));
     return;
   }
   const sub = route.sub || '', leaf = route.leaf || '', extra = route.extra || '';
-  api.title(host, 'travel', `${trip.stops.length} waypoints · ${nightsTotal(trip)} nights · saved on this browser`, 'travel');
+  if (sub === 'share') { cleanup.push(sharing.mountSharing(host, trip, api)); return; }
+  if (sub === 'conflict') { sharing.mountConflict(host, trip, api); return; }
+  const viewer = travelStore.getRecord(trip.uid)?.role === 'viewer';
+  host.classList.toggle('travel-readonly', viewer);
+  if (viewer && editor) { go(api, routePath(trip.uid)); return; }
+  sharing.controls(host, trip, api);
+  api.title(host, 'travel', `${trip.stops.length} stops · ${nightsTotal(trip)} nights`, 'travel');
   if (sub === 'edit') { tripEditor(host, trip, api); return; }
   if (sub === 'stop' && leaf === 'new') { stopEditor(host, trip, null, api); return; }
   if (sub === 'stop' && leaf && extra === 'edit') {
@@ -658,11 +652,12 @@ export function mount(host, route, api) {
     const stop = trip.stops.find(item => item.uid === leaf); if (stop) { momentEditor(host, trip, stop, api); return; }
   }
   const selectedStop = trip.stops.find(item => item.uid === (sub === 'stop' ? leaf : '')) || trip.stops[0];
-  if (!selectedStop) { host.append(el('p', { class: 'travel-empty-hint', text: 'Add the first waypoint to give the trip a route.' }), button('+ add a stop', () => go(api, `${routePath(trip.uid)}/stop/new`), { class: 'travel-commit' })); return; }
+  if (!selectedStop) { host.append(el('h2', { class: 'travel-editor-title', text: trip.title }), el('p', { class: 'travel-empty-hint', text: 'No stops yet.' })); if (!viewer) host.append(button('+ add a stop', () => go(api, `${routePath(trip.uid)}/stop/new`), { class: 'travel-commit' })); return; }
   const selectedIndex = trip.stops.findIndex(item => item.uid === selectedStop.uid);
   tripHeader(host, trip, selectedIndex, api);
   const layout = el('div', { class: 'travel-planner-grid' }, journeyIndex(trip, selectedStop, api));
   const detail = el('div', { class: 'travel-detail-column' }); stopDetail(detail, trip, selectedStop, api); layout.append(detail); host.append(layout);
   summaryNotes(host, trip, api);
+  if (viewer) host.querySelectorAll('.travel-star, .travel-activity-check').forEach(control => { control.disabled = true; });
   host.append(el('div', { class: 'travel-bottom-actions' }, button('+ another trip', () => go(api, '/travel/new'), { class: 'travel-inline-add' })));
 }

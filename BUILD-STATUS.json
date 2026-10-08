@@ -33,7 +33,7 @@
     "hosting": "Vercel",
     "url": "https://pocket-phone.vercel.app/",
     "release_asset": "pocket-web-0.19.0-source.zip",
-    "offline_worker": "pocket-astro-0190-markdown",
+    "offline_worker": "pocket-astro-0190-shared-travel",
     "changed": true
   },
   "full_test_suite": {
@@ -80,5 +80,23 @@
     "full_test_suite": "Not rerun for this web-only update",
     "external_services": "No model, web-search or COROS requests made for Markdown verification",
     "offline": "Up to 20 completed previews within 600000 cache characters per account; uncached text remains plain and readable without the renderer."
+  },
+  "travel_update": {
+    "limitations": [
+      "Travel sharing is browser-only in this pass",
+      "Five-second live polling while Travel is visible; no WebSocket presence",
+      "Browser preview remained hidden; polling cadence/visibility behavior verified with controlled store fixture, incoming redraw verified with real API sync",
+      "All accounts and mutations for verification were local fixtures; no real invitations sent",
+      "The full test suite was not rerun for this web-only change"
+    ],
+    "checked_at_utc": "2026-10-08T08:22:20.9602974Z",
+    "verification": [
+      "node scripts/travel-server-check.mjs: isolated libSQL/API authorization, origin and account isolation, invite hashing/expiry/revocation/races, permissions, three-way merge conflicts, idempotent replays, tombstones and input validation passed",
+      "node --experimental-vm-modules scripts/test-travel-store.mjs: 10 groups passed including offline reload, multi-tab and in-flight edits, account fencing, deterministic migration, malformed recovery, conflict choices, live polling pause/resume/disposal",
+      "T3 browser checks against isolated localhost Astro database passed: actual invite creation, sign-out/password sign-in/resume/join with another account, draft preserved during remote edits, independent field merges, conflict comparison and resolution, incoming update redraw, read-only controls/deep routes, leaving a trip, backup restore as a private copy with raw recovery retained; layouts checked at 390, 701 and 1280 px"
+    ],
+    "build": "Astro production build passed",
+    "database": "Additive lazy libSQL schema; no new environment variables",
+    "scope": "Web shared trips; Android artifact remains unchanged"
   }
 }

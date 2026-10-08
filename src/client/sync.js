@@ -7,6 +7,7 @@ import { syncObjects } from './object-sync.js';
 import * as coros from './coros.js';
 import { applyDocument } from './extras.js';
 import { syncPaperPhotos } from './paper-store.js';
+import * as travel from './travel-store.js';
 
 export const status = { state: "idle", last: Number(localStorage.getItem("pocket:last-sync") || 0), error: "" };
 const listeners = new Set();
@@ -15,7 +16,7 @@ const emit = () => listeners.forEach(fn => fn(status));
 let running = null, timer = 0;
 
 export function describe() {
-  const pending = dirty().size + waiting();
+  const pending = dirty().size + waiting() + travel.pendingCount();
   if (!cloud.configured()) return "LOCAL";
   if (!navigator.onLine) return pending ? `OFFLINE · ${pending} WAITING` : "OFFLINE";
   if (!cloud.connected()) return pending ? `SIGN IN · ${pending} WAITING` : "SIGN IN";
@@ -52,7 +53,7 @@ export function syncNow() {
         if (unchanged || JSON.stringify(merged) === JSON.stringify(remote)) clean(name);
         }catch(error){if(error instanceof cloud.Expired)throw error;failures.push(error.message);}
       }
-      for(const operation of [syncPaperPhotos,syncObjects,()=>coros.syncAccount()])try{status.changed=Boolean(await operation())||status.changed;}catch(error){if(error instanceof cloud.Expired)throw error;failures.push(error.message);}
+      for(const operation of [syncPaperPhotos,syncObjects,()=>coros.syncAccount(),async () => { const changed = await travel.syncTravel(); const state = travel.readStatus(); if (state.state === 'signed-out') { await cloud.init(); throw new cloud.Expired(); } if (state.state === 'error') throw new Error(state.error || 'Travel sync failed.'); return changed; }])try{status.changed=Boolean(await operation())||status.changed;}catch(error){if(error instanceof cloud.Expired)throw error;failures.push(error.message);}
       if(failures.length)throw new Error([...new Set(failures)].join(' · '));
       status.state = "idle"; status.last = Date.now(); localStorage.setItem("pocket:last-sync", String(status.last));
       return true;
@@ -66,6 +67,7 @@ export function syncNow() {
 export function soon(delay = 1500) { clearTimeout(timer); timer = setTimeout(syncNow, delay); }
 
 onChange(() => { emit(); soon(); });
+travel.subscribe(emit);
 addEventListener('pocket-persistence-change', () => { emit(); soon(); });
 addEventListener("online", () => soon(0));
 addEventListener("offline", emit);

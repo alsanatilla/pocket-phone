@@ -23,6 +23,9 @@ import { gym, weekStart } from "./store.js";
 import { installRefresh } from "./retro-loading.js";
 import { initExtras, todayTiles, TODAY_CATALOG } from "./extras.js";
 import * as travel from "./travel.js";
+import * as sharedTravel from './travel-store.js';
+import { INVITE_RESUME } from './travel-sharing.js';
+import { normalizeTrip } from '../shared/travel-data.js';
 import { agenda, clock as clockStore, mountAgenda, mountClock, startClockRuntime, focusTask, planTask, remindTask } from "./planner.js";
 import { mountBrief, readBrief, briefEnabled } from './daily-brief.js';
 import * as setup from './setup.js';
@@ -72,7 +75,7 @@ const statusLabel = () => describe().replace(" · ", "\n");
 function view(tool, actions = []) {
   flushNote?.(); flushNote = null;
   briefView?.(); briefView = null;
-  zines.leave(); pip.leave(); shell(); closeDialog(); say("");
+  zines.leave(); pip.leave(); travel.leave(); shell(); closeDialog(); say("");
   content.querySelectorAll('.pixel-backdrop').forEach(canvas=>canvas.dispose?.());
   const pipEntry = document.getElementById("pip-entry"); pipEntry.classList.toggle("selected", tool === "pip"); pipEntry.setAttribute("aria-current", tool === "pip" ? "page" : "false");
   document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync", "calendar", "clock", "travel", "account", "brief", "setup"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
@@ -925,7 +928,7 @@ async function linkPhone(value) {
   } catch (error) { say(/invalid|expired|not found/i.test(error.message) ? 'That code has expired. Show a new one on the phone.' : error.message); }
 }
 function exportWorkspace() {
-  const data = { format: 'pocket-workspace', version: 1, exportedAt: new Date().toISOString(), documents: Object.fromEntries(FILES.map(name => [name, load(name)])) };
+  const data = { format: 'pocket-workspace', version: 1, exportedAt: new Date().toISOString(), documents: Object.fromEntries(FILES.map(name => [name, load(name)])), travel: { version: 1, trips: sharedTravel.readTrips(), recovery: sharedTravel.recoveryEntries() } };
   const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
   const link = h('a', { href: url, download: 'pocket-backup-' + new Date().toISOString().slice(0, 10) + '.json' });
   link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -935,11 +938,18 @@ function restoreWorkspace() {
   picker.onchange = async () => {
     try {
       const file = picker.files?.[0]; if (!file) return;
-      if (file.size > 3 * 1024 * 1024) throw new Error('Keep a workspace backup under 3 MB.');
+      if (file.size > 20 * 1024 * 1024) throw new Error('Keep a workspace backup under 20 MB.');
       const backup = JSON.parse(await file.text());
       if (backup.format !== 'pocket-workspace' || backup.version !== 1 || !backup.documents || Object.entries(backup.documents).some(([name, value]) => !FILES.includes(name) || !validDocument(name, value))) throw new Error('This is not a Pocket workspace backup.');
-      if (!await confirmBox('Merge this backup into your workspace?', 'restore')) return;
+      if (backup.travel && (backup.travel.version !== 1 || !Array.isArray(backup.travel.trips) || backup.travel.trips.length > 80 || backup.travel.trips.some(trip => !normalizeTrip(trip)))) throw new Error('This backup contains an invalid trip.');
+      if (backup.travel?.recovery && (!Array.isArray(backup.travel.recovery) || backup.travel.recovery.length > 500 || backup.travel.recovery.some(entry => !entry || typeof entry !== 'object' || Array.isArray(entry) || entry.raw !== undefined && typeof entry.raw !== 'string' || entry.operations !== undefined && !Array.isArray(entry.operations)))) throw new Error('This backup contains invalid recovery records.');
+      if (backup.travel?.recovery && (sharedTravel.recoveryEntries().length + backup.travel.recovery.length > 1000 || new TextEncoder().encode(JSON.stringify(backup.travel.recovery)).length > 16 * 1024 * 1024)) throw new Error('Recovery copies exceed the backup limit.');
+      const travelCopies = backup.travel?.trips || [];
+      if (sharedTravel.readTrips().length + travelCopies.length > 80) throw new Error('The travel shelf holds up to 80 trips.');
+      if (!await confirmBox(travelCopies.length ? 'Merge this backup and restore trips as new private copies?' : 'Merge this backup into your workspace?', 'restore')) return;
       for (const [name, value] of Object.entries(backup.documents)) importDocument(name, merge[name](load(name), value, Date.now()));
+      for (const value of travelCopies) sharedTravel.saveTrip({ ...value, uid: crypto.randomUUID(), title: value.title.slice(0, 92) + ' · copy', created: Date.now() });
+      if (backup.travel?.recovery?.length) sharedTravel.importRecoveryEntries(backup.travel.recovery);
       await syncNow(); route(); say('Restored.');
     } catch (error) { say(error.message); }
   };
@@ -992,7 +1002,7 @@ onStatus(() => {
   const state = document.getElementById("sync-status"); if (state) state.textContent = statusLabel();
   const finished = lastState === "syncing" && status.state === "idle"; lastState = status.state;
   // Merged edits from the phone appear without a reload, unless the user is typing or a dialog is open.
-  if (finished && status.changed && !searchOpening && !["#/zines", "#/movement", "#/pip"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea, select")) {
+  if (finished && status.changed && !searchOpening && !["#/zines", "#/movement", "#/pip", "#/travel"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea, select")) {
     if (location.hash === '#/brief') { briefView?.refresh(); return; }
     const text = notice?.textContent; route(); say(text);
   }
@@ -1017,10 +1027,15 @@ addEventListener("keydown", event => {
 // A COROS sign-in comes back to this page with ?code=…; finish it before drawing the Movement tab.
 if (coros.returning()) coros.finish().then(() => { setup.resume(); route(); say("COROS connected."); }, error => { setup.resume(); route(); say(error.message); });
 else route();
-cloud.init().then(() => { if (!document.activeElement?.matches('input, textarea, select')) { if (location.hash === '#/brief') briefView?.refresh(); else route(); } return syncNow(); }).catch(error => say(error.message));
+cloud.init().then(() => {
+  const invite = globalThis.sessionStorage.getItem(INVITE_RESUME);
+  if (cloud.connected() && /^[A-Za-z0-9_-]{30,100}$/.test(invite || '') && /^#\/(account|sync|setup)(\/|$)/.test(location.hash)) history.replaceState(null, '', '#/travel/join/' + invite);
+  if (!document.activeElement?.matches('input, textarea, select')) { if (location.hash === '#/brief') briefView?.refresh(); else route(); }
+  return syncNow();
+}).catch(error => say(error.message));
 initExtras();
 startClockRuntime();
 const refresh = installRefresh({ sync: syncNow, status, onStatus, describe, say });
 if ('serviceWorker' in navigator && !import.meta.env.DEV) navigator.serviceWorker.register('/sw.js').catch(() => {});
-addEventListener("pagehide", () => { flushNote?.(); zines.leave(); briefView?.(); briefView=null; });
+addEventListener("pagehide", () => { flushNote?.(); zines.leave(); travel.leave(); briefView?.(); briefView=null; });
 addEventListener("pageshow", event => { if (event.persisted) route(); });
