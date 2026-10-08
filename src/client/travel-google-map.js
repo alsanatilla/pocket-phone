@@ -136,7 +136,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
   let savedViewport = null, currentStayPromise = Promise.resolve([]), fitScope = options.focusStays ? 'stays' : 'trip';
   const mapListeners = [], stopOverlays = [], stayOverlays = [], lines = [], pendingTimers = new Set();
   const resolvedStays = new Map();
-  let pip = null, walkFrame = 0, styled = null, PipOverlay;
+  let pip = null, walkFrame = 0, styled = null, PipOverlay, tidyFrame = 0;
   const wrapper = el('div', { class: 'travel-google-route-map', 'data-map-provider': 'google', 'aria-busy': 'true' });
   const viewport = el('div', { class: 'travel-google-viewport' });
   const loading = el('div', { class: 'travel-google-loading', role: 'status', 'aria-label': 'Loading map' },
@@ -170,6 +170,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
     if (stayTimer != null) clearTimeout(stayTimer);
     if (frame) cancelAnimationFrame(frame); frame = 0;
     if (walkFrame) cancelAnimationFrame(walkFrame); walkFrame = 0; pip?.setMap(null); pip = null;
+    if (tidyFrame) cancelAnimationFrame(tidyFrame); tidyFrame = 0;
     for (const handle of mapListeners.splice(0)) handle.remove?.();
     removeOverlays(stopOverlays); removeOverlays(stayOverlays);
     for (const line of lines.splice(0)) line.setMap(null);
@@ -286,6 +287,8 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
         if (!pixel || !Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) { this.pixel = null; this.element.hidden = true; return; }
         this.pixel = { x: pixel.x, y: pixel.y };
         this.element.hidden = this.merged; this.element.style.left = `${pixel.x}px`; this.element.style.top = `${pixel.y}px`;
+        // Google places pins on its own schedule; sort out shared spots and names once they have positions.
+        if (this.kind === 'stop' && !tidyFrame) tidyFrame = requestAnimationFrame(() => { tidyFrame = 0; declutter(); });
         this.element.classList.toggle('is-wide-view', (map.getZoom?.() || 0) < 7);
         // Address pins share a city's position at continent zoom; the Stay area
         // control exposes them at a useful scale without inventing offsets.
@@ -313,7 +316,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
     if (!map || disposed || failed) return;
     const groups = [];
     for (const overlay of stopOverlays) {
-      if (!overlay.pixel) { overlay.setGroup(null); continue; }
+      if (!overlay.pixel) continue;
       const near = groups.find(group => Math.hypot(group[0].pixel.x - overlay.pixel.x, group[0].pixel.y - overlay.pixel.y) < 26);
       if (near) near.push(overlay); else groups.push([overlay]);
     }
