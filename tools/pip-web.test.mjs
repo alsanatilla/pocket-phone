@@ -149,3 +149,13 @@ test('a web result the client cannot match no longer ends the run',async()=>{
   const web=result.activity.filter(row=>row.kind==='web');
   assert.equal(web.length,1);assert.equal(web[0].state,'done');
 });
+test('web search runs through Firecrawl for every provider',()=>{
+  const {chat}=ready();
+  const names = value => (requestBody({ ...chat, config: value }, turn).tools || []).map(tool => tool.name || tool.function?.name);
+  const anthropic = config({...DEFAULT_CONFIG, webSearch:true});
+  const compatible = config({...DEFAULT_CONFIG, provider:'compatible', model:'local-model', baseUrl:'https://model.example/v1', webSearch:true});
+  assert.ok(names(anthropic).includes('search_web'));
+  assert.ok(names(anthropic).includes('read_web_page'));
+  assert.ok(!names(anthropic).includes('web_search'));
+  assert.ok(names(compatible).includes('search_web'));
+});

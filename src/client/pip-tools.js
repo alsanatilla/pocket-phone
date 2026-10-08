@@ -3,7 +3,7 @@ import { corosAction, corosProblem, corosTitle } from '../shared/coros-course.js
 import { notes, tasks, parking, gym, noteTitle, NOTE_LIMIT } from "./store.js";
 import { agenda } from './planner.js';
 
-// Web search for providers without their own: Firecrawl search and page reading. Works without a key at low volume;
+// Web search runs through Firecrawl for every provider: search_web and read_web_page. Works without a key at low volume;
 // a Firecrawl key (API settings) raises the limits. The key stays in this tab, like provider keys.
 const FIRECRAWL = "https://api.firecrawl.dev/v2", FIRECRAWL_KEY = "pocket:firecrawl-key";
 export const firecrawlKey = (storage = sessionStorage) => storage.getItem(FIRECRAWL_KEY) || "";

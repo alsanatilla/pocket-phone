@@ -229,8 +229,7 @@ final class ClaudeChatClient {
             this.listener = listener;
             this.tools = PocketChatTools.definitions(context, config);
             this.instructions = system(!tools.isEmpty()) + (config.webSearch
-                    ? "\n\nWeb search is enabled. Use it when a question needs current information, and cite its URLs. Never invent tool activity."
-                            + (PocketChatTools.webTools(config) ? " Use search_web to find pages and read_web_page to read one." : "")
+                    ? "\n\nWeb search is enabled through search_web (find pages) and read_web_page (read one). Use them when a question needs current information, cite the urls you use, and never invent tool activity."
                     : "\n\nWeb search is off. Do not claim to browse or search the web, or invent tool activity.");
             this.activity = new ChatActivity(listener::activity);
             this.previousActivity = previousActivity == null ? "[]" : previousActivity;
@@ -382,13 +381,11 @@ final class ClaudeChatClient {
                 if (adaptiveThinking(config.model))
                     params.thinking(ThinkingConfigAdaptive.builder().display(ThinkingConfigAdaptive.Display.SUMMARIZED).build());
                 if (config.promptCaching) params.cacheControl(CacheControlEphemeral.builder().build());
-                if (!tools.isEmpty() || config.webSearch) {
+                if (!tools.isEmpty()) {
                     phase = "preparing tools";
                     for (PocketChatTools.Definition definition : tools)
                         params.addTool(Tool.builder().name(definition.name).description(definition.description)
                                 .inputSchema(anthropicSchema(definition.schema)).build());
-                    if (config.webSearch && webCalls < MAX_WEB_CALLS)
-                        params.addTool(WebSearchTool20250305.builder().maxUses((long) MAX_WEB_CALLS - webCalls).build());
                     if (synthesizing(round))
                         params.toolChoice(ToolChoiceNone.builder().build());
                 }

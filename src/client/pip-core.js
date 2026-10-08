@@ -108,11 +108,10 @@ export function requestBody(chat, turn, resume = null) {
   const messages = [...pairs, { role: "user", content: prompt(turn) + continuation }], value = chat.config;
   const body = { model: value.model, max_tokens: value.maxTokens, stream: true, messages };
   const reads = definitions(value), system = SYSTEM + (reads.length ? " Read only the Pocket categories offered by your tools." : " No Pocket access is enabled; read only attached context.")
-    + (value.webSearch ? " Web search is available; use it for current information and cite its URLs." + (value.provider === "anthropic" ? "" : " Use search_web to find pages and read_web_page to read one.") : " Web search is off. Do not claim to browse or search the web.");
+    + (value.webSearch ? " Web search is available through search_web (find pages) and read_web_page (read one); cite the urls you use." : " Web search is off. Do not claim to browse or search the web.");
   if (value.provider === "anthropic") {
     body.system = system;
-    const tools = [...reads, ...(value.webSearch ? [{ type: "web_search_20250305", name: "web_search", max_uses: 8 }] : [])];
-    if (tools.length) body.tools = tools;
+    if (reads.length) body.tools = reads;
     if (value.thinking) body.thinking = { type: "adaptive", display: "summarized" };
   } else { body.messages = [{ role: "system", content: system }, ...messages]; if (reads.length) body.tools = reads.map(tool => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.input_schema } })); }
   return body;
