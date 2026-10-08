@@ -78,10 +78,12 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
       const fallbacks = freeFallbacks(value); if (fallbacks) { request.model = fallbacks[0]; request.models = fallbacks; }
       if (value.provider === "compatible" && new URL(value.baseUrl).hostname === "api.openai.com") { request.max_completion_tokens = allowance; delete request.max_tokens; request.stream_options = { include_usage: true }; }
       if (round && JSON.stringify(request.messages).length > 190000) return finishFromObservations("The research context limit was reached.");
-      // A final round produces the answer, with no more client reads or server searches.
+      // A final round stops research, but keeps the plan and prepare tools so the model can still
+      // save the note, task or change the user asked for before it answers.
       if (final && request.tools?.length) {
-        request.tool_choice = value.provider === "anthropic" ? { type: "none" } : "none";
-        request.messages.push({ role: "user", content: "Finish now using the observations already collected. Do not call more tools. Explain material gaps briefly." + (finalReason ? " Research limit: " + finalReason : "") });
+        request.tools = request.tools.filter(tool => STATE_TOOLS.includes(tool.name || tool.function?.name));
+        request.tool_choice = request.tools.length ? (value.provider === "anthropic" ? { type: "auto" } : "auto") : (value.provider === "anthropic" ? { type: "none" } : "none");
+        request.messages.push({ role: "user", content: "Finish now using the observations already collected. Do not start more research or read more sources. If the user asked you to save or change something, prepare it now, then answer. Explain material gaps briefly." + (finalReason ? " Research limit: " + finalReason : "") });
       }
       else if (value.provider === "anthropic") for (const tool of request.tools || []) if (tool.name === "web_search") tool.max_uses = Math.max(1, RESEARCH_LIMITS.webCalls - searches);
       const headers = { "content-type": "application/json" };
@@ -207,7 +209,7 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
       }
       if (stop === "tool_use" || stop === "tool_calls") {
         if (!reads.size) throw new Error("The provider returned no complete tool request.");
-        if (final) return finishFromObservations("The provider requested more tools after the research limit.");
+        if (final && [...reads.values()].some(read => !STATE_TOOLS.includes(read.name))) return finishFromObservations("The provider requested more tools after the research limit.");
         if (new Set([...reads.values()].map(read => read.id)).size !== reads.size) throw new Error("The provider returned duplicate tool identifiers.");
         for (const row of result.activity.filter(row => row.kind === "web" && row.state === "running")) record(row.id, { state: "queued" });
         // Keep the provider's original blocks/IDs/signatures for the continuation. Remarks are not later answer history.
@@ -219,7 +221,7 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
           check(); let answer;
           const allowed = offered.has(read.name) && definitions(value).some(tool => tool.name === read.name), web = ["search_web", "read_web_page"].includes(read.name);
           if (!allowed || read.name === "web_search") { answer = { error: "tool_unavailable", message: "This tool is not offered or its access was switched off." }; finalReason ||= "Unavailable tool requested"; }
-          else if (calls >= RESEARCH_LIMITS.calls || web && searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || finalReason === "Research data exhausted") { answer = budgetError; finalReason ||= "Research calls or data exhausted"; }
+          else if (!STATE_TOOLS.includes(read.name) && (calls >= RESEARCH_LIMITS.calls || web && searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || finalReason === "Research data exhausted")) { answer = budgetError; finalReason ||= "Research calls or data exhausted"; }
           else {
             calls++; if (web) searches++; result.phase = label(read.name, read.input);
             record(read.id, { state: "running", title: label(read.name, read.input), input: JSON.stringify(read.input) });
@@ -245,7 +247,7 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
           if (!content || content.length > RESEARCH_LIMITS.result) { answer = { error: "result_too_large", message: "Use a narrower request." }; content = JSON.stringify(answer); }
           const unfinished = outputs.filter(Boolean).length;
           // Reserve enough space for a bounded error for every outstanding call in this batch.
-          if (toolData + content.length + (ordered.length - unfinished - 1) * budgetContent.length > RESEARCH_LIMITS.toolData) { answer = budgetError; content = budgetContent; finalReason ||= "Research data exhausted"; }
+          if (!STATE_TOOLS.includes(read.name) && toolData + content.length + (ordered.length - unfinished - 1) * budgetContent.length > RESEARCH_LIMITS.toolData) { answer = budgetError; content = budgetContent; finalReason ||= "Research data exhausted"; }
           if (toolData + content.length <= RESEARCH_LIMITS.toolData) toolData += content.length;
           completed.push({ name: read.name, answer }); outputs[index] = { answer, content };
           record(read.id, { name: read.name, input: JSON.stringify(read.input), state: answer.error || answer.available === false ? "failed" : "done", summary: summary(read.name, answer), result: content, sources: sources(read.name, answer), ended: Date.now() }); clock();

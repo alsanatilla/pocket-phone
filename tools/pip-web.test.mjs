@@ -150,6 +150,27 @@ test('a web result the client cannot match no longer ends the run',async()=>{
   const web=result.activity.filter(row=>row.kind==='web');
   assert.equal(web.length,1);assert.equal(web[0].state,'done');
 });
+test('a note can still be prepared after the budget forces synthesis',async()=>{
+  const {chat}=ready(), value=config({...DEFAULT_CONFIG});
+  const body={model:value.model,max_tokens:value.maxTokens,stream:true,messages:[{role:'user',content:'Save a note about the car industry'}],tools:[{name:'propose_action'},{name:'search_notes'}]};
+  const truncated=event({type:'message_start',message:{model:'m',usage:{input_tokens:10}}})
+    +event({type:'content_block_delta',delta:{type:'text_delta',text:'Let me check.'}})
+    +event({type:'message_delta',delta:{stop_reason:'max_tokens'},usage:{output_tokens:12}})
+    +event({type:'message_stop'});
+  const proposing=event({type:'content_block_start',index:0,content_block:{type:'tool_use',id:'toolu_1',name:'propose_action',input:{}}})
+    +event({type:'content_block_delta',index:0,delta:{type:'input_json_delta',partial_json:'{"kind":"note","title":"Car industry turmoil","text":"VW plans to cut jobs."}'}})
+    +event({type:'content_block_stop',index:0})
+    +event({type:'message_delta',delta:{stop_reason:'tool_use'},usage:{output_tokens:30}})
+    +event({type:'message_stop'});
+  const answering=event({type:'content_block_delta',delta:{type:'text_delta',text:'Prepared the note for you.'}})
+    +event({type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:8}})
+    +event({type:'message_stop'});
+  let calls=0;
+  const result=await streamChat(chat,turn,{value,body,readSse:sse,key:'k',fetcher:async()=>response(++calls===1?truncated:calls===2?proposing:answering)});
+  assert.equal(calls,3);
+  assert.equal(result.answer,'Prepared the note for you.');
+  assert.ok(result.activity.some(row=>row.name==='propose_action'&&row.state==='done'),'the note proposal is prepared during the final round');
+});
 test('web search runs through Firecrawl for every provider',()=>{
   const {chat}=ready();
   const names = value => (requestBody({ ...chat, config: value }, turn).tools || []).map(tool => tool.name || tool.function?.name);
