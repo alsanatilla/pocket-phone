@@ -2,6 +2,8 @@ import { activity, source, settle } from "./pip-activity.js";
 import { execute, access, accessFingerprint, checkpointIdentity, cacheKey, definitions, label, summary, sources, STATE_TOOLS } from "./pip-tools.js";
 
 export const RESEARCH_LIMITS = Object.freeze({ continuations: 8, calls: 20, webCalls: 8, toolData: 48000, result: 8000, parallel: 3, deadlineMs: 300000 });
+/** A tool round must be able to finish a tool call: never divide a round below this. */
+const TOOL_ROUND_TOKENS = 1024;
 
 const httpError = code => code === 401 || code === 403 ? "The provider rejected your key or access. Check API settings."
   : code === 429 ? "The provider is busy or your quota is exhausted. Retry when you’re ready."
@@ -67,7 +69,11 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
       const reserve = Math.min(1024, Math.max(1, Math.floor(value.maxTokens / 3))), final = Boolean(finalReason) || round === RESEARCH_LIMITS.continuations || calls >= RESEARCH_LIMITS.calls || searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || tokens <= reserve;
       result.phase = final ? "synthesizing" : "requesting"; publish();
       for (const row of result.activity.filter(row => row.kind === "web" && row.state === "queued")) { record(row.id, { state: "running" }); result.phase = "searching web"; }
-      const request = structuredClone(body), allowance = offered.size && !final ? Math.max(1, Math.floor((tokens - reserve) / (RESEARCH_LIMITS.continuations - round))) : tokens;
+      // Splitting the whole reply budget evenly across every possible continuation left the
+      // first rounds with too few tokens to finish a tool call, so the provider stopped at
+      // max_tokens mid-arguments. Keep the answer reserve, but give each tool round a usable floor.
+      const fair = Math.floor((tokens - reserve) / Math.max(1, RESEARCH_LIMITS.continuations - round));
+      const request = structuredClone(body), allowance = offered.size && !final ? Math.max(1, Math.min(tokens - reserve, Math.max(fair, TOOL_ROUND_TOKENS))) : tokens;
       request.max_tokens = allowance;
       const fallbacks = freeFallbacks(value); if (fallbacks) { request.model = fallbacks[0]; request.models = fallbacks; }
       if (value.provider === "compatible" && new URL(value.baseUrl).hostname === "api.openai.com") { request.max_completion_tokens = allowance; delete request.max_tokens; request.stream_options = { include_usage: true }; }

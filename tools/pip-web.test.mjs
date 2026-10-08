@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, apiKey, setKey, saveSettings, settings, requestBody, streamReply, sse } from '../src/client/pip-core.js';
+import { streamChat } from '../src/client/pip-stream.js';
 
 class Memory {
   values = new Map();
@@ -44,7 +45,7 @@ test('compatible streams do not double a summary supplied in two fields', async(
 test('truncated streams and reply limits stay unfinished', async()=>{
   const {chat}=ready();
   await assert.rejects(streamReply(chat,turn,{key:'key',fetcher:async()=>response(event({type:'content_block_delta',delta:{type:'text_delta',text:'Partial'}}))}),/before the reply was complete/);
-  await assert.rejects(streamReply(chat,turn,{key:'key',fetcher:async()=>response(event({type:'content_block_delta',delta:{type:'text_delta',text:'Partial'}})+event({type:'message_delta',delta:{stop_reason:'max_tokens'}})+event({type:'message_stop'}))}),/reply limit/);
+  await assert.rejects(streamReply(chat,turn,{key:'key',fetcher:async()=>response(event({type:'content_block_delta',delta:{type:'text_delta',text:'Partial'}})+event({type:'message_delta',delta:{stop_reason:'max_tokens'}})+event({type:'message_stop'}))}),/reply token limit/);
 });
 test('request errors do not expose provider text or an echoed API key', async()=>{
   const {chat}=ready();
@@ -91,8 +92,21 @@ test('deleted chats cannot be resurrected by an outstanding request',async()=>{
 });
 test('a timeout cancels a stalled response without automatically retrying',async()=>{
   const {chat}=ready();let calls=0;
-  await assert.rejects(streamReply(chat,turn,{key:'key',timeoutMs:5,fetcher:async(_,options)=>{calls++;return await new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('Stopped','AbortError'))));}}),/took too long/);assert.equal(calls,1);
+  await assert.rejects(streamReply(chat,turn,{key:'key',timeoutMs:5,fetcher:async(_,options)=>{calls++;return await new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('Stopped','AbortError'))));}}),/stopped responding/);assert.equal(calls,1);
 });
 test('damaged conversation data is kept rather than silently replaced',()=>{
   const {store,memory,chat}=ready();memory.setItem('pocket:pip-chat:'+chat.uid,'damaged-original');assert.throws(()=>store.get(chat.uid),/original data/);assert.equal(memory.getItem('pocket:pip-chat:'+chat.uid),'damaged-original');
+});
+test('a tool round gets a usable token allowance instead of the full-budget split',async()=>{
+  // The reply limit is shared across rounds, but dividing it evenly across every possible
+  // continuation left round 0 with too few tokens to finish a tool call, so the provider
+  // stopped at max_tokens mid-arguments ("prepare action · failed").
+  const {chat}=ready(), value=config({...DEFAULT_CONFIG});
+  const body={...requestBody(chat,turn),tools:[{name:'propose_action',description:'Prepare an action',input_schema:{type:'object'}}]};
+  const requests=[];
+  const wire=event({type:'message_start',message:{model:'m',usage:{input_tokens:5}}})+event({type:'content_block_delta',delta:{type:'text_delta',text:'ok'}})+event({type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:4}})+event({type:'message_stop'});
+  await streamChat(chat,turn,{value,body,readSse:sse,key:'k',fetcher:async(url,options)=>{requests.push(JSON.parse(options.body));return response(wire);}});
+  assert.equal(value.maxTokens,2048);
+  assert.ok(requests[0].max_tokens>=1024,`first tool round allowance ${requests[0].max_tokens} should finish a tool call`);
+  assert.ok(requests[0].max_tokens<=value.maxTokens);
 });

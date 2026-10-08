@@ -66,7 +66,7 @@ final class ClaudeChatClient {
     private static final com.anthropic.core.Timeout TIMEOUT = com.anthropic.core.Timeout.builder()
             .connect(Duration.ofSeconds(15)).read(Duration.ofSeconds(90)).write(Duration.ofSeconds(30))
             .request(Duration.ofMinutes(5)).build();
-    private static final int MAX_TOOL_ROUNDS = 8, MAX_TOOL_CALLS = 20, MAX_WEB_CALLS = 8, MAX_TOOL_DATA = 48_000;
+    private static final int MAX_TOOL_ROUNDS = 8, MAX_TOOL_CALLS = 20, MAX_WEB_CALLS = 8, MAX_TOOL_DATA = 48_000, TOOL_ROUND_TOKENS = 1024;
     private static final int MAX_TOOL_ARGUMENTS = 8000;
     private static final long IDLE_NANOS = TimeUnit.SECONDS.toNanos(90), RUN_NANOS = TimeUnit.MINUTES.toNanos(5);
     private static final int MAX_CONTINUATION_CHARS = 524_288, MAX_REASONING_CONTINUATION_CHARS = 131_072;
@@ -887,7 +887,11 @@ final class ClaudeChatClient {
             // Reserve answer space. If a compatible endpoint omits usage, summed request caps still fit the reply limit.
             int reserve = Math.min(1024, Math.max(1, config.maxTokens / 3));
             if (remainingTokens <= reserve) { synthesis = true; return remainingTokens; }
-            return Math.max(1, (remainingTokens - reserve) / (MAX_TOOL_ROUNDS - round));
+            // Splitting the whole reply budget evenly across every remaining round left the
+            // first rounds too small to finish a tool call. Keep the answer reserve, but give
+            // each tool round a usable floor so the provider does not stop mid-arguments.
+            int fair = Math.max(1, (remainingTokens - reserve) / (MAX_TOOL_ROUNDS - round));
+            return Math.min(remainingTokens - reserve, Math.max(fair, TOOL_ROUND_TOKENS));
         }
 
         private boolean synthesizing(int round) {
