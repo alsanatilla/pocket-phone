@@ -33,7 +33,7 @@
     "hosting": "Vercel",
     "url": "https://pocket-phone.vercel.app/",
     "release_asset": "pocket-web-0.19.0-source.zip",
-    "offline_worker": "pocket-astro-0190-shared-travel",
+    "offline_worker": "pocket-astro-0190-profile-names",
     "changed": true
   },
   "full_test_suite": {
@@ -80,6 +80,23 @@
     "full_test_suite": "Not rerun for this web-only update",
     "external_services": "No model, web-search or COROS requests made for Markdown verification",
     "offline": "Up to 20 completed previews within 600000 cache characters per account; uncached text remains plain and readable without the renderer."
+  },
+  "profile_update": {
+    "checked_at_utc": "2026-10-08T08:39:54Z",
+    "scope": "Web account names and server validation; Android artifact remains unchanged",
+    "behavior": "Choose a name during password or passkey signup, or update the existing account name. Shared trip members and invitation previews use current names.",
+    "build": "Astro production build passed",
+    "verification": [
+      "node scripts/profile-name-check.mjs: isolated local libSQL checks passed for authenticated and account-fenced profile updates, Unicode normalization and validation, password signup, signed passkey registration context and options, and current names in shared trips and invitations",
+      "node --experimental-vm-modules scripts/profile-client-check.mjs: four groups passed for stale refreshes before/during a save, account changes during a save, and signup names kept separate from passkey device labels",
+      "node scripts/travel-server-check.mjs passed with account-name hooks enabled",
+      "Edge browser checks passed against an isolated localhost database: chosen-name signup, edit and reload persistence, 390px layout, separate-account invite/signup/join, live member rename and fresh inviter names; zero page errors"
+    ],
+    "limitations": [
+      "Hardware passkey creation was not performed; actual server registration options and signed context were checked, with a fixture browser ceremony",
+      "All verification accounts and writes were local fixtures; no production user data was changed",
+      "The full test suite was not rerun for this web-only update"
+    ]
   },
   "travel_update": {
     "limitations": [

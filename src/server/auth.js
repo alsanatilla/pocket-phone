@@ -7,9 +7,14 @@ import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { drizzle } from 'drizzle-orm/libsql';
 import { database, ensureSchema, execute } from './database.js';
 import * as schema from './schema.js';
+import { chosenName, NAME_LIMIT } from '../shared/profile-name.js';
 
 export const PHONE_CLIENT = 'pocket-android';
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
+const accountName = value => {
+  try { return chosenName(value); }
+  catch (error) { throw new APIError('BAD_REQUEST', { message: error.message }); }
+};
 
 // Registration is signed and short-lived. No user or session exists until WebAuthn succeeds.
 function registrationContext(secret, origin, value) {
@@ -21,6 +26,7 @@ function registrationContext(secret, origin, value) {
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) throw new Error();
     const claims = JSON.parse(Buffer.from(payload, 'base64url').toString());
     if (claims.origin !== origin || !EMAIL.test(claims.email) || !claims.id || claims.expires < Date.now()) throw new Error();
+    if (claims.name !== undefined) accountName(claims.name);
     return claims;
   } catch { throw new APIError('BAD_REQUEST', { message: 'Start creating your passkey again.' }); }
 }
@@ -31,7 +37,8 @@ const pocketAccounts = (secret, origin) => ({
       const email = String(ctx.body?.email || '').trim().toLowerCase();
       if (!EMAIL.test(email)) throw new APIError('BAD_REQUEST', { message: 'Enter a valid email address.' });
       if (await ctx.context.internalAdapter.findUserByEmail(email)) throw new APIError('BAD_REQUEST', { message: 'This email already has a Pocket account. Sign in instead.' });
-      const payload = Buffer.from(JSON.stringify({ id: randomUUID(), email, origin, expires: Date.now() + 5 * 60_000 })).toString('base64url');
+      const name = accountName(ctx.body?.name ?? email.split('@')[0].slice(0, NAME_LIMIT));
+      const payload = Buffer.from(JSON.stringify({ id: randomUUID(), email, name, origin, expires: Date.now() + 5 * 60_000 })).toString('base64url');
       const signature = createHmac('sha256', secret).update('pocket-registration:' + payload).digest('base64url');
       return ctx.json({ context: payload + '.' + signature });
     }),
@@ -53,7 +60,7 @@ function pocketPasskeys(secret, origin) {
       resolveUser: async ({ ctx, context }) => {
         const value = registrationContext(secret, origin, context);
         if (await ctx.context.internalAdapter.findUserByEmail(value.email)) throw new APIError('BAD_REQUEST', { message: 'Sign in to your existing Pocket account.' });
-        return { id: value.id, name: value.email, displayName: value.email };
+        return { id: value.id, name: value.email, displayName: value.name || value.email };
       },
       afterVerification: async ({ ctx, user, context, verification }) => {
         if (!verification.registrationInfo?.userVerified) throw new APIError('BAD_REQUEST', { message: 'Use a passkey protected by your screen lock or PIN.' });
@@ -61,7 +68,7 @@ function pocketPasskeys(secret, origin) {
         const value = registrationContext(secret, origin, context);
         if (value.id !== user.id || !ctx.body.createSession) throw new APIError('BAD_REQUEST', { message: 'Start creating your passkey again.' });
         if (await ctx.context.internalAdapter.findUserByEmail(value.email)) throw new APIError('BAD_REQUEST', { message: 'Sign in to your existing Pocket account.' });
-        const created = await ctx.context.internalAdapter.createUser({ id: value.id, email: value.email, name: value.email.split('@')[0], emailVerified: false });
+        const created = await ctx.context.internalAdapter.createUser({ id: value.id, email: value.email, name: accountName(value.name ?? value.email.split('@')[0].slice(0, NAME_LIMIT)), emailVerified: false });
         return { userId: created.id };
       },
     },
@@ -94,6 +101,10 @@ export async function authFor(request) {
       database: drizzleAdapter(drizzle(database(), { schema }), { provider: 'sqlite', schema, transaction: true }),
       emailAndPassword: { enabled: true, minPasswordLength: 12, maxPasswordLength: 128, requireEmailVerification: false },
       session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },
+      databaseHooks: { user: {
+        create: { before: async user => ({ data: { ...user, name: accountName(user.name) } }) },
+        update: { before: async user => user.name === undefined ? undefined : ({ data: { ...user, name: accountName(user.name) } }) },
+      } },
       plugins: [
         bearer(),
         pocketPasskeys(secret, origin),

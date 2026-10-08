@@ -10,6 +10,8 @@ Use **sign in** on another device; **create account** is a separate choice. Pass
 
 **Travel on the web** now saves to the account and supports shared trips. Open a trip → **share trip** → **create invite link**; another person joins with their own Pocket account. Only the trip is shared. Choose editing or viewing access, optionally bind the invite to an email, and remove access from the sharing screen. Changes refresh every five seconds while Travel is visible. Offline edits survive reloads; independent changes merge, and conflicting details require review. Older local trips migrate with recovery copies retained. This web update does not add Travel to the Android app.
 
+Choose your name when creating an account, or change it in **Apps → Account & devices → Name → save name**. Shared trips and invitation previews use the current account name. Changing a name keeps the same account, email and access.
+
 Pip uses matching Pocket visuals on phone and web, with an upper-corner pixel glow and a small console-inspired mascot. Actual tool/search activity has queries, status, results and citations. Read-only Pocket access and Anthropic search start off and can be enabled from the composer. Keeping a reply as a Note, Thought or Task remains an explicit action. See [PIP.md](PIP.md).
 
 Shared headers, typography, rows, controls and Back conventions connect the apps. See [DESIGN.md](DESIGN.md), [CAMERA.md](CAMERA.md), [APP-STATUS.md](APP-STATUS.md) and [release notes](RELEASES.md).

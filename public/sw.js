@@ -1,4 +1,4 @@
-const CACHE = 'pocket-astro-0190-shared-travel';
+const CACHE = 'pocket-astro-0190-profile-names';
 const allowed = url => url.origin === self.location.origin && (url.pathname === '/' || url.pathname.startsWith('/_astro/') || url.pathname.startsWith('/fonts/') || url.pathname.startsWith('/sprites/'));
 self.addEventListener('install', event => {
   event.waitUntil((async () => {

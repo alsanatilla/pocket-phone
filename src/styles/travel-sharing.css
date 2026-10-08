@@ -19,6 +19,9 @@
 .travel-conflict-row, .travel-recovery-row { border-bottom: 1px solid var(--line); padding: 16px 0; overflow-wrap: anywhere; }
 .travel-conflict-row strong { font-size: 14px; }
 .travel-recovery-row button { margin-right: 24px; min-height: 44px; }
+.account-profile { display: flex; align-items: end; gap: 20px; margin: 8px 0 24px; }
+.account-profile .account-field { flex: 1; min-width: 0; margin: 0; }
+.account-profile button { min-height: 44px; flex: none; padding: 8px 0; }
 .tool-travel > .travel-commit { margin: 12px 24px 12px 0; }
 .travel-readonly .travel-reorder, .travel-readonly .travel-stop-actions button, .travel-readonly .travel-inline-add, .travel-readonly .travel-envelope-action, .travel-readonly .travel-stay-actions, .travel-readonly .travel-return .travel-text-action { display: none; }
 .travel-readonly .travel-star:disabled, .travel-readonly .travel-activity-check:disabled { opacity: 1; cursor: default; }

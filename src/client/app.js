@@ -26,6 +26,7 @@ import * as travel from "./travel.js";
 import * as sharedTravel from './travel-store.js';
 import { INVITE_RESUME } from './travel-sharing.js';
 import { normalizeTrip } from '../shared/travel-data.js';
+import { chosenName, NAME_LIMIT } from '../shared/profile-name.js';
 import { agenda, clock as clockStore, mountAgenda, mountClock, startClockRuntime, focusTask, planTask, remindTask } from "./planner.js";
 import { mountBrief, readBrief, briefEnabled } from './daily-brief.js';
 import * as setup from './setup.js';
@@ -817,6 +818,7 @@ async function roll(result, detail) {
 
 // ── Account: who you are, which devices are linked, and this browser's copy ──
 let passwordMode = true;
+let registrationDraft = { name: '', email: '' };
 const KEY_GLYPH = '<svg viewBox="0 0 12 7" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M1 1h3v1h1v1h6v1h-1v1h-1v-1h-1v1h-1v-1h-2v1h-1v1h-3v-1h-1v-3h1zM2 3v1h1v-1z"/></svg>';
 const deviceLabel = ua => !ua ? 'linked device' : /Pocket Android|okhttp|Dalvik/i.test(ua) ? 'Pocket phone' : [
   /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Browser',
@@ -855,12 +857,18 @@ function signedOutAccount(pane, creating = false, base = '/account') {
   };
   const field = (label, input) => h('label', { class: 'account-field' }, h('span', { text: label }), input);
   const email = h('input', { type: 'email', autocomplete: usePassword ? 'username' : 'username webauthn', placeholder: 'you@example.com', maxlength: 254, required: true });
+  const name = creating ? h('input', { type: 'text', autocomplete: 'name', 'aria-label': 'Your name', maxlength: NAME_LIMIT, required: true }) : null;
+  if (creating) {
+    name.value = registrationDraft.name; email.value = registrationDraft.email;
+    const remember = () => { registrationDraft = { name: name.value, email: email.value }; };
+    name.addEventListener('input', remember); email.addEventListener('input', remember);
+  }
   const bring=h('input',{type:'checkbox'});
   if(bringGuest())add(pane,h('label',{class:'check-label account-import'},bring,'bring this browser’s workspace'));
   if (!usePassword) {
-    if(creating)add(pane,h('form',{class:'account-create',onsubmit:event=>{event.preventDefault();if(!email.checkValidity()){email.reportValidity();return;}
-      run('Creating your account and passkey…',()=>cloud.createAccount(email.value.trim(),bring.checked));}},
-      field('EMAIL',email),h('button',{type:'submit',class:'account-primary'},keyGlyph(),'create account with passkey')));
+    if(creating)add(pane,h('form',{class:'account-create',onsubmit:event=>{event.preventDefault();if(!email.checkValidity() || !name.checkValidity()){email.reportValidity();name.reportValidity();return;}
+      run('Creating your account and passkey…',()=>cloud.createAccount(email.value.trim(),bring.checked,name.value));}},
+      field('NAME',name),field('EMAIL',email),h('button',{type:'submit',class:'account-primary'},keyGlyph(),'create account with passkey')));
     else add(pane,h('button',{class:'account-primary',onclick:()=>run('Waiting for your passkey…',()=>cloud.signInWithPasskey(bring.checked))},keyGlyph(),'sign in with passkey'));
     add(pane,h('button',{class:'account-switch',onclick:()=>{passwordMode=true;route();}},'use a password'),
       h('button',{class:'account-switch',onclick:()=>go(creating?base:base+'/new')},creating?'back to sign in':'create account'));
@@ -869,11 +877,12 @@ function signedOutAccount(pane, creating = false, base = '/account') {
   const password = h('input', { type: 'password', autocomplete: creating ? 'new-password' : 'current-password', minlength: creating ? 12 : null, maxlength: 128, required: true });
   const submit = () => {
     if (!email.checkValidity() || !password.value) { email.reportValidity(); password.reportValidity(); return; }
+    if (creating && !name.checkValidity()) { name.reportValidity(); return; }
     if (creating && password.value.length < 12) { say('Use at least 12 characters for your password.'); return; }
-    run(creating ? 'Creating account…' : 'Signing in…', () => cloud.login(email.value.trim(), password.value, creating, bring.checked));
+    run(creating ? 'Creating account…' : 'Signing in…', () => cloud.login(email.value.trim(), password.value, creating, bring.checked, name?.value));
   };
   add(pane, h('form', { class: 'account-create', onsubmit: event => { event.preventDefault(); submit(); } },
-    field('EMAIL', email), field('PASSWORD', password),
+    creating ? field('NAME', name) : null, field('EMAIL', email), field('PASSWORD', password),
     h('button', { type: 'submit', class: 'account-primary' }, creating ? 'create account' : 'sign in')),
     passkeys ? h('button', { class: 'account-switch', onclick: () => {
       if (creating) { passwordMode = false; route(); }
@@ -883,6 +892,22 @@ function signedOutAccount(pane, creating = false, base = '/account') {
 }
 
 function signedInAccount(pane) {
+  const name = h('input', { type: 'text', autocomplete: 'name', 'aria-label': 'Your name', maxlength: NAME_LIMIT, required: true });
+  name.value = cloud.account().name || '';
+  let editedName = false;
+  name.addEventListener('input', () => { editedName = true; });
+  const saveName = h('button', { type: 'submit', text: 'save name' });
+  const profile = h('form', { class: 'account-profile', onsubmit: async event => {
+    event.preventDefault(); if (!profile.reportValidity()) return;
+    const accountId = activeAccount(); saveName.disabled = true; name.disabled = true;
+    try {
+      await cloud.updateName(chosenName(name.value));
+      if (activeAccount() !== accountId || !profile.isConnected) return;
+      name.value = cloud.account().name; editedName = false; say('Name saved.');
+      sharedTravel.syncTravel();
+    } catch (error) { if (profile.isConnected) say(error.message); }
+    finally { if (profile.isConnected) { saveName.disabled = false; name.disabled = false; } }
+  } }, h('label', { class: 'account-field' }, h('span', { text: 'NAME' }), name), saveName);
   const state = h('div', { class: 'account-status' },
     h('span', { class: status.state === 'error' ? 'warn' : 'accent', text: status.state === 'error' ? 'sync failed' : describe().toLowerCase() }),
     h('button', { onclick: async () => { const ok = await syncNow(); route(); say(ok ? 'Synced.' : describe()); } }, 'sync now'));
@@ -891,8 +916,9 @@ function signedInAccount(pane) {
   const codeInput = h('input', { class: 'code-input', placeholder: 'XXXX-XXXX', maxlength: 9, autocomplete: 'one-time-code', 'aria-label': 'Code shown on the phone',
     oninput: event => { event.target.value = normalCode(event.target.value); } });
   add(link, codeInput, h('button', { type: 'submit', class: 'account-commit' }, 'link phone'));
-  add(pane, state, section('DEVICES'), devices, section('LINK A PHONE'), link, section('PASSKEYS'), keysList,
+  add(pane, profile, state, section('DEVICES'), devices, section('LINK A PHONE'), link, section('PASSKEYS'), keysList,
     rowButton('sign out', '', async () => { try { await syncNow(); await cloud.disconnect(); } catch (error) { say(error.message); } }));
+  cloud.refreshAccount().then(user => { if (user && profile.isConnected && !editedName && !name.disabled) name.value = user.name || ''; }).catch(error => { if (profile.isConnected) say(error.message); });
   const pending = globalThis.sessionStorage.getItem(PHONE_LINK);
   if (pending) { codeInput.value = pending; globalThis.sessionStorage.removeItem(PHONE_LINK); setTimeout(() => codeInput.focus(), 0); }
   drawDevices(devices); drawPasskeys(keysList);
@@ -1002,7 +1028,7 @@ onStatus(() => {
   const state = document.getElementById("sync-status"); if (state) state.textContent = statusLabel();
   const finished = lastState === "syncing" && status.state === "idle"; lastState = status.state;
   // Merged edits from the phone appear without a reload, unless the user is typing or a dialog is open.
-  if (finished && status.changed && !searchOpening && !["#/zines", "#/movement", "#/pip", "#/travel"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea, select")) {
+  if (finished && status.changed && !searchOpening && !["#/zines", "#/movement", "#/pip", "#/travel", "#/account", "#/sync", "#/setup"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea, select")) {
     if (location.hash === '#/brief') { briefView?.refresh(); return; }
     const text = notice?.textContent; route(); say(text);
   }
