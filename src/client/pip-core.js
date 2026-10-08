@@ -4,7 +4,7 @@ import { changed } from './persistence-events.js';
 import { access, accessFingerprint, definitions, STATE_TOOLS } from "./pip-tools.js";
 import { activity, settle, source } from "./pip-activity.js";
 import { streamChat } from "./pip-stream.js";
-export const DEFAULT_CONFIG = Object.freeze({ provider: "anthropic", model: "claude-sonnet-5-5", baseUrl: "https://api.anthropic.com/v1", maxTokens: 2048, thinking: false, webSearch: false });
+export const DEFAULT_CONFIG = Object.freeze({ provider: "anthropic", model: "claude-sonnet-5-5", baseUrl: "https://api.anthropic.com/v1", maxTokens: 4096, thinking: false, webSearch: false });
 const PREFIX = "pocket:pip-chat:", SETTINGS = "pocket:pip-settings";
 const copy = value => structuredClone(value);
 const id = () => crypto.randomUUID();

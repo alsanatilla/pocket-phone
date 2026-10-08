@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, apiKey, setKey, saveSettings, settings, requestBody, streamReply, sse } from '../src/client/pip-core.js';
 import { streamChat } from '../src/client/pip-stream.js';
+import { execute, definitions } from '../src/client/pip-tools.js';
 
 class Memory {
   values = new Map();
@@ -106,8 +107,8 @@ test('a tool round gets a usable token allowance instead of the full-budget spli
   const requests=[];
   const wire=event({type:'message_start',message:{model:'m',usage:{input_tokens:5}}})+event({type:'content_block_delta',delta:{type:'text_delta',text:'ok'}})+event({type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:4}})+event({type:'message_stop'});
   await streamChat(chat,turn,{value,body,readSse:sse,key:'k',fetcher:async(url,options)=>{requests.push(JSON.parse(options.body));return response(wire);}});
-  assert.equal(value.maxTokens,2048);
-  assert.ok(requests[0].max_tokens>=1024,`first tool round allowance ${requests[0].max_tokens} should finish a tool call`);
+  assert.equal(value.maxTokens,4096);
+  assert.ok(requests[0].max_tokens>=2048,`first tool round allowance ${requests[0].max_tokens} should finish a tool call`);
   assert.ok(requests[0].max_tokens<=value.maxTokens);
 });
 test('a web search that resolves after a paused turn updates its own search',async()=>{
@@ -158,4 +159,18 @@ test('web search runs through Firecrawl for every provider',()=>{
   assert.ok(names(anthropic).includes('read_web_page'));
   assert.ok(!names(anthropic).includes('web_search'));
   assert.ok(names(compatible).includes('search_web'));
+});
+test('search_web forwards news and research filters to Firecrawl',async()=>{
+  const value=config({...DEFAULT_CONFIG,webSearch:true});
+  const savedFetch=globalThis.fetch, savedLocal=globalThis.localStorage, savedSession=globalThis.sessionStorage;
+  globalThis.localStorage=new Memory(); globalThis.sessionStorage=new Memory();
+  let sent;
+  globalThis.fetch=async(url,options)=>{sent=JSON.parse(options.body);return new Response(JSON.stringify({data:{web:[{url:'https://example.com/a',title:'A',description:'a'}],news:[{url:'https://news.example/b',title:'B',description:'b'}]}}),{headers:{'content-type':'application/json'}});};
+  try{
+    const schema=(definitions(value).find(tool=>tool.name==='search_web')||{}).input_schema?.properties||{};
+    assert.ok(schema.sources&&schema.categories);
+    const result=await execute(value,'search_web',{query:'car industry',sources:['news'],categories:['research','pdf']},undefined,{cache:new Map()});
+    assert.deepEqual(sent.sources,['news']);assert.deepEqual(sent.categories,['research','pdf']);
+    assert.ok(result.results.some(item=>item.url.includes('news.example')));
+  }finally{globalThis.fetch=savedFetch;globalThis.localStorage=savedLocal;globalThis.sessionStorage=savedSession;}
 });

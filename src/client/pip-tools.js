@@ -55,7 +55,7 @@ const TOOLS = [
   tool("coros", "propose_coros", "Prepare a COROS workout change for the user to review and apply with a tap: createScheduledWorkout (new workout on a date), scheduleWorkout (a library workout on a date), createSingleWorkout (new library workout), updateScheduledWorkout or updateWorkoutDetails. arguments must follow coros_format for that tool exactly. Never applies anything. COROS cannot remove a workout through Pocket, so check the date and sections.", { tool: { type: "string", enum: COROS_WRITES }, arguments: { type: "object", description: "Exactly the arguments coros_format describes for this tool." }, summary: { type: "string", minLength: 1, maxLength: 300, description: "One line for the review: what changes and why." } }, ["tool", "arguments", "summary"])
 ];
 const WEB = [
-  { name: "search_web", description: "Search current web information. Optionally limit to five domains and a time range. Cite the urls you use.", input_schema: { type: "object", properties: { query: { type: "string", minLength: 1, description: "What to search for.", maxLength: 300 }, limit: integer("Maximum results.", 1, 5, 5), domains: { type: "array", maxItems: 5, items: { type: "string", maxLength: 253 } }, time_range: { type: "string", enum: ["any", "day", "week", "month", "year"], default: "any" } }, required: ["query"], additionalProperties: false } },
+  { name: "search_web", description: "Search current web information. Optionally limit to five domains, a time range, and the source or category: news for current events, research or pdf for papers and documents, github for code. Cite the urls you use.", input_schema: { type: "object", properties: { query: { type: "string", minLength: 1, description: "What to search for.", maxLength: 300 }, limit: integer("Maximum results.", 1, 5, 5), domains: { type: "array", maxItems: 5, items: { type: "string", maxLength: 253 } }, time_range: { type: "string", enum: ["any", "day", "week", "month", "year"], default: "any" }, sources: { type: "array", maxItems: 3, items: { type: "string", enum: ["web", "news", "images"] } }, categories: { type: "array", maxItems: 3, items: { type: "string", enum: ["research", "pdf", "github"] } } }, required: ["query"], additionalProperties: false } },
   { name: "read_web_page", description: "Read a public page in 200–6000 character pages. Use next_offset to continue. Optional query finds relevant passages at or after offset; pages are cached for this reply.", input_schema: { type: "object", properties: { url: { type: "string", description: "The page's public https URL.", maxLength: 2048 }, ...paging, query: search.query }, required: ["url"], additionalProperties: false } },
 ];
 const pocketCategories = ["notes", "tasks", "thoughts", "calendar"];
@@ -100,11 +100,13 @@ async function web(value, name, args, signal, context) {
   if (name === "search_web") {
     const query = typeof args.query === "string" ? args.query.trim() : "", limit = args.limit ?? 5;
     const domains = args.domains || [], time = { day: "qdr:d", week: "qdr:w", month: "qdr:m", year: "qdr:y" }[args.time_range];
-    if (!query || domains.some(domain => !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(domain) || !publicUrl("https://" + domain))) return failure("invalid_arguments", "Use a short query and public domain names without a protocol or path.");
-    // Firecrawl's documented domain and recency filters: docs.firecrawl.dev/features/search.
-    const response = await post("/search", { query, limit, timeout: 20000, ...(domains.length ? { includeDomains: domains.map(domain => domain.toLowerCase()) } : {}), ...(time ? { tbs: time } : {}) });
+    const sources = args.sources || [], categories = args.categories || [];
+    if (!query || domains.some(domain => !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(domain) || !publicUrl("https://" + domain))
+      || sources.some(source => !["web", "news", "images"].includes(source)) || categories.some(category => !["research", "pdf", "github"].includes(category))) return failure("invalid_arguments", "Use a short query, public domains without a protocol or path, and known sources or categories.");
+    // Firecrawl's documented filters: docs.firecrawl.dev/features/search.
+    const response = await post("/search", { query, limit, timeout: 20000, ...(domains.length ? { includeDomains: domains.map(domain => domain.toLowerCase()) } : {}), ...(time ? { tbs: time } : {}), ...(sources.length ? { sources } : {}), ...(categories.length ? { categories } : {}) });
     if (!response.ok) return refused(response.status);
-    const found = await response.json(), list = Array.isArray(found.data) ? found.data : found.data?.web || [];
+    const found = await response.json(), groups = Array.isArray(found.data) ? [found.data] : Object.values(found.data || {}).filter(Array.isArray), list = groups.flat();
     return { source: "web:firecrawl", query, results: list.slice(0, limit).filter(item => publicUrl(String(item.url || ""))).map(item => ({ title: String(item.title || item.url).slice(0, 160), url: String(item.url).slice(0, 2048), description: String(item.description || "").slice(0, 400) })) };
   }
   const url = publicUrl(args.url); if (!url) return failure("invalid_arguments", "Use a public https URL.");

@@ -3,7 +3,7 @@ import { execute, access, accessFingerprint, checkpointIdentity, cacheKey, defin
 
 export const RESEARCH_LIMITS = Object.freeze({ continuations: 8, calls: 20, webCalls: 8, toolData: 48000, result: 8000, parallel: 3, deadlineMs: 300000 });
 /** A tool round must be able to finish a tool call: never divide a round below this. */
-const TOOL_ROUND_TOKENS = 1024;
+const TOOL_ROUND_TOKENS = 2048;
 
 const httpError = code => code === 401 || code === 403 ? "The provider rejected your key or access. Check API settings."
   : code === 429 ? "The provider is busy or your quota is exhausted. Retry when you’re ready."
