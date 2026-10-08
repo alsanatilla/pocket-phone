@@ -155,6 +155,47 @@ public class PipActionsTest {
         assertEquals(60, onlyAppointment().minutes);
     }
 
+    @Test public void reviewedChangesApplyOnceAndRemindersMoveWithTheirAppointment() throws Exception {
+        context.getSharedPreferences("pocket_planner", 0).edit().putString("entries", new JSONArray()
+                .put(new JSONObject().put("id", 1).put("kind", "note").put("text", "# Lisbon\n\nFerry before Friday.").put("created", 1))
+                .put(new JSONObject().put("id", 2).put("kind", "task").put("text", "Book ferry tickets").put("created", 2)
+                        .put("steps", new JSONArray().put(new JSONObject().put("text", "compare times").put("done", true)))).toString())
+                .putString("task_uid_2", "task-portable-id").commit();
+        JSONObject complete = new JSONObject().put("change", "complete_task").put("id", "task-portable-id");
+        assertEquals("/tasks/task-portable-id", PipActions.applyChange(context, complete));
+        assertTrue(planner.find(2).done);
+        PipActions.applyChange(context, complete); assertTrue("Applying again must not reopen the task", planner.find(2).done);
+
+        JSONObject update = new JSONObject().put("change", "update_task").put("id", "2").put("title", "Book the ferry").put("due", "2026-10-11")
+                .put("add_steps", new JSONArray().put("compare times").put("pay online"));
+        PipActions.applyChange(context, update); PipActions.applyChange(context, update);
+        PlannerStore.Entry task = planner.find(2);
+        assertEquals("Book the ferry", task.text); assertEquals("2026-10-11", task.due);
+        assertEquals(2, task.steps.size()); assertEquals("pay online", task.steps.get(1).text);
+
+        JSONObject append = new JSONObject().put("change", "append_note").put("id", "1").put("text", "Bring the camera.");
+        assertEquals("/notes/1", PipActions.applyChange(context, append)); PipActions.applyChange(context, append);
+        assertEquals("# Lisbon\n\nFerry before Friday.\n\nBring the camera.", planner.find(1).text);
+
+        org.robolectric.shadows.ShadowAlarmManager.setCanScheduleExactAlarms(true);
+        long when = System.currentTimeMillis() + 86400000L, later = when + 86400000L;
+        ClockStore.Entry alarm = new ClockStore.Entry(); alarm.kind = "reminder"; alarm.title = "Dentist"; alarm.enabled = true; alarm.due = when - 900000L;
+        AlarmScheduler.saveAndArm(context, alarm);
+        AgendaStore.Event dentist = new AgendaStore.Event(); dentist.title = "Dentist"; dentist.when = when; dentist.minutes = 45; dentist.alarm = alarm.id;
+        AgendaStore.save(context, dentist);
+        JSONObject move = new JSONObject().put("change", "move_appointment").put("id", onlyAppointment().uid).put("when", java.time.Instant.ofEpochMilli(later).toString());
+        assertEquals("/calendar/" + onlyAppointment().uid, PipActions.applyChange(context, move)); PipActions.applyChange(context, move);
+        AgendaStore.Event moved = onlyAppointment();
+        assertEquals(later, moved.when); assertEquals(45, moved.minutes);
+        assertEquals("The reminder keeps its 15 minutes", later - 900000L, ClockStore.find(context, alarm.id).due); assertEquals(later - 900000L, moved.remindAt);
+
+        for (JSONObject bad : new JSONObject[]{new JSONObject().put("change", "update_task").put("id", "2").put("add_steps", new JSONArray().put("a\nb")),
+                new JSONObject().put("change", "delete_task").put("id", "2"), new JSONObject().put("change", "append_note").put("id", "99").put("text", "x"),
+                new JSONObject().put("change", "move_appointment").put("id", moved.uid).put("when", "tomorrow")})
+            try { PipActions.applyChange(context, bad); fail("Applied " + bad); } catch (IllegalArgumentException expected) { }
+        assertEquals(later, onlyAppointment().when);
+    }
+
     private String apply(String event, JSONObject value) throws Exception { return PipActions.apply(context, CHAT, TURN, event, value); }
     private void rejected(String event, JSONObject value) throws Exception {
         try { apply(event, value); fail("Malformed or deleted proposal was saved: " + event); }

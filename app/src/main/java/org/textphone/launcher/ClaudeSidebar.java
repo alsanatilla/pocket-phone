@@ -1155,6 +1155,17 @@ final class ClaudeSidebar extends FrameLayout {
                 try {
                     org.json.JSONObject result = new org.json.JSONObject(event.optString("result", "{}"));
                     if (result.optJSONArray("plan") != null) plan = result.getJSONArray("plan");
+                    org.json.JSONObject change = "change".equals(result.optString("kind")) ? result.optJSONObject("change") : null, before = result.optJSONObject("before");
+                    if (change != null && before != null && change.opt("change") instanceof String && before.opt("title") instanceof String) {
+                        proposalRows.addView(label(changeName(change.optString("change")), PocketDesign.META, PocketDesign.MUTED));
+                        proposalRows.addView(label(before.optString("title"), PocketDesign.BODY, PocketDesign.CREAM));
+                        String applied = event.optString("applied_href");
+                        Button review = control(applied.isEmpty() ? "review change" : "open " + changeTarget(change.optString("change")),
+                                () -> { if (applied.isEmpty()) showChange(turn.id, event, change, before); else openToolSource(applied); });
+                        review.setEnabled(!"pending".equals(turn.state)); review.setTag("pip_change_" + event.optString("id"));
+                        PocketDesign.command(review, true); proposalRows.addView(review);
+                        continue;
+                    }
                     org.json.JSONObject proposal = result.optJSONObject("proposal"); if (proposal == null || !java.util.Arrays.asList("note", "task", "appointment").contains(proposal.optString("kind")) || !(proposal.opt("title") instanceof String)) continue;
                     TextView kind = label(proposal.optString("kind"), PocketDesign.META, PocketDesign.MUTED);
                     TextView title = label(proposal.optString("title"), PocketDesign.BODY, PocketDesign.CREAM);
@@ -1285,7 +1296,7 @@ final class ClaudeSidebar extends FrameLayout {
             if ("web_search".equals(name) || "search_web".equals(name)) searches++;
             else if ("read_web_page".equals(name)) pages++;
             else if ("update_plan".equals(name)) plans++;
-            else if ("propose_action".equals(name)) proposals++;
+            else if ("propose_action".equals(name) || "propose_change".equals(name)) proposals++;
             else reads++;
             failed |= "failed".equals(state); stopped |= "stopped".equals(state);
         }
@@ -1403,6 +1414,69 @@ final class ClaudeSidebar extends FrameLayout {
                 if (stepsField != null) { org.json.JSONArray selected = new org.json.JSONArray(); for (String line : stepsField.getText().toString().split("\n")) if (!line.trim().isEmpty()) selected.put(line.trim()); chosen.put("steps", selected); }
                 if (whenField != null) { java.text.SimpleDateFormat format = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.ROOT); format.setLenient(false); java.text.ParsePosition position = new java.text.ParsePosition(0); java.util.Date date = format.parse(whenField.getText().toString(), position); if (date == null || position.getIndex() != whenField.length()) throw new IllegalArgumentException("Choose a date and time."); chosen.put("when", date.toInstant().toString()).put("minutes", Integer.parseInt(minutesField.getText().toString())); }
                 String href = PipActions.apply(activity, chatId, repository.proposalUserId(replyId), event.optString("id"), chosen);
+                repository.applied(replyId, event.optString("id"), href); review.dismiss(); render();
+            } catch (org.json.JSONException | RuntimeException invalid) { failure.setText(invalid.getMessage()); }
+        }));
+        showDialog(review);
+    }
+
+    private static String changeName(String change) {
+        return "complete_task".equals(change) ? "complete task" : "update_task".equals(change) ? "update task"
+                : "append_note".equals(change) ? "add to note" : "move_appointment".equals(change) ? "move appointment" : "change";
+    }
+    private static String changeTarget(String change) {
+        return change.endsWith("_task") ? "task" : "append_note".equals(change) ? "note" : "move_appointment".equals(change) ? "appointment" : "record";
+    }
+
+    /** A change to an existing record: what it is now, what it becomes, and nothing applied until the button. */
+    private void showChange(String replyId, org.json.JSONObject event, org.json.JSONObject change, org.json.JSONObject before) {
+        String chatId = repository.snapshot().chatId, kind = change.optString("change");
+        java.text.SimpleDateFormat minute = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.ROOT);
+        LinearLayout fields = new LinearLayout(activity); fields.setOrientation(LinearLayout.VERTICAL); fields.setPadding(dp(20), dp(8), dp(20), dp(8));
+        if (!change.optString("reason").isEmpty()) fields.addView(label(change.optString("reason"), PocketDesign.META, PocketDesign.MUTED));
+        EditText title = null, due = null, steps = null, text = null, when = null, minutes = null;
+        if ("complete_task".equals(kind)) fields.addView(label("Mark “" + before.optString("title") + "” as done.", PocketDesign.BODY, PocketDesign.CREAM));
+        else if ("update_task".equals(kind)) {
+            int count = before.optInt("steps");
+            fields.addView(label("now: " + (before.optString("due").isEmpty() ? "no date" : "due " + before.optString("due")) + " · " + count + (count == 1 ? " step" : " steps"), PocketDesign.META, PocketDesign.MUTED));
+            title = settingsField(fields, "title", change.has("title") ? change.optString("title") : before.optString("title"), "", false); title.setTag("pip_change_title");
+            title.setFilters(new InputFilter[]{new InputFilter.LengthFilter(500)});
+            due = settingsField(fields, "due", change.has("due") ? change.optString("due") : before.optString("due"), "YYYY-MM-DD", false); due.setTag("pip_change_due");
+            org.json.JSONArray added = change.optJSONArray("add_steps"); StringBuilder lines = new StringBuilder();
+            if (added != null) for (int i = 0; i < added.length(); i++) { if (i > 0) lines.append('\n'); lines.append(added.optString(i)); }
+            steps = settingsField(fields, "add steps", lines.toString(), "", false); steps.setTag("pip_change_steps");
+            steps.setSingleLine(false); steps.setMinLines(2); steps.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        } else if ("append_note".equals(kind)) {
+            if (!before.optString("ending").isEmpty()) fields.addView(label("…" + before.optString("ending"), PocketDesign.META, PocketDesign.MUTED));
+            text = settingsField(fields, "add", change.optString("text"), "", false); text.setTag("pip_change_text");
+            text.setSingleLine(false); text.setMinLines(3); text.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE); text.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4000)});
+        } else {
+            long then = 0, next = System.currentTimeMillis() + 3600000;
+            try { then = java.time.Instant.parse(before.optString("when")).toEpochMilli(); } catch (RuntimeException invalid) { }
+            try { next = java.time.OffsetDateTime.parse(change.optString("when")).toInstant().toEpochMilli(); } catch (RuntimeException invalid) { }
+            if (then > 0) fields.addView(label("now: " + minute.format(new java.util.Date(then)) + " · " + before.optInt("minutes") + " min", PocketDesign.META, PocketDesign.MUTED));
+            when = settingsField(fields, "when", minute.format(new java.util.Date(next)), "YYYY-MM-DD HH:mm", false); when.setTag("pip_change_when");
+            minutes = settingsField(fields, "minutes", String.valueOf(change.optInt("minutes", before.optInt("minutes", 60))), "", false); minutes.setInputType(InputType.TYPE_CLASS_NUMBER); minutes.setTag("pip_change_minutes");
+        }
+        TextView failure = label("", PocketDesign.META, PocketDesign.WARNING); fields.addView(failure);
+        ScrollView scroll = new ScrollView(activity); scroll.addView(fields);
+        AlertDialog review = new AlertDialog.Builder(activity).setTitle(before.optString("title")).setView(scroll).setNegativeButton("cancel", null).setPositiveButton(changeName(kind), null).create();
+        final EditText titleField = title, dueField = due, stepsField = steps, textField = text, whenField = when, minutesField = minutes;
+        review.setOnShowListener(ignored -> review.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            try {
+                if (!chatId.equals(repository.snapshot().chatId) || repository.snapshot().running) throw new IllegalStateException("Open the change again after Pip finishes.");
+                org.json.JSONObject chosen = new org.json.JSONObject(change.toString());
+                if (titleField != null) chosen.put("title", titleField.getText().toString());
+                if (dueField != null) chosen.put("due", dueField.getText().toString().trim());
+                if (stepsField != null) { org.json.JSONArray selected = new org.json.JSONArray(); for (String line : stepsField.getText().toString().split("\n")) if (!line.trim().isEmpty()) selected.put(line.trim()); chosen.put("add_steps", selected); }
+                if (textField != null) chosen.put("text", textField.getText().toString());
+                if (whenField != null) {
+                    minute.setLenient(false); java.text.ParsePosition position = new java.text.ParsePosition(0);
+                    java.util.Date date = minute.parse(whenField.getText().toString(), position);
+                    if (date == null || position.getIndex() != whenField.length()) throw new IllegalArgumentException("Choose a date and time.");
+                    chosen.put("when", date.toInstant().toString()).put("minutes", Integer.parseInt(minutesField.getText().toString()));
+                }
+                String href = PipActions.applyChange(activity, chosen);
                 repository.applied(replyId, event.optString("id"), href); review.dismiss(); render();
             } catch (org.json.JSONException | RuntimeException invalid) { failure.setText(invalid.getMessage()); }
         }));

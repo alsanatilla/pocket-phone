@@ -1,4 +1,4 @@
-import { load, importDocument, NOTE_LIMIT } from './store.js';
+import { load, importDocument, NOTE_LIMIT, tasks, notes, receipt, KIND } from './store.js';
 import { agenda } from './planner.js';
 import { validDocument } from '../shared/workspace.js';
 import { activeAccount } from './workspace-storage.js';
@@ -45,4 +45,53 @@ export async function applyProposal(chatId, turnId, eventId, proposal) {
   if (!validDocument(name, doc)) throw new Error('Check the proposal details.');
   importDocument(name, doc);
   return '/' + key + '/' + uid;
+}
+
+const validDay = raw => /^\d{4}-\d{2}-\d{2}$/.test(raw) && Number.isFinite(Date.parse(raw + 'T12:00:00Z')) && new Date(raw + 'T12:00:00Z').toISOString().slice(0, 10) === raw;
+const validInstant = raw => typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(raw) && Number.isFinite(Date.parse(raw)) && validDay(raw.slice(0, 10));
+/**
+ * Applies a reviewed change to an existing record. Each change is idempotent, so applying it again on this or
+ * another device leaves the same result: a task stays done, steps are added once, text is appended once.
+ */
+export function applyChange(change) {
+  if (!change || typeof change.change !== 'string' || typeof change.id !== 'string') throw new Error('This change is incomplete.');
+  const owner = activeAccount();
+  if (change.change === 'complete_task' || change.change === 'update_task') {
+    const task = tasks.get(change.id); if (!task) throw new Error('That task is no longer available.');
+    if (change.change === 'complete_task') { if (!task.done) { tasks.edit(task.uid, t => { t.done = true; }); receipt.log(KIND.DONE, task.text); } return '/tasks/' + task.uid; }
+    const title = change.title === undefined ? undefined : String(change.title).trim(), due = change.due === undefined ? undefined : String(change.due);
+    const add = (Array.isArray(change.add_steps) ? change.add_steps : []).map(step => String(step).trim());
+    if (title !== undefined && (!title || title.length > 500) || due && !validDay(due) || add.some(step => !step || step.length > 160 || /[\r\n]/.test(step))) throw new Error('Check the title, due date and steps.');
+    if (owner !== activeAccount()) throw new Error('The account changed. Open the change again.');
+    tasks.edit(task.uid, t => {
+      if (title !== undefined) t.text = title;
+      if (due !== undefined) t.due = due;
+      t.steps ||= [];
+      for (const step of add) if (!t.steps.some(old => old.text === step)) t.steps.push({ text: step, done: false });
+      if (t.steps.length > 12) throw new Error('A task keeps at most 12 steps.');
+    });
+    return '/tasks/' + task.uid;
+  }
+  if (change.change === 'append_note') {
+    const note = notes.get(change.id), text = String(change.text || '').trim();
+    if (!note) throw new Error('That saved note is no longer available.');
+    if (!text) throw new Error('Write the text to add.');
+    const current = note.text.trimEnd();
+    if (!current.endsWith(text)) {
+      if (current.length + text.length + 2 > NOTE_LIMIT) throw new Error('The note would exceed its length limit.');
+      notes.update(note.uid, current + '\n\n' + text);
+    }
+    return '/notes/' + note.uid;
+  }
+  if (change.change === 'move_appointment') {
+    const item = agenda.get(change.id), minutes = change.minutes ?? item?.minutes;
+    if (!item) throw new Error('That appointment is no longer available.');
+    if (!validInstant(change.when)) throw new Error('Choose a date and time.');
+    if (!Number.isInteger(minutes) || minutes < 15 || minutes > 480) throw new Error('Use 15 to 480 minutes.');
+    const when = Date.parse(change.when);
+    // A reminder keeps its distance from the appointment.
+    agenda.save({ ...item, when: change.when, minutes, remindAt: item.remindAt ? item.remindAt + (when - item.when) : 0 });
+    return '/calendar/' + item.uid;
+  }
+  throw new Error('Choose a supported change.');
 }

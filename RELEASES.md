@@ -2,6 +2,13 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.19.0 — Pip changes what you already have
+
+- Pip can now prepare changes to existing records, not only new ones: complete a task, update a task's title, due date or steps, add text to the end of a note, or move an appointment. Each change appears as a card under the reply. **review change** shows the record as it is now, Pip's reason and the editable change. Nothing changes until you tap apply.
+- Changes are checked against the live record when Pip prepares them. Missing records, tasks already done, full notes and invalid dates come back to Pip as errors, and steps the task already has are dropped. Each change needs its own access: Tasks, Notes or Calendar.
+- Applying is idempotent on phone and web. A completed task stays completed and is logged once. Steps and note text are added once. A moved appointment's reminder keeps its distance. Applied cards open the changed record and sync through the Pocket account like saved proposals. Change proposals are never cached or replayed on Continue.
+- Android and Astro builds passed. Five browser change checks and the 25 existing agent checks pass, and the review flow was exercised in Edge against the dev server. New native tests cover tool gating and validation, idempotent apply with reminder shift, and the review dialog. The full Android unit suite ran 558 cases; its six failing cases already failed on 0.16.0. Model traffic was simulated; no handset was attached. The APK is unsigned for the signing agent.
+
 ## 0.18.1 — Finish research when a round fills up
 
 - When an intermediate model round reaches its output cap, Pip uses the reserved final-answer tokens instead of ending the run early. Phone and browser discard unfinished tool requests and preserve completed observations for synthesis.

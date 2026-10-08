@@ -108,6 +108,19 @@ final class PocketChatTools {
                             "steps", json("type", "array", "maxItems", 12, "items", json("type", "string", "minLength", 1, "maxLength", 160, "pattern", "^[^\\r\\n]+$")),
                             "when", json("type", "string", "maxLength", 80, "description", "An ISO 8601 timestamp with UTC or an offset."),
                             "minutes", integerProperty("Appointment duration in minutes.", 15, 480, 60)), new JSONArray().put("kind").put("title").put("text"))));
+            if (enabled(context, TASKS) || enabled(context, NOTES) || enabled(context, CALENDAR))
+                result.add(new Definition("propose_change", "Prepare a change to an existing record for the user to review and apply with a tap: "
+                        + "complete_task, update_task (title, due YYYY-MM-DD or empty to clear, add_steps), append_note (text) or move_appointment (when, minutes). "
+                        + "Use ids from Pocket searches or reads. Never applies the change.",
+                        schema(json("change", json("type", "string", "enum", new JSONArray().put("complete_task").put("update_task").put("append_note").put("move_appointment")),
+                                "id", idProperty(), "title", json("type", "string", "minLength", 1, "maxLength", 200),
+                                "due", json("type", "string", "maxLength", 10),
+                                "add_steps", json("type", "array", "maxItems", 6, "items", json("type", "string", "minLength", 1, "maxLength", 160, "pattern", "^[^\\r\\n]+$")),
+                                "text", json("type", "string", "minLength", 1, "maxLength", 4000),
+                                "when", json("type", "string", "maxLength", 40, "description", "An ISO 8601 timestamp with UTC or an offset."),
+                                "minutes", integerProperty("Appointment duration in minutes.", 15, 480, 60),
+                                "reason", json("type", "string", "maxLength", 300, "description", "One short line on why, shown in the review.")),
+                                new JSONArray().put("change").put("id"))));
         } catch (JSONException impossible) { throw new IllegalStateException("Chat tools could not be described."); }
         return Collections.unmodifiableList(result);
     }
@@ -144,6 +157,7 @@ final class PocketChatTools {
         if ("update_plan".equals(name) || "propose_action".equals(name)) return true;
         if ("search_web".equals(name) || "read_web_page".equals(name)) return webTools(config) && webTools(ChatProvider.get(context));
         if ("search_pocket".equals(name)) return workspaceAccess(context);
+        if ("propose_change".equals(name)) return enabled(context, TASKS) || enabled(context, NOTES) || enabled(context, CALENDAR);
         String category = toolCategory(name);
         return category != null && enabled(context, category);
     }
@@ -165,7 +179,7 @@ final class PocketChatTools {
         if ("search_web".equals(name) || "read_web_page".equals(name)) return web(context, name, args, run);
         boolean universal = "update_plan".equals(name) || "propose_action".equals(name);
         String category = toolCategory(name);
-        if (!universal && category == null && !"search_pocket".equals(name)) return error("unknown_tool", "This tool is not available.");
+        if (!universal && category == null && !"search_pocket".equals(name) && !"propose_change".equals(name)) return error("unknown_tool", "This tool is not available.");
         if (!universal && !permitted(context, ChatProvider.get(context), name, args))
             return error("access_disabled", "Access to this category is disabled in Chat settings.");
         String access = accessFingerprint(context);
@@ -196,6 +210,7 @@ final class PocketChatTools {
                     keys(args, "query", "days", "limit"); result = searchPocket(context, query(args), integer(args, "days", 7, 1, 30), integer(args, "limit", 10, 1, 10)); break;
                 case "update_plan": result = plan(args); break;
                 case "propose_action": result = proposal(args); break;
+                case "propose_change": result = change(context, args); break;
                 case "gym_summary":
                     keys(args, "days");
                     result = gym(context, integer(args, "days", 7, 1, 30));
@@ -422,6 +437,70 @@ final class PocketChatTools {
             steps.put(json("text", text.trim(), "status", status));
         }
         return json("kind", "plan", "plan", steps);
+    }
+
+    /** Validates a change against the record as it is now and keeps a short "before" for the review. Nothing is written here. */
+    private static JSONObject change(Context context, JSONObject args) throws JSONException {
+        keys(args, "change", "id", "title", "due", "add_steps", "text", "when", "minutes", "reason");
+        String change = requiredText(args, "change", 40, false), reason = optionalText(args, "reason", 300).trim();
+        String category = "complete_task".equals(change) || "update_task".equals(change) ? TASKS : "append_note".equals(change) ? NOTES : "move_appointment".equals(change) ? CALENDAR : null;
+        if (category == null) throw new IllegalArgumentException("change must be complete_task, update_task, append_note or move_appointment.");
+        if (!enabled(context, category)) return json("error", "access_disabled", "message", "Turn on " + category + " access before proposing this change.");
+        JSONObject proposed = json("change", change);
+        if (!reason.isEmpty()) proposed.put("reason", reason);
+        if (TASKS.equals(category)) {
+            PlannerStore.Entry task = savedEntry(context, args, "task");
+            if (task == null) return json("error", "task_not_found", "message", "That task is no longer available.");
+            JSONObject before = json("title", title(task.text), "due", task.due, "done", task.done, "steps", task.steps.size());
+            proposed.put("id", entryId(context, task));
+            if ("complete_task".equals(change)) {
+                if (task.done) return json("error", "already_done", "message", "That task is already complete.");
+                return json("kind", "change", "change", proposed, "before", before, "requires_confirmation", true);
+            }
+            JSONArray add = new JSONArray();
+            if (args.has("add_steps")) {
+                Object raw = args.opt("add_steps");
+                if (!(raw instanceof JSONArray) || ((JSONArray) raw).length() > 6) throw new IllegalArgumentException("add_steps must be an array of at most 6 strings.");
+                for (int i = 0; i < ((JSONArray) raw).length(); i++) {
+                    Object value = ((JSONArray) raw).opt(i);
+                    if (!(value instanceof String) || ((String) value).trim().isEmpty() || ((String) value).length() > 160 || ((String) value).contains("\n") || ((String) value).contains("\r"))
+                        throw new IllegalArgumentException("Each step must be one nonempty line of up to 160 characters.");
+                    String step = ((String) value).trim(); boolean known = false;
+                    for (PlannerStore.Step old : task.steps) if (old.text.equals(step)) known = true;
+                    if (!known) add.put(step);
+                }
+            }
+            if (task.steps.size() + add.length() > 12) return json("error", "too_many_steps", "message", "A task keeps at most 12 steps.");
+            if (args.has("title")) proposed.put("title", requiredText(args, "title", 200, false).trim());
+            if (args.has("due")) {
+                String due = optionalText(args, "due", 10);
+                if (!due.isEmpty()) {
+                    if (!due.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}")) throw new IllegalArgumentException("due must be YYYY-MM-DD or empty.");
+                    try { LocalDate.parse(due); } catch (DateTimeParseException invalid) { throw new IllegalArgumentException("due must be YYYY-MM-DD or empty."); }
+                }
+                proposed.put("due", due);
+            }
+            if (!args.has("title") && !args.has("due") && add.length() == 0) throw new IllegalArgumentException("Change the title, due date or steps.");
+            return json("kind", "change", "change", proposed.put("add_steps", add), "before", before, "requires_confirmation", true);
+        }
+        if (NOTES.equals(category)) {
+            PlannerStore.Entry note = savedEntry(context, args, "note");
+            if (note == null) return json("error", "note_not_found", "message", "That saved note is no longer available.");
+            String text = requiredText(args, "text", 4000, false).trim(), current = note.text.replaceAll("\\s+$", "");
+            if (current.length() + text.length() + 2 > 8000) return json("error", "note_full", "message", "The note would exceed its length limit.");
+            return json("kind", "change", "change", proposed.put("id", entryId(context, note)).put("text", text),
+                    "before", json("title", title(note.text).replaceFirst("^#+\\s*", ""), "ending", current.substring(Math.max(0, current.length() - 240))), "requires_confirmation", true);
+        }
+        String id = savedId(args); AgendaStore.Event event = null;
+        for (AgendaStore.Event candidate : AgendaStore.list(context)) if (id.equals(candidate.uid) || id.equals(Long.toString(candidate.id))) event = candidate;
+        if (event == null) return json("error", "appointment_not_found", "message", "That appointment is no longer available.");
+        String when = optionalText(args, "when", 40);
+        if (!when.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2}(\\.[0-9]{1,3})?)?(Z|[+-][0-9]{2}:[0-9]{2})"))
+            throw new IllegalArgumentException("Use an ISO date and time with timezone.");
+        try { OffsetDateTime.parse(when); } catch (DateTimeParseException invalid) { throw new IllegalArgumentException("Use an ISO date and time with timezone."); }
+        int minutes = integer(args, "minutes", event.minutes, 15, 480);
+        return json("kind", "change", "change", proposed.put("id", event.uid.isEmpty() ? Long.toString(event.id) : event.uid).put("when", when).put("minutes", minutes),
+                "before", json("title", clip(event.title, 200), "when", timestamp(event.when), "minutes", event.minutes), "requires_confirmation", true);
     }
 
     private static JSONObject proposal(JSONObject args) throws JSONException {

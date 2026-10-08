@@ -1,5 +1,5 @@
 import { activity, source, settle } from "./pip-activity.js";
-import { execute, access, accessFingerprint, checkpointIdentity, cacheKey, definitions, label, summary, sources } from "./pip-tools.js";
+import { execute, access, accessFingerprint, checkpointIdentity, cacheKey, definitions, label, summary, sources, STATE_TOOLS } from "./pip-tools.js";
 
 export const RESEARCH_LIMITS = Object.freeze({ continuations: 8, calls: 20, webCalls: 8, toolData: 48000, result: 8000, parallel: 3, deadlineMs: 300000 });
 
@@ -28,7 +28,7 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
   const offered = new Set((body.tools || []).map(t => t.name || t.function?.name));
   const cache = new Map(), inFlight = new Map(), context = { cache }, completed = [];
   for (const row of resume?.observations || []) {
-    if (!offered.has(row.name) || ["update_plan", "propose_action", "web_search"].includes(row.name)) continue;
+    if (!offered.has(row.name) || [...STATE_TOOLS, "web_search"].includes(row.name)) continue;
     try { const answer = JSON.parse(row.result), input = JSON.parse(row.input || "{}"); cache.set(cacheKey(row.name, input), { permissions: row.name === "search_pocket" ? resume.permissions : row.name === "read_task" && access(value).includes("notes") ? "notes" : "", result: answer }); } catch { /* unusable checkpoint */ }
   }
   const check = () => { if (controller.signal.aborted) throw new DOMException("Stopped", "AbortError"); };
@@ -212,7 +212,7 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
             calls++; if (web) searches++; result.phase = label(read.name, read.input);
             record(read.id, { state: "running", title: label(read.name, read.input), input: JSON.stringify(read.input) });
             try {
-              const reuse = !["update_plan", "propose_action"].includes(read.name), signature = read.name === "search_pocket" ? access(value).filter(category => ["notes", "tasks", "thoughts", "calendar"].includes(category)).sort().join("|") : read.name === "read_task" && access(value).includes("notes") ? "notes" : "", lookup = cacheKey(read.name, read.input), saved = reuse && cache.get(lookup);
+              const reuse = !STATE_TOOLS.includes(read.name), signature = read.name === "search_pocket" ? access(value).filter(category => ["notes", "tasks", "thoughts", "calendar"].includes(category)).sort().join("|") : read.name === "read_task" && access(value).includes("notes") ? "notes" : "", lookup = cacheKey(read.name, read.input), saved = reuse && cache.get(lookup);
               if (saved?.permissions === signature && saved.result) answer = { ...structuredClone(saved.result), cached: true };
               else {
                 let pending = reuse && inFlight.get(lookup), duplicate = Boolean(pending);
@@ -228,7 +228,7 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
             catch (error) { check(); answer = { error: "data_unavailable", message: web ? "The web source could not be read." : "The saved data could not be read." }; }
           }
           check();
-          if (answer && !answer.error && !["update_plan", "propose_action"].includes(read.name)) answer = { access_fingerprint: accessFingerprint(value), request_identity: checkpointIdentity(value), ...answer };
+          if (answer && !answer.error && !STATE_TOOLS.includes(read.name)) answer = { access_fingerprint: accessFingerprint(value), request_identity: checkpointIdentity(value), ...answer };
           let content = JSON.stringify(answer);
           if (!content || content.length > RESEARCH_LIMITS.result) { answer = { error: "result_too_large", message: "Use a narrower request." }; content = JSON.stringify(answer); }
           const unfinished = outputs.filter(Boolean).length;
@@ -240,7 +240,7 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
         };
         // Read batches can finish in any order; continuations retain the provider's original order and IDs.
         for (let index = 0; index < ordered.length;) {
-          const stateTool = read => ["update_plan", "propose_action"].includes(read.name);
+          const stateTool = read => STATE_TOOLS.includes(read.name);
           let end = index + 1;
           if (!stateTool(ordered[index])) while (end < ordered.length && end - index < RESEARCH_LIMITS.parallel && !stateTool(ordered[end])) end++;
           await Promise.all(ordered.slice(index, end).map((read, offset) => run(read, index + offset)));

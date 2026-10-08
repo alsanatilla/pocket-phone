@@ -61,6 +61,48 @@ public class PocketChatToolsTest {
         assertFalse(execute("propose_action", new JSONObject(valid.toString()).put("kind", "appointment").put("when", "2026-10-08T12:00:00+02:00")).has("error"));
     }
 
+    @Test public void changeProposalsNeedTheirCategoryAndCheckLiveRecordsWithoutWriting() throws Exception {
+        saveEntries(new JSONObject().put("id", 1).put("kind", "note").put("text", "# Lisbon\n\nFerry before Friday.").put("created", 1),
+                new JSONObject().put("id", 2).put("kind", "task").put("text", "Book ferry tickets").put("created", 2).put("due", "2026-10-09")
+                        .put("steps", new JSONArray().put(new JSONObject().put("text", "compare times").put("done", true))),
+                new JSONObject().put("id", 3).put("kind", "task").put("text", "Already done").put("done", true).put("created", 3));
+        context.getSharedPreferences("pocket_planner", 0).edit().putString("task_uid_2", "task-portable-id").commit();
+        context.getSharedPreferences("pocket_agenda", 0).edit().putString("events", new JSONArray().put(new JSONObject().put("id", 7).put("when", 1791534600000L)
+                .put("title", "Dentist").put("minutes", 45).put("uid", "appt-portable-id")).toString()).commit();
+        for (PocketChatTools.Definition item : PocketChatTools.definitions(context)) assertNotEquals("propose_change", item.name);
+        PocketChatTools.enabled(context, PocketChatTools.TASKS, true);
+        boolean offered = false;
+        for (PocketChatTools.Definition item : PocketChatTools.definitions(context)) offered |= "propose_change".equals(item.name);
+        assertTrue(offered);
+        assertEquals("access_disabled", execute("propose_change", new JSONObject().put("change", "append_note").put("id", 1).put("text", "Bring the camera.")).getString("error"));
+        assertEquals("access_disabled", execute("propose_change", new JSONObject().put("change", "move_appointment").put("id", 7).put("when", "2026-10-10T10:30:00Z")).getString("error"));
+        PocketChatTools.enabled(context, PocketChatTools.NOTES, true); PocketChatTools.enabled(context, PocketChatTools.CALENDAR, true);
+        String before = stores();
+
+        JSONObject complete = execute("propose_change", new JSONObject().put("change", "complete_task").put("id", "task-portable-id").put("reason", "You booked it."));
+        assertEquals("change", complete.getString("kind")); assertTrue(complete.getBoolean("requires_confirmation"));
+        assertEquals("task-portable-id", complete.getJSONObject("change").getString("id")); assertEquals("You booked it.", complete.getJSONObject("change").getString("reason"));
+        assertEquals("Book ferry tickets", complete.getJSONObject("before").getString("title"));
+        assertEquals("already_done", execute("propose_change", new JSONObject().put("change", "complete_task").put("id", 3)).getString("error"));
+        assertEquals("task_not_found", execute("propose_change", new JSONObject().put("change", "complete_task").put("id", "missing")).getString("error"));
+        JSONObject update = execute("propose_change", new JSONObject().put("change", "update_task").put("id", 2).put("due", "2026-10-11")
+                .put("add_steps", new JSONArray().put("compare times").put("pay online")));
+        assertEquals("[\"pay online\"]", update.getJSONObject("change").getJSONArray("add_steps").toString());
+        assertEquals("2026-10-11", update.getJSONObject("change").getString("due")); assertEquals(1, update.getJSONObject("before").getInt("steps"));
+        invalid("propose_change", new JSONObject().put("change", "update_task").put("id", 2));
+        invalid("propose_change", new JSONObject().put("change", "update_task").put("id", 2).put("due", "2026-02-30"));
+        invalid("propose_change", new JSONObject().put("change", "update_task").put("id", 2).put("add_steps", new JSONArray().put("a\nb")));
+        invalid("propose_change", new JSONObject().put("change", "delete_task").put("id", 2));
+        JSONObject append = execute("propose_change", new JSONObject().put("change", "append_note").put("id", 1).put("text", "Bring the camera."));
+        assertEquals("Lisbon", append.getJSONObject("before").getString("title"));
+        assertTrue(append.getJSONObject("before").getString("ending").endsWith("Ferry before Friday."));
+        JSONObject move = execute("propose_change", new JSONObject().put("change", "move_appointment").put("id", "appt-portable-id").put("when", "2026-10-10T10:30:00+02:00"));
+        assertEquals(45, move.getJSONObject("change").getInt("minutes")); assertEquals("Dentist", move.getJSONObject("before").getString("title"));
+        invalid("propose_change", new JSONObject().put("change", "move_appointment").put("id", 7).put("when", "tomorrow"));
+        invalid("propose_change", new JSONObject().put("change", "move_appointment").put("id", 7).put("when", "2026-10-10T10:30:00Z").put("save", true));
+        assertEquals(before, stores());
+    }
+
     @Test public void notePagesContinueAtReturnedOffsetsAndStayBoundedAfterJsonEscaping() throws Exception {
         String text = "\"\\\n".repeat(2300);
         saveEntries(new JSONObject().put("id", 1).put("kind", "note").put("text", text).put("created", 1));
@@ -186,6 +228,7 @@ public class PocketChatToolsTest {
 
     private void saveEntries(JSONObject... entries) throws Exception { JSONArray array = new JSONArray(); for (JSONObject entry : entries) array.put(entry); context.getSharedPreferences("pocket_planner", 0).edit().putString("entries", array.toString()).commit(); }
     private void enableWeb() { context.getSharedPreferences("pocket_chat_provider", 0).edit().putBoolean("web_search", true).commit(); }
+    private String stores() { return new java.util.TreeMap<>(context.getSharedPreferences("pocket_planner", 0).getAll()) + "\n" + new java.util.TreeMap<>(context.getSharedPreferences("pocket_agenda", 0).getAll()); }
     private JSONObject execute(String name, JSONObject args) throws Exception { return new JSONObject(PocketChatTools.execute(context, name, args)); }
     private void invalid(String name, JSONObject args) throws Exception { assertEquals(name + " " + args, "invalid_arguments", execute(name, args).getString("error")); }
     private static JSONObject event(long id, long when, String title, String uid) throws Exception { return new JSONObject().put("id", id).put("when", when).put("title", title).put("uid", uid).put("minutes", 60); }

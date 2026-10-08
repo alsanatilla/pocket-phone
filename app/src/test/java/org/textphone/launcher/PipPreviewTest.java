@@ -169,6 +169,36 @@ public class PipPreviewTest {
         android.content.Intent opened = Shadows.shadowOf(controller.get()).getNextStartedActivity();
         assertNotNull(opened); assertEquals(saved.id, opened.getLongExtra("pocket_task", -1));
     }
+    @Test public void changeReviewAppliesOnlyOnTapAndThenOpensTheTask() throws Exception {
+        context.getSharedPreferences("pocket_planner", 0).edit().putString("entries", new org.json.JSONArray().put(new org.json.JSONObject().put("id", 4).put("kind", "task")
+                .put("text", "Book ferry tickets").put("created", 4).put("steps", new org.json.JSONArray())).toString()).commit();
+        repository.send("The ferry is booked."); assertTrue(started.get(0).await(5, TimeUnit.SECONDS));
+        ChatActivity trace = new ChatActivity(listeners.get(0)::activity);
+        trace.record("change", "propose_change", new org.json.JSONObject(), "done", "Book ferry tickets · ready to review", null);
+        trace.result("change", new org.json.JSONObject().put("kind", "change").put("change", new org.json.JSONObject().put("change", "update_task").put("id", "4")
+                .put("due", "2026-10-11").put("add_steps", new org.json.JSONArray().put("Print tickets")).put("reason", "Departure is on the 11th."))
+                .put("before", new org.json.JSONObject().put("title", "Book ferry tickets").put("due", "").put("done", false).put("steps", 0)).put("requires_confirmation", true).toString());
+        listeners.get(0).text("Ready for you to review."); listeners.get(0).done(ClaudeChatRepository.MODEL, ClaudeChatClient.Usage.EMPTY);
+        open(); View root = save(controller.get(), "pocket-agent-change.png");
+        assertTrue(containsText(root, "update task")); assertTrue(containsText(root, "Book ferry tickets"));
+        PlannerStore planner = new PlannerStore(context.getSharedPreferences("pocket_planner", 0));
+        root.findViewWithTag("pip_change_change").performClick();
+        AlertDialog dialog = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+        assertTrue(containsText(dialog.getWindow().getDecorView(), "Departure is on the 11th."));
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick(); assertEquals("", planner.find(4).due);
+        root.findViewWithTag("pip_change_change").performClick(); dialog = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+        ((android.widget.EditText) dialog.findViewById(android.R.id.content).findViewWithTag("pip_change_due")).setText("2026-10-12");
+        saveView(dialog.getWindow().getDecorView(), "pocket-agent-review-change.png");
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+        PlannerStore.Entry task = planner.find(4); assertEquals("2026-10-12", task.due); assertEquals(1, task.steps.size()); assertEquals("Print tickets", task.steps.get(0).text);
+        org.json.JSONObject event = ChatActivity.read(repository.snapshot().turns.get(1).activity).getJSONObject(0);
+        assertEquals("/tasks/4", event.getString("applied_href"));
+        sidebar.closeImmediately(); sidebar.open(); root = save(controller.get(), "pocket-agent-change-applied.png");
+        assertTrue(containsText(root, "open task"));
+        root.findViewWithTag("pip_change_change").performClick();
+        android.content.Intent opened = Shadows.shadowOf(controller.get()).getNextStartedActivity();
+        assertNotNull(opened); assertEquals(4L, opened.getLongExtra("pocket_task", -1));
+    }
     private boolean containsText(View view, String value) {
         if (view instanceof TextView && ((TextView) view).getText().toString().contains(value)) return true;
         if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++)

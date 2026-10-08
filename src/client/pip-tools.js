@@ -1,5 +1,5 @@
 import { storage as localStorage, tabStorage as sessionStorage } from './workspace-storage.js';
-import { notes, tasks, parking, gym, noteTitle } from "./store.js";
+import { notes, tasks, parking, gym, noteTitle, NOTE_LIMIT } from "./store.js";
 import { agenda } from './planner.js';
 
 // Web search for providers without their own: Firecrawl search and page reading. Works without a key at low volume;
@@ -34,6 +34,7 @@ const TOOLS = [
   tool("pocket", "search_pocket", "Search Notes, Tasks, parked Thoughts and Calendar together, using only granted categories. Returns links and excerpts.", { query: search.query, limit: integer("Maximum results.", 1, 10, 10), days: integer("Calendar days beginning today.", 1, 30, 7) }),
   tool("universal", "update_plan", "Show or update a short plan for this reply. Changes only the displayed plan; never saves Pocket records.", { steps: { type: "array", minItems: 1, maxItems: 6, items: { type: "object", properties: { text: { type: "string", minLength: 1, maxLength: 160 }, status: { type: "string", enum: ["pending", "in_progress", "done"] } }, required: ["text", "status"], additionalProperties: false } } }, ["steps"]),
   tool("universal", "propose_action", "Prepare a note, task or appointment for the user to review and save with a tap. Never saves or changes data. Appointment proposals need when; task due is YYYY-MM-DD.", { kind: { type: "string", enum: ["note", "task", "appointment"] }, title: { type: "string", minLength: 1, maxLength: 200 }, text: { type: "string", maxLength: 6000 }, due: { type: "string", maxLength: 10 }, steps: { type: "array", maxItems: 12, items: { type: "string", minLength: 1, maxLength: 160, pattern: "^[^\\r\\n]+$" } }, when: { type: "string", maxLength: 40 }, minutes: integer("Appointment duration in minutes.", 15, 480, 60) }, ["kind", "title", "text"]),
+  tool("changes", "propose_change", "Prepare a change to an existing record for the user to review and apply with a tap: complete_task, update_task (title, due YYYY-MM-DD or empty to clear, add_steps), append_note (text) or move_appointment (when, minutes). Use ids from Pocket searches or reads. Never applies the change.", { change: { type: "string", enum: ["complete_task", "update_task", "append_note", "move_appointment"] }, id: recordId, title: { type: "string", minLength: 1, maxLength: 200 }, due: { type: "string", maxLength: 10 }, add_steps: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 160, pattern: "^[^\\r\\n]+$" } }, text: { type: "string", minLength: 1, maxLength: 4000 }, when: { type: "string", maxLength: 40, description: "An ISO 8601 timestamp with UTC or an offset." }, minutes: integer("Appointment duration in minutes.", 15, 480, 60), reason: { type: "string", maxLength: 300, description: "One short line on why, shown in the review." } }, ["change", "id"]),
   tool("gym", "gym_summary", "Read locally saved workouts and their exercise sets from the last 1–30 days. Never edits a workout.", days),
   tool("coros", "coros_summary", "Read COROS readings already cached in Movement. Never refreshes or calls COROS. Check last_updated and stale; missing data is not a zero reading.", days)
 ];
@@ -42,7 +43,13 @@ const WEB = [
   { name: "read_web_page", description: "Read a public page in 200–6000 character pages. Use next_offset to continue. Optional query finds relevant passages at or after offset; pages are cached for this reply.", input_schema: { type: "object", properties: { url: { type: "string", description: "The page's public https URL.", maxLength: 2048 }, ...paging, query: search.query }, required: ["url"], additionalProperties: false } },
 ];
 const pocketCategories = ["notes", "tasks", "thoughts", "calendar"];
-const permitted = (value, definition) => definition.category === "universal" || definition.category === "pocket" ? definition.category === "universal" || access(value).some(c => pocketCategories.includes(c)) : definition.category ? access(value).includes(definition.category) : webTools(value);
+/** Tools that show or prepare something instead of reading: never cached, run one at a time, never replayed as observations. */
+export const STATE_TOOLS = ["update_plan", "propose_action", "propose_change"];
+const CHANGE_CATEGORY = { complete_task: "tasks", update_task: "tasks", append_note: "notes", move_appointment: "calendar" };
+const CHANGE_NAMES = { complete_task: "complete task", update_task: "update task", append_note: "add to note", move_appointment: "move appointment" };
+export const changeName = change => CHANGE_NAMES[change] || "change";
+export const changeTarget = change => ({ tasks: "task", notes: "note", calendar: "appointment" })[CHANGE_CATEGORY[change]] || "record";
+const permitted = (value, definition) => definition.category === "changes" ? access(value).some(c => ["tasks", "notes", "calendar"].includes(c)) : definition.category === "universal" || definition.category === "pocket" ? definition.category === "universal" || access(value).some(c => pocketCategories.includes(c)) : definition.category ? access(value).includes(definition.category) : webTools(value);
 export const definitions = value => [...TOOLS.filter(t => permitted(value, t)).map(({ category, ...definition }) => structuredClone(definition)), ...(webTools(value) ? structuredClone(WEB) : [])];
 export const checkpointIdentity = value => [value.provider, value.baseUrl, value.model].join("|");
 export const accessFingerprint = value => { const granted = access(value); return CATEGORIES.map(([category]) => granted.includes(category) ? "1" : "0").join(""); };
@@ -111,12 +118,39 @@ function validInstant(raw) {
   return Boolean(match && validDay(match[1]) && +match[2] < 24 && +match[3] < 60 && +(match[4] || 0) < 60 && +(match[5] || 0) <= 18 && +(match[6] || 0) < 60 && (+match[5] !== 18 || +match[6] === 0) && Number.isFinite(Date.parse(raw)));
 }
 const calendarItems = days => { const start = new Date(); start.setHours(0, 0, 0, 0); const end = new Date(start); end.setDate(end.getDate() + days); return agenda.all().filter(item => item.when < +end && item.when + item.minutes * 60000 > +start); };
+/** Validates a change against the record as it is now and keeps a short "before" for the review. Nothing is written here. */
+function changeProposal(value, args) {
+  const category = CHANGE_CATEGORY[args.change], reason = (args.reason || "").trim();
+  if (!access(value).includes(category)) return failure("access_disabled", "Turn on " + category + " access before proposing this change.");
+  const ready = (change, before) => ({ kind: "change", change: { change: args.change, ...change, ...(reason ? { reason } : {}) }, before, requires_confirmation: true });
+  if (args.change === "complete_task" || args.change === "update_task") {
+    const task = tasks.get(args.id); if (!task) return failure("task_not_found", "That task is no longer available.");
+    const before = { title: task.text, due: task.due || "", done: Boolean(task.done), steps: (task.steps || []).length };
+    if (args.change === "complete_task") return task.done ? failure("already_done", "That task is already complete.") : ready({ id: task.uid }, before);
+    const add = (args.add_steps || []).map(step => step.trim()).filter(step => !(task.steps || []).some(old => old.text === step));
+    if (args.title !== undefined && !args.title.trim() || args.due && !validDay(args.due) || (args.add_steps || []).some(step => !step.trim())) return failure("invalid_arguments", "Use a nonempty title, a YYYY-MM-DD due date (or empty to clear) and nonempty steps.");
+    if ((task.steps || []).length + add.length > 12) return failure("too_many_steps", "A task keeps at most 12 steps.");
+    if (args.title === undefined && args.due === undefined && !add.length) return failure("invalid_arguments", "Change the title, due date or steps.");
+    return ready({ id: task.uid, ...(args.title !== undefined ? { title: args.title.trim() } : {}), ...(args.due !== undefined ? { due: args.due } : {}), add_steps: add }, before);
+  }
+  if (args.change === "append_note") {
+    const note = notes.get(args.id), text = (args.text || "").trim();
+    if (!note) return failure("note_not_found", "That saved note is no longer available.");
+    if (!text) return failure("invalid_arguments", "Write the text to add.");
+    if (note.text.trimEnd().length + text.length + 2 > NOTE_LIMIT) return failure("note_full", "The note would exceed its length limit.");
+    return ready({ id: note.uid, text }, { title: noteTitle(note), ending: note.text.trimEnd().slice(-240) });
+  }
+  const item = agenda.get(args.id);
+  if (!item) return failure("appointment_not_found", "That appointment is no longer available.");
+  if (!args.when || !validInstant(args.when)) return failure("invalid_arguments", "Use an ISO date and time with timezone.");
+  return ready({ id: item.uid, when: args.when, minutes: args.minutes ?? item.minutes }, { title: item.title, when: new Date(item.when).toISOString(), minutes: item.minutes });
+}
 export async function execute(value, name, args = {}, signal, context = {}) {
   if (signal?.aborted) throw new DOMException("Stopped", "AbortError");
   const definition = TOOLS.find(t => t.name === name) || WEB.find(t => t.name === name);
   if (!definition || !permitted(value, definition)) return failure("access_disabled", "Access to this source is off or this tool is unavailable.");
   if (!valid(args, definition.input_schema)) return failure("invalid_arguments", "Check the tool arguments and their limits.");
-  const cache = context.cache, entryKey = cacheKey(name, args), signature = grantSignature(value, name), reuse = definition.category !== "universal", saved = reuse && cache?.get(entryKey);
+  const cache = context.cache, entryKey = cacheKey(name, args), signature = grantSignature(value, name), reuse = !STATE_TOOLS.includes(name), saved = reuse && cache?.get(entryKey);
   if (saved && saved.permissions === signature) return bounded({ ...structuredClone(saved.result), cached: true });
   const query = args.query ?? "", limit = args.limit ?? (name === "search_pocket" ? 10 : 5), window = args.days ?? 7;
   let result;
@@ -126,7 +160,8 @@ export async function execute(value, name, args = {}, signal, context = {}) {
     const due = args.due || "", when = args.when || "";
     if (!args.title.trim() || args.steps?.some(step => !step.trim()) || due && !validDay(due) || when && !validInstant(when) || args.kind === "appointment" && !when) return failure("invalid_arguments", "Use a title, valid date and time, and nonempty steps. Appointments need an ISO date and time with timezone.");
     result = { kind: "proposal", proposal: { kind: args.kind, title: args.title.trim(), text: args.text, due, steps: (args.steps || []).map(step => step.trim()), when, minutes: args.minutes ?? 60 }, requires_confirmation: true };
-  } else if (name === "search_calendar") {
+  } else if (name === "propose_change") result = changeProposal(value, args);
+  else if (name === "search_calendar") {
     const found = calendarItems(window).filter(item => matches(item.title, query));
     result = { source: "pocket:calendar", days: window, matched: found.length, truncated: found.length > limit, appointments: found.slice(0, limit).map(item => ({ id: item.uid, title: item.title, when: new Date(item.when).toISOString(), minutes: item.minutes, task_uid: item.task_uid || "", href: "/calendar/" + encodeURIComponent(item.uid) })) };
   } else if (name === "search_pocket") {
@@ -189,6 +224,7 @@ export function label(name, input = {}) {
   if (name === "read_task") return "read task";
   if (name === "update_plan") return "update plan";
   if (name === "propose_action") return "prepare " + (input.kind || "action");
+  if (name === "propose_change") return "prepare " + changeName(input.change);
   if (name === "coros_summary") return "read COROS cache · " + (input.days || 7) + " days";
   if (name === "gym_summary") return "read Gym · " + (input.days || 7) + " days";
   return name.replaceAll("_", " ");
@@ -199,6 +235,7 @@ function resultSummary(name, result) {
   if (name === "read_note" || name === "read_task") return result.title || "Record read";
   if (name === "update_plan") return result.plan.filter(step => step.status === "done").length + "/" + result.plan.length + " steps";
   if (name === "propose_action") return result.proposal.title + " · ready to review";
+  if (name === "propose_change") return result.before.title + " · ready to review";
   if (name === "search_web") return (result.results?.length || 0) + " results";
   if (name === "read_web_page") return result.title || "Page read";
   if (name === "coros_summary") return (result.stale ? "stale cache" : "cached readings") + (result.last_updated ? " · " + result.last_updated.slice(0, 10) : "");
@@ -212,7 +249,7 @@ export function sources(name, result) {
   if (name === "read_task") return [{ title: result.title, href: "/tasks/" + encodeURIComponent(result.id) }];
   if (name === "search_calendar") return (result.appointments || []).map(item => ({ title: item.title, href: item.href }));
   if (name === "search_pocket") return (result.results || []).map(item => ({ title: item.title, href: item.href }));
-  if (name === "update_plan" || name === "propose_action") return [];
+  if (STATE_TOOLS.includes(name)) return [];
   if (name === "search_web") return (result.results || []).map(item => ({ title: item.title, href: item.url }));
   if (name === "read_web_page") return [{ title: result.title, href: result.url }];
   const kind = name === "search_notes" ? "notes" : name === "search_thoughts" ? "thoughts" : name === "search_tasks" ? "tasks" : "gym";

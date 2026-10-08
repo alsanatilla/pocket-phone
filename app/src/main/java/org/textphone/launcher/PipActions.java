@@ -56,4 +56,70 @@ final class PipActions {
         }
         CloudSync.changed(c); return "/" + ("note".equals(kind) ? "notes" : "tasks") + "/" + uid;
     }
+
+    /**
+     * Applies a reviewed change to an existing record. Each change is idempotent, so applying it again on this or another device
+     * leaves the same result: a task stays done, steps are added once, text is appended once, an appointment keeps its new time.
+     */
+    static synchronized String applyChange(Context c, JSONObject change) throws JSONException {
+        if (!(change.opt("change") instanceof String) || !(change.opt("id") instanceof String)) throw new IllegalArgumentException("This change is incomplete.");
+        String kind = change.getString("change"), id = change.getString("id");
+        PlannerStore planner = new PlannerStore(c.getSharedPreferences("pocket_planner", 0));
+        if ("complete_task".equals(kind) || "update_task".equals(kind)) {
+            PlannerStore.Entry task = entry(c, planner, "task", id);
+            if (task == null) throw new IllegalArgumentException("That task is no longer available.");
+            String href = "/tasks/" + portable(c, task);
+            if ("complete_task".equals(kind)) { if (!task.done) TaskReminders.toggle(c, task.id); CloudSync.changed(c); return href; }
+            String title = change.has("title") ? change.optString("title").trim() : null, due = change.has("due") ? change.optString("due") : null;
+            JSONArray supplied = change.optJSONArray("add_steps"); java.util.List<String> add = new java.util.ArrayList<>();
+            if (supplied != null) for (int i = 0; i < supplied.length(); i++) {
+                String step = supplied.optString(i).trim();
+                if (step.isEmpty() || step.length() > 160 || step.contains("\n") || step.contains("\r")) throw new IllegalArgumentException("Check the title, due date and steps.");
+                boolean known = false; for (PlannerStore.Step old : task.steps) if (old.text.equals(step)) known = true;
+                if (!known && !add.contains(step)) add.add(step);
+            }
+            if (title != null && (title.isEmpty() || title.length() > 500)) throw new IllegalArgumentException("Check the title, due date and steps.");
+            if (due != null) PlannerDates.validate(due);
+            if (task.steps.size() + add.size() > 12) throw new IllegalArgumentException("A task keeps at most 12 steps.");
+            if (title != null && !title.equals(task.text)) planner.save(task.id, "task", title);
+            if (due != null && !due.equals(task.due)) planner.setDue(task.id, due);
+            for (String step : add) planner.addStep(task.id, step);
+            CloudSync.changed(c); return href;
+        }
+        if ("append_note".equals(kind)) {
+            PlannerStore.Entry note = entry(c, planner, "note", id);
+            if (note == null) throw new IllegalArgumentException("That saved note is no longer available.");
+            String text = change.optString("text").trim(), current = note.text.replaceAll("\\s+$", "");
+            if (text.isEmpty()) throw new IllegalArgumentException("Write the text to add.");
+            if (!current.endsWith(text)) {
+                if (current.length() + text.length() + 2 > 8000) throw new IllegalArgumentException("The note would exceed its length limit.");
+                planner.save(note.id, "note", current + "\n\n" + text); CloudSync.changed(c);
+            }
+            return "/notes/" + portable(c, note);
+        }
+        if ("move_appointment".equals(kind)) {
+            AgendaStore.Event event = null;
+            for (AgendaStore.Event candidate : AgendaStore.list(c)) if (id.equals(candidate.uid) || id.equals(Long.toString(candidate.id))) event = candidate;
+            if (event == null) throw new IllegalArgumentException("That appointment is no longer available.");
+            String when = change.optString("when");
+            if (!when.matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,3})?)?(?:Z|[+-]\\d{2}:\\d{2})")) throw new IllegalArgumentException("Choose a date and time.");
+            long instant; try { instant = java.time.OffsetDateTime.parse(when).toInstant().toEpochMilli(); } catch (RuntimeException invalid) { throw new IllegalArgumentException("Choose a date and time."); }
+            int minutes = change.has("minutes") ? change.optInt("minutes", -1) : event.minutes;
+            if (minutes < 15 || minutes > 480) throw new IllegalArgumentException("Use 15 to 480 minutes.");
+            // The reminder keeps its distance to the appointment, as on the web.
+            if (event.alarm != 0 && event.when != instant) { ClockStore.Entry alarm = ClockStore.find(c, event.alarm); if (alarm != null) { alarm.due += instant - event.when; AlarmScheduler.saveAndArm(c, alarm); } }
+            event.when = instant; event.minutes = minutes; AgendaStore.save(c, event);
+            return "/calendar/" + (event.uid.isEmpty() ? Long.toString(event.id) : event.uid);
+        }
+        throw new IllegalArgumentException("Choose a supported change.");
+    }
+    /** Records keep a local numeric id and, once synced, a portable uid; proposals may name either. */
+    private static PlannerStore.Entry entry(Context c, PlannerStore planner, String kind, String id) {
+        for (PlannerStore.Entry entry : planner.entries()) if (kind.equals(entry.kind) && (Long.toString(entry.id).equals(id) || portable(c, entry).equals(id))) return entry;
+        return null;
+    }
+    private static String portable(Context c, PlannerStore.Entry entry) {
+        String uid = c.getSharedPreferences("pocket_planner", 0).getString(entry.kind + "_uid_" + entry.id, "");
+        return uid == null || uid.isEmpty() ? Long.toString(entry.id) : uid;
+    }
 }

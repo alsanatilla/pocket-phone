@@ -5,9 +5,9 @@ import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings,
 import { notes, tasks, parking, noteTitle, receipt, KIND } from "./store.js";
 import { mascot } from "./pip-pixels.js";
 import { backdrop } from "./pixel-backdrop.js";
-import { CATEGORIES, access, saveAccess, definitions, firecrawlKey, setFirecrawlKey } from "./pip-tools.js";
+import { CATEGORIES, access, saveAccess, definitions, firecrawlKey, setFirecrawlKey, changeName, changeTarget } from "./pip-tools.js";
 import { activity, settle, mark, elapsed, activityTitle, phaseLabel } from "./pip-activity.js";
-import { applyProposal } from './pip-actions.js';
+import { applyProposal, applyChange } from './pip-actions.js';
 
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, viewportCleanup = null;
@@ -146,7 +146,10 @@ function updateReply(turn) {
     parts.plan.replaceChildren(...lastPlan.map(step => ui.h('div', {class:'pip-plan-step ' + step.status}, ui.h('span', {text:step.status === 'done' ? '□' : step.status === 'in_progress' ? '◌' : '◇'}), ui.h('span', {text:step.text}))));
     parts.proposals.replaceChildren(...decoded.filter(item => ['note','task','appointment'].includes(item.value.proposal?.kind) && typeof item.value.proposal.title === 'string').map(({row,value}) => ui.h('section', {class:'pip-proposal','data-proposal':row.id},
       caption(value.proposal.kind), ui.h('strong', {text:value.proposal.title}),
-      row.applied_href ? sourceLink({href:row.applied_href,title:'open saved ' + value.proposal.kind}) : button('review ' + value.proposal.kind, () => reviewProposal(parts.chat, turn, row, value.proposal), {disabled:active}))));
+      row.applied_href ? sourceLink({href:row.applied_href,title:'open saved ' + value.proposal.kind}) : button('review ' + value.proposal.kind, () => reviewProposal(parts.chat, turn, row, value.proposal), {disabled:active}))),
+      ...decoded.filter(item => item.value.kind === 'change' && typeof item.value.change?.change === 'string' && typeof item.value.before?.title === 'string').map(({row,value}) => ui.h('section', {class:'pip-proposal','data-proposal':row.id},
+        caption(changeName(value.change.change)), ui.h('strong', {text:value.before.title}),
+        row.applied_href ? sourceLink({href:row.applied_href,title:'open ' + changeTarget(value.change.change)}) : button('review change', () => reviewChange(parts.chat, turn, row, value), {disabled:active}))));
     parts.agentSignature = signature + active;
   }
   parts.toolGroup.hidden = !rows.length; parts.toolTitle.textContent = activityTitle(rows);
@@ -228,6 +231,48 @@ async function reviewProposal(chat, turn, row, proposal) {
       finally { saving = false; }
     }, {class:'accent'}));
   await ui.dialog(proposal.kind, form, [['cancel', null]]);
+}
+
+/** A change to an existing record: what it is now, what it becomes, and nothing applied until the button. */
+async function reviewChange(chat, turn, row, value) {
+  const change = value.change, before = value.before, error = caption(''), fields = [];
+  let saving = false, read = () => ({ ...change });
+  error.classList.add('warn');
+  if (change.change === 'complete_task') fields.push(ui.h('p', { class: 'small', text: 'Mark “' + before.title + '” as done.' }));
+  else if (change.change === 'update_task') {
+    const title = ui.h('input', { 'aria-label': 'Task title', maxlength: 500, value: change.title ?? before.title });
+    const due = ui.h('input', { type: 'date', 'aria-label': 'Task due date', value: change.due ?? before.due });
+    const steps = ui.h('textarea', { 'aria-label': 'Steps to add', rows: 4 }); steps.value = (change.add_steps || []).join('\n');
+    fields.push(caption('now: ' + [before.due ? 'due ' + before.due : 'no date', before.steps + (before.steps === 1 ? ' step' : ' steps')].join(' · ')),
+      ui.h('label', {}, 'title', title), ui.h('label', {}, 'due', due), ui.h('label', {}, 'add steps', steps));
+    read = () => ({ ...change, title: title.value, due: due.value, add_steps: steps.value.split('\n').map(step => step.trim()).filter(Boolean) });
+  } else if (change.change === 'append_note') {
+    const text = ui.h('textarea', { 'aria-label': 'Text to add', rows: 6, maxlength: 4000 }); text.value = change.text || '';
+    fields.push(before.ending ? ui.h('p', { class: 'small muted', text: '…' + before.ending }) : null, ui.h('label', {}, 'add', text));
+    read = () => ({ ...change, text: text.value });
+  } else {
+    const when = ui.h('input', { type: 'datetime-local', 'aria-label': 'New time' }), at = new Date(change.when);
+    if (Number.isFinite(+at)) when.value = new Date(+at - at.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    const minutes = ui.h('input', { type: 'number', min: 15, max: 480, 'aria-label': 'Minutes', value: change.minutes || before.minutes || 60 });
+    fields.push(caption('now: ' + new Date(before.when).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' · ' + before.minutes + ' min'),
+      ui.h('label', {}, 'when', when), ui.h('label', {}, 'minutes', minutes));
+    read = () => ({ ...change, when: new Date(when.value).toISOString(), minutes: Number(minutes.value) });
+  }
+  const form = ui.h('div', { class: 'pip-settings' }, change.reason ? caption(change.reason) : null, ...fields, error,
+    button(changeName(change.change), () => {
+      if (saving) return;
+      saving = true;
+      try {
+        const current = store.get(chat.uid), latest = current?.turns.find(t => t.uid === turn.uid), event = activity(latest?.activity).find(item => item.id === row.id);
+        if (!event || runner.active?.chatId === chat.uid) throw new Error('Let Pip finish first.');
+        if (event.applied_href) { ui.closeDialog(); return; }
+        const href = applyChange(read());
+        store.update(chat.uid, c => { const saved = c.turns.find(t => t.uid === turn.uid)?.activity?.find(item => item.id === row.id); if (!saved) throw new Error('This reply is no longer available.'); saved.applied_href = href; saved.applied = Date.now(); });
+        ui.closeDialog(); render();
+      } catch (failure) { error.textContent = failure.message; }
+      finally { saving = false; }
+    }, { class: 'accent' }));
+  await ui.dialog(before.title, form, [['cancel', null]]);
 }
 
 async function pocketAccess(chat) {

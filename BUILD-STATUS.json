@@ -1,15 +1,17 @@
 {
   "component": "Pocket Android launcher/apps and Astro browser workspace",
-  "version_name": "0.18.1",
-  "version_code": 46,
+  "version_name": "0.19.0",
+  "version_code": 47,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-07T20:09:04.152Z",
-  "build": "Android assembleRom and Astro production build passed. Browser agent checks (25) and the full Android unit suite ran.",
+  "checked_at_utc": "2026-10-08T04:15:36.297Z",
+  "build": "Android assembleRom and Astro production build passed. Browser change checks (5), agent checks (25), an Edge review flow and the full Android unit suite ran.",
   "commands": [
     "npm run build",
+    "node pip-change-check.mjs (5 deterministic change-proposal checks)",
     "node pip-agent-check.mjs (25 deterministic browser agent checks)",
+    "node pip-change-browser.mjs (Edge review flow against the dev server)",
     "./gradlew.bat :app:testDebugUnitTest --console=plain",
     "./gradlew.bat :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
   ],
@@ -19,9 +21,9 @@
   },
   "apk": {
     "file": "app/build/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.18.1-unsigned.apk",
-    "bytes": 11155545,
-    "sha256": "3ce05a3a5a59b7c42073d1f56ab4d04eae8650897fe0603cbf6710a7139bf78e",
+    "release_asset": "pocket-phone-0.19.0-unsigned.apk",
+    "bytes": 11159109,
+    "sha256": "cff4545f7e471985766e2420fc50bb5f6d5be58ce20cd189e0a332310e88d4ba",
     "signed": false,
     "installable_update": false,
     "signing": "Another release agent handles signing"
@@ -30,24 +32,24 @@
     "framework": "Astro server output",
     "hosting": "Vercel",
     "url": "https://pocket-phone.vercel.app/",
-    "release_asset": "pocket-web-0.18.1-source.zip",
-    "offline_worker": "pocket-astro-0181-agent",
+    "release_asset": "pocket-web-0.19.0-source.zip",
+    "offline_worker": "pocket-astro-0190-changes",
     "changed": true
   },
   "full_test_suite": {
     "status": "Ran",
-    "cases": 555,
+    "cases": 558,
     "failed_results": 10,
     "failing_cases": 6,
     "skipped": 2,
-    "detail": "All six failing cases also fail on the 0.16.0 code (cloud sync tag, Drive scheduling, two short-window planning layouts, one organizer search). No failure is new since 0.16.0. Two obsolete Today command-row tests are skipped."
+    "detail": "All six failing cases also fail on the 0.16.0 code (cloud sync tag, Drive scheduling, two short-window planning layouts, one organizer search); four of them also fail at API 24. No failure is new since 0.16.0. Two obsolete Today command-row tests are skipped."
   },
   "changes": [
-    "An intermediate round that reaches its output cap continues to final synthesis with the reserved budget instead of ending the run",
-    "Unfinished tool requests from a truncated round are marked failed and never execute; completed observations are kept",
-    "Phone tool-input limit raised to 8,000 characters to match browser proposal payloads",
-    "A final answer that fills its budget, or a browser idle/absolute deadline, stays incomplete and resumable with Continue",
-    "Android SDK tests compile again (AnthropicClient is not AutoCloseable); Pip answer formatting test finds the answer by text"
+    "propose_change tool on phone and web: complete a task, update a task (title, due date, new steps), add to a note, move an appointment",
+    "Changes are validated against the live record and write nothing until the user applies them in the review dialog",
+    "Applying is idempotent: tasks stay done and are logged once, steps and note text are added once, reminders keep their distance from a moved appointment",
+    "Each change needs its own access category; change proposals are never cached or replayed on Continue",
+    "Applied change cards open the changed record and sync with existing approval markers"
   ],
   "known_limits": [
     "APK requires signing before installation.",
@@ -59,10 +61,10 @@
   ],
   "physical_handset_checked": false,
   "full_custom_rom_compiled": false,
-  "previous_release": "v0.18.0",
+  "previous_release": "v0.18.1",
   "focused_verification": {
-    "browser": "25 deterministic agent checks passed: multi-round budgets, parallel order, caching, truncated and malformed tool arguments, final token cap, idle/deadline interruption, resume and checkpoints. No provider or Firecrawl traffic.",
-    "native": "Pip, Claude transport and streaming suites: 67 cases pass on Android API 24 and 35, including truncated Anthropic rounds, final token cap and 5,600-character proposal arguments.",
+    "browser": "5 change-proposal checks (access gating, live validation, no writes before apply, idempotent apply, agent loop) and 25 agent checks pass. Edge drove the review, apply and open flow on the dev server with no page errors. No provider traffic.",
+    "native": "PocketChatTools, PipActions and Pip preview suites pass, including change gating/validation, idempotent apply with reminder shift and the review dialog (cancel, edit, apply, open).",
     "handset": "No device attached; physical handset behavior remains unverified."
   }
 }
