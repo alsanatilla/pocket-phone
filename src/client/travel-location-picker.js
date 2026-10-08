@@ -101,7 +101,7 @@ function placeSearch(search, list, hooks) {
       if (attempt !== serial || !hooks.alive() || input.value.trim() !== text) return;
       const found = suggestions.map(item => item.placePrediction).filter(Boolean).slice(0, MAX_SUGGESTIONS).map(prediction => ({
         placeId: prediction.placeId, main: prediction.mainText?.text || prediction.text?.text || '', secondary: prediction.secondaryText?.text || '',
-        text: prediction.text?.text || prediction.mainText?.text || '', types: Array.isArray(prediction.types) ? prediction.types : [],
+        text: prediction.text?.text || prediction.mainText?.text || '', types: Array.isArray(prediction.types) ? prediction.types : [], prediction,
       })).filter(item => item.placeId && item.main);
       if (!found.length) { close(); return; }
       list.replaceChildren(...found.map((item, index) => {
@@ -118,7 +118,12 @@ function placeSearch(search, list, hooks) {
     }
   }
   async function choose(item) {
-    close(); token = null; serial++;
+    close(); token = null; const attempt = ++serial;
+    // A stay keeps its street address, for the taxi; the suggestion itself only names the area. Ends the search session.
+    if (search.address) {
+      try { const place = item.prediction.toPlace(); await place.fetchFields({ fields: ['formattedAddress'] }); item.address = String(place.formattedAddress || ''); } catch { /* the area stays */ }
+      if (attempt !== serial) return;
+    }
     const { locationQuery } = await import('./travel-geocoding.js');
     if (!hooks.alive()) return;
     hooks.chosen(item, subject => ({ placeId: item.placeId, query: locationQuery(subject) }));

@@ -300,11 +300,11 @@ function stayEditor(host, trip, stop, stay, api) {
   const reference = textInput('Booking reference', current.bookingRef, 'Reservation code', { maxlength: 120 });
   const address = textInput('Address', current.address, 'Street, neighborhood, pin for the taxi', { maxlength: 240 });
   const locateHost = el('div');
-  const locate = locationPicker(locateHost, () => ({ place: address.value, country: stop.country }), current.location, api, cleanup, { input: name, kind: 'stay', near: () => stop,
+  const locate = locationPicker(locateHost, () => ({ place: address.value, country: stop.country }), current.location, api, cleanup, { input: name, kind: 'stay', near: () => stop, address: true,
     apply: choice => {
       // A hotel or other listed place fills its name and address; an address suggestion fills the address only.
-      if (choice.types.some(type => ['lodging', 'establishment', 'point_of_interest'].includes(type))) { name.value = choice.main.slice(0, 140); address.value = (choice.secondary || choice.text).slice(0, 240); }
-      else address.value = choice.text.slice(0, 240);
+      if (choice.types.some(type => ['lodging', 'establishment', 'point_of_interest'].includes(type))) { name.value = choice.main.slice(0, 140); address.value = (choice.address || choice.secondary || choice.text).slice(0, 240); }
+      else address.value = (choice.address || choice.text).slice(0, 240);
     } });
   address.addEventListener('input', locate.clear);
   const note = textArea('Stay note', current.note, 'Room request, cancellation terms, who owes whom…', 3, 800);
