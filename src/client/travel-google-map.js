@@ -1,7 +1,6 @@
 import { loadGoogleMaps, onMapsAuthFailure } from './google-maps.js';
 import { resolveLocation } from './travel-geocoding.js';
 import { sheet, drawFrame, SIZE, stepMs } from './sprite-player.js';
-import './travel-google-map.css';
 
 const WARM_MAP_STYLE = [
   { elementType: 'geometry', stylers: [{ color: '#302f27' }] },

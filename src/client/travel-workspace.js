@@ -6,6 +6,9 @@ import { mapsSearchUrl, mapsDirectionsUrl } from './travel-links.js';
 import { stayCoverage, stayTotals, tripCosts, reorderTrip, currentStop } from '../shared/travel-planning.js';
 import { mapsEnabled, mapsStatus } from './google-maps.js';
 import './travel-workspace.css';
+// The maps load later, but their styles come with Travel's, so a map is never drawn unstyled.
+import './travel-map.css';
+import './travel-google-map.css';
 
 const path = trip => `/travel/${trip.uid}`;
 const clone = value => JSON.parse(JSON.stringify(value));

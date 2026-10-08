@@ -1,4 +1,4 @@
-const CACHE = 'pocket-astro-0190-travel-pins';
+const CACHE = 'pocket-astro-0190-travel-styles';
 const allowed = url => url.origin === self.location.origin && (url.pathname === '/' || url.pathname.startsWith('/_astro/') || url.pathname.startsWith('/fonts/') || url.pathname.startsWith('/sprites/'));
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
@@ -24,7 +24,8 @@ self.addEventListener('fetch', event => {
     const cache = await caches.open(CACHE);
     try {
       const response = await fetch(event.request);
-      if (response.ok) await cache.put(event.request, response.clone());
+      // A full or unavailable cache must not cost the page a file it already downloaded.
+      if (response.ok) await cache.put(event.request, response.clone()).catch(() => {});
       return response;
     } catch (error) {
       const saved = await cache.match(event.request) || (event.request.mode === 'navigate' ? await cache.match('/') : null);

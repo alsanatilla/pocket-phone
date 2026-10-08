@@ -1,5 +1,4 @@
 import world from './travel-world.json';
-import './travel-map.css';
 import { normalizeDestination as norm, destinationCountry as countryName, destinationPlace as placeName } from './travel-links.js';
 export { mapsSearchUrl, mapsDirectionsUrl } from './travel-links.js';
 
