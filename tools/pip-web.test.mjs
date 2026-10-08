@@ -110,3 +110,27 @@ test('a tool round gets a usable token allowance instead of the full-budget spli
   assert.ok(requests[0].max_tokens>=1024,`first tool round allowance ${requests[0].max_tokens} should finish a tool call`);
   assert.ok(requests[0].max_tokens<=value.maxTokens);
 });
+test('a web search that resolves after a paused turn updates its own search',async()=>{
+  // Anthropic can return pause_turn after a server_tool_use and deliver the
+  // web_search_tool_result on the continuation. Activity ids carry the round, so the
+  // result must be matched by the provider's id or it is rejected as "unmatched".
+  const {chat}=ready(), value=config({...DEFAULT_CONFIG,webSearch:true});
+  const body={model:value.model,max_tokens:value.maxTokens,stream:true,messages:[{role:'user',content:'Compare German carmakers.'}],tools:[{name:'web_search'},{name:'search_pocket'}]};
+  const paused=event({type:'message_start',message:{model:'m',usage:{input_tokens:10}}})
+    +event({type:'content_block_start',index:0,content_block:{type:'server_tool_use',id:'srvtoolu_1',name:'web_search',input:{}}})
+    +event({type:'content_block_delta',index:0,delta:{type:'input_json_delta',partial_json:'{"query":"VW quarterly"}'}})
+    +event({type:'content_block_stop',index:0})
+    +event({type:'message_delta',delta:{stop_reason:'pause_turn'},usage:{output_tokens:20}})
+    +event({type:'message_stop'});
+  const resolved=event({type:'message_start',message:{model:'m',usage:{input_tokens:12}}})
+    +event({type:'content_block_start',index:0,content_block:{type:'web_search_tool_result',tool_use_id:'srvtoolu_1',content:[{type:'web_search_result',url:'https://example.com/vw',title:'VW figures'}]}})
+    +event({type:'content_block_stop',index:0})
+    +event({type:'content_block_delta',index:1,delta:{type:'text_delta',text:'Done'}})
+    +event({type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:10}})
+    +event({type:'message_stop'});
+  let calls=0;
+  const result=await streamChat(chat,turn,{value,body,readSse:sse,key:'k',fetcher:async()=>response(++calls===1?paused:resolved)});
+  assert.equal(calls,2);assert.equal(result.answer,'Done');
+  const web=result.activity.filter(row=>row.kind==='web');
+  assert.equal(web.length,1);assert.equal(web[0].state,'done');assert.equal(web[0].summary,'1 results');
+});

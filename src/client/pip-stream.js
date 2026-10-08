@@ -28,7 +28,7 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
   const clock = () => { clearTimeout(timeout); timeout = setTimeout(() => { timedOut = true; controller.abort(); }, Math.min(timeoutMs, 90000)); };
   const result = { answer: "", reasoning: resume?.reasoning || "", activity: activity(resume?.activity || []), sources: [], phase: "requesting", usage: { request_identity: [value.provider, value.baseUrl, value.model].join("|"), read_access: access(value).join("|"), web_access: value.webSearch, notes_restricted: resume?.notes_restricted || false }, model: value.model };
   const offered = new Set((body.tools || []).map(t => t.name || t.function?.name));
-  const cache = new Map(), inFlight = new Map(), context = { cache }, completed = [];
+  const cache = new Map(), inFlight = new Map(), webRows = new Map(), context = { cache }, completed = [];
   for (const row of resume?.observations || []) {
     if (!offered.has(row.name) || [...STATE_TOOLS, "web_search"].includes(row.name)) continue;
     try { const answer = JSON.parse(row.result), input = JSON.parse(row.input || "{}"); cache.set(cacheKey(row.name, input), { permissions: row.name === "search_pocket" ? resume.permissions : row.name === "read_task" && access(value).includes("notes") ? "notes" : "", result: answer }); } catch { /* unusable checkpoint */ }
@@ -116,16 +116,19 @@ export async function streamChat(chat, turn, { value, body, readSse, key, signal
               const web = block.type === "server_tool_use";
               partials.set(event.index, { id: block.id, name: block.name, args: "", initial: block.input || {}, web });
               record(block.id, { kind: web ? "web" : "tool", name: block.name, title: label(block.name, block.input), state: web ? "running" : "queued" });
-              if (web) { if (!offered.has(block.name) || !value.webSearch || block.name !== "web_search") throw new Error("The provider requested an unavailable search."); if (final || ++searches > RESEARCH_LIMITS.webCalls) return finishFromObservations("The web research limit was reached."); result.phase = "searching web"; }
+              if (web) { if (!offered.has(block.name) || !value.webSearch || block.name !== "web_search") throw new Error("The provider requested an unavailable search."); webRows.set(block.id, activityId(block.id)); if (final || ++searches > RESEARCH_LIMITS.webCalls) return finishFromObservations("The web research limit was reached."); result.phase = "searching web"; }
             }
             if (block.type === "web_search_tool_result") {
-              if (!result.activity.some(row => row.id === activityId(block.tool_use_id) && row.kind === "web")) throw new Error("The provider returned an unmatched search result.");
+              // Anthropic can resolve a server search in a later round than its server_tool_use
+              // (pause_turn), so match the search by the provider's id rather than this round's.
+              const rowId = webRows.get(block.tool_use_id);
+              if (!rowId) throw new Error("The provider returned an unmatched search result.");
               const error = !Array.isArray(block.content) && block.content?.type === "web_search_tool_result_error";
               const found = (Array.isArray(block.content) ? block.content : []).map(source).filter(Boolean);
               const observation = { source: "web:anthropic", results: found.slice(0, 3), matched: found.length, truncated: found.length > 3, request_identity: checkpointIdentity(value), access_fingerprint: accessFingerprint(value), ...(error ? { error: block.content.error_code || "web_unavailable", message: "Search failed" } : {}) }, content = JSON.stringify(observation);
               if (toolData + content.length > RESEARCH_LIMITS.toolData) return finishFromObservations("The research data limit was reached.");
               toolData += content.length; completed.push({ name: "web_search", answer: observation });
-              record(block.tool_use_id, { state: error ? "failed" : "done", summary: error ? "Search failed · " + (block.content.error_code || "unavailable") : found.length + " results", result: content, sources: found, ended: Date.now() });
+              record(rowId, { state: error ? "failed" : "done", summary: error ? "Search failed · " + (block.content.error_code || "unavailable") : found.length + " results", result: content, sources: found, ended: Date.now() });
               result.phase = "preparing reply";
             }
           }
