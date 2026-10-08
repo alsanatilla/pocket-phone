@@ -119,6 +119,21 @@
       "The full suite was not rerun for this web-only update"
     ]
   },
+  "pip_map_life_update": {
+    "checked_at_utc": "2026-10-08T13:34:38Z",
+    "scope": "Web Travel map; Android artifact unchanged",
+    "behavior": "Pip wanders near stops, visits neighboring destinations, and waves, juggles, reads, hops and writes. Stop selection interrupts the current journey. Animation time pauses in hidden tabs, offscreen maps and cached pages; reduced motion is respected dynamically.",
+    "build": "npm run build passed (Astro 7.3.6 / Vercel)",
+    "verification": [
+      "12 deterministic behavior groups passed against the actual map adapter, with fixture DOM, SDK, sprites and clock: continuing life after the route, all activities, single-stop and 320/390/1280 map bounds, hidden walk and timer resume, offscreen and page lifecycle, dynamic reduced motion, selection and map reuse, geometry failure and antimeridian fallback, polar fallback, empty/stay/missing-location maps, asset failure and late completion, and auth/offline teardown",
+      "node --check src/client/travel-google-map.js and git diff --check passed"
+    ],
+    "limitations": [
+      "Collaborative browser preview timed out; visual behavior against the live Google SDK was not reverified in this pass",
+      "The focused fixture check made no external service requests or production data changes",
+      "The full test suite was not run for this web-only update"
+    ]
+  },
   "travel_update": {
     "limitations": [
       "Travel sharing is browser-only in this pass",

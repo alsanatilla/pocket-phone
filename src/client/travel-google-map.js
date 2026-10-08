@@ -1,6 +1,6 @@
 import { loadGoogleMaps, onMapsAuthFailure } from './google-maps.js';
 import { resolveLocation } from './travel-geocoding.js';
-import { sheet, drawFrame, SIZE, stepMs } from './sprite-player.js';
+import { sheet, drawFrame, SIZE, stepMs, frameCount } from './sprite-player.js';
 
 const WARM_MAP_STYLE = [
   { elementType: 'geometry', stylers: [{ color: '#302f27' }] },
@@ -36,7 +36,7 @@ const QUIET_STYLE = [...DETAIL_STYLE,
   { featureType: 'administrative.country', elementType: 'labels.text.fill', stylers: [{ color: '#8f8676' }] }];
 const DETAIL_ZOOM = 11;
 const viewports = new Map();
-// Pip walks a trip's route once per visit, then from stop to stop; this remembers where Pip last stood.
+// Keep Pip's last stop across route redraws, with the same small limit as map viewports.
 const walked = new Set(), pipAt = new Map();
 // One SDK map survives detached route redraws; adapter overlays/listeners do not.
 // This avoids constructing another billable map on every stop/tab/live update.
@@ -135,7 +135,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
   let savedViewport = null, currentStayPromise = Promise.resolve([]), fitScope = options.focusStays ? 'stays' : 'trip';
   const mapListeners = [], stopOverlays = [], stayOverlays = [], lines = [], pendingTimers = new Set();
   const resolvedStays = new Map();
-  let pip = null, walkFrame = 0, styled = null, PipOverlay, tidyFrame = 0;
+  let pip = null, pipLife = null, styled = null, PipOverlay, tidyFrame = 0;
   const wrapper = el('div', { class: 'travel-google-route-map', 'data-map-provider': 'google', 'aria-busy': 'true' });
   const viewport = el('div', { class: 'travel-google-viewport' });
   const loading = el('div', { class: 'travel-google-loading', role: 'status', 'aria-label': 'Loading map' },
@@ -168,7 +168,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
     for (const timer of pendingTimers) clearTimeout(timer); pendingTimers.clear();
     if (stayTimer != null) clearTimeout(stayTimer);
     if (frame) cancelAnimationFrame(frame); frame = 0;
-    if (walkFrame) cancelAnimationFrame(walkFrame); walkFrame = 0; pip?.setMap(null); pip = null;
+    pipLife?.dispose(); pipLife = null; pip?.setMap(null); pip = null;
     if (tidyFrame) cancelAnimationFrame(tidyFrame); tidyFrame = 0;
     for (const handle of mapListeners.splice(0)) handle.remove?.();
     removeOverlays(stopOverlays); removeOverlays(stayOverlays);
@@ -249,6 +249,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
     selected = next; updateSelection();
     if (notify && changed) onSelect(uid);
     if (changed && map && !disposed && !failed) {
+      pipLife?.select(next);
       stayGeneration++; stayController?.abort(); removeOverlays(stayOverlays);
       if (stayTimer != null) { clearTimeout(stayTimer); pendingTimers.delete(stayTimer); }
       stayTimer = later(() => { stayTimer = null; refreshStays(); });
@@ -340,7 +341,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
     select(members[(index + 1) % members.length].stopUID, true);
   };
 
-  // ── Pip walks the route: the whole way once per visit, then to each stop you choose. ──
+  // Pip follows the route, then wanders and keeps busy around its stop.
   function createPipClass() {
     PipOverlay = class extends maps.OverlayView {
       constructor() {
@@ -351,7 +352,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
       onAdd() { this.getPanes()?.overlayLayer?.append(this.canvas); }
       draw() {
         const pixel = this.position && this.getProjection()?.fromLatLngToDivPixel(this.position);
-        if (!pixel || !Number.isFinite(pixel.x)) { this.canvas.hidden = true; return; }
+        if (!pixel || !Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) { this.canvas.hidden = true; return; }
         this.canvas.hidden = false; this.canvas.style.left = `${pixel.x}px`; this.canvas.style.top = `${pixel.y}px`;
         this.canvas.classList.toggle('is-resting', this.resting); this.canvas.classList.toggle('is-west', this.facing < 0);
       }
@@ -363,46 +364,177 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
     const located = points.filter(point => point.location);
     if (options.focusStays || !located.length || pip) return;
     try { await sheet('pip', 'yellow'); } catch { return; }
-    const geometry = await maps.importLibrary?.('geometry').catch(() => null);
+    if (disposed || failed || pip) return;
+    let spherical = null;
+    try { spherical = (await maps.importLibrary?.('geometry'))?.spherical; } catch { /* Strolls still work without geometry. */ }
     if (disposed || failed || pip) return;
     createPipClass(); pip = new PipOverlay(); pip.setMap(map);
-    const target = located.find(point => String(point.stop.uid) === selected) || located[0];
-    const from = located.find(point => String(point.stop.uid) === pipAt.get(trip.uid));
-    const rest = point => {
+    const motion = matchMedia('(prefers-reduced-motion: reduce)');
+    let closed = false, inView = true, pageActive = true, observer = null, walkFrame = 0, lifeTimer = 0;
+    let frameWork = null, timerWork = null, pausedAt = null, pausedFor = 0;
+    const gone = () => closed || disposed || failed || !pip;
+    const canRun = () => !gone() && pageActive && !document.hidden && inView && !motion.matches;
+    // Freeze animation time as well as callbacks: returning to the tab never skips a walk.
+    const time = () => { const now = performance.now(); return (pausedAt ?? now) - pausedFor; };
+    const cancelHandles = () => {
       if (walkFrame) cancelAnimationFrame(walkFrame); walkFrame = 0;
-      pip.resting = true; pip.position = locationPoint(point.location); pip.paint(0, 2); pip.draw(); pipAt.set(trip.uid, String(point.stop.uid));
+      clearTimeout(lifeTimer); lifeTimer = 0;
     };
-    const between = (a, b) => { const i = located.indexOf(a), j = located.indexOf(b), path = located.slice(Math.min(i, j), Math.max(i, j) + 1); return i <= j ? path : path.reverse(); };
-    const walk = path => {
-      if (path.length < 2) { rest(path[0]); return; }
-      const zoom = map.getZoom?.() || 2, legs = [];
-      for (let i = 1; i < path.length; i++) {
-        const a = locationPoint(path[i - 1].location), b = locationPoint(path[i].location);
-        const meters = geometry ? geometry.spherical.computeDistanceBetween(a, b) : Math.hypot(a.lat - b.lat, a.lng - b.lng) * 111000;
-        const pixels = meters / (156543.03392 * Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180) / 2 ** zoom);
-        legs.push({ a, b, ms: clamp(pixels / 0.16, 450, 1600), facing: b.lng < a.lng && Math.abs(b.lng - a.lng) < 180 ? -1 : 1 });
-      }
-      const total = legs.reduce((sum, leg) => sum + leg.ms, 0), scale = total > 12000 ? 12000 / total : 1;
-      let leg = 0, started = performance.now(), painted = 0;
-      pip.resting = false;
-      const step = now => {
+    const still = () => { cancelHandles(); frameWork = null; timerWork = null; };
+    const armFrame = () => {
+      if (!frameWork || walkFrame || !canRun()) return;
+      walkFrame = requestAnimationFrame(() => {
         walkFrame = 0;
-        if (disposed || failed || !pip) return;
-        const current = legs[leg], t = Math.min(1, (now - started) / (current.ms * scale));
-        pip.position = geometry ? geometry.spherical.interpolate(current.a, current.b, t) : { lat: current.a.lat + (current.b.lat - current.a.lat) * t, lng: current.a.lng + (current.b.lng - current.a.lng) * t };
-        pip.facing = current.facing;
-        if (now - painted >= stepMs('pip', 1)) { painted = now; pip.frame = (pip.frame + 1) % 16; pip.paint(1, pip.frame); }
-        pip.draw();
-        if (t >= 1 && ++leg >= legs.length) { rest(path.at(-1)); return; }
-        if (t >= 1) started = now;
-        walkFrame = requestAnimationFrame(step);
-      };
-      walkFrame = requestAnimationFrame(step);
+        if (!canRun()) { playbackChanged(); return; }
+        const next = frameWork; frameWork = null; next?.(time());
+      });
     };
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { rest(target); return; }
-    if (!walked.has(trip.uid)) { walked.add(trip.uid); rest(located[0]); walk(located); }
-    else if (from && from !== target) { rest(from); walk(between(from, target)); }
-    else rest(target);
+    const armTimer = () => {
+      if (!timerWork || lifeTimer || !canRun()) return;
+      lifeTimer = setTimeout(() => {
+        lifeTimer = 0;
+        if (!canRun()) { playbackChanged(); return; }
+        const next = timerWork; timerWork = null; next?.fn();
+      }, Math.max(0, timerWork.due - time()));
+    };
+    function playbackChanged() {
+      if (gone()) return;
+      if (!canRun()) {
+        pausedAt ??= performance.now(); cancelHandles();
+      } else {
+        if (pausedAt != null) { pausedFor += performance.now() - pausedAt; pausedAt = null; }
+        armFrame(); armTimer();
+      }
+    }
+    const nextFrame = fn => { frameWork = fn; armFrame(); };
+    const pause = (fn, ms) => {
+      clearTimeout(lifeTimer); lifeTimer = 0;
+      timerWork = { fn, due: time() + ms }; armTimer();
+    };
+    const longitude = value => ((value + 180) % 360 + 360) % 360 - 180;
+    const deltaLongitude = (a, b) => longitude(b - a);
+    const literal = value => typeof value?.toJSON === 'function' ? value.toJSON() : locationPoint(value);
+    const metersPerPixel = lat => 156543.03392 * Math.cos(clamp(lat, -85, 85) * Math.PI / 180) / 2 ** (map.getZoom?.() || 2);
+    const distance = (a, b) => spherical?.computeDistanceBetween
+      ? spherical.computeDistanceBetween(a, b)
+      : Math.hypot(a.lat - b.lat, deltaLongitude(a.lng, b.lng) * Math.cos(a.lat * Math.PI / 180)) * 111320;
+    let home = located[0];
+    const stand = (position, resting) => { pip.position = position; pip.resting = resting; pip.paint(0, 2); pip.draw(); };
+    const settle = point => {
+      still(); home = point;
+      pipAt.delete(trip.uid); pipAt.set(trip.uid, String(point.stop.uid));
+      while (pipAt.size > 8) { const key = pipAt.keys().next().value; pipAt.delete(key); walked.delete(key); }
+      stand(locationPoint(point.location), true);
+    };
+    const along = (a, b) => { const i = located.indexOf(a), j = located.indexOf(b), path = located.slice(Math.min(i, j), Math.max(i, j) + 1); return (i <= j ? path : path.reverse()).map(point => locationPoint(point.location)); };
+
+    /** Walks through positions (a stroll is slower than a trip leg), then calls done. */
+    const walk = (positions, done, pace = 0.16) => {
+      still();
+      const legs = [];
+      for (let i = 1; i < positions.length; i++) {
+        const a = literal(positions[i - 1]), b = literal(positions[i]), pixels = distance(a, b) / metersPerPixel((a.lat + b.lat) / 2);
+        if (pixels >= 1) legs.push({ a, b, ms: clamp(pixels / pace, 450, 1600), facing: deltaLongitude(a.lng, b.lng) < 0 ? -1 : 1 });
+      }
+      if (!legs.length) { done(); return; }
+      const total = legs.reduce((sum, leg) => sum + leg.ms, 0), scale = total > 12000 ? 12000 / total : 1;
+      let leg = 0, started = time(), painted = -Infinity;
+      pip.resting = false; pip.frame = 0;
+      const step = now => {
+        if (gone()) return;
+        const current = legs[leg], t = Math.min(1, (now - started) / (current.ms * scale));
+        pip.position = spherical?.interpolate ? literal(spherical.interpolate(current.a, current.b, t))
+          : { lat: current.a.lat + (current.b.lat - current.a.lat) * t, lng: longitude(current.a.lng + deltaLongitude(current.a.lng, current.b.lng) * t) };
+        pip.facing = current.facing;
+        if (now - painted >= stepMs('pip', 1)) { painted = now; pip.frame = (pip.frame + 1) % frameCount('pip', 1); pip.paint(1, pip.frame); }
+        pip.draw();
+        if (t >= 1 && ++leg >= legs.length) { done(); return; }
+        if (t >= 1) started = now;
+        nextFrame(step);
+      };
+      nextFrame(step);
+    };
+    /** One of pip's activities in place: wave, juggle, read, hop or write. */
+    const play = (activity, loops, done) => {
+      still(); let frame = 0, count = 0;
+      const tick = () => {
+        if (gone()) return;
+        pip.paint(activity, frame); frame = (frame + 1) % frameCount('pip', activity);
+        if (frame === 0) count++;
+        pause(() => { if (count >= loops) { pip.paint(0, 2); done(); } else tick(); }, stepMs('pip', activity));
+      };
+      tick();
+    };
+    let activities = [], lastActivity = null;
+    const nextActivity = () => {
+      if (!activities.length) {
+        activities = [0, 2, 3, 4, 5];
+        for (let i = activities.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [activities[i], activities[j]] = [activities[j], activities[i]]; }
+        if (activities.at(-1) === lastActivity) activities.unshift(activities.pop());
+      }
+      return lastActivity = activities.pop();
+    };
+    const stroll = base => {
+      const angle = Math.random() * Math.PI * 2, reach = 24 + Math.random() * 56;
+      const projection = pip.getProjection(), pixel = projection?.fromLatLngToContainerPixel?.(base);
+      const width = viewport.clientWidth, height = viewport.clientHeight;
+      if (pixel && Number.isFinite(pixel.x) && Number.isFinite(pixel.y) && width > 88 && height > 100) {
+        // Stay inside the map, including the sprite's head and the mobile viewport edges.
+        if (pixel.x < 0 || pixel.x > width || pixel.y < 0 || pixel.y > height) return null;
+        const value = projection.fromContainerPixelToLatLng(new maps.Point(
+          clamp(pixel.x + Math.cos(angle) * reach, 28, width - 28),
+          clamp(pixel.y + Math.sin(angle) * reach, 48, height - 28)));
+        return value && validLocation(literal(value)) ? literal(value) : null;
+      }
+      const mpp = metersPerPixel(base.lat);
+      return { lat: clamp(base.lat - Math.sin(angle) * reach * mpp / 111320, -85, 85),
+        lng: longitude(base.lng + Math.cos(angle) * reach * mpp / (111320 * Math.cos(clamp(base.lat, -85, 85) * Math.PI / 180))) };
+    };
+    const live = () => {
+      if (gone()) return;
+      const base = locationPoint(home.location), here = pip.position || base, roll = Math.random(), index = located.indexOf(home);
+      const away = distance(here, base) / metersPerPixel(base.lat) > 12;
+      if (away && roll < .45) walk([here, base], () => { stand(base, true); pause(live, 600 + Math.random() * 1400); }, .07);
+      else if (roll < .45) play(nextActivity(), 1 + Math.floor(Math.random() * 2), () => pause(live, 1500 + Math.random() * 3500));
+      else if (roll < .88 || located.length < 2) {
+        const target = stroll(base);
+        if (!target) { pause(live, 2000); return; }
+        walk([here, target], () => { stand(target, false); pause(live, 800 + Math.random() * 2400); }, .07);
+      } else {
+        const neighbour = located[index === 0 ? 1 : index === located.length - 1 ? index - 1 : index + (Math.random() < .5 ? -1 : 1)], there = locationPoint(neighbour.location);
+        walk([here, base, there], () => { stand(there, false); play(0, 1, () => walk([there, base], () => { stand(base, true); pause(live, 1500 + Math.random() * 2500); })); });
+      }
+    };
+    const selectedStop = () => located.find(point => String(point.stop.uid) === selected) || located[0];
+    const arrive = point => { settle(point); pause(live, 1200); };
+    pipLife = {
+      dispose() { closed = true; still(); observer?.disconnect(); },
+      select(uid) {
+        const point = located.find(point => String(point.stop.uid) === uid);
+        if (!point || gone()) return;
+        if (motion.matches) settle(point);
+        else walk([pip.position || locationPoint(home.location), ...along(home, point)], () => arrive(point));
+      },
+    };
+    listen(document, 'visibilitychange', playbackChanged);
+    listen(window, 'pagehide', () => { pageActive = false; playbackChanged(); });
+    listen(window, 'pageshow', () => { pageActive = true; playbackChanged(); });
+    listen(motion, 'change', () => {
+      if (motion.matches) settle(selectedStop()); else arrive(selectedStop());
+      playbackChanged();
+    });
+    if (typeof IntersectionObserver === 'function') {
+      observer = new IntersectionObserver(entries => {
+        inView = entries.some(entry => entry.isIntersecting); playbackChanged();
+      });
+      observer.observe(viewport);
+    }
+    playbackChanged();
+    const target = selectedStop(), from = located.find(point => String(point.stop.uid) === pipAt.get(trip.uid));
+    if (motion.matches) { settle(target); return; }
+    if (!walked.has(trip.uid)) { walked.add(trip.uid); settle(located[0]); walk(located.map(point => locationPoint(point.location)), () => arrive(located.at(-1))); }
+    else if (from && from !== target) { settle(from); walk(along(from, target), () => arrive(target)); }
+    else arrive(target);
   }
   function drawStays(rows) {
     removeOverlays(stayOverlays);
