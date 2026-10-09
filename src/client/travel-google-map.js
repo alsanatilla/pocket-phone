@@ -1,6 +1,7 @@
 import { loadGoogleMaps, onMapsAuthFailure } from './google-maps.js';
 import { resolveLocation } from './travel-geocoding.js';
 import { sheet, drawFrame, SIZE, stepMs, frameCount } from './sprite-player.js';
+import { localToday, pipPhase, stopFacts, visitedStops, souvenirFor } from './pip-travel-life.js';
 
 const WARM_MAP_STYLE = [
   { elementType: 'geometry', stylers: [{ color: '#302f27' }] },
@@ -37,7 +38,7 @@ const QUIET_STYLE = [...DETAIL_STYLE,
 const DETAIL_ZOOM = 11;
 const viewports = new Map();
 // Keep Pip's last stop across route redraws, with the same small limit as map viewports.
-const walked = new Set(), pipAt = new Map();
+const walked = new Set(), pipAt = new Map(), pipFactIndex = new Map();
 // One SDK map survives detached route redraws; adapter overlays/listeners do not.
 // This avoids constructing another billable map on every stop/tab/live update.
 let retainedMap = null;
@@ -53,6 +54,17 @@ function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) if (value != null) node.setAttribute(key, value);
   node.append(...children); return node;
+}
+// Souvenirs from visited stops, at most 12 shown. Derived from the trip, so shared trips match.
+function backpackRow(visited) {
+  if (!visited.length) return null;
+  const icons = visited.slice(0, 12).map(stop => {
+    const { color, svg } = souvenirFor(stop), label = `souvenir from ${stop.place || 'destination'}`;
+    const icon = el('span', { role: 'img', 'aria-label': label, title: label });
+    icon.style.color = color; icon.innerHTML = svg; return icon;
+  });
+  if (visited.length > 12) icons.push(el('span', { class: 'travel-google-backpack-more' }, `+${visited.length - 12}`));
+  return el('div', { class: 'travel-google-backpack' }, el('span', { class: 'travel-google-backpack-label' }, 'backpack'), ...icons);
 }
 function abortable(promise, signal) {
   if (signal.aborted) return Promise.reject(abortError());
@@ -146,8 +158,9 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
   const zoomOut = el('button', { type: 'button', 'aria-label': 'Zoom out', disabled: '' }, '−');
   const zoomControls = el('div', { class: 'travel-google-zoom', role: 'group', 'aria-label': 'Map zoom' }, zoomIn, zoomOut);
   const unavailable = el('div', { class: 'travel-google-missing', hidden: '' });
+  const backpack = options.focusStays ? null : backpackRow(visitedStops(trip, localToday()));
   viewport.append(loading, fitButton, stayArea, zoomControls);
-  wrapper.append(viewport, el('div', { class: 'travel-google-caption' }, options.focusStays ? 'Stays' : 'Trip order'), unavailable);
+  wrapper.append(viewport, el('div', { class: 'travel-google-caption' }, options.focusStays ? 'Stays' : 'Trip order'), ...(backpack ? [backpack] : []), unavailable);
   host.replaceChildren(wrapper);
   const viewportKey = () => trip?.uid ? `${trip.uid}:${options.focusStays ? 'stays:' + selected : 'route'}` : '';
   const remember = () => {
@@ -348,15 +361,21 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
         super(); this.position = null; this.facing = 1; this.resting = true; this.frame = 0;
         this.canvas = el('canvas', { class: 'travel-google-pip', 'aria-hidden': 'true', width: String(SIZE), height: String(SIZE) });
         this.context = this.canvas.getContext('2d');
+        this.zz = el('span', { class: 'travel-google-pip-zz', 'aria-hidden': 'true' }, 'z z');
+        this.button = el('button', { type: 'button', class: 'travel-google-pip-button', 'aria-label': 'Pip' }, this.canvas, this.zz);
+        // The bubble sits beside the button, not inside it, so it is announced and stays valid markup.
+        this.bubble = el('span', { class: 'travel-google-pip-bubble', role: 'status', hidden: '' });
+        this.element = el('div', { class: 'travel-google-pip-wrap' }, this.button, this.bubble);
+        maps.OverlayView.preventMapHitsAndGesturesFrom?.(this.element);
       }
-      onAdd() { this.getPanes()?.overlayLayer?.append(this.canvas); }
+      onAdd() { this.getPanes()?.overlayMouseTarget?.append(this.element); }
       draw() {
         const pixel = this.position && this.getProjection()?.fromLatLngToDivPixel(this.position);
-        if (!pixel || !Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) { this.canvas.hidden = true; return; }
-        this.canvas.hidden = false; this.canvas.style.left = `${pixel.x}px`; this.canvas.style.top = `${pixel.y}px`;
-        this.canvas.classList.toggle('is-resting', this.resting); this.canvas.classList.toggle('is-west', this.facing < 0);
+        if (!pixel || !Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) { this.element.hidden = true; return; }
+        this.element.hidden = false; this.element.style.left = `${pixel.x}px`; this.element.style.top = `${pixel.y}px`;
+        this.element.classList.toggle('is-resting', this.resting); this.element.classList.toggle('is-west', this.facing < 0);
       }
-      onRemove() { this.canvas.remove(); }
+      onRemove() { this.element.remove(); }
       paint(activity, frame) { drawFrame(this.context, 'pip', 'yellow', activity, frame); }
     };
   }
@@ -370,7 +389,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
     if (disposed || failed || pip) return;
     createPipClass(); pip = new PipOverlay(); pip.setMap(map);
     const motion = matchMedia('(prefers-reduced-motion: reduce)');
-    let closed = false, inView = true, pageActive = true, observer = null, walkFrame = 0, lifeTimer = 0;
+    let closed = false, inView = true, pageActive = true, observer = null, walkFrame = 0, lifeTimer = 0, bubbleTimer = 0, holding = false;
     let frameWork = null, timerWork = null, pausedAt = null, pausedFor = 0;
     const gone = () => closed || disposed || failed || !pip;
     const canRun = () => !gone() && pageActive && !document.hidden && inView && !motion.matches;
@@ -419,7 +438,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
       ? spherical.computeDistanceBetween(a, b)
       : Math.hypot(a.lat - b.lat, deltaLongitude(a.lng, b.lng) * Math.cos(a.lat * Math.PI / 180)) * 111320;
     let home = located[0];
-    const stand = (position, resting) => { pip.position = position; pip.resting = resting; pip.paint(0, 2); pip.draw(); };
+    const stand = (position, resting) => { pip.button.classList.remove('is-asleep'); pip.position = position; pip.resting = resting; pip.paint(0, 2); pip.draw(); };
     const settle = point => {
       still(); home = point;
       pipAt.delete(trip.uid); pipAt.set(trip.uid, String(point.stop.uid));
@@ -439,7 +458,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
       if (!legs.length) { done(); return; }
       const total = legs.reduce((sum, leg) => sum + leg.ms, 0), scale = total > 12000 ? 12000 / total : 1;
       let leg = 0, started = time(), painted = -Infinity;
-      pip.resting = false; pip.frame = 0;
+      pip.button.classList.remove('is-asleep'); pip.resting = false; pip.frame = 0;
       const step = now => {
         if (gone()) return;
         const current = legs[leg], t = Math.min(1, (now - started) / (current.ms * scale));
@@ -456,7 +475,7 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
     };
     /** One of pip's activities in place: wave, juggle, read, hop or write. */
     const play = (activity, loops, done) => {
-      still(); let frame = 0, count = 0;
+      still(); pip.button.classList.remove('is-asleep'); let frame = 0, count = 0;
       const tick = () => {
         if (gone()) return;
         pip.paint(activity, frame); frame = (frame + 1) % frameCount('pip', activity);
@@ -465,14 +484,10 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
       };
       tick();
     };
-    let activities = [], lastActivity = null;
-    const nextActivity = () => {
-      if (!activities.length) {
-        activities = [0, 2, 3, 4, 5];
-        for (let i = activities.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [activities[i], activities[j]] = [activities[j], activities[i]]; }
-        if (activities.at(-1) === lastActivity) activities.unshift(activities.pop());
-      }
-      return lastActivity = activities.pop();
+    let lastActivity = null;
+    const pickActivity = list => {
+      const options = list.filter(activity => activity !== lastActivity);
+      return lastActivity = (options.length ? options : list)[Math.floor(Math.random() * (options.length || list.length))];
     };
     const stroll = base => {
       const angle = Math.random() * Math.PI * 2, reach = 24 + Math.random() * 56;
@@ -494,12 +509,25 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
       if (gone()) return;
       const base = locationPoint(home.location), here = pip.position || base, roll = Math.random(), index = located.indexOf(home);
       const away = distance(here, base) / metersPerPixel(base.lat) > 12;
+      const phase = pipPhase(home.location.lng, Date.now());
+      wrapper.dataset.pipPhase = phase;
+      // Night: Pip walks home if away, then sleeps there and checks again in a minute.
+      if (phase === 'night') {
+        const sleep = () => { still(); stand(base, true); pip.button.classList.add('is-asleep'); pause(live, 60000); };
+        if (away) walk([here, base], sleep, .07); else sleep();
+        return;
+      }
+      // Activities and strolls share a roll; the cut-offs decide the mix for this part of the day.
+      const [activityUntil, strollUntil] = { day: [.45, .88], morning: [.3, .8], evening: [.7, 1] }[phase];
+      const kind = roll < activityUntil ? 'activity' : roll < strollUntil ? 'stroll' : 'neighbour';
+      const activities = { day: [2, 4, 0], morning: [0, 4], evening: [3, 5] }[phase];
+      const pace = phase === 'evening' ? .05 : .07;
       if (away && roll < .45) walk([here, base], () => { stand(base, true); pause(live, 600 + Math.random() * 1400); }, .07);
-      else if (roll < .45) play(nextActivity(), 1 + Math.floor(Math.random() * 2), () => pause(live, 1500 + Math.random() * 3500));
-      else if (roll < .88 || located.length < 2) {
+      else if (kind === 'activity') play(pickActivity(activities), 1 + Math.floor(Math.random() * 2), () => pause(live, 1500 + Math.random() * 3500));
+      else if (kind === 'stroll' || located.length < 2) {
         const target = stroll(base);
         if (!target) { pause(live, 2000); return; }
-        walk([here, target], () => { stand(target, false); pause(live, 800 + Math.random() * 2400); }, .07);
+        walk([here, target], () => { stand(target, false); pause(live, 800 + Math.random() * 2400); }, pace);
       } else {
         const neighbour = located[index === 0 ? 1 : index === located.length - 1 ? index - 1 : index + (Math.random() < .5 ? -1 : 1)], there = locationPoint(neighbour.location);
         walk([here, base, there], () => { stand(there, false); play(0, 1, () => walk([there, base], () => { stand(base, true); pause(live, 1500 + Math.random() * 2500); })); });
@@ -508,14 +536,34 @@ export function mountGoogleRouteMap(host, trip, selectedUID, onSelect = () => {}
     const selectedStop = () => located.find(point => String(point.stop.uid) === selected) || located[0];
     const arrive = point => { settle(point); pause(live, 1200); };
     pipLife = {
-      dispose() { closed = true; still(); observer?.disconnect(); },
+      dispose() { closed = true; still(); clearTimeout(bubbleTimer); observer?.disconnect(); },
       select(uid) {
         const point = located.find(point => String(point.stop.uid) === uid);
         if (!point || gone()) return;
+        // Choosing a stop ends a tap pause; the bubble must not later stop the walk there.
+        holding = false; pip.bubble.hidden = true; clearTimeout(bubbleTimer); bubbleTimer = 0;
         if (motion.matches) settle(point);
         else walk([pip.position || locationPoint(home.location), ...along(home, point)], () => arrive(point));
       },
     };
+    // Tap: wave once and say the next fact about the stop Pip is at. Hiding resumes life.
+    const bubble = pip.bubble;
+    const hideBubble = () => {
+      if (bubble.hidden) return;
+      clearTimeout(bubbleTimer); bubbleTimer = 0; bubble.hidden = true;
+      if (holding && !gone()) { holding = false; still(); pause(live, 1500); }
+    };
+    const tap = () => {
+      if (gone()) return;
+      const facts = stopFacts(trip, home.stop.uid, localToday(), []), index = pipFactIndex.get(trip.uid) || 0;
+      pipFactIndex.set(trip.uid, index + 1);
+      holding = true; still(); pip.button.classList.remove('is-asleep');
+      if (motion.matches) pip.paint(0, 2); else play(0, 1, () => {});
+      bubble.textContent = facts[index % facts.length] || home.stop.place || 'Destination';
+      bubble.hidden = false; clearTimeout(bubbleTimer); bubbleTimer = setTimeout(hideBubble, 4500);
+    };
+    listen(pip.button, 'click', tap);
+    addMapListener('click', hideBubble);
     listen(document, 'visibilitychange', playbackChanged);
     listen(window, 'pagehide', () => { pageActive = false; playbackChanged(); });
     listen(window, 'pageshow', () => { pageActive = true; playbackChanged(); });

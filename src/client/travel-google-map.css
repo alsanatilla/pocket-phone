@@ -48,7 +48,22 @@
 /* Names that would cover another pin or name step back; a shared spot shows all its numbers. */
 .travel-google-pin.is-label-hidden .travel-google-pin-name { display: none; }
 .travel-google-pin.is-group .travel-google-pin-number { width: auto; min-width: 30px; padding: 0 7px; border-radius: 15px; }
-/* Pip walking the route. Below the pins, never in the way of a tap. */
-.travel-google-pip { position: absolute; width: 44px; height: 44px; image-rendering: pixelated; pointer-events: none; transform: translate(-50%, -92%); z-index: 1; }
-.travel-google-pip.is-west { transform: translate(-50%, -92%) scaleX(-1); }
-.travel-google-pip.is-resting { transform: translate(-112%, -86%); }
+/* Pip walking the route. Below the pins, never in the way of a tap. The button carries position and the 44px hit area. */
+.travel-google-pip-wrap { position: absolute; z-index: 1; width: 44px; height: 44px; transform: translate(-50%, -92%); pointer-events: none; }
+.travel-google-pip-wrap.is-resting { transform: translate(-112%, -86%); }
+.travel-google-pip-button { position: relative; display: block; width: 44px; height: 44px; min-width: 44px; min-height: 44px; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent !important; box-shadow: none !important; pointer-events: auto; cursor: pointer; }
+.travel-google-pip-button:focus-visible { outline: 2px solid var(--accent, #ecc981); outline-offset: 2px; }
+.travel-google-pip { display: block; width: 44px; height: 44px; image-rendering: pixelated; pointer-events: none; }
+.travel-google-pip-wrap.is-west .travel-google-pip { transform: scaleX(-1); }
+.travel-google-pip-zz { display: none; position: absolute; left: 30px; top: -2px; color: var(--text, #f0e9dd); font: 13px/1 var(--mono, monospace); pointer-events: none; }
+.travel-google-pip-button.is-asleep .travel-google-pip-zz { display: block; animation: travel-google-zz 2.4s ease-in infinite; }
+@keyframes travel-google-zz { 0% { opacity: 0; transform: translate(0, 4px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(6px, -14px); } }
+@media (prefers-reduced-motion: reduce) { .travel-google-pip-button.is-asleep .travel-google-pip-zz { animation: none; opacity: 1; } }
+.travel-google-pip-bubble { position: absolute; display: block; pointer-events: none; bottom: 100%; left: 50%; width: max-content; max-width: 26ch; margin-bottom: 6px; transform: translateX(-50%); padding: 6px 10px; border: 1px solid var(--line, #4a4438); background: var(--plane, #1e1c18); color: var(--text, #f0e9dd); font: 13px/1.5 var(--mono, monospace); text-align: left; white-space: normal; cursor: default; }
+.travel-google-pip-bubble::after { content: ''; position: absolute; left: 50%; top: 100%; width: 6px; height: 6px; margin: -4px 0 0 -3px; border-right: 1px solid var(--line, #4a4438); border-bottom: 1px solid var(--line, #4a4438); background: var(--plane, #1e1c18); transform: rotate(45deg); }
+/* Backpack: souvenirs from visited stops, derived from the trip. */
+.travel-google-backpack { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 6px; min-width: 0; font: 13px/1.5 var(--mono, monospace); }
+.travel-google-backpack-label, .travel-google-backpack-more { color: var(--muted, #b6ac9d); }
+.travel-google-backpack-label { margin-right: 4px; }
+.travel-google-backpack [role=img] { display: inline-flex; width: 16px; height: 16px; }
+.travel-google-backpack svg { display: block; width: 16px; height: 16px; }
