@@ -88,7 +88,7 @@ test('forgetting the key stops scheduling, and settings are validated', async ()
   await assert.rejects(background.saveRoutine(userId, { kind: 'checkin', time: '25:00', days: [1] }), /time/);
 });
 
-const { trainingRuntime } = await import('../src/server/pip-training.js');
+const { trainingRuntime, trainingObservation, trainingChanged } = await import('../src/server/pip-training.js');
 const { readDocuments } = await import('../src/server/workspace.js');
 const trainingRoutine = { id: 'training-fixture', kind: 'training', prompt: 'Combine running and gym. Maintain fitness.', time: '07:00', days: [0, 1, 2, 3, 4, 5, 6], trainingDays: [0, 1, 2, 3, 4, 5, 6] };
 const trainingRead = async (_, name) => ({ text: name === 'queryTrainingSchedule' || name === 'querySportRecords' ? '[]' : '{"recovery":80,"load":40}' });
@@ -122,6 +122,7 @@ test('training upserts only its own dated gym task and respects user edits and c
   assert.ok((await runtime.prepare('create_record', { ...gymTask, kind: 'note' })).error);
   assert.ok((await runtime.prepare('create_record', { ...gymTask, due: '2026-10-09' })).error);
   assert.ok((await runtime.prepare('create_record', { ...gymTask, due: '2026-10-17' })).error);
+  assert.ok((await runtime.prepare('create_record', { ...gymTask, due: '2026-10-13' })).error);
 });
 
 test('missing live data, unavailable days and revoked authorization block all training writes', async () => {
@@ -167,4 +168,76 @@ test('training uses the actual SDK approval loop to save a gym task without a br
   assert.equal(reply.answer, 'Gym saved for tomorrow.');
   assert.equal((await readDocuments(userId))['tasks.json'].value.tasks.length, 1);
   assert.ok(reply.activity.some(row => row.applied_href?.startsWith('/tasks/')));
+});
+
+const completedRun = (id = '101', pace = '5:40/km') => `Sport Records — 2026-09-25 to 2026-10-09 (1 records)\n\n1. Outdoor Run — 2026-10-09\n   Distance: 5.0 km | Duration: 00:28:20\n   Average Pace: ${pace} | Avg HR: 148\n   LabelId: ${id} | SportType: 100`;
+
+test('workout reviews fetch actual session details and refuse writes when details are missing', async () => {
+  const userId = await account(), calls = [];
+  const read = async (id, name, args) => {
+    calls.push({ name, args });
+    if (name === 'querySportRecords') return { text: completedRun() };
+    if (name === 'getActivityDetail') return { text: 'Pace 5:40/km; HR 148; completed 5 km; intervals: 5 × 1 km.' };
+    return trainingRead(id, name);
+  };
+  const runtime = await trainingRuntime(userId, trainingRoutine, '2026-10-09', { read });
+  assert.deepEqual(calls.find(call => call.name === 'getActivityDetail').args, { labelId: '101', sportType: 100 });
+  assert.match(runtime.prompt, /completed 5 km/);
+  assert.match(runtime.prompt, /next one or two/);
+  assert.match(runtime.prompt, /compare actual duration/);
+  assert.equal(runtime.complete, true);
+  const missing = await trainingRuntime(userId, trainingRoutine, '2026-10-09', { read: (id, name, args) => name === 'getActivityDetail' ? { error: true } : read(id, name, args) });
+  assert.equal(missing.complete, false);
+  assert.match((await missing.execute('create_record', gymTask)).message, /getActivityDetail:101/);
+});
+
+test('completed gym workouts trigger reviews; active workouts and refresh timestamps do not', async () => {
+  const userId = await account(), at = Date.parse('2026-10-09T07:00:00Z');
+  const before = await trainingObservation(userId, '2026-10-09', { read: trainingRead });
+  const workout = { id: 'gym-1', started: at, ended: 0, updated: at, entries: [{ exercise: 'Squat', sets: [{ reps: 5, kg: 60 }] }] };
+  await syncDocuments(userId, { 'gym.json': { v: 1, workouts: [workout] } });
+  let after = await trainingObservation(userId, '2026-10-09', { read: trainingRead });
+  assert.equal(after.gym.length, 0);
+  assert.equal(trainingChanged(before, after), false);
+  workout.ended = at + 3600000; workout.updated++;
+  await syncDocuments(userId, { 'gym.json': { v: 1, workouts: [workout] } });
+  after = await trainingObservation(userId, '2026-10-09', { read: trainingRead });
+  assert.equal(trainingChanged(before, after), true); assert.equal(after.gym.length, 1);
+  workout.updated++;
+  await syncDocuments(userId, { 'gym.json': { v: 1, workouts: [workout] } });
+  assert.equal(trainingChanged(after, await trainingObservation(userId, '2026-10-09', { read: trainingRead })), false);
+});
+
+test('background checks run AI only for changed workouts, the daily recovery check, or run now', async () => {
+  const userId = await account(); let requests = 0, records = completedRun();
+  await background.saveBackground(userId, { ...settings, grants: ['gym', 'coros', 'tasks'] }, 'fixture-key-123456');
+  const { routines } = await background.saveRoutine(userId, trainingRoutine), routine = routines[0];
+  assert.ok(routine.nextRun - Date.now() <= 30 * 60000);
+  const options = { now: Date.parse('2026-10-09T08:00:00Z'),
+    fetcher: async () => { requests++; return response(compatibleMessage({ text: 'Reviewed the latest run. Keep the next session easy.' })); },
+    trainingServices: { read: async (id, name) => name === 'querySportRecords' ? { text: records } : name === 'getActivityDetail' ? { text: 'Completed 5 km, average HR 148.' } : trainingRead(id, name) } };
+  const first = await background.runClaimed(userId, routine.id, { ...options, force: true });
+  assert.equal(first.status, 'done'); assert.equal(requests, 1);
+  assert.equal((await background.runRoutine(userId, routine, options)).status, 'unchanged'); assert.equal(requests, 1);
+  records = completedRun('101', '5:30/km');
+  assert.equal((await background.runRoutine(userId, routine, options)).status, 'done'); assert.equal(requests, 2);
+  records = completedRun('102');
+  assert.equal((await background.runRoutine(userId, routine, options)).status, 'done'); assert.equal(requests, 3);
+  await execute({ sql: 'UPDATE pocket_pip_routines SET next_run = 0 WHERE user_id = ?', args: [userId] });
+  assert.equal((await background.runClaimed(userId, routine.id, options)).status, 'unchanged');
+  assert.equal((await background.backgroundState(userId)).routines[0].lastChat, first.chat);
+  assert.equal((await background.runRoutine(userId, routine, { ...options, now: options.now + 86400000 })).status, 'done'); assert.equal(requests, 4);
+  assert.equal((await background.runRoutine(userId, routine, { ...options, now: options.now + 86400000, force: true })).status, 'done'); assert.equal(requests, 5);
+});
+
+test('two upcoming sessions is a shared limit across parallel writes and subsequent reviews', async () => {
+  const userId = await account(), runtime = await trainingRuntime(userId, trainingRoutine, '2026-10-09', { read: trainingRead });
+  const results = await Promise.all(['2026-10-10', '2026-10-11', '2026-10-12'].map(due => runtime.execute('create_record', { ...gymTask, due })));
+  assert.equal(results.filter(result => result.action?.status === 'saved').length, 2);
+  assert.match(results[2].message, /Two upcoming sessions/);
+  const next = await trainingRuntime(userId, trainingRoutine, '2026-10-09', { read: trainingRead });
+  assert.match((await next.execute('create_record', { ...gymTask, due: '2026-10-12' })).message, /Two upcoming sessions/);
+  assert.equal((await next.execute('create_record', { ...gymTask, title: 'Recovery · Easy mobility' })).action.status, 'saved');
+  const tomorrow = await trainingRuntime(userId, trainingRoutine, '2026-10-10', { read: trainingRead });
+  assert.equal((await tomorrow.execute('create_record', { ...gymTask, due: '2026-10-12' })).action.status, 'saved');
 });

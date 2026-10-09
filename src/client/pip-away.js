@@ -34,7 +34,7 @@ export async function pipAway(ui, openChat) {
       webSearch: web.input.checked, grants: grants.filter(item => item.input.checked).map(item => item.name), dailyTokens: Number(limit.value), timezone: timezone(), enabled: enabled.input.checked });
     const routines = state.routines.map(routine => ui.h('div', { class: 'pip-routine' },
       ui.h('strong', { text: routine.title }),
-      caption([routine.time + ' · ' + dayList(routine.days), routine.nextRun ? 'next ' + when(routine.nextRun) : 'paused', routine.lastError].filter(Boolean).join(' · ')),
+      caption([routine.kind === 'training' ? 'after workouts · daily check ' + routine.time + ' · ' + dayList(routine.days) : routine.time + ' · ' + dayList(routine.days), routine.nextRun ? (routine.kind === 'training' ? 'next data check ' : 'next ') + when(routine.nextRun) : 'paused', routine.lastError].filter(Boolean).join(' · ')),
       ui.h('div', { class: 'pip-routine-actions' },
         button('run now', async () => {
           ui.say('Pip is running “' + routine.title + '”…');
@@ -61,12 +61,13 @@ export async function pipAway(ui, openChat) {
       if (training) prompt.placeholder = 'Your running and gym goals, weekly time budget, equipment, preferences, and any current fatigue or limitations.';
       await ui.dialog(routine.id ? routine.title : training ? 'training planner' : routine.kind === 'checkin' ? 'morning check-in' : 'scheduled prompt', ui.h('div', { class: 'pip-settings' },
         ui.h('label', {}, 'name', title), routine.kind !== 'checkin' ? ui.h('label', {}, training ? 'goals & current training situation' : 'what Pip should do', prompt) : caption('Overdue and due tasks, old parked thoughts, COROS readiness and load, with up to three suggestions.'),
-        training ? caption('Automatically plans the next seven days from tomorrow using live COROS recovery, load, recent activities and your Gym history. Running, cycling and trail workouts go to COROS; gym and recovery sessions become dated Pocket tasks. Updates its own sessions, leaves manual workouts intact, and reports changes here.') : null,
+        training ? caption('Reviews how your latest workouts went, then adjusts just the next one or two sessions within three days, starting tomorrow. Checks for completed COROS and synced Gym workouts about every 30 minutes, and reviews recovery at the daily check below. Unchanged data does not start another AI review.') : null,
+        training ? caption('Running, cycling and trail workouts go to COROS; gym and recovery sessions become dated Pocket tasks. Pip reviews actual workout details, updates its own upcoming sessions and explains what changed. Manual workouts stay intact.') : null,
         training ? caption('Requires Gym, COROS and Tasks access. COROS must be connected in Movement. Missing live data stops changes. COROS cannot remove a workout; Pip will flag a session to skip when needed.') : null,
         training ? caption('available training days') : null,
         training ? ui.h('div', { class: 'pip-days', 'aria-label': 'Available training days' }, trainingDays.map(item => item.view)) : null,
-        ui.h('label', {}, (training ? 'review plan at · ' : 'time · ') + timezone(), time),
-        training ? caption('review plan on') : null,
+        ui.h('label', {}, (training ? 'daily recovery check · ' : 'time · ') + timezone(), time),
+        training ? caption('daily recovery check on · new workouts are checked every day') : null,
         ui.h('div', { class: 'pip-days', 'aria-label': 'Routine days' }, days.map(item => item.view)), on.view, problem,
         button(training ? 'save automatic training planner' : 'save routine', save, { class: 'row-button accent' }),
         routine.id ? button('delete routine', async () => show(await post(API, { action: 'delete-routine', id: routine.id }))) : null,
@@ -77,7 +78,7 @@ export async function pipAway(ui, openChat) {
       caption('Runs on Pocket\'s server while Pocket is closed, with a key used only for this. Replies arrive as Pip chats. Check-ins and prompts suggest changes. The training planner automatically saves workouts and its own gym tasks.'),
       caption(state.hasKey ? 'today · ' + state.usedToday.toLocaleString() + ' of ' + settings.dailyTokens.toLocaleString() + ' tokens' : 'Add a key to start. Set a spending limit for it at your provider.'),
       ui.h('label', {}, 'Provider', provider), ui.h('label', {}, 'API base URL', endpoint), ui.h('label', {}, 'Model', model), ui.h('label', {}, 'Dedicated key', key),
-      ui.h('label', {}, 'Daily token limit', limit), ui.h('label', {}, 'Reply token limit', replyLimit), caption('For a full training week, use 8,192 reply tokens.'), enabled.view,
+      ui.h('label', {}, 'Daily token limit', limit), ui.h('label', {}, 'Reply token limit', replyLimit), caption('Workout analysis and detailed sessions may need up to 8,192 reply tokens.'), enabled.view,
       caption('Pip may read'), ...grants.map(item => item.view), web.view, caption('Calendar appointments stay on your phone.'), error,
       button('save settings', async () => {
         try { await show(await post(API, { action: 'settings', settings: read(), key: key.value.trim() })); }

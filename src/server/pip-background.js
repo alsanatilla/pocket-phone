@@ -7,7 +7,7 @@ import { corosState, corosTool, corosCatalog } from './coros.js';
 import { EMPTY } from '../shared/workspace.js';
 import { config as pipConfig, requestBody, contextCoverage } from '../client/pip-core.js';
 import { execute as runTool, recordSource, WRITE_TOOLS } from '../client/pip-tools.js';
-import { trainingRuntime, TRAINING_GRANTS } from './pip-training.js';
+import { trainingRuntime, trainingObservation, trainingCheckpoint, trainingChanged, rememberTraining, TRAINING_GRANTS, TRAINING_CHECK_INTERVAL } from './pip-training.js';
 
 // Pip on its own: routines that run on a schedule with the account's dedicated provider key, read the account's
 // server copy and reply in a synced Pip chat. Training routines have scoped writes; calendar appointments stay on the phone.
@@ -80,7 +80,8 @@ export async function backgroundState(userId) {
   const saved = await stored(userId), today = saved?.settings ? localDay(Date.now(), saved.settings.timezone) : '';
   return { settings: saved?.settings || null, hasKey: Boolean(saved?.credentials), usedToday: saved && saved.usedDay === today ? saved.usedTokens : 0, routines: await routines(userId) };
 }
-const schedule = (routine, settings, active) => active && settings?.enabled && routine.enabled ? nextRun(routine, settings.timezone) : NEVER;
+const schedule = (routine, settings, active, after = Date.now()) => active && settings?.enabled && routine.enabled
+  ? Math.min(nextRun(routine, settings.timezone, after), routine.kind === 'training' ? after + TRAINING_CHECK_INTERVAL : NEVER) : NEVER;
 async function reschedule(userId) {
   const saved = await stored(userId), active = Boolean(saved?.credentials);
   for (const routine of await routines(userId)) await sql({ sql: 'UPDATE pocket_pip_routines SET next_run = ? WHERE user_id = ? AND id = ?', args: [schedule(routine, saved?.settings, active), userId, routine.id] });
@@ -139,7 +140,7 @@ async function routineChat(userId, routine, settings, now) {
   const { grants, dailyTokens, timezone, enabled, ...config } = settings;
   return chat || { uid, title: 'Pip · ' + routine.title, created: now, updated: now, draft: '', context: [], turns: [], config };
 }
-export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.now() } = {}) {
+export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.now(), force = false, trainingServices } = {}) {
   const saved = await stored(userId);
   if (!saved?.credentials || !saved.settings?.enabled) return { status: 'off' };
   const { settings } = saved, today = localDay(now, settings.timezone), used = saved.usedDay === today ? saved.usedTokens : 0;
@@ -147,10 +148,16 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   const chat = await routineChat(userId, routine, settings, now);
   if (!chat) return { status: 'skipped', error: 'This month\'s chat for the routine was deleted.' };
   const { key } = open(userId, saved.credentials), value = { ...pipConfig(settings), grants: settings.grants };
-  let training;
+  let training, observation, checkpoint, dailyReview;
   if (routine.kind === 'training') {
     if (!TRAINING_GRANTS.every(grant => settings.grants.includes(grant))) return { status: 'off', error: 'Training planning needs Gym, COROS and Tasks access.' };
-    training = await trainingRuntime(userId, routine, today, { authorized: async () => {
+    if (routine.enabled === false) return { status: 'off', error: 'Enable the training planner first.' };
+    observation = await trainingObservation(userId, today, trainingServices);
+    checkpoint = await trainingCheckpoint(userId, routine.id);
+    const wall = wallClock(now, settings.timezone), [hour, minute] = routine.time.split(':').map(Number);
+    dailyReview = checkpoint?.reviewDay !== today && routine.days.includes(wall.weekday) && wall.hour * 60 + wall.minute >= hour * 60 + minute;
+    if (!force && !dailyReview && !trainingChanged(checkpoint, observation)) return { status: 'unchanged' };
+    training = await trainingRuntime(userId, routine, today, { ...trainingServices, observation, previous: checkpoint, authorized: async () => {
       const latest = await stored(userId), current = (await routines(userId)).find(item => item.id === routine.id);
       return Boolean(latest?.credentials && latest.settings.enabled && current?.enabled && current.kind === 'training'
         && current.prompt === routine.prompt && JSON.stringify(current.trainingDays) === JSON.stringify(routine.trainingDays)
@@ -180,23 +187,24 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   } catch (error) { Object.assign(turn, { status: 'failed', phase: 'failed', error: String(error?.message || 'The scheduled reply failed.').slice(0, 500) }); }
   turn.updated = chat.updated = Math.max(Date.now(), chat.updated + 1);
   await writeObject(userId, 'chats', chat);
+  if (training?.complete && turn.status === 'done') await rememberTraining(userId, routine.id, observation, dailyReview ? today : checkpoint?.reviewDay || '');
   const spent = (turn.usage?.input_tokens || 0) + (turn.usage?.output_tokens || 0);
   await sql({ sql: 'UPDATE pocket_pip_background SET used_day = ?, used_tokens = ? WHERE user_id = ?', args: [today, used + spent, userId] });
   return { status: turn.status, chat: chat.uid, turn: turn.uid, ...(turn.error ? { error: turn.error } : {}) };
 }
 /** Claims a routine so two jobs never run it at once, runs it and schedules its next time. */
-export async function runClaimed(userId, id, { force = false, fetcher, now = Date.now() } = {}) {
+export async function runClaimed(userId, id, { force = false, fetcher, now = Date.now(), trainingServices } = {}) {
   const claimed = (await sql({ sql: `UPDATE pocket_pip_routines SET lock_until = ? WHERE user_id = ? AND id = ? AND lock_until <= ? ${force ? '' : 'AND next_run <= ?'} RETURNING payload`,
     args: [now + 10 * 60000, userId, id, now, ...(force ? [] : [now])] })).rows[0];
   if (!claimed) throw Object.assign(new Error('This routine is already running.'), { status: 409 });
   const routine = parse(claimed.payload);
   let result;
-  try { result = await runRoutine(userId, routine, { fetcher, now }); }
+  try { result = await runRoutine(userId, routine, { fetcher, now, force, trainingServices }); }
   catch (error) { result = { status: 'failed', error: String(error?.message || 'The routine could not run.').slice(0, 500) }; }
   const saved = await stored(userId);
   const current = (await routines(userId)).find(item => item.id === id);
   await sql({ sql: 'UPDATE pocket_pip_routines SET lock_until = 0, last_run = ?, last_error = ?, last_chat = ?, next_run = ? WHERE user_id = ? AND id = ?',
-    args: [now, result.error || '', result.chat || '', current ? schedule(current, saved?.settings, Boolean(saved?.credentials)) : NEVER, userId, id] });
+    args: [now, result.error || '', result.chat || current?.lastChat || '', current ? schedule(current, saved?.settings, Boolean(saved?.credentials)) : NEVER, userId, id] });
   return result;
 }
 export async function runPipJob({ fetcher, now = Date.now() } = {}) {
