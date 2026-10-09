@@ -12,7 +12,7 @@ export function source(value) {
 export function activity(items = []) {
   if (!Array.isArray(items)) return [];
   let size = 0;
-  const indexed = items.map((item, index) => ({ item, index })).filter(({ item }) => item?.id && ["queued", "running", "done", "failed", "stopped"].includes(item.state));
+  const indexed = items.map((item, index) => ({ item, index })).filter(({ item }) => item?.id && ["queued", "running", "awaiting", "done", "failed", "stopped"].includes(item.state));
   const saved = indexed.filter(({ item }) => source({ href: item.applied_href })?.href.startsWith('/')).slice(-32), savedIndices = new Set(saved.map(entry => entry.index));
   // Approved outcomes get space before ordinary reads, so restarting research cannot evict a saved action.
   const selected = [...saved.reverse(), ...indexed.filter(entry => !savedIndices.has(entry.index)).reverse().slice(0, 64 - saved.length)];
@@ -29,13 +29,13 @@ export function activity(items = []) {
   }).sort((a, b) => a.index - b.index).map(entry => entry.row);
 }
 export function settle(items, state, summary = "") {
-  return activity(items).map(row => ["queued", "running"].includes(row.state) ? { ...row, state, summary: clip(summary || (state === "stopped" ? "Stopped" : "No result returned")), ended: Date.now() } : row);
+  return activity(items).map(row => ["queued", "running", "awaiting"].includes(row.state) ? { ...row, state, summary: clip(summary || (state === "stopped" ? "Stopped" : "No result returned")), ended: Date.now() } : row);
 }
 export const elapsed = row => row.ended > row.started ? Math.max(1, Math.round((row.ended - row.started) / 1000)) + "s" : "";
-export const mark = state => ({ queued: "◇", running: "◌", done: "□", failed: "△", stopped: "−" })[state] || "◇";
+export const mark = state => ({ queued: "◇", running: "◌", awaiting: "◈", done: "□", failed: "△", stopped: "−" })[state] || "◇";
 export function activityTitle(rows) {
-  const live = rows.find(row => row.state === "running") || rows.find(row => row.state === "queued");
-  if (live) return mark(live.state) + " " + live.title;
+  const live = rows.find(row => row.state === "awaiting") || rows.find(row => row.state === "running") || rows.find(row => row.state === "queued");
+  if (live) return mark(live.state) + " " + live.title + (live.state === "awaiting" ? " · waiting for your approval" : "");
   const names = [...new Set(rows.map(row => row.kind === "web" ? "Web" : row.name.includes("note") ? "Notes" : row.name.includes("thought") ? "Thoughts" : row.name.includes("task") ? "Tasks" : row.name.includes("gym") ? "Gym" : row.name.includes("coros") ? "COROS" : row.title))];
   const failed = rows.some(row => row.state === "failed"), stopped = rows.some(row => row.state === "stopped");
   return (failed ? "△ " : stopped ? "− " : "□ ") + names.join(" + ") + " · " + rows.length + (rows.length === 1 ? " step" : " steps") + (failed ? " · failed" : stopped ? " · stopped" : "");

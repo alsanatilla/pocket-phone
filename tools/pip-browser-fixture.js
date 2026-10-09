@@ -1,5 +1,5 @@
 // Import /tools/pip-browser-fixture.js in the isolated Astro dev preview.
-// Modes: answer, prepare, hold, truncated, overflow. No paid provider calls.
+// Modes: answer, save (asks to save a note; approve or decline it in the reply), hold, truncated, overflow. No paid provider calls.
 await (async () => {
   if (!['http://localhost:8881', 'http://localhost:8882', 'http://127.0.0.1:8882'].includes(location.origin)) throw new Error('Use the isolated preview origin.');
   const cloud = await import('/src/client/cloud.js');
@@ -20,11 +20,13 @@ await (async () => {
     const native = String(url).endsWith('/messages');
     const hasResults = request.messages.some(message => message.role === 'tool' || Array.isArray(message.content) && message.content.some(part => part.type === 'tool_result'));
     const question = request.messages.filter(message => message.role === 'user').flatMap(message => typeof message.content === 'string' ? [message.content] : (message.content || []).filter(part => part.type === 'text').map(part => part.text)).at(-1) || '';
-    const calls = pipFixture.mode === 'prepare' && !hasResults ? [
-      { name: 'update_plan', input: { steps: [{ text: 'Prepare the requested note', status: 'done' }] }, id: 'plan_fixture' },
-      { name: 'propose_action', input: { kind: 'note', title: 'Pip test', text: 'Blue car' }, id: 'proposal_fixture' }
+    const calls = pipFixture.mode === 'save' && !hasResults ? [
+      { name: 'update_plan', input: { steps: [{ text: 'Save the requested note', status: 'done' }] }, id: 'plan_fixture' },
+      { name: 'create_record', input: { kind: 'note', title: 'Pip test', text: 'Blue car' }, id: 'proposal_fixture' }
     ] : [];
-    const text = calls.length ? 'Preparing the requested note.' : pipFixture.mode === 'prepare' ? 'The note “Pip test” is prepared for review.' : /which stock/i.test(question) ? 'What is your investment horizon?' : 'AI SDK streamed this answer. Grüße 🌱';
+    const results = request.messages.flatMap(message => message.role === 'tool' ? [String(message.content)] : Array.isArray(message.content) ? message.content.filter(part => part.type === 'tool_result').map(part => JSON.stringify(part.content)) : []);
+    const declined = results.some(result => result.includes('declined'));
+    const text = calls.length ? 'Saving the requested note.' : pipFixture.mode === 'save' ? (declined ? 'Understood, the note was not saved.' : 'The note “Pip test” is saved.') : /which stock/i.test(question) ? 'What is your investment horizon?' : 'AI SDK streamed this answer. Grüße 🌱';
     const wire = native ? anthropicMessage({ text, calls, usage: { input_tokens: 120 }, output: 74, complete: !['hold', 'truncated'].includes(pipFixture.mode) }) : compatibleMessage({ text, calls });
     const frames = wire.split(/\r?\n\r?\n/).filter(Boolean); let timer, cursor = 0;
     return new Response(new ReadableStream({
@@ -38,5 +40,5 @@ await (async () => {
       cancel() { clearInterval(timer); }
     }), { headers: { 'content-type': 'text/event-stream' } });
   };
-  return { fixture: true, account: 'guest', modes: ['answer', 'prepare', 'hold', 'truncated', 'overflow'] };
+  return { fixture: true, account: 'guest', modes: ['answer', 'save', 'hold', 'truncated', 'overflow'] };
 })();

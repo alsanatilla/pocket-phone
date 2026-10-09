@@ -1,4 +1,4 @@
-import { APICallError } from 'ai';
+import { APICallError, generateId, wrapLanguageModel } from 'ai';
 import { CONTEXT_OVERFLOW } from './pip-limits.js';
 const httpError = code => code === 401 || code === 403 ? 'The provider rejected your key or access. Check API settings.'
   : code === 429 ? 'The provider is busy or your quota is exhausted. Retry when you’re ready.'
@@ -95,6 +95,62 @@ function guardedFetch(value, fetcher, signal, clock, onRetry) {
   };
 }
 
+// Open models such as Qwen3-Coder, Nemotron and Hermes-style ones sometimes write a tool call as text
+// when their host does not parse it. This middleware turns each <tool_call> block into an SDK tool call,
+// so the SDK validates, runs or refuses it like any other call instead of showing it as the answer.
+const OPEN = '<tool_call>', CLOSE = '</tool_call>';
+const partialOpen = text => { for (let size = Math.min(OPEN.length - 1, text.length); size > 0; size--) if (OPEN.startsWith(text.slice(-size))) return size; return 0; };
+export function parseTextToolCall(raw, tools = []) {
+  const body = raw.trim(), xml = /^<function=([^>\s]+)>([\s\S]*?)(?:<\/function>)?$/.exec(body);
+  if (xml) {
+    const properties = tools.find(tool => tool.name === xml[1])?.inputSchema?.properties || {}, input = {};
+    for (const [, key, value] of xml[2].matchAll(/<parameter=([^>\s]+)>\n?([\s\S]*?)\n?<\/parameter>/g)) {
+      if (properties[key]?.type === 'string') input[key] = value;
+      else try { input[key] = JSON.parse(value); } catch { input[key] = value; }
+    }
+    return { name: xml[1], input };
+  }
+  try {
+    const call = JSON.parse(body), args = call.arguments ?? call.parameters ?? {};
+    return typeof call.name === 'string' ? { name: call.name, input: typeof args === 'string' ? JSON.parse(args) : args } : null;
+  } catch { return null; }
+}
+export const textToolCalls = {
+  specificationVersion: 'v4',
+  async wrapStream({ doStream, params }) {
+    const tools = (params.tools || []).filter(tool => tool.type === 'function'), result = await doStream();
+    if (!tools.length) return result;
+    let buffer = '', inCall = false, textId = '0', calls = 0;
+    const text = (controller, delta) => { if (delta) controller.enqueue({ type: 'text-delta', id: textId, delta }); };
+    const call = (controller, raw, closed) => {
+      const parsed = parseTextToolCall(raw, tools);
+      if (!parsed) { text(controller, OPEN + raw + (closed ? CLOSE : '')); return; }
+      calls++; controller.enqueue({ type: 'tool-call', toolCallId: 'text-call-' + generateId(), toolName: parsed.name, input: JSON.stringify(parsed.input) });
+    };
+    const drain = controller => {
+      for (;;) {
+        if (!inCall) {
+          const at = buffer.indexOf(OPEN);
+          if (at < 0) { const keep = partialOpen(buffer); text(controller, buffer.slice(0, buffer.length - keep)); buffer = buffer.slice(buffer.length - keep); return; }
+          text(controller, buffer.slice(0, at)); buffer = buffer.slice(at + OPEN.length); inCall = true;
+        }
+        const end = buffer.indexOf(CLOSE); if (end < 0) return;
+        call(controller, buffer.slice(0, end), true); buffer = buffer.slice(end + CLOSE.length); inCall = false;
+      }
+    };
+    // An unterminated block at the end of the text still counts when it parses as a call.
+    const flush = controller => { if (inCall) call(controller, buffer, false); else text(controller, buffer); buffer = ''; inCall = false; };
+    return { ...result, stream: result.stream.pipeThrough(new TransformStream({
+      transform(part, controller) {
+        if (part.type === 'text-delta') { textId = part.id; buffer += part.delta; drain(controller); return; }
+        if (part.type === 'text-end' || part.type === 'finish') flush(controller);
+        if (part.type === 'finish' && calls && part.finishReason?.unified === 'stop') { controller.enqueue({ ...part, finishReason: { ...part.finishReason, unified: 'tool-calls' } }); return; }
+        controller.enqueue(part);
+      }
+    })) };
+  }
+};
+
 export async function providerModel(value, key, { fetcher, signal, clock, onRetry }) {
   const options = { apiKey: key, baseURL: value.baseUrl, fetch: guardedFetch(value, fetcher, signal, clock, onRetry) };
   if (value.provider === 'anthropic') {
@@ -102,16 +158,18 @@ export async function providerModel(value, key, { fetcher, signal, clock, onRetr
     return createAnthropic({ ...options, headers: { 'anthropic-dangerous-direct-browser-access': 'true' } })(value.model);
   }
   const host = new URL(value.baseUrl).hostname;
+  let model;
   if (host === 'openrouter.ai') {
     const { createOpenRouter } = await import('@openrouter/ai-sdk-provider');
-    return createOpenRouter(options).chat(freeFallbacks(value)?.[0] || value.model);
-  }
-  if (host === 'api.openai.com') {
+    model = createOpenRouter(options).chat(freeFallbacks(value)?.[0] || value.model);
+  } else if (host === 'api.openai.com') {
     const { createOpenAI } = await import('@ai-sdk/openai');
-    return createOpenAI(options).chat(value.model);
+    model = createOpenAI(options).chat(value.model);
+  } else {
+    const { createOpenAICompatible } = await import('@ai-sdk/openai-compatible');
+    model = createOpenAICompatible({ ...options, name: 'pocket-compatible' }).chatModel(value.model);
   }
-  const { createOpenAICompatible } = await import('@ai-sdk/openai-compatible');
-  return createOpenAICompatible({ ...options, name: 'pocket-compatible' }).chatModel(value.model);
+  return wrapLanguageModel({ model, middleware: textToolCalls });
 }
 
 export function providerOptions(value) {

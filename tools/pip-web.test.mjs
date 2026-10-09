@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, apiKey, setKey, saveSettings, settings, requestBody, streamReply } from '../src/client/pip-core.js';
 import { streamChat } from '../src/client/pip-stream.js';
-import { execute, definitions } from '../src/client/pip-tools.js';
+import { execute } from '../src/client/pip-tools.js';
+import { SCHEMAS } from '../src/client/pip-sdk-tools.js';
 import { event, response, anthropicMessage } from './pip-provider-fixtures.mjs';
 
 class Memory {
@@ -137,7 +138,7 @@ test('a tool round gets a usable token allowance instead of the full-budget spli
   // continuation left round 0 with too few tokens to finish a tool call, so the provider
   // stopped at max_tokens mid-arguments ("prepare action · failed").
   const {chat}=ready(), value=config({...DEFAULT_CONFIG});
-  const body={...requestBody(chat,turn),tools:[{name:'propose_action',description:'Prepare an action',input_schema:{type:'object'}}]};
+  const body={...requestBody(chat,turn),tools:['create_record']};
   const requests=[];
   const wire=anthropicMessage({text:'ok',model:'m',usage:{input_tokens:5},output:4});
   await streamChat(chat,turn,{value,body,key:'k',fetcher:async(url,options)=>{requests.push(JSON.parse(options.body));return response(wire);}});
@@ -147,21 +148,23 @@ test('a tool round gets a usable token allowance instead of the full-budget spli
 });
 // Native Anthropic web_search is not offered by Pocket; current web research
 // uses Firecrawl client tools for every provider (covered below and in SDK tests).
-test('a note can still be prepared after the budget forces synthesis', async () => {
+test('a note can still be saved after the budget forces synthesis', async () => {
   const { chat } = ready(), value = config({ ...DEFAULT_CONFIG });
   const body = requestBody(chat, { ...turn, text: 'Save a note about the car industry' });
   const truncated = anthropicMessage({ text: 'Let me check.', finish: 'max_tokens', usage: { input_tokens: 10 }, output: 12 });
-  const proposing = anthropicMessage({ calls: [{ name: 'propose_action', id: 'toolu_1', input: { kind: 'note', title: 'Car industry turmoil', text: 'VW plans to cut jobs.' } }], output: 30 });
-  const answering = anthropicMessage({ text: 'Prepared the note for you.' });
+  const proposing = anthropicMessage({ calls: [{ name: 'create_record', id: 'toolu_1', input: { kind: 'note', title: 'Car industry turmoil', text: 'VW plans to cut jobs.' } }], output: 30 });
+  const answering = anthropicMessage({ text: 'Saved the note for you.' });
   let calls = 0;
-  const result = await streamChat(chat, turn, { value, body, key: 'k', fetcher: async () => response(++calls === 1 ? truncated : calls === 2 ? proposing : answering) });
-  assert.equal(calls, 3); assert.equal(result.answer, 'Prepared the note for you.');
-  assert.ok(result.activity.some(row => row.name === 'propose_action' && row.state === 'done'));
+  const result = await streamChat(chat, turn, { value, body, key: 'k', fetcher: async () => response(++calls === 1 ? truncated : calls === 2 ? proposing : answering),
+    approve: async requests => new Map(requests.map(request => [request.toolCallId, { approved: true }])),
+    executeTool: async (_, name, input) => ({ kind: 'action', action: { tool: name, kind: input.kind, title: input.title, status: 'saved', href: '/notes/car' } }) });
+  assert.equal(calls, 3); assert.equal(result.answer, 'Saved the note for you.');
+  assert.ok(result.activity.some(row => row.name === 'create_record' && row.state === 'done' && row.applied_href === '/notes/car'));
 });
 
 test('web search runs through Firecrawl for every provider',()=>{
   const {chat}=ready();
-  const names = value => (requestBody({ ...chat, config: value }, turn).tools || []).map(tool => tool.name || tool.function?.name);
+  const names = value => requestBody({ ...chat, config: value }, turn).tools || [];
   const anthropic = config({...DEFAULT_CONFIG, webSearch:true});
   const compatible = config({...DEFAULT_CONFIG, provider:'compatible', model:'local-model', baseUrl:'https://model.example/v1', webSearch:true});
   assert.ok(names(anthropic).includes('search_web'));
@@ -176,24 +179,26 @@ test('search_web forwards news and research filters to Firecrawl',async()=>{
   let sent;
   globalThis.fetch=async(url,options)=>{sent=JSON.parse(options.body);return new Response(JSON.stringify({data:{web:[{url:'https://example.com/a',title:'A',description:'a'}],news:[{url:'https://news.example/b',title:'B',description:'b'}]}}),{headers:{'content-type':'application/json'}});};
   try{
-    const schema=(definitions(value).find(tool=>tool.name==='search_web')||{}).input_schema?.properties||{};
+    const schema=SCHEMAS.search_web.shape;
     assert.ok(schema.sources&&schema.categories);
     const result=await execute(value,'search_web',{query:'car industry',sources:['news'],categories:['research','pdf']},undefined,{cache:new Map()});
     assert.deepEqual(sent.sources,['news']);assert.deepEqual(sent.categories,['research','pdf']);
     assert.ok(result.results.some(item=>item.url.includes('news.example')));
   }finally{globalThis.fetch=savedFetch;globalThis.localStorage=savedLocal;globalThis.sessionStorage=savedSession;}
 });
-test('replayed history tells Pip which proposals it already prepared',()=>{
+test('replayed history tells Pip which actions it already took or had declined',()=>{
   const {chat}=ready();
   chat.turns=[
     {uid:'t1',text:'Research the car industry and save a note',status:'done',answer:'I prepared a note.',activity:[
       {id:'r1',name:'propose_action',state:'done',applied_href:'/notes/abc',result:JSON.stringify({kind:'proposal',proposal:{kind:'note',title:'Car industry turmoil',text:'…'}})},
       {id:'r2',name:'propose_change',state:'done',result:JSON.stringify({kind:'change',change:{change:'append_note'},before:{title:'Trip'}})},
+      {id:'r3',name:'create_record',state:'done',applied_href:'/tasks/xyz',result:JSON.stringify({kind:'action',action:{tool:'create_record',kind:'task',title:'Call the dealer',status:'saved',href:'/tasks/xyz'}})},
+      {id:'r4',name:'change_record',state:'done',result:JSON.stringify({kind:'action',action:{tool:'change_record',kind:'complete_task',title:'Old task',status:'declined'}})},
     ]},
     {uid:'t2',text:'which stock should I buy?',context:[],status:'open',answer:''},
   ];
   const body=requestBody({...chat,config:config({...DEFAULT_CONFIG})},chat.turns[1]);
   const assistant=body.messages.find(message=>message.role==='assistant');
   assert.ok(assistant,'the finished turn is replayed');
-  assert.match(assistant.content,/\[Pip prepared: note "Car industry turmoil" \(saved by the user\); append_note on "Trip" \(not applied\)\]/);
+  assert.match(assistant.content,/\[Pip actions: note "Car industry turmoil" \(saved by the user\); append_note on "Trip" \(not applied\); task "Call the dealer" \(saved after the user approved it\); complete_task "Old task" \(declined by the user\)\]/);
 });

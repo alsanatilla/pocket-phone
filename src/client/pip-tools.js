@@ -1,8 +1,9 @@
 import { storage as localStorage, tabStorage as sessionStorage, activeAccount } from './workspace-storage.js';
 import { corosAction, corosProblem, corosTitle } from '../shared/coros-course.js';
-import { notes, tasks, parking, gym, noteTitle, NOTE_LIMIT } from "./store.js";
+import { load, gym, noteTitle, listNotes, listTasks, openThoughts, listWorkouts, NOTE_LIMIT } from "./store.js";
 import { agenda } from './planner.js';
 import { readChatHistory } from './pip-memory.js';
+import { applyProposal, applyChange, applyCoros } from './pip-actions.js';
 
 // Web search runs through Firecrawl for every provider: search_web and read_web_page. Works without a key at low volume;
 // a Firecrawl key (API settings) raises the limits. The key stays in this tab, like provider keys.
@@ -14,22 +15,17 @@ export const webTools = value => Boolean(value.webSearch);
 export const CATEGORIES = [["notes", "Notes"], ["thoughts", "Thoughts"], ["tasks", "Tasks"], ["calendar", "Calendar"], ["gym", "Gym"], ["coros", "COROS"]];
 const permissionKey = value => "pocket:pip-access:" + value.provider + "|" + value.baseUrl;
 export function access(value, storage = localStorage) {
+  // A scheduled run carries the grants chosen for Pip on its own; the browser keeps them per endpoint.
+  if (Array.isArray(value.grants)) return CATEGORIES.map(([key]) => key).filter(key => value.grants.includes(key));
   try { const allowed = JSON.parse(storage?.getItem(permissionKey(value)) || "[]"); return CATEGORIES.map(([key]) => key).filter(key => Array.isArray(allowed) && allowed.includes(key)); } catch { return []; }
 }
 export function saveAccess(value, categories, storage = localStorage) {
   storage.setItem(permissionKey(value), JSON.stringify(CATEGORIES.map(([key]) => key).filter(key => categories.includes(key))));
 }
-const text = description => ({ type: "string", description, maxLength: 200 });
-const integer = (description, min, max, fallback) => ({ type: "integer", description, minimum: min, maximum: max, default: fallback });
-const search = { query: text("Words to match; empty lists recent records."), limit: integer("Maximum results.", 1, 5, 5) };
-const days = { days: integer("Calendar days ending today.", 1, 30, 7) };
-const paging = { offset: integer("Character offset; use next_offset to continue.", 0, 200000, 0), length: integer("Characters to read.", 200, 6000, 6000) };
-const recordId = { type: "string", description: "The id returned by a Pocket search.", maxLength: 80, minLength: 1, pattern: "^[A-Za-z0-9_-]+$" };
-const tool = (category, name, description, properties, required = []) => ({ category, name, description, input_schema: { type: "object", properties, required, additionalProperties: false } });
 // Live COROS (MCP through the Pocket account). Training plans stay read-only: a plan is larger than a whole reply budget.
-const COROS_READS = ["querySportRecords", "getActivityDetail", "analyzeActivityDetail", "queryActivityLapData", "queryCustomActivityLapData", "queryActivityFitFileDownloadUrls", "queryDailyHealthData", "querySleepOverview", "querySleepHrv", "queryRestingHeartRate", "queryAvgHeartRate", "queryStressLevel", "queryStressTimeSeries", "queryHealthCheckTimeSeries", "queryRecoveryStatus", "queryTrainingLoadAssessment", "queryFitnessAssessmentOverview", "queryMenstruationCycles", "queryTrainingSchedule", "queryScheduledWorkoutDetails", "queryWorkoutLibrary", "queryWorkoutDetails", "queryTrainingPlanLibrary", "queryTrainingPlanDetails", "queryUserInfo", "queryDevices"];
-const COROS_WRITES = ["createScheduledWorkout", "scheduleWorkout", "createSingleWorkout", "updateScheduledWorkout", "updateWorkoutDetails"];
-const COROS_INDEX = [
+export const COROS_READS = ["querySportRecords", "getActivityDetail", "analyzeActivityDetail", "queryActivityLapData", "queryCustomActivityLapData", "queryActivityFitFileDownloadUrls", "queryDailyHealthData", "querySleepOverview", "querySleepHrv", "queryRestingHeartRate", "queryAvgHeartRate", "queryStressLevel", "queryStressTimeSeries", "queryHealthCheckTimeSeries", "queryRecoveryStatus", "queryTrainingLoadAssessment", "queryFitnessAssessmentOverview", "queryMenstruationCycles", "queryTrainingSchedule", "queryScheduledWorkoutDetails", "queryWorkoutLibrary", "queryWorkoutDetails", "queryTrainingPlanLibrary", "queryTrainingPlanDetails", "queryUserInfo", "queryDevices"];
+export const COROS_WRITES = ["createScheduledWorkout", "scheduleWorkout", "createSingleWorkout", "updateScheduledWorkout", "updateWorkoutDetails"];
+export const COROS_INDEX = [
   "querySportRecords(startDate, endDate, sportTypeCodes, minDistanceKm, maxDistanceKm, minDurationMinutes, maxDurationMinutes, maxAveragePace, locationKeyword, limit): activities with filters",
   "getActivityDetail / analyzeActivityDetail(labelId, sportType[, focus]) · queryActivityLapData(labelId, sportType) · queryCustomActivityLapData(labelId, sportType, startTimestamp, endTimestamp): one activity",
   "queryDailyHealthData(days) · querySleepOverview / querySleepHrv / queryAvgHeartRate / queryHealthCheckTimeSeries / queryStressTimeSeries(startDate, endDate, days) · queryRestingHeartRate / queryStressLevel(days): health",
@@ -37,57 +33,33 @@ const COROS_INDEX = [
   "queryTrainingSchedule(startDate, endDate) · queryScheduledWorkoutDetails(date, idInPlan) · queryWorkoutLibrary(sportType, courseType) · queryWorkoutDetails(workoutId): planned and saved workouts",
   "queryTrainingPlanLibrary(statusList, planType, weeks, cursor) · queryTrainingPlanDetails(planId, startDay, endDay) · queryMenstruationCycles(startDay, endDay) · queryUserInfo() · queryDevices() · queryActivityFitFileDownloadUrls(startDate, endDate, sportType, labelId, limit)"
 ].join("\n");
-const COROS_ARGUMENTS = { coros_read: 4000, propose_coros: 6000 };
-const TOOLS = [
-  tool("notes", "search_notes", "Search saved Pocket notes. All query words must match. Read a result by id for its text; drafts are excluded.", search),
-  tool("notes", "read_note", "Read a saved Pocket note in pages. Use next_offset for more text. No drafts or writes.", { id: recordId, ...paging }, ["id"]),
-  tool("thoughts", "search_thoughts", "Search undecided, parked Thoughts. Thoughts are separate from Tasks. Read only; never turns an idea into an action.", search),
-  tool("tasks", "search_tasks", "Search chosen Pocket tasks, including completion and due date. Read only; never edits or completes a task.", search),
-  tool("tasks", "read_task", "Read a chosen Pocket task, its steps, source, due date and completion. Never edits a task.", { id: recordId }, ["id"]),
-  tool("calendar", "search_calendar", "Search saved Calendar appointments from today through the next 1–30 days. Read only.", { ...search, days: integer("Calendar days beginning today.", 1, 30, 7) }),
-  tool("pocket", "search_pocket", "Search Notes, Tasks, parked Thoughts and Calendar together, using only granted categories. Returns links and excerpts.", { query: search.query, limit: integer("Maximum results.", 1, 10, 10), days: integer("Calendar days beginning today.", 1, 30, 7) }),
-  tool("universal", "read_chat_history", "Read this conversation's earlier requests, final answers, actual tool outcomes and user-applied actions. Historical results are not current facts. No other chats or provider reasoning. Source results respect current access. Use next_offset for older matches, turn_id for one reply, or event_id for serialized recorded result pages using next_result_offset. Listings contain excerpts; query searches full requests and completed answers. With turn_id, use answer_offset or request_offset to read exact text in bounded pages, including explicitly attached request snapshots; follow next_answer_offset or next_request_offset. Match offsets locate search hits beyond excerpts.", {
-    query: search.query, turn_id: recordId, event_id: text("An event_id returned by conversation memory or this tool."),
-    offset: integer("Matching reply offset, newest first.", 0, 200000, 0), limit: integer("Maximum matching replies.", 1, 5, 3),
-    result_offset: integer("Recorded result character offset; use next_result_offset.", 0, 8000, 0), result_length: integer("Recorded result characters to read.", 200, 6000, 2000),
-    answer_offset: { type: "integer", description: "Completed answer offset with turn_id; use next_answer_offset or answer_match_offset.", minimum: 0, maximum: 200000 },
-    request_offset: { type: "integer", description: "Original request and attached snapshot offset with turn_id; use next_request_offset or request_match_offset.", minimum: 0, maximum: 200000 }
-  }),
-  tool("universal", "update_plan", "Show or update a short plan for this reply. Changes only the displayed plan; never saves Pocket records.", { steps: { type: "array", minItems: 1, maxItems: 6, items: { type: "object", properties: { text: { type: "string", minLength: 1, maxLength: 160 }, status: { type: "string", enum: ["pending", "in_progress", "done"] } }, required: ["text", "status"], additionalProperties: false } } }, ["steps"]),
-  tool("universal", "propose_action", "Prepare a note, task or appointment for the user to review and save with a tap. Never saves or changes data. Appointment proposals need when; task due is YYYY-MM-DD.", { kind: { type: "string", enum: ["note", "task", "appointment"] }, title: { type: "string", minLength: 1, maxLength: 200 }, text: { type: "string", maxLength: 6000 }, due: { type: "string", maxLength: 10 }, steps: { type: "array", maxItems: 12, items: { type: "string", minLength: 1, maxLength: 160, pattern: "^[^\\r\\n]+$" } }, when: { type: "string", maxLength: 40 }, minutes: integer("Appointment duration in minutes.", 15, 480, 60) }, ["kind", "title", "text"]),
-  tool("changes", "propose_change", "Prepare a change to an existing record for the user to review and apply with a tap: complete_task, update_task (title, due YYYY-MM-DD or empty to clear, add_steps), append_note (text) or move_appointment (when, minutes). Use ids from Pocket searches or reads. Never applies the change.", { change: { type: "string", enum: ["complete_task", "update_task", "append_note", "move_appointment"] }, id: recordId, title: { type: "string", minLength: 1, maxLength: 200 }, due: { type: "string", maxLength: 10 }, add_steps: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 160, pattern: "^[^\\r\\n]+$" } }, text: { type: "string", minLength: 1, maxLength: 4000 }, when: { type: "string", maxLength: 40, description: "An ISO 8601 timestamp with UTC or an offset." }, minutes: integer("Appointment duration in minutes.", 15, 480, 60), reason: { type: "string", maxLength: 300, description: "One short line on why, shown in the review." } }, ["change", "id"]),
-  tool("gym", "gym_summary", "Read locally saved workouts and their exercise sets from the last 1–30 days. Never edits a workout.", days),
-  tool("coros", "coros_summary", "Read COROS readings already cached in Movement. Never refreshes or calls COROS. Check last_updated and stale; missing data is not a zero reading.", days),
-  tool("coros", "coros_read", "Read live data from the user's COROS account, in pages. Tools and arguments (dates yyyyMMdd; sport codes 1 run, 2 ride, 5 trail run):\n" + COROS_INDEX + "\nIf COROS refuses a request, read coros_format for that tool.", { tool: { type: "string", enum: COROS_READS }, arguments: { type: "object", description: "The COROS tool's arguments as an object; {} when it takes none." }, ...paging }, ["tool"]),
-  tool("coros", "coros_format", "Read COROS's exact rules and arguments for one COROS tool, in pages. Read every page for a change tool before propose_coros.", { tool: { type: "string", enum: [...COROS_READS, ...COROS_WRITES] }, ...paging }, ["tool"]),
-  tool("coros", "propose_coros", "Prepare a COROS workout change for the user to review and apply with a tap: createScheduledWorkout (new workout on a date), scheduleWorkout (a library workout on a date), createSingleWorkout (new library workout), updateScheduledWorkout or updateWorkoutDetails. arguments must follow coros_format for that tool exactly. Never applies anything. COROS cannot remove a workout through Pocket, so check the date and sections.", { tool: { type: "string", enum: COROS_WRITES }, arguments: { type: "object", description: "Exactly the arguments coros_format describes for this tool." }, summary: { type: "string", minLength: 1, maxLength: 300, description: "One line for the review: what changes and why." } }, ["tool", "arguments", "summary"])
-];
-const WEB = [
-  { name: "search_web", description: "Search current web information. Optionally limit to five domains, a time range, and the source or category: news for current events, research or pdf for papers and documents, github for code. Cite the urls you use.", input_schema: { type: "object", properties: { query: { type: "string", minLength: 1, description: "What to search for.", maxLength: 300 }, limit: integer("Maximum results.", 1, 5, 5), domains: { type: "array", maxItems: 5, items: { type: "string", maxLength: 253 } }, time_range: { type: "string", enum: ["any", "day", "week", "month", "year"], default: "any" }, sources: { type: "array", maxItems: 3, items: { type: "string", enum: ["web", "news", "images"] } }, categories: { type: "array", maxItems: 3, items: { type: "string", enum: ["research", "pdf", "github"] } } }, required: ["query"], additionalProperties: false } },
-  { name: "read_web_page", description: "Read a public page in 200–6000 character pages. Use next_offset to continue. Optional query finds relevant passages at or after offset; pages are cached for this reply.", input_schema: { type: "object", properties: { url: { type: "string", description: "The page's public https URL.", maxLength: 2048 }, ...paging, query: search.query }, required: ["url"], additionalProperties: false } },
-];
+export const COROS_ARGUMENTS = { coros_read: 4000, coros_write: 6000 };
+// The grant each tool needs. Descriptions and input schemas live in pip-sdk-tools.js, which loads with the AI SDK.
+const TOOL_CATEGORIES = { search_notes: "notes", read_note: "notes", search_thoughts: "thoughts", search_tasks: "tasks", read_task: "tasks", search_calendar: "calendar", search_pocket: "pocket",
+  read_chat_history: "universal", update_plan: "universal", create_record: "universal", change_record: "changes", gym_summary: "gym",
+  coros_summary: "coros", coros_read: "coros", coros_format: "coros", coros_write: "coros", search_web: "web", read_web_page: "web" };
 const pocketCategories = ["notes", "tasks", "thoughts", "calendar"];
-/** Tools that show or prepare something instead of reading: never cached, run one at a time, never replayed as observations. */
-export const STATE_TOOLS = ["update_plan", "propose_action", "propose_change", "propose_coros"];
+/** Tools that show or change something instead of reading: never cached, never replayed as observations. The propose_* names are earlier replies' review cards. */
+export const STATE_TOOLS = ["update_plan", "create_record", "change_record", "coros_write", "propose_action", "propose_change", "propose_coros"];
+/** Tools that write to Pocket or COROS. The AI SDK holds each call until the user approves or declines it. */
+export const WRITE_TOOLS = ["create_record", "change_record", "coros_write"];
 const CHANGE_CATEGORY = { complete_task: "tasks", update_task: "tasks", append_note: "notes", move_appointment: "calendar" };
 const CHANGE_NAMES = { complete_task: "complete task", update_task: "update task", append_note: "add to note", move_appointment: "move appointment" };
 export const changeName = change => CHANGE_NAMES[change] || "change";
 export const changeTarget = change => ({ tasks: "task", notes: "note", calendar: "appointment" })[CHANGE_CATEGORY[change]] || "record";
-const permitted = (value, definition) => definition.category === "changes" ? access(value).some(c => ["tasks", "notes", "calendar"].includes(c)) : definition.category === "universal" || definition.category === "pocket" ? definition.category === "universal" || access(value).some(c => pocketCategories.includes(c)) : definition.category ? access(value).includes(definition.category) : webTools(value);
-export const definitions = value => [...TOOLS.filter(t => permitted(value, t)).map(({ category, ...definition }) => structuredClone(definition)), ...(webTools(value) ? structuredClone(WEB) : [])];
+const permitted = (value, name) => {
+  const category = TOOL_CATEGORIES[name];
+  if (category === "universal") return true;
+  if (category === "changes") return access(value).some(c => ["tasks", "notes", "calendar"].includes(c));
+  if (category === "pocket") return access(value).some(c => pocketCategories.includes(c));
+  return category === "web" ? webTools(value) : Boolean(category) && access(value).includes(category);
+};
+export const toolNames = value => Object.keys(TOOL_CATEGORIES).filter(name => permitted(value, name));
 export const checkpointIdentity = value => [value.provider, value.baseUrl, value.model].join("|");
 export const accessFingerprint = value => { const granted = access(value); return CATEGORIES.map(([category]) => granted.includes(category) ? "1" : "0").join(""); };
-export const historyPolicy = value => ({ offered: definitions(value).map(tool => tool.name), stateTools: STATE_TOOLS, identity: checkpointIdentity(value), fingerprint: accessFingerprint(value), grants: access(value), webSearch: webTools(value) });
+export const historyPolicy = value => ({ offered: toolNames(value), stateTools: STATE_TOOLS, identity: checkpointIdentity(value), fingerprint: accessFingerprint(value), grants: access(value), webSearch: webTools(value) });
 export const cacheKey = (name, args) => name + ":" + JSON.stringify(canonical(args));
 function canonical(value) { return Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value; }
-function valid(value, schema) {
-  // An object schema without properties is a free-form argument object (COROS requests); its size is checked per tool.
-  if (schema.type === "object" && !schema.properties) return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-  if (schema.type === "object") return value && typeof value === "object" && !Array.isArray(value) && (!schema.required || schema.required.every(key => Object.hasOwn(value, key))) && Object.keys(value).every(key => Object.hasOwn(schema.properties, key) && valid(value[key], schema.properties[key]));
-  if (schema.type === "array") return Array.isArray(value) && value.length >= (schema.minItems || 0) && value.length <= (schema.maxItems ?? Infinity) && value.every(item => valid(item, schema.items));
-  if (schema.type === "integer") return Number.isInteger(value) && value >= schema.minimum && value <= schema.maximum;
-  return typeof value === "string" && value.length >= (schema.minLength || 0) && value.length <= (schema.maxLength ?? Infinity) && (!schema.enum || schema.enum.includes(value)) && (!schema.pattern || new RegExp(schema.pattern).test(value));
-}
 export function publicUrl(raw) {
   let url; try { url = new URL(raw); } catch { return null; }
   const host = url.hostname.toLowerCase().replace(/\.$/, ""), ip = host.split(".").map(Number);
@@ -103,7 +75,7 @@ function pageText(text, args) {
 }
 async function web(value, name, args, signal, context) {
   if (!webTools(value)) return failure("access_disabled", "Web search is off.");
-  const key = firecrawlKey(), headers = { "content-type": "application/json", ...(key ? { authorization: "Bearer " + key } : {}) };
+  const key = context.source.firecrawlKey(), headers = { "content-type": "application/json", ...(key ? { authorization: "Bearer " + key } : {}) };
   const post = (path, body) => fetch(FIRECRAWL + path, { method: "POST", headers, body: JSON.stringify(body), signal, credentials: "omit", referrerPolicy: "no-referrer" });
   const refused = status => failure("web_unavailable", status === 401 || status === 402 || status === 429 ? "Web search is unavailable right now (Firecrawl " + status + "). A Firecrawl key in API settings raises the limit." : "Web search failed (Firecrawl " + status + ").");
   if (name === "search_web") {
@@ -165,14 +137,14 @@ function validInstant(raw) {
   const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-](\d{2}):(\d{2}))$/.exec(raw);
   return Boolean(match && validDay(match[1]) && +match[2] < 24 && +match[3] < 60 && +(match[4] || 0) < 60 && +(match[5] || 0) <= 18 && +(match[6] || 0) < 60 && (+match[5] !== 18 || +match[6] === 0) && Number.isFinite(Date.parse(raw)));
 }
-const calendarItems = days => { const start = new Date(); start.setHours(0, 0, 0, 0); const end = new Date(start); end.setDate(end.getDate() + days); return agenda.all().filter(item => item.when < +end && item.when + item.minutes * 60000 > +start); };
+const calendarItems = (source, days) => { const start = new Date(); start.setHours(0, 0, 0, 0); const end = new Date(start); end.setDate(end.getDate() + days); return source.appointments().filter(item => item.when < +end && item.when + item.minutes * 60000 > +start); };
 /** Validates a change against the record as it is now and keeps a short "before" for the review. Nothing is written here. */
-function changeProposal(value, args) {
+function changeProposal(value, args, source) {
   const category = CHANGE_CATEGORY[args.change], reason = (args.reason || "").trim();
   if (!access(value).includes(category)) return failure("access_disabled", "Turn on " + category + " access before proposing this change.");
   const ready = (change, before) => ({ kind: "change", change: { change: args.change, ...change, ...(reason ? { reason } : {}) }, before, requires_confirmation: true });
   if (args.change === "complete_task" || args.change === "update_task") {
-    const task = tasks.get(args.id); if (!task) return failure("task_not_found", "That task is no longer available.");
+    const task = source.task(args.id); if (!task) return failure("task_not_found", "That task is no longer available.");
     const before = { title: task.text, due: task.due || "", done: Boolean(task.done), steps: (task.steps || []).length };
     if (args.change === "complete_task") return task.done ? failure("already_done", "That task is already complete.") : ready({ id: task.uid }, before);
     const add = (args.add_steps || []).map(step => step.trim()).filter(step => !(task.steps || []).some(old => old.text === step));
@@ -182,19 +154,19 @@ function changeProposal(value, args) {
     return ready({ id: task.uid, ...(args.title !== undefined ? { title: args.title.trim() } : {}), ...(args.due !== undefined ? { due: args.due } : {}), add_steps: add }, before);
   }
   if (args.change === "append_note") {
-    const note = notes.get(args.id), text = (args.text || "").trim();
+    const note = source.note(args.id), text = (args.text || "").trim();
     if (!note) return failure("note_not_found", "That saved note is no longer available.");
     if (!text) return failure("invalid_arguments", "Write the text to add.");
     if (note.text.trimEnd().length + text.length + 2 > NOTE_LIMIT) return failure("note_full", "The note would exceed its length limit.");
     return ready({ id: note.uid, text }, { title: noteTitle(note), ending: note.text.trimEnd().slice(-240) });
   }
-  const item = agenda.get(args.id);
+  const item = source.appointment(args.id);
   if (!item) return failure("appointment_not_found", "That appointment is no longer available.");
   if (!args.when || !validInstant(args.when)) return failure("invalid_arguments", "Use an ISO date and time with timezone.");
   return ready({ id: item.uid, when: args.when, minutes: args.minutes ?? item.minutes }, { title: item.title, when: new Date(item.when).toISOString(), minutes: item.minutes });
 }
 /** Live COROS goes through the signed-in Pocket account, which holds the COROS connection. */
-async function corosApi(action, body, signal) {
+async function corosFetch(action, body, signal) {
   if (!activeAccount()) return { failed: failure("coros_unavailable", "Sign in to Pocket and connect COROS in Movement to use live COROS data.") };
   let response, value = {};
   try { response = await fetch("/api/coros/" + action, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, accountId: activeAccount() }), signal }); }
@@ -203,6 +175,22 @@ async function corosApi(action, body, signal) {
   if (!response.ok) return { failed: failure(response.status === 422 ? "coros_refused" : "coros_unavailable", String(value.error || "COROS is unavailable.").slice(0, 800)) };
   return { value };
 }
+/**
+ * Where tools read Pocket records: read(name) returns a synced document. Calendar, COROS and the Firecrawl key come
+ * from where the run happens. This browser by default; Pip's scheduled runs pass the account's server copy.
+ */
+export function recordSource(read, place = {}) {
+  return {
+    notes: () => listNotes(read("notes.json")), note: id => listNotes(read("notes.json")).find(note => note.uid === id) || null,
+    tasks: () => listTasks(read("tasks.json")), task: id => listTasks(read("tasks.json")).find(task => task.uid === id) || null,
+    thoughts: () => openThoughts(read("parking.json")), workouts: () => listWorkouts(read("gym.json")),
+    appointments: () => [], appointment: () => null, corosCache: () => ({}), firecrawlKey: () => "",
+    coros: async () => ({ failed: failure("coros_unavailable", "Live COROS is unavailable here.") }),
+    ...place
+  };
+}
+const BROWSER = recordSource(load, { appointments: () => agenda.all(), appointment: id => agenda.get(id), coros: corosFetch, firecrawlKey: () => firecrawlKey(),
+  corosCache: () => ({ cockpit: cached("pocket:coros-cockpit"), activities: cached("pocket:coros-activities") }) });
 /** A page that still fits the 8,000-character result limit after JSON escaping (COROS formats are full of quotes). */
 function fitted(text, args, fields) {
   for (let length = args.length ?? 6000; ; length = Math.floor(length * 0.8)) {
@@ -213,10 +201,10 @@ function fitted(text, args, fields) {
 const formats = new Map();
 const firstSentence = text => (String(text).match(/^[\s\S]*?\.(?:\s|$)/)?.[0] || String(text)).trim();
 const slimSchema = value => Array.isArray(value) ? value.map(slimSchema) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, key === "description" && typeof item === "string" ? firstSentence(item) : slimSchema(item)])) : value;
-async function corosFormat(args, signal) {
+async function corosFormat(args, signal, source) {
   let text = formats.get(args.tool);
   if (!text) {
-    const { failed, value } = await corosApi("catalog", { names: [args.tool] }, signal); if (failed) return failed;
+    const { failed, value } = await source.coros("catalog", { names: [args.tool] }, signal); if (failed) return failed;
     const found = value.tools?.[0]; if (!found) return failure("coros_unavailable", "COROS does not offer this tool right now.");
     // COROS's own rules in full; per-field notes keep their first sentence, since the rules repeat them.
     text = found.description + "\n\nArguments (JSON schema):\n" + JSON.stringify(slimSchema(found.inputSchema)); formats.set(args.tool, text);
@@ -227,31 +215,59 @@ async function corosRead(args, signal, context) {
   const request = args.arguments || {}, key = "coros-text:" + cacheKey(args.tool, request);
   let text = context.cache?.get(key);
   if (typeof text !== "string") {
-    const { failed, value } = await corosApi("tool", { name: args.tool, arguments: request }, signal); if (failed) return failed;
+    const { failed, value } = await context.source.coros("tool", { name: args.tool, arguments: request }, signal); if (failed) return failed;
     if (value.error) return failure("coros_refused", "COROS: " + String(value.text || "the request was refused").slice(0, 800));
     text = String(value.text || ""); context.cache?.set(key, text);
   }
   return fitted(text, args, { source: "coros:" + args.tool, tool: args.tool });
 }
 /** Checks the shape and, for updates and library workouts, reads what is there now. Nothing is written to COROS here. */
-async function corosProposal(args, signal) {
+async function corosProposal(args, signal, source) {
   const problem = corosProblem(args.tool, args.arguments); if (problem) return failure("invalid_arguments", problem);
   const lookup = args.tool === "updateScheduledWorkout" ? ["queryScheduledWorkoutDetails", { date: args.arguments.date, idInPlan: String(args.arguments.idInPlan) }]
     : args.tool === "updateWorkoutDetails" || args.tool === "scheduleWorkout" ? ["queryWorkoutDetails", { workoutId: args.arguments.workoutId }] : null;
   let before = "";
   if (lookup) {
-    const { failed, value } = await corosApi("tool", { name: lookup[0], arguments: lookup[1] }, signal); if (failed) return failed;
+    const { failed, value } = await source.coros("tool", { name: lookup[0], arguments: lookup[1] }, signal); if (failed) return failed;
     if (value.error) return failure("workout_not_found", "COROS: " + String(value.text || "that workout was not found").slice(0, 600));
     before = String(value.text || "").slice(0, 1200);
   }
   return { kind: "coros", coros: { tool: args.tool, arguments: structuredClone(args.arguments), summary: args.summary.trim() }, title: corosTitle(args.tool, args.arguments), ...(before ? { before } : {}), requires_confirmation: true };
 }
+/** Dates, times and lines of a new record; the AI SDK has already checked its shape against the schema. */
+export function recordProblem(args) {
+  const due = args.due || "", when = args.when || "";
+  if (!String(args.title || "").trim() || args.steps?.some(step => !step.trim()) || due && !validDay(due) || when && !validInstant(when) || args.kind === "appointment" && !when) return "Use a title, valid date and time, and nonempty steps. Appointments need an ISO date and time with timezone.";
+  return "";
+}
+/** What a write would do, checked against the record as it is now. The approval review shows it; nothing is written. */
+export async function preview(value, name, args, signal, source = BROWSER) {
+  if (!WRITE_TOOLS.includes(name) || !permitted(value, name)) return failure("access_disabled", "Access to this record is off or this tool is unavailable.");
+  if (name === "create_record") { const problem = recordProblem(args); return problem ? failure("invalid_arguments", problem) : { action: { tool: name, kind: args.kind, title: args.title.trim() } }; }
+  if (name === "change_record") { const ready = changeProposal(value, args, source); return ready.error ? ready : { action: { tool: name, kind: args.change, title: ready.change.title || ready.before.title }, change: ready.change, before: ready.before }; }
+  const ready = await corosProposal(args, signal, source);
+  return ready.error ? ready : { action: { tool: name, kind: args.tool, title: ready.title }, ...(ready.before ? { before: ready.before } : {}) };
+}
+/** Runs only after the user approved the call. Stable ids keep a retried write from saving twice. */
+async function write(value, name, args, signal, context) {
+  const ready = await preview(value, name, args, signal, context.source); if (ready.error) return ready;
+  if (!context.chat || !context.turn || !context.eventId) return failure("write_unavailable", "This conversation is unavailable.");
+  try {
+    const href = name === "create_record" ? await applyProposal(context.chat.uid, context.turn.uid, context.eventId, args)
+      : name === "change_record" ? applyChange(ready.change)
+      : await applyCoros(context.chat.uid, context.turn.uid, context.eventId, args.tool, args.arguments);
+    return { kind: "action", action: { ...ready.action, status: "saved", href } };
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    return failure("write_failed", String(error?.message || "The change could not be saved.").slice(0, 300));
+  }
+}
 export async function execute(value, name, args = {}, signal, context = {}) {
   if (signal?.aborted) throw new DOMException("Stopped", "AbortError");
-  const definition = TOOLS.find(t => t.name === name) || WEB.find(t => t.name === name);
-  if (!definition || !permitted(value, definition)) return failure("access_disabled", "Access to this source is off or this tool is unavailable.");
-  if (!valid(args, definition.input_schema)) return { ...failure("invalid_arguments", "Correct the arguments to match this tool's schema; unknown fields are not accepted."), required_fields: definition.input_schema.required || [], allowed_fields: Object.keys(definition.input_schema.properties || {}) };
-  if (COROS_ARGUMENTS[name] && JSON.stringify(args.arguments ?? {}).length > COROS_ARGUMENTS[name]) return failure("invalid_arguments", "Keep the COROS arguments under " + COROS_ARGUMENTS[name] + " characters.");
+  context = { ...context, source: context.source || BROWSER };
+  const source = context.source;
+  if (!permitted(value, name)) return failure("access_disabled", "Access to this source is off or this tool is unavailable.");
+  if (WRITE_TOOLS.includes(name)) return write(value, name, args, signal, context);
   const cache = context.cache, entryKey = cacheKey(name, args), signature = grantSignature(value, name), reuse = !STATE_TOOLS.includes(name), saved = reuse && cache?.get(entryKey);
   if (saved && saved.permissions === signature) return bounded({ ...structuredClone(saved.result), cached: true });
   const query = args.query ?? "", limit = args.limit ?? (name === "search_pocket" ? 10 : 5), window = args.days ?? 7;
@@ -259,48 +275,42 @@ export async function execute(value, name, args = {}, signal, context = {}) {
   if (name === "read_chat_history") result = context.chat && context.turn ? readChatHistory(context.chat, context.turn, historyPolicy(value), args) : failure("history_unavailable", "This conversation's history is unavailable.");
   else if (name === "search_web" || name === "read_web_page") result = await web(value, name, args, signal, context);
   else if (name === "update_plan") result = args.steps.some(step => !step.text.trim()) ? failure("invalid_arguments", "Write nonempty plan steps.") : { kind: "plan", plan: args.steps.map(step => ({ text: step.text.trim(), status: step.status })) };
-  else if (name === "propose_action") {
-    const due = args.due || "", when = args.when || "";
-    if (!args.title.trim() || args.steps?.some(step => !step.trim()) || due && !validDay(due) || when && !validInstant(when) || args.kind === "appointment" && !when) return failure("invalid_arguments", "Use a title, valid date and time, and nonempty steps. Appointments need an ISO date and time with timezone.");
-    result = { kind: "proposal", proposal: { kind: args.kind, title: args.title.trim(), text: args.text, due, steps: (args.steps || []).map(step => step.trim()), when, minutes: args.minutes ?? 60 }, requires_confirmation: true };
-  } else if (name === "propose_change") result = changeProposal(value, args);
   else if (name === "coros_read") result = await corosRead(args, signal, context);
-  else if (name === "coros_format") result = await corosFormat(args, signal);
-  else if (name === "propose_coros") result = await corosProposal(args, signal);
+  else if (name === "coros_format") result = await corosFormat(args, signal, source);
   else if (name === "search_calendar") {
-    const found = calendarItems(window).filter(item => matches(item.title, query));
+    const found = calendarItems(source, window).filter(item => matches(item.title, query));
     result = { source: "pocket:calendar", days: window, matched: found.length, truncated: found.length > limit, appointments: found.slice(0, limit).map(item => ({ id: item.uid, title: item.title, when: new Date(item.when).toISOString(), minutes: item.minutes, task_uid: item.task_uid || "", href: "/calendar/" + encodeURIComponent(item.uid) })) };
   } else if (name === "search_pocket") {
     const grants = access(value), found = [], add = (collection, item, title, content) => { const id = String(item.uid || item.id), href = "/" + collection + "/" + encodeURIComponent(id), kind = collection === "calendar" ? "appointment" : collection.slice(0, -1); if (matches(content, query)) found.push({ kind, type: kind, id, title: title.slice(0, 200), excerpt: excerpt(content, query), href, route: href, updated: item.updated || item.created || 0 }); };
-    if (grants.includes("notes")) for (const item of notes.list()) add("notes", item, noteTitle(item), item.text);
-    if (grants.includes("tasks")) for (const item of tasks.list()) add("tasks", item, item.text, [item.text, ...(item.steps || []).map(step => step.text)].join("\n"));
-    if (grants.includes("thoughts")) for (const item of parking.open()) add("thoughts", item, item.text, item.text);
-    if (grants.includes("calendar")) for (const item of calendarItems(window)) add("calendar", item, item.title, item.title);
+    if (grants.includes("notes")) for (const item of source.notes()) add("notes", item, noteTitle(item), item.text);
+    if (grants.includes("tasks")) for (const item of source.tasks()) add("tasks", item, item.text, [item.text, ...(item.steps || []).map(step => step.text)].join("\n"));
+    if (grants.includes("thoughts")) for (const item of source.thoughts()) add("thoughts", item, item.text, item.text);
+    if (grants.includes("calendar")) for (const item of calendarItems(source, window)) add("calendar", item, item.title, item.title);
     found.sort((a, b) => b.updated - a.updated);
     result = { source: "pocket:workspace", matched: found.length, truncated: found.length > limit, results: found.slice(0, limit).map(({ updated, ...item }) => item) };
   } else if (name === "read_task") {
-    const item = tasks.get(args.id);
+    const item = source.task(args.id);
     const restricted = (item?.source?.kind === "note" || item?.source?.note_uid) && !access(value).includes("notes");
     result = item ? { source: "pocket:task:" + item.uid, id: item.uid, text: item.text, title: item.text, due: item.due || "", completed: Boolean(item.done), done: Boolean(item.done), steps: (item.steps || []).map(step => ({ text: String(step.text || "").slice(0, 200), done: Boolean(step.done) })), task_source: item.source ? { kind: item.source.kind || "", name: restricted ? "" : String(item.source.name || "").slice(0, 200), text: restricted ? "" : String(item.source.text || "").slice(0, 4000), note_uid: item.source.note_uid || "", ...(restricted ? { access_disabled: true } : {}) } : null } : failure("task_not_found", "That task is no longer available.");
   } else if (name === "search_notes") {
-    const found = recent(notes.list(), query);
+    const found = recent(source.notes(), query);
     result = { source: "pocket:notes", matched: found.length, truncated: found.length > limit, notes: found.slice(0, limit).map(n => ({ id: n.uid, title: noteTitle(n), excerpt: excerpt(n.text, query), text_truncated: n.text.length > 500 })) };
   } else if (name === "read_note") {
     if (typeof args.id !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(args.id)) return failure("invalid_arguments", "Use the id returned by search_notes.");
-    const note = notes.get(args.id);
+    const note = source.note(args.id);
     result = note ? { source: "pocket:note:" + note.uid, id: note.uid, title: noteTitle(note), ...pageText(note.text, args) } : failure("note_not_found", "That saved note is no longer available.");
   } else if (name === "search_thoughts" || name === "search_tasks") {
-    const thought = name === "search_thoughts", found = recent(thought ? parking.open() : tasks.list(), query);
+    const thought = name === "search_thoughts", found = recent(thought ? source.thoughts() : source.tasks(), query);
     const kind = thought ? "thoughts" : "tasks";
     result = { source: "pocket:" + kind, matched: found.length, truncated: found.length > limit, [kind]: found.slice(0, limit).map(item => ({ id: String(item.uid || item.id), text: excerpt(item.text, query), truncated: item.text.length > 500, ...(thought ? { state: "parked" } : { done: Boolean(item.done), due: item.due || "" }) })) };
   } else {
     const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - window + 1);
     if (name === "gym_summary") {
-      const found = gym.all().filter(w => w.started >= +start);
+      const found = source.workouts().filter(w => w.started >= +start);
       result = { source: "pocket:gym", days: window, matched: found.length, truncated: found.length > 10, workouts: found.slice(0, 10).map(w => ({ id: w.id, started: w.started, ended: w.ended, sets: gym.count(w), volume_kg: gym.volume(w), exercises: (w.entries || []).slice(0, 12).map(e => ({ exercise: e.exercise, sets: e.sets.slice(-8), truncated: e.sets.length > 8 })) })) };
     } else {
       // These two caches contain parsed readings, not the COROS session or OAuth tokens.
-      const cockpit = cached("pocket:coros-cockpit"), activities = cached("pocket:coros-activities");
+      const { cockpit = null, activities = null } = source.corosCache();
       const updated = Math.max(cockpit?.at || 0, activities?.at || 0);
       result = { source: "pocket:coros", available: Boolean(updated), cached_only: true, days: window, last_updated: updated ? new Date(updated).toISOString() : null, stale: !updated || Date.now() - updated >= 864e5 };
       if (!updated) result.message = "No cached COROS readings. Open Movement to refresh them.";
@@ -314,7 +324,7 @@ export async function execute(value, name, args = {}, signal, context = {}) {
     }
   }
   if (signal?.aborted) throw new DOMException("Stopped", "AbortError");
-  if (!permitted(value, definition) || signature !== grantSignature(value, name)) return failure("access_disabled", "Access to this source was switched off.");
+  if (!permitted(value, name) || signature !== grantSignature(value, name)) return failure("access_disabled", "Access to this source was switched off.");
   if (reuse && !result.error) result = { ...result, access_fingerprint: accessFingerprint(value), request_identity: checkpointIdentity(value) };
   result = bounded(result);
   if (reuse && !result.error) cache?.set(entryKey, { permissions: signature, result: structuredClone(result) });
@@ -332,11 +342,14 @@ export function label(name, input = {}) {
   if (name === "read_note") return "read note";
   if (name === "read_task") return "read task";
   if (name === "update_plan") return "update plan";
+  if (name === "create_record") return "save " + (input.kind || "record");
+  if (name === "change_record") return changeName(input.change);
   if (name === "propose_action") return "prepare " + (input.kind || "action");
   if (name === "propose_change") return "prepare " + changeName(input.change);
   if (name === "coros_summary") return "read COROS cache · " + (input.days || 7) + " days";
   if (name === "coros_read") return "read COROS · " + corosName(input.tool);
   if (name === "coros_format") return "read COROS format · " + corosName(input.tool);
+  if (name === "coros_write") return corosAction(input.tool);
   if (name === "propose_coros") return "prepare " + corosAction(input.tool);
   if (name === "gym_summary") return "read Gym · " + (input.days || 7) + " days";
   return name.replaceAll("_", " ");
@@ -346,6 +359,7 @@ function resultSummary(name, result) {
   if (result.available === false) return result.message || "No cached data";
   if (name === "read_note" || name === "read_task") return result.title || "Record read";
   if (name === "update_plan") return result.plan.filter(step => step.status === "done").length + "/" + result.plan.length + " steps";
+  if (result.kind === "action") return result.action.title + " · " + (result.action.status === "saved" ? "saved" : "declined");
   if (name === "propose_action") return result.proposal.title + " · ready to review";
   if (name === "propose_change") return result.before.title + " · ready to review";
   if (name === "search_web") return (result.results?.length || 0) + " results";

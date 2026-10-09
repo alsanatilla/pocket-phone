@@ -23,9 +23,10 @@ function actionFact(turn, row, data) {
   if (data.kind === 'proposal') { kind = data.proposal?.kind; title = data.proposal?.title; }
   else if (data.kind === 'change') { kind = data.change?.change; title = row.applied_href && data.change?.title || data.before?.title; }
   else if (data.kind === 'coros') { kind = data.coros?.tool; title = data.title; }
+  else if (data.kind === 'action') { kind = data.action?.kind; title = data.action?.title; }
   else if (data.kind === 'kept_record' && data.actor === 'user') { kind = data.record?.kind; title = data.record?.title; }
   if (!kind) return null;
-  return { turn_id: turn.uid, event_id: row.id, kind, title: clip(title, 160), status: row.applied_href ? 'applied_by_user' : 'prepared_awaiting_user', ...(row.applied_href ? { href: row.applied_href, applied_at: row.applied || 0 } : {}) };
+  return { turn_id: turn.uid, event_id: row.id, kind, title: clip(title, 160), status: row.applied_href ? 'applied_by_user' : data.kind === 'action' ? 'declined_by_user' : 'prepared_awaiting_user', ...(row.applied_href ? { href: row.applied_href, applied_at: row.applied || 0 } : {}) };
 }
 
 function excerpt(data, stringLimit = 1000, arrayLimit = 3) {

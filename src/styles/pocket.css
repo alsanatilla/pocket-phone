@@ -657,6 +657,10 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 .pip-settings label { display: block; color: var(--muted); font-size: 13px; margin: 8px 0; }
 .pip-settings .check-label { display: flex; }
 .pip-settings input, .pip-settings select { font-size: 15px; }
+.pip-routine { border-top: 1px solid var(--line); padding: 8px 0; }
+.pip-routine-actions, .pip-days { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.pip-routine-actions button { min-height: 44px; font-size: 13px; }
+.pip-days .check-label { display: inline-flex; margin: 0; }
 @media (max-width: 899px) {
   .tabs { min-width: 0; }
   .pip-layout { display: flex; flex-direction: column; gap: 12px; }
