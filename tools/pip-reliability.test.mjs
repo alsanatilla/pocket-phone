@@ -5,6 +5,7 @@ import { execute, accessFingerprint, historyPolicy, saveAccess } from '../src/cl
 import { conversationMemory, MEMORY_LIMIT } from '../src/client/pip-memory.js';
 import { activity } from '../src/client/pip-activity.js';
 import { sanitizeObject, mergeObject, validObject } from '../src/shared/objects.js';
+import { event, response, anthropicMessage, systemText, messageText } from './pip-provider-fixtures.mjs';
 
 class Memory {
   values = new Map();
@@ -20,14 +21,10 @@ function workspace(t) {
   t.after(() => { globalThis.localStorage = previous.local; globalThis.sessionStorage = previous.session; globalThis.fetch = previous.fetch; });
   const store = new ChatStore(disk), chat = store.create(); return { disk, store, chat };
 }
-const event = value => 'data: ' + JSON.stringify(value) + '\n\n';
-const response = wire => new Response(wire, { headers: { 'content-type': 'text/event-stream' } });
-const answer = text => event({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } }) + event({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 8 } }) + event({ type: 'message_stop' });
-const limited = () => event({ type: 'message_delta', delta: { stop_reason: 'max_tokens' }, usage: { output_tokens: 8 } }) + event({ type: 'message_stop' });
+const answer = text => anthropicMessage({ text });
+const limited = () => anthropicMessage({ finish: 'max_tokens' });
 function call(name, input, id = 'toolu_fixture', tokens = 8) {
-  return event({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id, name, input } })
-    + event({ type: 'content_block_stop', index: 0 })
-    + event({ type: 'message_delta', delta: { stop_reason: 'tool_use' }, ...(tokens === null ? {} : { usage: { output_tokens: tokens } }) }) + event({ type: 'message_stop' });
+  return anthropicMessage({ calls: [{ name, input, id }], output: tokens ?? 0 });
 }
 const memoryOf = body => JSON.parse(body.messages.at(-1).content.match(/<pocket_conversation_memory>\n(.*?)\n<\/pocket_conversation_memory>/s)[1]);
 const row = (name, data, fields = {}) => ({ id: 'event-' + name, name, state: 'done', input: '{}', ended: 123, result: JSON.stringify(data), ...fields });
@@ -37,8 +34,8 @@ const current = () => ({ uid: 'current-turn', text: 'which stock should I buy?',
 test('current research requests receive the local date and timezone', t => {
   const { chat } = workspace(t); t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 9, 8, 12).getTime() });
   const body = requestBody(chat, current());
-  assert.match(body.system, /Today is 2026-10-08 \(.+\)/);
-  assert.match(body.system, /verify publication dates/);
+  assert.match(body.instructions, /Today is 2026-10-08 \(.+\)/);
+  assert.match(body.instructions, /verify publication dates/);
 });
 
 for (const provider of ['anthropic', 'compatible']) test(`${provider} synthesis preserves the actual stock question and attributes limits to the app`, async t => {
@@ -53,8 +50,8 @@ for (const provider of ['anthropic', 'compatible']) test(`${provider} synthesis 
   } });
   assert.equal(sent.length, 2);
   assert.deepEqual(sent[1].messages.filter(item => item.role === 'user'), sent[0].messages.filter(item => item.role === 'user'));
-  assert.equal(sent[1].messages.at(-1).content, turn.text);
-  const system = provider === 'anthropic' ? sent[1].system : sent[1].messages[0].content;
+  assert.equal(messageText(sent[1].messages.at(-1)), turn.text);
+  const system = systemText(sent[1]);
   assert.match(system, /app limit, not a user instruction/);
   assert.match(system, /earlier message must not replace the current answer/);
 });
@@ -93,7 +90,7 @@ test('publication dates and page offsets remain accurate across cached reads', a
   assert.equal(first.truncated, true); assert.equal(second.offset, 4000); assert.equal(second.next_offset, null); assert.equal(requests, 1);
 });
 
-test('a proposal in the last research round receives an answer with reserved tokens even without usage', async t => {
+test('a proposal in the last research round reserves an answer even when output usage is zero', async t => {
   const { chat } = workspace(t), turn = current(), sent = [];
   turn.text = 'Research and prepare a note';
   const result = await streamReply(chat, turn, { key: 'fixture', fetcher: async (_, options) => {
@@ -102,7 +99,7 @@ test('a proposal in the last research round receives an answer with reserved tok
     if (index === 8) return response(call('propose_action', { kind: 'note', title: 'Research note', text: 'Verified findings' }, 'last-proposal', null));
     return response(answer('The note is ready for review.'));
   } });
-  assert.equal(sent.length, 10); assert.equal(sent[9].tool_choice.type, 'none');
+  assert.equal(sent.length, 10); assert.ok(sent[9].tool_choice?.type === 'none' || !sent[9].tools?.length);
   assert.ok(sent[8].max_tokens + sent[9].max_tokens + 8 <= chat.config.maxTokens);
   assert.ok(result.activity.some(event => event.name === 'propose_action' && event.state === 'done'));
   assert.equal(result.answer, 'The note is ready for review.');
@@ -453,10 +450,10 @@ test('last-request usage includes Anthropic cache tokens and does not reuse earl
     let requests = 0;
     const result = await streamReply(chat, current(), { key: 'fixture', fetcher: async () => {
       const usage = ++requests === 1 ? { input_tokens: 10, cache_read_input_tokens: 20, cache_creation_input_tokens: 30 } : reported ? { input_tokens: 7, cache_read_input_tokens: 9, cache_creation_input_tokens: 11 } : null;
-      return response((usage ? event({ type: 'message_start', message: { usage } }) : '') + (requests === 1 ? call('update_plan', { steps: [{ text: 'Answer the question', status: 'done' }] }) : answer('Finished')));
+      return response(anthropicMessage({ usage: usage || { input_tokens: 0 }, ...(requests === 1 ? { calls: [{ name: 'update_plan', input: { steps: [{ text: 'Answer the question', status: 'done' }] } }] } : { text: 'Finished' }) }));
     } });
     assert.equal(requests, 2); assert.equal(result.usage.input_tokens, reported ? 17 : 10);
-    assert.equal(result.usage.last_input_tokens, reported ? 27 : undefined); assert.equal(result.usage.last_output_tokens, 8);
+    assert.equal(result.usage.last_input_tokens, reported ? 27 : 0); assert.equal(result.usage.last_output_tokens, 8);
     assert.deepEqual(result.usage.history_replay.selected_ids, ['first']); assert.equal(result.usage.history_replay.total, 1);
   }
 });

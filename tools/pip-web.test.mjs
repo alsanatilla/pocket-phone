@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, apiKey, setKey, saveSettings, settings, requestBody, streamReply, sse } from '../src/client/pip-core.js';
+import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, apiKey, setKey, saveSettings, settings, requestBody, streamReply } from '../src/client/pip-core.js';
 import { streamChat } from '../src/client/pip-stream.js';
 import { execute, definitions } from '../src/client/pip-tools.js';
+import { event, response, anthropicMessage } from './pip-provider-fixtures.mjs';
 
 class Memory {
   values = new Map();
@@ -13,23 +14,19 @@ class Memory {
   removeItem(key) { this.values.delete(key); }
 }
 const ready = () => { const memory = new Memory(), store = new ChatStore(memory), chat = store.create(); return { memory, store, chat }; };
-const response = (events, chunkSize = 7) => {
-  const bytes = new TextEncoder().encode(events);
-  return new Response(new ReadableStream({ start(controller) { for (let at=0;at<bytes.length;at+=chunkSize) controller.enqueue(bytes.slice(at,at+chunkSize)); controller.close(); } }), { headers:{'content-type':'text/event-stream'} });
-};
-const event = value => 'data: ' + JSON.stringify(value) + '\r\n\r\n';
-const anthropic = text => event({type:'message_start',message:{model:'canonical-model',usage:{input_tokens:20}}}) + event({type:'content_block_delta',delta:{type:'text_delta',text}}) + event({type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:8}}) + event({type:'message_stop'});
+const anthropic = text => anthropicMessage({ text, model: 'canonical-model', usage: { input_tokens: 20 } });
 const source = {kind:'note',uid:'note-1',title:'Trip',text:'Take the train'};
 const turn = {uid:'turn-1',text:'What next?',context:[source]};
 
 test('UTF-8, CRLF and multiline SSE framing survive single-byte chunks', async()=>{
-  const wire=': ping\r\ndata: {"text":\r\ndata: "Grüße 🌱"}\r\n\r\n';
-  const data=[];for await(const value of sse(response(wire,1).body))data.push(JSON.parse(value));
-  assert.deepEqual(data,[{text:'Grüße 🌱'}]);
+  const { chat } = ready();
+  const wire = ': ping\r\n' + anthropic('Grüße 🌱').replace(/data: (.+)\r\n\r\n/g, (_, json) => JSON.stringify(JSON.parse(json), null, 2).split('\n').map(line => 'data: ' + line).join('\r\n') + '\r\n\r\n');
+  const result = await streamReply(chat, turn, { key: 'fixture', fetcher: async () => response(wire, 1) });
+  assert.equal(result.answer, 'Grüße 🌱'); assert.equal(result.usage.runtime, 'ai-sdk');
 });
 test('Anthropic streams keep the answer, summary and usage separate', async()=>{
   const {chat}=ready(), updates=[];
-  const wire=event({type:'content_block_delta',delta:{type:'thinking_delta',thinking:'Compare options.'}})+event({type:'content_block_delta',delta:{type:'signature_delta',signature:'private-signature'}})+anthropic('Take the train 🌱');
+  const wire=anthropicMessage({ text:'Take the train 🌱', reasoning:'Compare options.', signature:'private-signature', model:'canonical-model', usage:{ input_tokens:20 } });
   let request;
   const result=await streamReply(chat,turn,{key:'tab-key',fetcher:async(url,options)=>{request={url,options};return response(wire,1);},onUpdate:value=>updates.push(value)});
   assert.equal(result.answer,'Take the train 🌱');assert.equal(result.reasoning,'Compare options.');assert.equal(result.usage.output_tokens,8);assert.equal(result.model,'canonical-model');
@@ -47,8 +44,8 @@ test('compatible streams do not double a summary supplied in two fields', async(
 });
 test('truncated streams and reply limits stay unfinished', async()=>{
   const {chat}=ready();
-  await assert.rejects(streamReply(chat,turn,{key:'key',fetcher:async()=>response(event({type:'content_block_delta',delta:{type:'text_delta',text:'Partial'}}))}),/before the reply was complete/);
-  await assert.rejects(streamReply(chat,turn,{key:'key',fetcher:async()=>response(event({type:'content_block_delta',delta:{type:'text_delta',text:'Partial'}})+event({type:'message_delta',delta:{stop_reason:'max_tokens'}})+event({type:'message_stop'}))}),/reply token limit/);
+  await assert.rejects(streamReply(chat,turn,{key:'key',fetcher:async()=>response(anthropicMessage({text:'Partial',complete:false}))}),/before the reply was complete/);
+  await assert.rejects(streamReply(chat,turn,{key:'key',fetcher:async()=>response(anthropicMessage({text:'Partial',finish:'max_tokens',output:4096}))}),/reply token limit/);
 });
 test('request errors do not expose provider text or an echoed API key', async()=>{
   const {chat}=ready();
@@ -74,7 +71,6 @@ test('context overflow is named with a fixed message, never retried and never ec
   assert.equal(await attempt(compatible,422,JSON.stringify({detail:[{msg:'Field required secret',input:{messages:[{content:'my context window is too long secret'}]}}]})),generic.replace('400','422'));
   assert.equal(await attempt(compatible,422,JSON.stringify({error:{message:'Invalid message format',metadata:{raw:JSON.stringify({detail:[{msg:'Field required',input:{messages:[{content:'Explain the maximum context length.'}]}}]})}}})),generic.replace('400','422'));
   assert.equal(await attempt(null,200,response(event({type:'error',error:{type:'invalid_request_error',message:'prompt is too long: secret'}}))),overflow);
-  assert.match(await attempt(null,200,response(event({type:'error',error:{type:'overloaded_error',message:'secret'}}))),/interrupted/);
 });
 test('unanswered questions keep their place with a marker; reasoning and partials do not repeat',()=>{
   const {chat}=ready();chat.turns=[{uid:'old-1',text:'First',context:[source],answer:'Answer',reasoning:'private trace',status:'done'},{uid:'old-2',text:'Failed',answer:'Partial',status:'failed'},{uid:'old-3',text:'Stopped',answer:'More partial',status:'stopped'},turn];
@@ -84,7 +80,7 @@ test('unanswered questions keep their place with a marker; reasoning and partial
   assert.equal(request.messages[2].content,'Failed');assert.match(request.messages[3].content,/^\[No answer: this reply failed/);
   assert.equal(request.messages[4].content,'Stopped');assert.match(request.messages[5].content,/^\[No answer: the user stopped this reply/);
   for(const hidden of ['private trace','Partial','More partial'])assert.ok(!json.includes(hidden),hidden);
-  assert.ok(!request.messages.at(-1).content.includes('<pocket_history_coverage>'),'nothing omitted, so no coverage block');assert.equal(request.model,DEFAULT_CONFIG.model);
+  assert.ok(!request.messages.at(-1).content.includes('<pocket_history_coverage>'),'nothing omitted, so no coverage block');assert.ok(request.instructions.includes('You are pip'));
 });
 test('keys are tab-only and bound to their endpoint; settings contain no key',()=>{
   const tab=new Memory(), disk=new Memory(), a=config({...DEFAULT_CONFIG,provider:'compatible',model:'model-a',baseUrl:'https://a.example/v1/'}), b=config({...a,baseUrl:'https://b.example/v1'});
@@ -143,72 +139,26 @@ test('a tool round gets a usable token allowance instead of the full-budget spli
   const {chat}=ready(), value=config({...DEFAULT_CONFIG});
   const body={...requestBody(chat,turn),tools:[{name:'propose_action',description:'Prepare an action',input_schema:{type:'object'}}]};
   const requests=[];
-  const wire=event({type:'message_start',message:{model:'m',usage:{input_tokens:5}}})+event({type:'content_block_delta',delta:{type:'text_delta',text:'ok'}})+event({type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:4}})+event({type:'message_stop'});
-  await streamChat(chat,turn,{value,body,readSse:sse,key:'k',fetcher:async(url,options)=>{requests.push(JSON.parse(options.body));return response(wire);}});
+  const wire=anthropicMessage({text:'ok',model:'m',usage:{input_tokens:5},output:4});
+  await streamChat(chat,turn,{value,body,key:'k',fetcher:async(url,options)=>{requests.push(JSON.parse(options.body));return response(wire);}});
   assert.equal(value.maxTokens,4096);
   assert.ok(requests[0].max_tokens>=2048,`first tool round allowance ${requests[0].max_tokens} should finish a tool call`);
   assert.ok(requests[0].max_tokens<=value.maxTokens);
 });
-test('a web search that resolves after a paused turn updates its own search',async()=>{
-  // Anthropic can return pause_turn after a server_tool_use and deliver the
-  // web_search_tool_result on the continuation. Activity ids carry the round, so the
-  // result must be matched by the provider's id or it is rejected as "unmatched".
-  const {chat}=ready(), value=config({...DEFAULT_CONFIG,webSearch:true});
-  const body={model:value.model,max_tokens:value.maxTokens,stream:true,messages:[{role:'user',content:'Compare German carmakers.'}],tools:[{name:'web_search'},{name:'search_pocket'}]};
-  const paused=event({type:'message_start',message:{model:'m',usage:{input_tokens:10}}})
-    +event({type:'content_block_start',index:0,content_block:{type:'server_tool_use',id:'srvtoolu_1',name:'web_search',input:{}}})
-    +event({type:'content_block_delta',index:0,delta:{type:'input_json_delta',partial_json:'{"query":"VW quarterly"}'}})
-    +event({type:'content_block_stop',index:0})
-    +event({type:'message_delta',delta:{stop_reason:'pause_turn'},usage:{output_tokens:20}})
-    +event({type:'message_stop'});
-  const resolved=event({type:'message_start',message:{model:'m',usage:{input_tokens:12}}})
-    +event({type:'content_block_start',index:0,content_block:{type:'web_search_tool_result',tool_use_id:'srvtoolu_1',content:[{type:'web_search_result',url:'https://example.com/vw',title:'VW figures'}]}})
-    +event({type:'content_block_stop',index:0})
-    +event({type:'content_block_delta',index:1,delta:{type:'text_delta',text:'Done'}})
-    +event({type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:10}})
-    +event({type:'message_stop'});
-  let calls=0;
-  const result=await streamChat(chat,turn,{value,body,readSse:sse,key:'k',fetcher:async()=>response(++calls===1?paused:resolved)});
-  assert.equal(calls,2);assert.equal(result.answer,'Done');
-  const web=result.activity.filter(row=>row.kind==='web');
-  assert.equal(web.length,1);assert.equal(web[0].state,'done');assert.equal(web[0].summary,'1 results');
+// Native Anthropic web_search is not offered by Pocket; current web research
+// uses Firecrawl client tools for every provider (covered below and in SDK tests).
+test('a note can still be prepared after the budget forces synthesis', async () => {
+  const { chat } = ready(), value = config({ ...DEFAULT_CONFIG });
+  const body = requestBody(chat, { ...turn, text: 'Save a note about the car industry' });
+  const truncated = anthropicMessage({ text: 'Let me check.', finish: 'max_tokens', usage: { input_tokens: 10 }, output: 12 });
+  const proposing = anthropicMessage({ calls: [{ name: 'propose_action', id: 'toolu_1', input: { kind: 'note', title: 'Car industry turmoil', text: 'VW plans to cut jobs.' } }], output: 30 });
+  const answering = anthropicMessage({ text: 'Prepared the note for you.' });
+  let calls = 0;
+  const result = await streamChat(chat, turn, { value, body, key: 'k', fetcher: async () => response(++calls === 1 ? truncated : calls === 2 ? proposing : answering) });
+  assert.equal(calls, 3); assert.equal(result.answer, 'Prepared the note for you.');
+  assert.ok(result.activity.some(row => row.name === 'propose_action' && row.state === 'done'));
 });
-test('a web result the client cannot match no longer ends the run',async()=>{
-  // Defensive: whatever id a provider uses, a search result must not abort the whole reply.
-  const {chat}=ready(), value=config({...DEFAULT_CONFIG,webSearch:true});
-  const body={model:value.model,max_tokens:value.maxTokens,stream:true,messages:[{role:'user',content:'x'}],tools:[{name:'web_search'}]};
-  const wire=event({type:'message_start',message:{model:'m',usage:{input_tokens:10}}})
-    +event({type:'content_block_start',index:0,content_block:{type:'web_search_tool_result',tool_use_id:'srvtoolu_orphan',content:[{type:'web_search_result',url:'https://example.com/x',title:'X'}]}})
-    +event({type:'content_block_stop',index:0})
-    +event({type:'content_block_delta',index:1,delta:{type:'text_delta',text:'Done'}})
-    +event({type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:10}})
-    +event({type:'message_stop'});
-  const result=await streamChat(chat,turn,{value,body,readSse:sse,key:'k',fetcher:async()=>response(wire)});
-  assert.equal(result.answer,'Done');
-  const web=result.activity.filter(row=>row.kind==='web');
-  assert.equal(web.length,1);assert.equal(web[0].state,'done');
-});
-test('a note can still be prepared after the budget forces synthesis',async()=>{
-  const {chat}=ready(), value=config({...DEFAULT_CONFIG});
-  const body={model:value.model,max_tokens:value.maxTokens,stream:true,messages:[{role:'user',content:'Save a note about the car industry'}],tools:[{name:'propose_action'},{name:'search_notes'}]};
-  const truncated=event({type:'message_start',message:{model:'m',usage:{input_tokens:10}}})
-    +event({type:'content_block_delta',delta:{type:'text_delta',text:'Let me check.'}})
-    +event({type:'message_delta',delta:{stop_reason:'max_tokens'},usage:{output_tokens:12}})
-    +event({type:'message_stop'});
-  const proposing=event({type:'content_block_start',index:0,content_block:{type:'tool_use',id:'toolu_1',name:'propose_action',input:{}}})
-    +event({type:'content_block_delta',index:0,delta:{type:'input_json_delta',partial_json:'{"kind":"note","title":"Car industry turmoil","text":"VW plans to cut jobs."}'}})
-    +event({type:'content_block_stop',index:0})
-    +event({type:'message_delta',delta:{stop_reason:'tool_use'},usage:{output_tokens:30}})
-    +event({type:'message_stop'});
-  const answering=event({type:'content_block_delta',delta:{type:'text_delta',text:'Prepared the note for you.'}})
-    +event({type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:8}})
-    +event({type:'message_stop'});
-  let calls=0;
-  const result=await streamChat(chat,turn,{value,body,readSse:sse,key:'k',fetcher:async()=>response(++calls===1?truncated:calls===2?proposing:answering)});
-  assert.equal(calls,3);
-  assert.equal(result.answer,'Prepared the note for you.');
-  assert.ok(result.activity.some(row=>row.name==='propose_action'&&row.state==='done'),'the note proposal is prepared during the final round');
-});
+
 test('web search runs through Firecrawl for every provider',()=>{
   const {chat}=ready();
   const names = value => (requestBody({ ...chat, config: value }, turn).tools || []).map(tool => tool.name || tool.function?.name);

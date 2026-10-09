@@ -10,7 +10,7 @@ import { activity, settle, mark, elapsed, activityTitle, phaseLabel } from "./pi
 import { applyProposal, applyChange, applyCoros } from './pip-actions.js';
 import { corosAction, corosCourse, corosDated, corosDate, corosProblem, corosTitle, courseLines, sportName } from '../shared/coros-course.js';
 import { travelDraft } from '../shared/travel-context.js';
-import { CONTEXT_OVERFLOW } from './pip-stream.js';
+import { CONTEXT_OVERFLOW } from './pip-limits.js';
 
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, historyTimer = 0, viewportCleanup = null;

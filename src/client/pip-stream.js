@@ -1,357 +1,205 @@
-import { activity, source, settle } from "./pip-activity.js";
-import { execute, access, accessFingerprint, checkpointIdentity, cacheKey, definitions, grantSignature, label, summary, sources, STATE_TOOLS } from "./pip-tools.js";
-
-export const RESEARCH_LIMITS = Object.freeze({ continuations: 8, calls: 20, finalCalls: 4, webCalls: 8, toolData: 48000, result: 8000, parallel: 3, deadlineMs: 300000 });
-/** A tool round must be able to finish a tool call: never divide a round below this. */
+import { ToolLoopAgent, isStepCount, jsonSchema, tool } from 'ai';
+import { activity, source, settle } from './pip-activity.js';
+import { execute, access, accessFingerprint, checkpointIdentity, cacheKey, definitions, grantSignature, label, summary, sources, STATE_TOOLS } from './pip-tools.js';
+import { providerModel, providerOptions, providerError } from './pip-provider.js';
+import { RESEARCH_LIMITS } from './pip-limits.js';
+export { RESEARCH_LIMITS, CONTEXT_OVERFLOW } from './pip-limits.js';
+export { freeFallbacks } from './pip-provider.js';
 const TOOL_ROUND_TOKENS = 2048;
+const stopped = () => new DOMException('Stopped', 'AbortError');
 
-const httpError = code => code === 401 || code === 403 ? "The provider rejected your key or access. Check API settings."
-  : code === 429 ? "The provider is busy or your quota is exhausted. Retry when you’re ready."
-  : code >= 500 ? "The provider is temporarily unavailable. Retry when you’re ready."
-  : "The provider could not accept this request (" + code + "). Check its model, tools and search settings.";
-// A too-long chat otherwise reads like a wrong model ID. Provider wording is only matched, never shown.
-export const CONTEXT_OVERFLOW = "This chat is too long for this model. Start a new chat, or choose a model with a larger context window.";
-const OVERFLOW_CODE = /\b(?:request_too_large|context_length_exceeded|prompt_too_long)\b/i;
-const LONG_INPUT = /\b(?:prompt|input|messages?|conversation)\s+(?:(?:is|are)\s+)?too\s+long\b|\b(?:input|prompt)\s+(?:tokens?|token\s+count)\b.{0,80}\b(?:exceeds?|greater\s+than|maximum)\b/i;
-const CONTEXT_LIMIT = /\b(?:maximum|max)\s+(?:context|prompt)\s+(?:length|window|size)\b|\bcontext[ _-](?:length|window|size|limit)\b.{0,80}\b(?:exceeded|exceeds?|too\s+many|too\s+long)\b|\btoo\s+many\s+(?:input|prompt)\s+tokens\b/i;
-const OUTPUT_LIMIT = /\b(?:max_tokens|max_completion_tokens|max_output_tokens|maximum(?:\s+supported)?\s+output|output\s+tokens?)\b/i;
-/** Error code/type/message fields only: validation errors (422) can echo the request, which may mention any of these words. */
-function errorFields(value, depth = 0) {
-  if (depth > 8) return [];
-  if (typeof value === 'string') return [value];
-  if (Array.isArray(value)) return value.slice(0, 3).flatMap(item => errorFields(item, depth + 1));
-  if (!value || typeof value !== 'object') return [];
-  return ['code', 'type', 'message', 'error', 'metadata', 'raw'].flatMap(key => {
-    let field = value[key];
-    if (key === 'raw' && typeof field === 'string') { try { field = JSON.parse(field); } catch {} }
-    return errorFields(field, depth + 1);
-  });
-}
-const contextOverflow = data => errorFields(data).some(text => OVERFLOW_CODE.test(text) || LONG_INPUT.test(text) || !OUTPUT_LIMIT.test(text) && CONTEXT_LIMIT.test(text));
-const overflowed = raw => { let data; try { data = JSON.parse(raw); } catch { data = raw; } return contextOverflow(data); };
-/** At most a few KB of an error body; the request's abort signal and inactivity timer still end a stalled one. */
-async function errorText(response, signal) {
-  const reader = response.body?.getReader(), decoder = new TextDecoder(); let text = "";
-  if (!reader) return text;
-  const abort = () => { void reader.cancel().catch(() => {}); };
-  signal.addEventListener("abort", abort, { once: true }); if (signal.aborted) abort();
-  try { while (text.length < 4096 && !signal.aborted) { const { done, value } = await reader.read(); if (done) break; text += decoder.decode(value, { stream: true }); } }
-  catch { /* unreadable or stopped: the status alone decides */ }
-  finally { signal.removeEventListener("abort", abort); abort(); reader.releaseLock(); }
-  return text.slice(0, 4096);
-}
-
-const FREE_CHAIN = ["nvidia/nemotron-3-super-120b-a12b:free", "inclusionai/ling-3.0-flash-sante:free", "openrouter/free"];
-/** OpenRouter tries these in order when a free model is rate-limited; the free router alone sometimes picks a model that cannot chat. */
-export function freeFallbacks(value) {
-  let host = ""; try { host = new URL(value.baseUrl).hostname; } catch {}
-  if (value.provider !== "compatible" || host !== "openrouter.ai" || !(value.model.endsWith(":free") || value.model === "openrouter/free")) return null;
-  const chain = value.model === "openrouter/free" ? FREE_CHAIN : [value.model, ...FREE_CHAIN.filter(m => m !== value.model)];
-  return chain.slice(0, 3);
-}
-const pause = (ms, signal) => new Promise((resolve, reject) => { const abort = () => { clearTimeout(t); reject(new DOMException("Stopped", "AbortError")); }, t = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, ms); signal.addEventListener("abort", abort, { once: true }); if (signal.aborted) abort(); });
-
-export async function streamChat(chat, turn, { value, body, readSse, key, signal, onUpdate = () => {}, fetcher = fetch, executeTool = execute, timeoutMs = 90000, deadlineMs = RESEARCH_LIMITS.deadlineMs, resume = null, coverage = null } = {}) {
+// AI SDK owns provider parsing, tool-call IDs and model continuation. Pocket owns
+// user permissions, bounded research, recorded outcomes and proposal review.
+export async function streamChat(chat, turn, { value, body, key, signal, onUpdate = () => {}, fetcher = fetch, executeTool = execute, timeoutMs = 90000, deadlineMs = RESEARCH_LIMITS.deadlineMs, resume = null, coverage = null } = {}) {
   const controller = new AbortController(), abort = () => controller.abort();
-  signal?.addEventListener("abort", abort, { once: true }); if (signal?.aborted) controller.abort();
-  let timeout, timedOut = false, deadlineReached = false, calls = 0, searches = 0, toolData = 0, tokens = value.maxTokens, finalReason = "", finalRounds = 0, finalCalls = 0;
+  signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort();
+  let timeout, timedOut = false, deadlineReached = false, calls = 0, searches = 0, toolData = 0, tokens = value.maxTokens;
+  let finalReason = '', finalRounds = 0, finalCalls = 0, round = 0, currentRound = 0, allowance = 0, final = false, canPrepare = false, lastFinish = '', fatal = null;
   const absolute = setTimeout(() => { deadlineReached = true; controller.abort(); }, Math.min(deadlineMs, RESEARCH_LIMITS.deadlineMs));
   const clock = () => { clearTimeout(timeout); timeout = setTimeout(() => { timedOut = true; controller.abort(); }, Math.min(timeoutMs, 90000)); };
-  const result = { answer: "", reasoning: resume?.reasoning || "", activity: activity(resume?.activity || turn.activity || []), sources: [], phase: "requesting", usage: { request_identity: [value.provider, value.baseUrl, value.model].join("|"), read_access: access(value).join("|"), web_access: value.webSearch, notes_restricted: resume?.notes_restricted || false, ...(coverage ? { history_replay: coverage } : {}) }, model: value.model };
-  const offered = new Set((body.tools || []).map(t => t.name || t.function?.name));
-  const cache = new Map(), inFlight = new Map(), failures = new Map(), preparations = new Map(), webRows = new Map(), context = { cache, chat, turn }, completed = [];
+  const result = { answer: '', reasoning: resume?.reasoning || '', activity: activity(resume?.activity || turn.activity || []), sources: [], phase: 'requesting', usage: { runtime: 'ai-sdk', request_identity: checkpointIdentity(value), read_access: access(value).join('|'), web_access: value.webSearch, notes_restricted: resume?.notes_restricted || false, ...(coverage ? { history_replay: coverage } : {}) }, model: value.model };
+  const offered = new Set((body.tools || []).map(definition => definition.name));
+  const cache = new Map(), inFlight = new Map(), failures = new Map(), preparations = new Map(), inputs = new Map(), executed = new Set();
+  const context = { cache, chat, turn }, completed = [], responses = [];
+  const check = () => { if (controller.signal.aborted) throw stopped(); if (fatal) throw fatal; };
+  const publish = () => { check(); if (result.answer.length > 64000 || result.reasoning.length > 24000) throw new Error('This reply is too large. Try a shorter request.'); result.activity = activity(result.activity); onUpdate(structuredClone(result)); };
+  const prefix = (turn.attempt || crypto.randomUUID()) + ':', activityId = id => prefix + currentRound + ':' + String(id).slice(0, 145);
+  const record = (id, fields) => {
+    id = activityId(id); const old = result.activity.find(row => row.id === id), now = Date.now();
+    const row = { id, kind: 'tool', name: '', title: '', input: '', summary: '', sources: [], state: 'queued', started: now, ended: 0, ...old, ...fields };
+    if (old) Object.assign(old, row); else result.activity.push(row); publish();
+  };
   for (const row of result.activity) {
     if (row.state !== 'done' || !STATE_TOOLS.includes(row.name) || row.name === 'update_plan') continue;
     try {
       const data = JSON.parse(row.result), input = JSON.parse(row.input || '{}');
       if (['proposal', 'change', 'coros'].includes(data.kind)) preparations.set(cacheKey(row.name, input), { event_id: row.id, title: data.proposal?.title || data.before?.title || data.title || 'Proposal', status: row.applied_href ? 'applied_by_user' : 'prepared_awaiting_user', ...(row.applied_href ? { href: row.applied_href } : {}) });
-    } catch { /* no complete preparation to reuse */ }
+    } catch { /* An incomplete preparation cannot be reused. */ }
   }
   for (const row of resume?.observations || []) {
-    if (!offered.has(row.name) || [...STATE_TOOLS, "web_search"].includes(row.name)) continue;
-    try { const answer = JSON.parse(row.result), input = JSON.parse(row.input || "{}"); cache.set(cacheKey(row.name, input), { permissions: grantSignature(value, row.name), result: answer }); } catch { /* unusable checkpoint */ }
+    if (!offered.has(row.name) || STATE_TOOLS.includes(row.name)) continue;
+    try { cache.set(cacheKey(row.name, JSON.parse(row.input || '{}')), { permissions: grantSignature(value, row.name), result: JSON.parse(row.result) }); } catch { /* Unusable checkpoint. */ }
   }
-  const check = () => { if (controller.signal.aborted) throw new DOMException("Stopped", "AbortError"); };
-  const publish = () => { check(); if (result.answer.length > 64000 || result.reasoning.length > 24000) throw new Error("This reply is too large. Try a shorter request."); result.activity = activity(result.activity); onUpdate(structuredClone(result)); };
-  let currentRound = 0;
-  const activityPrefix = (turn.attempt || crypto.randomUUID()) + ":", activityId = id => id.startsWith(activityPrefix) ? id : activityPrefix + currentRound + ":" + id.slice(0, 145);
-  const record = (id, fields) => {
-    id = activityId(id);
-    const old = result.activity.find(a => a.id === id), now = Date.now();
-    const entry = { id, kind: "tool", name: "", title: "", input: "", summary: "", sources: [], state: "running", started: now, ended: 0, ...old, ...fields };
-    if (old) Object.assign(old, entry); else result.activity.push(entry); publish();
-  };
-  const cite = raw => {
-    const found = source(raw); if (!found || found.href.startsWith("/")) return;
-    let index = result.sources.findIndex(s => s.href === found.href);
-    if (index < 0 && result.sources.length < 24) { index = result.sources.length; result.sources.push(found); }
-    if (index >= 0) result.answer += ` [${index + 1}](${found.href.replace(/[()]/g, c => encodeURIComponent(c))})`;
-  };
-  const finishFromObservations = (reason, failed = true) => {
-    const observations = completed.length ? completed : (resume?.observations || []).map(row => { try { return { name: row.name, answer: JSON.parse(row.result) }; } catch { return null; } }).filter(Boolean);
+  const finishFromObservations = reason => {
+    const observations = completed.length ? completed : (resume?.observations || []).flatMap(row => { try { return [{ answer: JSON.parse(row.result) }]; } catch { return []; } });
     if (!result.answer.trim()) {
-      const excerpts = observations.flatMap(({ answer }) => answer.error ? [] : answer.kind === "proposal" ? ["Prepared for review: " + answer.proposal.title] : answer.kind === "plan" ? [] : answer.text ? [String(answer.title || "Source") + ": " + answer.text.slice(0, 600)] : (answer.results || answer.notes || answer.tasks || answer.appointments || []).slice(0, 3).map(item => (item.title || item.text || "Source") + (item.description || item.excerpt ? ": " + (item.description || item.excerpt).slice(0, 300) : "")));
-      result.answer = excerpts.length ? "Collected observations:\n\n" + excerpts.slice(0, 8).map(item => "- " + item).join("\n") : "Research stopped before a final answer was available.";
+      const excerpts = observations.flatMap(({ answer }) => answer.error ? [] : answer.kind === 'proposal' ? ['Prepared for review: ' + answer.proposal.title] : answer.kind === 'plan' ? [] : answer.text ? [String(answer.title || 'Source') + ': ' + answer.text.slice(0, 600)] : (answer.results || answer.notes || answer.tasks || answer.appointments || []).slice(0, 3).map(item => (item.title || item.text || 'Source') + (item.description || item.excerpt ? ': ' + (item.description || item.excerpt).slice(0, 300) : '')));
+      result.answer = excerpts.length ? 'Collected observations:\n\n' + excerpts.slice(0, 8).map(item => '- ' + item).join('\n') : 'Research stopped before a final answer was available.';
     }
-    result.answer += "\n\n" + reason + " Completed lookups remain in the activity.";
-    result.activity = settle(result.activity, "failed", reason); result.phase = failed ? "failed" : "done";
-    onUpdate(structuredClone(result));
-    if (failed) throw new Error(reason);
-    return result;
+    result.answer += '\n\n' + reason + ' Completed lookups remain in the activity.';
+    result.activity = settle(result.activity, 'failed', reason); result.phase = 'failed'; onUpdate(structuredClone(result));
+    throw new Error(reason);
+  };
+
+  // SDK tools can run concurrently. Bound reads and put preparations behind the
+  // preceding reads/preparations so dependent Pocket operations retain order.
+  let barrier = Promise.resolve(), readers = [], slots = 0; const waiting = [];
+  const withSlot = async work => {
+    if (slots >= RESEARCH_LIMITS.parallel) await new Promise(resolve => waiting.push(resolve)); else slots++;
+    try { check(); return await work(); } finally { const next = waiting.shift(); if (next) next(); else slots--; }
+  };
+  const schedule = (name, work) => {
+    if (STATE_TOOLS.includes(name)) {
+      const preceding = [barrier, ...readers]; readers = [];
+      const pending = Promise.allSettled(preceding).then(() => { check(); return work(); }); barrier = pending; return pending;
+    }
+    const pending = barrier.catch(() => {}).then(() => withSlot(work)); readers.push(pending); return pending;
+  };
+  const budgetError = { error: 'research_budget_reached', message: 'The app’s call or data limit was reached; use completed observations.' };
+  const runTool = async (name, input, { toolCallId }) => {
+    check(); const id = currentRound + ':' + toolCallId;
+    if (!input || typeof input !== 'object' || Array.isArray(input) || JSON.stringify(input).length > 8000) { fatal = new Error('The provider returned invalid or oversized tool arguments.'); throw fatal; }
+    if ([...executed].filter(id => id.startsWith(currentRound + ':')).length >= RESEARCH_LIMITS.calls + RESEARCH_LIMITS.finalCalls) { fatal = new Error('The tool request is too large.'); throw fatal; }
+    if (executed.has(id)) { fatal = new Error('The provider returned duplicate tool identifiers.'); throw fatal; }
+    executed.add(id);
+    return schedule(name, async () => {
+      check(); let answer;
+      const stateTool = STATE_TOOLS.includes(name), web = ['search_web', 'read_web_page'].includes(name);
+      const allowed = offered.has(name) && definitions(value).some(definition => definition.name === name);
+      if (!allowed) { answer = { error: 'tool_unavailable', message: 'This tool is not offered or its access was switched off.' }; finalReason ||= 'Unavailable tool requested'; }
+      else if (final && (!canPrepare || !stateTool)) { fatal = new Error(stateTool ? 'The provider requested tools instead of a final answer. Continue when you’re ready.' : 'The provider requested more tools after the research limit.'); throw fatal; }
+      else if (stateTool && (final ? finalCalls >= RESEARCH_LIMITS.finalCalls : calls >= RESEARCH_LIMITS.calls) || !stateTool && (calls >= RESEARCH_LIMITS.calls || web && searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || finalReason === 'Research data exhausted')) { answer = budgetError; finalReason ||= 'Research calls or data exhausted'; }
+      else {
+        calls++; if (final) finalCalls++; if (web) searches++;
+        record(toolCallId, { name, state: 'running', title: label(name, input), input: JSON.stringify(input) }); result.phase = label(name, input);
+        const signature = grantSignature(value, name), lookup = cacheKey(name, input), reuse = !stateTool;
+        try {
+          const saved = reuse && cache.get(lookup), failed = failures.get(lookup), prepared = preparations.get(lookup);
+          if (prepared) answer = { kind: 'existing_proposal', ...prepared, message: 'Use the existing proposal. No new proposal was prepared or applied.' };
+          else if (failed?.permissions === signature) { answer = { ...structuredClone(failed.result), repeated: true, message: 'This identical call already failed. Correct its arguments or use the available observations.' }; finalReason ||= 'An identical failed tool call was repeated'; }
+          else if (saved?.permissions === signature && saved.result) answer = { ...structuredClone(saved.result), cached: true };
+          else {
+            let pending = reuse && inFlight.get(lookup), duplicate = Boolean(pending);
+            if (!pending) { pending = executeTool(value, name, input, controller.signal, context); if (reuse) inFlight.set(lookup, pending); }
+            try { answer = await pending; } finally { if (reuse) inFlight.delete(lookup); }
+            if (duplicate && answer && !answer.error) answer = { ...answer, cached: true };
+            if (reuse && answer && !answer.error) cache.set(lookup, { permissions: signature, result: structuredClone(answer) });
+          }
+          if (!definitions(value).some(definition => definition.name === name) || signature !== grantSignature(value, name)) answer = { error: 'access_disabled', message: 'Access to this source was switched off.' };
+        } catch { check(); answer = { error: 'data_unavailable', message: web ? 'The web source could not be read.' : 'The saved data could not be read.' }; }
+      }
+      check();
+      if (answer?.error && !answer.repeated) failures.set(cacheKey(name, input), { permissions: grantSignature(value, name), result: structuredClone(answer) });
+      if (answer && !answer.error && !stateTool) answer = { access_fingerprint: accessFingerprint(value), request_identity: checkpointIdentity(value), ...answer };
+      let content = JSON.stringify(answer);
+      if (!content || content.length > RESEARCH_LIMITS.result) { answer = { error: 'result_too_large', message: 'Use a narrower request.' }; content = JSON.stringify(answer); }
+      if (!stateTool && toolData + content.length > RESEARCH_LIMITS.toolData) { answer = budgetError; content = JSON.stringify(answer); finalReason ||= 'Research data exhausted'; }
+      if (toolData + content.length <= RESEARCH_LIMITS.toolData) toolData += content.length;
+      if (stateTool && ['proposal', 'change', 'coros'].includes(answer.kind)) preparations.set(cacheKey(name, input), { event_id: activityId(toolCallId), title: answer.proposal?.title || answer.before?.title || answer.title || 'Proposal', status: 'prepared_awaiting_user' });
+      completed.push({ name, answer });
+      record(toolCallId, { name, input: JSON.stringify(input), state: answer.error || answer.available === false ? 'failed' : 'done', summary: summary(name, answer), result: content, sources: sources(name, answer), ended: Date.now() }); clock();
+      return answer;
+    });
+  };
+  const tools = Object.fromEntries((body.tools || []).map(definition => [definition.name, tool({ description: definition.description, inputSchema: jsonSchema(definition.input_schema), strict: false, execute: (input, options) => runTool(definition.name, input, options) })]));
+  const instructions = body.instructions;
+  const prepareStep = ({ messages }) => {
+    check(); if (tokens < 1) return finishFromObservations('The configured reply token limit was reached. Continue when you’re ready.');
+    if (round > RESEARCH_LIMITS.continuations + 2) return finishFromObservations('The research continuation limit was reached.');
+    currentRound = round++; inputs.clear();
+    if (currentRound && JSON.stringify(messages).length > 190000) return finishFromObservations('The research context limit was reached.');
+    delete result.usage.last_input_tokens; delete result.usage.last_output_tokens;
+    const reserve = Math.min(1024, Math.max(1, Math.floor(value.maxTokens / 3)));
+    final = finalRounds > 0 || Boolean(finalReason) || currentRound >= RESEARCH_LIMITS.continuations || calls >= RESEARCH_LIMITS.calls || searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || tokens <= reserve;
+    canPrepare = final && finalRounds < 2 && finalCalls < RESEARCH_LIMITS.finalCalls && tokens > reserve && [...offered].some(name => STATE_TOOLS.includes(name));
+    if (final) finalRounds++;
+    const fair = Math.floor((tokens - reserve) / Math.max(1, RESEARCH_LIMITS.continuations - currentRound));
+    allowance = canPrepare ? tokens - reserve : offered.size && !final ? Math.max(1, Math.min(tokens - reserve, Math.max(fair, TOOL_ROUND_TOKENS))) : tokens;
+    const activeTools = [...offered].filter(name => definitions(value).some(definition => definition.name === name) && (!final || STATE_TOOLS.includes(name)));
+    result.phase = final ? 'synthesizing' : 'requesting'; publish();
+    const instruction = final ? '\n\nPocket runtime status: the app has stopped research for this reply. This is an app limit, not a user instruction, and does not mean the research is complete. Answer the current user request using the observations already collected. Do not start more research or read more sources. '
+      + (canPrepare ? 'Only if the current user request asks to save or change something, prepare it now if it has not already been prepared in this reply. An unfinished action from an earlier message must not replace the current answer. ' : 'Make no more tool calls; write the answer now. ')
+      + 'Explain material gaps briefly without attributing this limit to the user.' + (finalReason ? ' App limit: ' + finalReason : '') : '';
+    return { maxOutputTokens: allowance, instructions: instructions + instruction, activeTools, toolChoice: final && !canPrepare ? 'none' : 'auto' };
+  };
+  const onStepEnd = step => {
+    check(); lastFinish = step.finishReason;
+    const usage = step.usage, raw = usage.raw || {}, anthropic = value.provider === 'anthropic';
+    const input = anthropic ? raw.input_tokens ?? usage.inputTokenDetails.noCacheTokens : usage.inputTokens;
+    for (const [name, count] of Object.entries({ input_tokens: input, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.inputTokenDetails.cacheReadTokens, cache_creation_input_tokens: usage.inputTokenDetails.cacheWriteTokens })) if (typeof count === 'number' && Number.isFinite(count)) result.usage[name] = (result.usage[name] || 0) + count;
+    if (typeof usage.inputTokens === 'number') result.usage.last_input_tokens = usage.inputTokens;
+    if (typeof usage.outputTokens === 'number') result.usage.last_output_tokens = usage.outputTokens;
+    tokens -= usage.outputTokens || allowance;
+    result.model = step.response.modelId || result.model;
+    if (step.finishReason === 'length') { finalReason ||= 'Finish within the remaining reply token budget'; if (final) finalRounds = 2; result.activity = settle(result.activity, 'failed', 'Tool request did not finish within this round’s token allowance'); }
+    if (step.toolCalls.length || step.finishReason === 'length') {
+      if (result.answer.trim()) { result.reasoning += (result.reasoning ? '\n\n' : '') + result.answer.trim() + '\n\n'; result.answer = ''; result.sources = []; }
+    }
+    if (step.finishReason !== 'length' || step.toolResults.length) responses.push(...step.response.messages);
+    if (['content-filter', 'refusal'].includes(step.finishReason)) { fatal = new Error('The provider declined this reply.'); throw fatal; }
+    publish();
+  };
+  const onChunk = ({ chunk }) => {
+    check(); clock();
+    if (chunk.type === 'text-delta') { result.answer += chunk.text; result.phase = 'writing'; }
+    else if (chunk.type === 'reasoning-delta') { result.reasoning += chunk.text; result.phase = 'thinking'; }
+    else if (chunk.type === 'source' && chunk.sourceType === 'url') {
+      const found = source({ href: chunk.url, title: chunk.title });
+      if (found && !found.href.startsWith('/')) { let index = result.sources.findIndex(item => item.href === found.href); if (index < 0 && result.sources.length < 24) { index = result.sources.length; result.sources.push(found); } if (index >= 0) result.answer += ` [${index + 1}](${found.href.replace(/[()]/g, char => encodeURIComponent(char))})`; }
+    } else if (chunk.type === 'tool-input-start') {
+      if (!chunk.id || chunk.id.length > 200 || !chunk.toolName || chunk.toolName.length > 80) throw new Error('The provider returned an incomplete tool request.');
+      inputs.set(chunk.id, { name: chunk.toolName, text: '' }); record(chunk.id, { name: chunk.toolName, title: label(chunk.toolName), state: 'queued' });
+    } else if (chunk.type === 'tool-input-delta') {
+      const partial = inputs.get(chunk.id); if (!partial) throw new Error('The provider returned tool arguments without a tool.');
+      partial.text += chunk.delta; if (partial.text.length > 8000) throw new Error('The tool request is too large.');
+      record(chunk.id, { input: partial.text });
+    } else if (chunk.type === 'tool-call') {
+      if (final && (!canPrepare || !STATE_TOOLS.includes(chunk.toolName))) { fatal = new Error(STATE_TOOLS.includes(chunk.toolName) ? 'The provider requested tools instead of a final answer. Continue when you’re ready.' : 'The provider requested more tools after the research limit.'); throw fatal; }
+      if (JSON.stringify(chunk.input || {}).length > 8000) throw new Error('The tool request is too large.');
+      record(chunk.toolCallId, { name: chunk.toolName, title: label(chunk.toolName, chunk.input || {}), input: JSON.stringify(chunk.input || {}), ...(chunk.invalid ? { state: 'failed', summary: 'Invalid tool request', ended: Date.now(), result: JSON.stringify({ error: 'invalid_arguments', message: 'Correct the arguments or use an available tool.' }) } : {}) });
+    } else if (chunk.type === 'tool-error') {
+      record(chunk.toolCallId, { name: chunk.toolName, state: 'failed', summary: 'Tool failed', ended: Date.now(), result: JSON.stringify({ error: 'tool_failed', message: 'Correct the arguments or use the recorded observations.' }) });
+    }
+    publish();
   };
   clock();
   try {
-    // Allow at most two preparation rounds and one answer after research stops.
-    // These share the original token/deadline budget and cannot start more reads.
-    for (let round = 0; round <= RESEARCH_LIMITS.continuations + 2; round++) {
-      currentRound = round;
-      check(); if (tokens < 1) return finishFromObservations("The configured reply token limit was reached. Continue when you’re ready.", true);
-      delete result.usage.last_input_tokens; delete result.usage.last_output_tokens;
-      const reserve = Math.min(1024, Math.max(1, Math.floor(value.maxTokens / 3))), final = finalRounds > 0 || Boolean(finalReason) || round >= RESEARCH_LIMITS.continuations || calls >= RESEARCH_LIMITS.calls || searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || tokens <= reserve;
-      const canPrepare = final && finalRounds < 2 && finalCalls < RESEARCH_LIMITS.finalCalls && tokens > reserve && [...offered].some(name => STATE_TOOLS.includes(name));
-      if (final) finalRounds++;
-      result.phase = final ? "synthesizing" : "requesting"; publish();
-      for (const row of result.activity.filter(row => row.kind === "web" && row.state === "queued")) { record(row.id, { state: "running" }); result.phase = "searching web"; }
-      // Splitting the whole reply budget evenly across every possible continuation left the
-      // first rounds with too few tokens to finish a tool call, so the provider stopped at
-      // max_tokens mid-arguments. Keep the answer reserve, but give each tool round a usable floor.
-      const fair = Math.floor((tokens - reserve) / Math.max(1, RESEARCH_LIMITS.continuations - round));
-      const request = structuredClone(body), allowance = canPrepare ? tokens - reserve : offered.size && !final ? Math.max(1, Math.min(tokens - reserve, Math.max(fair, TOOL_ROUND_TOKENS))) : tokens;
-      request.max_tokens = allowance;
-      const fallbacks = freeFallbacks(value); if (fallbacks) { request.model = fallbacks[0]; request.models = fallbacks; }
-      if (value.provider === "compatible" && new URL(value.baseUrl).hostname === "api.openai.com") { request.max_completion_tokens = allowance; delete request.max_tokens; request.stream_options = { include_usage: true }; }
-      if (round && JSON.stringify(request.messages).length > 190000) return finishFromObservations("The research context limit was reached.");
-      // Runtime guidance belongs to the app's instructions, never to a fabricated user message.
-      if (final) {
-        if (request.tools?.length) {
-          request.tools = request.tools.filter(tool => STATE_TOOLS.includes(tool.name || tool.function?.name));
-          request.tool_choice = canPrepare ? (value.provider === "anthropic" ? { type: "auto" } : "auto") : (value.provider === "anthropic" ? { type: "none" } : "none");
-        }
-        const instruction = "\n\nPocket runtime status: the app has stopped research for this reply. This is an app limit, not a user instruction, and does not mean the research is complete. Answer the current user request using the observations already collected. Do not start more research or read more sources. "
-          + (canPrepare ? "Only if the current user request asks to save or change something, prepare it now if it has not already been prepared in this reply. An unfinished action from an earlier message must not replace the current answer. " : "Make no more tool calls; write the answer now. ")
-          + "Explain material gaps briefly without attributing this limit to the user." + (finalReason ? " App limit: " + finalReason : "");
-        if (value.provider === "anthropic") request.system = (request.system || "") + instruction;
-        else {
-          const system = request.messages.find(message => message.role === "system");
-          if (system) system.content += instruction;
-          else request.messages.unshift({ role: "system", content: instruction.trim() });
-        }
-      }
-      else if (value.provider === "anthropic") for (const tool of request.tools || []) if (tool.name === "web_search") tool.max_uses = Math.max(1, RESEARCH_LIMITS.webCalls - searches);
-      const headers = { "content-type": "application/json" };
-      if (value.provider === "anthropic") Object.assign(headers, { "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" });
-      else headers.authorization = "Bearer " + key;
-      let response;
-      for (let attempt = 0; ; attempt++) {
-        response = await fetcher(value.baseUrl + (value.provider === "anthropic" ? "/messages" : "/chat/completions"), {
-          method: "POST", headers, body: JSON.stringify(request), signal: controller.signal, redirect: "error", credentials: "omit", referrerPolicy: "no-referrer"
-        });
-        // A busy provider often answers a moment later; try twice more before giving up.
-        if (![429, 502, 503].includes(response.status) || attempt >= 2) break;
-        result.phase = "provider busy · retrying"; publish(); await pause(1500 * (attempt + 1) ** 2, controller.signal); clock();
+    const model = await providerModel(value, key, { fetcher, signal: controller.signal, clock, onRetry: () => { result.phase = 'provider busy · retrying'; publish(); } });
+    const guarded = callback => args => { try { return callback(args); } catch (error) { fatal = error; throw error; } };
+    const agent = new ToolLoopAgent({ model, instructions, tools, providerOptions: providerOptions(value), maxRetries: 2, streamRetries: 0, stopWhen: [isStepCount(RESEARCH_LIMITS.continuations + 3), () => round >= RESEARCH_LIMITS.continuations + 3 || tokens <= 0], prepareStep: guarded(prepareStep), onStepEnd: guarded(onStepEnd), onChunk: guarded(onChunk), onError: () => {} });
+    // A truncated text-only step has no tool result for SDK continuation. Synthesize
+    // from the original question and committed tool messages, within the same budget.
+    while (round <= RESEARCH_LIMITS.continuations + 2) {
+      const stream = await agent.stream({ messages: [...body.messages, ...responses], abortSignal: controller.signal });
+      let finished = false;
+      for await (const part of stream.stream) {
+        check();
+        if (part.type === 'error') { if (fatal) throw fatal; throw providerError(part.error); }
+        if (part.type === 'abort') throw stopped();
+        if (part.type === 'finish') { finished = true; lastFinish = part.finishReason; }
       }
       check();
-      // Overflow is read only after the retry loop: 400/413/422 are never retried, and a longer chat cannot fit on retry.
-      if (!response.ok) { const overflow = response.status === 413 || [400, 422].includes(response.status) && overflowed(await errorText(response, controller.signal)); check(); throw new Error(overflow ? CONTEXT_OVERFLOW : httpError(response.status)); }
-      if (!response.body || !response.headers.get("content-type")?.includes("text/event-stream")) throw new Error("This endpoint did not return a chat stream. Check its browser and streaming support.");
-      let terminal = false, stop = "", text = "", output = 0;
-      const blocks = [], partials = new Map(), reads = new Map(), argumentErrors = [], reasoning = {}, details = new Map();
-      for await (const data of readSse(response.body, controller.signal)) {
-        clock(); check();
-        if (data === "[DONE]") { if (value.provider === "compatible") terminal = true; break; }
-        let event; try { event = JSON.parse(data); } catch { throw new Error("The provider sent an unreadable reply. Retry when you’re ready."); }
-        if (event.error || event.type === "error") throw new Error(contextOverflow(event) ? CONTEXT_OVERFLOW : "The provider interrupted this reply. Check its settings or retry.");
-        if (value.provider === "anthropic") {
-          if (event.type === "message_start") {
-            result.model = event.message?.model || result.model;
-            const usage = event.message?.usage || {}; output = usage.output_tokens || 0;
-            for (const [name, count] of Object.entries(usage)) if (name !== "output_tokens" && typeof count === "number") result.usage[name] = (result.usage[name] || 0) + count;
-            if (typeof usage.input_tokens === 'number') result.usage.last_input_tokens = usage.input_tokens + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
-            if (typeof usage.output_tokens === 'number') result.usage.last_output_tokens = usage.output_tokens;
-          }
-          if (event.type === "content_block_start") {
-            const block = structuredClone(event.content_block || {}); blocks[event.index] = block;
-            if (block.type === "text") { text += block.text || ""; result.answer += block.text || ""; if (block.text) result.phase = "writing"; for (const citation of block.citations || []) cite(citation); }
-            if (block.type === "thinking") { result.reasoning += block.thinking || ""; result.phase = "thinking"; }
-            if (block.type === "tool_use" || block.type === "server_tool_use") {
-              if (typeof block.id !== "string" || !block.id || block.id.length > 200 || typeof block.name !== "string" || !block.name || block.name.length > 80) throw new Error("The provider returned an incomplete tool request.");
-              const web = block.type === "server_tool_use";
-              partials.set(event.index, { id: block.id, name: block.name, args: "", initial: block.input || {}, web });
-              record(block.id, { kind: web ? "web" : "tool", name: block.name, title: label(block.name, block.input), state: web ? "running" : "queued" });
-              if (web) { if (!offered.has(block.name) || !value.webSearch || block.name !== "web_search") throw new Error("The provider requested an unavailable search."); webRows.set(block.id, activityId(block.id)); if (final || ++searches > RESEARCH_LIMITS.webCalls) return finishFromObservations("The web research limit was reached."); result.phase = "searching web"; }
-            }
-            if (block.type === "web_search_tool_result") {
-              // A search can resolve in a later round than its server_tool_use (pause_turn), so it is
-              // remembered by the provider's id. If a provider omits or reuses an id, attach the
-              // result to the newest unfinished search rather than ending the whole run.
-              const pending = result.activity.find(row => row.kind === "web" && ["running", "queued"].includes(row.state));
-              const key = typeof block.tool_use_id === "string" ? block.tool_use_id : "";
-              const rowId = webRows.get(key) || pending?.id || activityId(key);
-              if (key) webRows.set(key, rowId);
-              const error = !Array.isArray(block.content) && block.content?.type === "web_search_tool_result_error";
-              const found = (Array.isArray(block.content) ? block.content : []).map(source).filter(Boolean);
-              const observation = { source: "web:anthropic", results: found.slice(0, 3), matched: found.length, truncated: found.length > 3, request_identity: checkpointIdentity(value), access_fingerprint: accessFingerprint(value), ...(error ? { error: block.content.error_code || "web_unavailable", message: "Search failed" } : {}) }, content = JSON.stringify(observation);
-              if (toolData + content.length > RESEARCH_LIMITS.toolData) return finishFromObservations("The research data limit was reached.");
-              toolData += content.length; completed.push({ name: "web_search", answer: observation });
-              record(rowId, { kind: "web", name: "web_search", state: error ? "failed" : "done", summary: error ? "Search failed · " + (block.content.error_code || "unavailable") : found.length + " results", result: content, sources: found, ended: Date.now() });
-              result.phase = "preparing reply";
-            }
-          }
-          if (event.type === "content_block_delta") {
-            const delta = event.delta || {}, block = blocks[event.index];
-            if (delta.type === "text_delta") { text += delta.text || ""; result.answer += delta.text || ""; if (block) block.text = (block.text || "") + (delta.text || ""); result.phase = "writing"; }
-            if (delta.type === "thinking_delta") { result.reasoning += delta.thinking || ""; if (block) block.thinking = (block.thinking || "") + (delta.thinking || ""); result.phase = "thinking"; }
-            if (delta.type === "signature_delta" && block) block.signature = (block.signature || "") + (delta.signature || "");
-            if (delta.type === "input_json_delta") {
-              const partial = partials.get(event.index); if (!partial) throw new Error("The provider returned tool arguments without a tool.");
-              partial.args += delta.partial_json || ""; if (partial.args.length > 8000) throw new Error("The tool request is too large.");
-              try { const args = JSON.parse(partial.args); record(partial.id, { title: label(partial.name, args), input: partial.args }); } catch (error) { if (!(error instanceof SyntaxError)) throw error; }
-            }
-            if (delta.type === "citations_delta") { if (block) (block.citations ||= []).push(delta.citation); cite(delta.citation); }
-          }
-          if (event.type === "content_block_stop" && partials.has(event.index)) {
-            const partial = partials.get(event.index); let args;
-            try { args = partial.args.trim() ? JSON.parse(partial.args) : partial.initial; }
-            catch { argumentErrors.push("The provider returned invalid tool arguments."); }
-            if (args !== undefined) {
-              if (!args || typeof args !== "object" || Array.isArray(args)) argumentErrors.push("The tool arguments must be an object.");
-              else { blocks[event.index].input = args; record(partial.id, { title: label(partial.name, args), input: JSON.stringify(args) }); if (!partial.web) reads.set(event.index, { ...partial, input: args }); }
-            }
-            if (args === undefined || !args || typeof args !== "object" || Array.isArray(args)) record(partial.id, { input: partial.args });
-          }
-          if (event.type === "message_delta") { stop = event.delta?.stop_reason || stop; output = event.usage?.output_tokens || output; if (typeof event.usage?.output_tokens === 'number') result.usage.last_output_tokens = event.usage.output_tokens; }
-          if (event.type === "message_stop") terminal = true;
-        } else {
-          const choice = event.choices?.find(c => c.index === 0) || event.choices?.[0], delta = choice?.delta || {};
-          if (typeof delta.content === "string") { text += delta.content; result.answer += delta.content; result.phase = "writing"; }
-          for (const field of ["reasoning_content", "reasoning"]) if (typeof delta[field] === "string") { reasoning[field] = (reasoning[field] || "") + delta[field]; }
-          const thought = delta.reasoning_content || delta.reasoning; if (typeof thought === "string") { result.reasoning += thought; result.phase = "thinking"; }
-          for (const detail of delta.reasoning_details || []) { const index = detail.index ?? detail.id ?? details.size, previous = details.get(index) || {}; details.set(index, { ...previous, ...detail, ...(typeof detail.text === "string" ? { text: (previous.text || "") + detail.text } : {}), ...(typeof detail.data === "string" ? { data: (previous.data || "") + detail.data } : {}) }); }
-          for (const call of delta.tool_calls || []) {
-            const index = call.index ?? 0, partial = partials.get(index) || { id: "", name: "", args: "" };
-            partial.id ||= call.id || ""; partial.name += call.function?.name || ""; partial.args += call.function?.arguments || "";
-            if (partial.args.length > 8000 || partial.name.length > 80 || !partials.has(index) && partials.size >= RESEARCH_LIMITS.calls) throw new Error("The tool request is too large.");
-            partials.set(index, partial);
-            if (partial.id && partial.name) { let args = {}; try { args = JSON.parse(partial.args || "{}"); } catch {} record(partial.id, { name: partial.name, title: label(partial.name, args), input: partial.args, state: "queued" }); }
-          }
-          for (const citation of delta.annotations || choice?.message?.annotations || []) cite(citation.url_citation || citation);
-          if (delta.function_call) throw new Error("This endpoint uses legacy tool calls. Use a model with current function-tool support.");
-          if (choice?.finish_reason) { stop = choice.finish_reason; terminal = true; }
-          if (event.usage) {
-            output = event.usage.completion_tokens || output;
-            for (const [name, count] of Object.entries({ input_tokens: event.usage.prompt_tokens, cache_read_input_tokens: event.usage.prompt_tokens_details?.cached_tokens })) if (typeof count === "number") result.usage[name] = (result.usage[name] || 0) + count;
-            if (typeof event.usage.prompt_tokens === 'number') result.usage.last_input_tokens = event.usage.prompt_tokens;
-            if (typeof event.usage.completion_tokens === 'number') result.usage.last_output_tokens = event.usage.completion_tokens;
-          }
-          result.model = event.model || result.model;
-        }
-        publish(); if (value.provider === "anthropic" && terminal) break;
-      }
-      check(); if (!terminal) throw new Error("The connection ended before the reply was complete. Retry when you’re ready.");
-      tokens -= output || allowance; result.usage.output_tokens = (result.usage.output_tokens || 0) + output;
-      if (["max_tokens", "length"].includes(stop)) {
-        if ((!final || canPrepare) && tokens > 0) {
-          if (result.answer.trim()) { result.reasoning += (result.reasoning ? "\n\n" : "") + result.answer.trim(); result.answer = ""; result.sources = []; }
-          result.activity = settle(result.activity, "failed", "Tool request did not finish within this round's token allowance");
-          finalReason = "Finish within the remaining reply token budget"; if (final) finalRounds = 2; continue;
-        }
-        return finishFromObservations("The configured reply token limit was reached. Continue when you’re ready.", true);
-      }
-      if (["refusal", "content_filter"].includes(stop)) throw new Error("The provider declined this reply.");
-      // A token-limited block can end mid-JSON. Only reject malformed completed calls after the finish reason is known.
-      if (argumentErrors.length) throw new Error(argumentErrors[0]);
-      if (value.provider === "compatible") for (const [index, partial] of [...partials].sort(([a], [b]) => a - b)) {
-        if (typeof partial.id !== "string" || !partial.id || partial.id.length > 200 || typeof partial.name !== "string" || !partial.name) throw new Error("The provider returned an incomplete tool request.");
-        let input; try { input = JSON.parse(partial.args || "{}"); } catch { throw new Error("The provider returned invalid tool arguments."); }
-        if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("The tool arguments must be an object.");
-        reads.set(index, { ...partial, input });
-      }
-      if (stop === "pause_turn" && value.provider === "anthropic" && value.webSearch) {
-        body.messages.push({ role: "assistant", content: blocks.filter(Boolean) });
-        if (final) return finishFromObservations("The provider paused during final synthesis.");
-        if (searches >= RESEARCH_LIMITS.webCalls) finalReason = "Web calls exhausted";
-        continue;
-      }
-      if (stop === "tool_use" || stop === "tool_calls") {
-        if (!reads.size) throw new Error("The provider returned no complete tool request.");
-        if (final && !canPrepare) return finishFromObservations("The provider requested tools instead of a final answer. Continue when you’re ready.");
-        if (final && [...reads.values()].some(read => !STATE_TOOLS.includes(read.name))) return finishFromObservations("The provider requested more tools after the research limit.");
-        if (new Set([...reads.values()].map(read => read.id)).size !== reads.size) throw new Error("The provider returned duplicate tool identifiers.");
-        for (const row of result.activity.filter(row => row.kind === "web" && row.state === "running")) record(row.id, { state: "queued" });
-        // Keep the provider's original blocks/IDs/signatures for the continuation. Remarks are not later answer history.
-        if (value.provider === "anthropic") body.messages.push({ role: "assistant", content: blocks.filter(Boolean) });
-        else body.messages.push({ role: "assistant", content: text || null, ...reasoning, ...(details.size ? { reasoning_details: [...details.values()] } : {}), tool_calls: [...reads.values()].map(read => ({ id: read.id, type: "function", function: { name: read.name, arguments: read.args || "{}" } })) });
-        if (result.answer.trim()) { result.reasoning += (result.reasoning ? "\n\n" : "") + result.answer.trim() + "\n\n"; result.answer = ""; result.sources = []; }
-        const replies = [], ordered = [...reads.values()], outputs = new Array(ordered.length), budgetError = { error: "research_budget_reached", message: "The app's call or data limit was reached; use completed observations." }, budgetContent = JSON.stringify(budgetError);
-        const run = async (read, index) => {
-          check(); let answer;
-          const allowed = offered.has(read.name) && definitions(value).some(tool => tool.name === read.name), web = ["search_web", "read_web_page"].includes(read.name);
-          if (!allowed || read.name === "web_search") { answer = { error: "tool_unavailable", message: "This tool is not offered or its access was switched off." }; finalReason ||= "Unavailable tool requested"; }
-          else if (STATE_TOOLS.includes(read.name) && (final ? finalCalls >= RESEARCH_LIMITS.finalCalls : calls >= RESEARCH_LIMITS.calls)) { answer = budgetError; finalReason ||= 'Preparation call limit reached'; }
-          else if (!STATE_TOOLS.includes(read.name) && (calls >= RESEARCH_LIMITS.calls || web && searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || finalReason === "Research data exhausted")) { answer = budgetError; finalReason ||= "Research calls or data exhausted"; }
-          else {
-            calls++; if (final) finalCalls++; if (web) searches++; result.phase = label(read.name, read.input);
-            record(read.id, { state: "running", title: label(read.name, read.input), input: JSON.stringify(read.input) });
-            try {
-              const reuse = !STATE_TOOLS.includes(read.name), signature = grantSignature(value, read.name), lookup = cacheKey(read.name, read.input), saved = reuse && cache.get(lookup);
-              const failed = failures.get(lookup);
-              const prepared = preparations.get(lookup);
-              if (prepared) answer = { kind: 'existing_proposal', ...prepared, message: 'Use the existing proposal. No new proposal was prepared or applied.' };
-              else if (failed?.permissions === signature) { answer = { ...structuredClone(failed.result), repeated: true, message: "This identical call already failed. Correct its arguments or use the available observations." }; finalReason ||= "An identical failed tool call was repeated"; }
-              else if (saved?.permissions === signature && saved.result) answer = { ...structuredClone(saved.result), cached: true };
-              else {
-                let pending = reuse && inFlight.get(lookup), duplicate = Boolean(pending);
-                if (!pending) { pending = executeTool(value, read.name, read.input, controller.signal, context); if (reuse) inFlight.set(lookup, pending); }
-                try { answer = await pending; } finally { if (reuse) inFlight.delete(lookup); }
-                if (duplicate && answer && !answer.error) answer = { ...answer, cached: true };
-                if (reuse && answer && !answer.error) cache.set(lookup, { permissions: signature, result: structuredClone(answer) });
-              }
-              // Recheck grants even when a duplicate lookup was served by the run cache.
-              const currentSignature = grantSignature(value, read.name);
-              if (!definitions(value).some(tool => tool.name === read.name) || signature !== currentSignature) answer = { error: "access_disabled", message: "Access to this source was switched off." };
-            }
-            catch (error) { check(); answer = { error: "data_unavailable", message: web ? "The web source could not be read." : "The saved data could not be read." }; }
-          }
-          check();
-          if (answer?.error && !answer.repeated) failures.set(cacheKey(read.name, read.input), { permissions: grantSignature(value, read.name), result: structuredClone(answer) });
-          if (answer && !answer.error && !STATE_TOOLS.includes(read.name)) answer = { access_fingerprint: accessFingerprint(value), request_identity: checkpointIdentity(value), ...answer };
-          let content = JSON.stringify(answer);
-          if (!content || content.length > RESEARCH_LIMITS.result) { answer = { error: "result_too_large", message: "Use a narrower request." }; content = JSON.stringify(answer); }
-          if (STATE_TOOLS.includes(read.name) && ['proposal', 'change', 'coros'].includes(answer.kind)) preparations.set(cacheKey(read.name, read.input), { event_id: activityId(read.id), title: answer.proposal?.title || answer.before?.title || answer.title || 'Proposal', status: 'prepared_awaiting_user' });
-          const unfinished = outputs.filter(Boolean).length;
-          // Reserve enough space for a bounded error for every outstanding call in this batch.
-          if (!STATE_TOOLS.includes(read.name) && toolData + content.length + (ordered.length - unfinished - 1) * budgetContent.length > RESEARCH_LIMITS.toolData) { answer = budgetError; content = budgetContent; finalReason ||= "Research data exhausted"; }
-          if (toolData + content.length <= RESEARCH_LIMITS.toolData) toolData += content.length;
-          completed.push({ name: read.name, answer }); outputs[index] = { answer, content };
-          record(read.id, { name: read.name, input: JSON.stringify(read.input), state: answer.error || answer.available === false ? "failed" : "done", summary: summary(read.name, answer), result: content, sources: sources(read.name, answer), ended: Date.now() }); clock();
-        };
-        // Read batches can finish in any order; continuations retain the provider's original order and IDs.
-        for (let index = 0; index < ordered.length;) {
-          const stateTool = read => STATE_TOOLS.includes(read.name);
-          let end = index + 1;
-          if (!stateTool(ordered[index])) while (end < ordered.length && end - index < RESEARCH_LIMITS.parallel && !stateTool(ordered[end])) end++;
-          await Promise.all(ordered.slice(index, end).map((read, offset) => run(read, index + offset)));
-          for (let at = index; at < end; at++) {
-            const read = ordered[at], { answer, content } = outputs[at];
-            if (value.provider === "anthropic") replies.push({ type: "tool_result", tool_use_id: read.id, content, is_error: Boolean(answer.error) });
-            else body.messages.push({ role: "tool", tool_call_id: read.id, content });
-          }
-          index = end;
-        }
-        if (value.provider === "anthropic") body.messages.push({ role: "user", content: replies });
-        publish(); continue;
-      }
-      if (reads.size || !["end_turn", "stop_sequence", "stop", ""].includes(stop)) throw new Error("The provider did not finish a normal reply.");
-      if (!result.answer.trim()) throw new Error("The provider returned no answer. Check its model and reply limit.");
-      result.activity = settle(result.activity, "failed"); result.phase = "done"; publish(); return result;
+      if (!finished || lastFinish === 'other' || lastFinish === 'error') throw new Error('The connection ended before the reply was complete. Retry when you’re ready.');
+      if (lastFinish === 'length' && tokens > 0 && round <= RESEARCH_LIMITS.continuations + 2) continue;
+      if (lastFinish === 'length') return finishFromObservations('The configured reply token limit was reached. Continue when you’re ready.');
+      if (lastFinish === 'tool-calls') return finishFromObservations('The research continuation limit was reached.');
+      if (!result.answer.trim()) throw new Error('The provider returned no answer. Check its model and reply limit.');
+      result.activity = settle(result.activity, 'failed'); result.phase = 'done'; publish(); return result;
     }
-    return finishFromObservations("The research continuation limit was reached.");
+    return finishFromObservations('The research continuation limit was reached.');
   } catch (error) {
-    if (!signal?.aborted && (timedOut || deadlineReached)) return finishFromObservations(deadlineReached ? "The five-minute research deadline was reached. Continue when you’re ready." : "The provider stopped responding for 90 seconds. Continue when you’re ready.", true);
-    if (!signal?.aborted) { result.activity = settle(result.activity, "failed", timedOut ? "Timed out" : error.message); result.phase = "failed"; onUpdate(structuredClone(result)); }
-    if (timedOut) throw new Error("The provider took too long to respond. Retry when you’re ready.");
-    if (controller.signal.aborted) throw new DOMException("Stopped", "AbortError");
-    if (error instanceof TypeError) throw new Error("The provider could not be reached. Check your connection and browser support (CORS).");
-    throw error;
-  } finally { clearTimeout(timeout); clearTimeout(absolute); signal?.removeEventListener("abort", abort); controller.abort(); }
+    if (!signal?.aborted && (timedOut || deadlineReached)) return finishFromObservations(deadlineReached ? 'The five-minute research deadline was reached. Continue when you’re ready.' : 'The provider stopped responding for 90 seconds. Continue when you’re ready.');
+    if (signal?.aborted || controller.signal.aborted) throw stopped();
+    result.activity = settle(result.activity, 'failed', error.message); result.phase = 'failed'; onUpdate(structuredClone(result)); throw error;
+  } finally { clearTimeout(timeout); clearTimeout(absolute); signal?.removeEventListener('abort', abort); controller.abort(); }
 }
