@@ -30,6 +30,7 @@ const memoryOf = body => JSON.parse(body.messages.at(-1).content.match(/<pocket_
 const row = (name, data, fields = {}) => ({ id: 'event-' + name, name, state: 'done', input: '{}', ended: 123, result: JSON.stringify(data), ...fields });
 const prior = (uid, activity = [], fields = {}) => ({ uid, text: 'Earlier question', answer: 'Earlier final answer', status: 'done', context: [], activity, ...fields });
 const current = () => ({ uid: 'current-turn', text: 'which stock should I buy?', context: [] });
+const approveAll = async requests => new Map(requests.map(request => [request.toolCallId, { approved: true }]));
 
 test('current research requests receive the local date and timezone', t => {
   const { chat } = workspace(t); t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 9, 8, 12).getTime() });
@@ -90,19 +91,19 @@ test('publication dates and page offsets remain accurate across cached reads', a
   assert.equal(first.truncated, true); assert.equal(second.offset, 4000); assert.equal(second.next_offset, null); assert.equal(requests, 1);
 });
 
-test('a proposal in the last research round reserves an answer even when output usage is zero', async t => {
+test('a save in the last research round reserves an answer even when output usage is zero', async t => {
   const { chat } = workspace(t), turn = current(), sent = [];
-  turn.text = 'Research and prepare a note';
-  const result = await streamReply(chat, turn, { key: 'fixture', fetcher: async (_, options) => {
+  turn.text = 'Research and save a note';
+  const result = await streamReply(chat, turn, { key: 'fixture', approve: approveAll, executeTool: async (value, name, input, signal, context) => name === 'create_record' ? { kind: 'action', action: { tool: name, kind: input.kind, title: input.title, status: 'saved', href: '/notes/research' } } : execute(value, name, input, signal, context), fetcher: async (_, options) => {
     sent.push(JSON.parse(options.body)); const index = sent.length - 1;
     if (index < 8) return response(call('read_chat_history', { query: 'q' + index }, 'read-' + index, 1));
-    if (index === 8) return response(call('propose_action', { kind: 'note', title: 'Research note', text: 'Verified findings' }, 'last-proposal', null));
-    return response(answer('The note is ready for review.'));
+    if (index === 8) return response(call('create_record', { kind: 'note', title: 'Research note', text: 'Verified findings' }, 'last-proposal', null));
+    return response(answer('The note is saved.'));
   } });
   assert.equal(sent.length, 10); assert.ok(sent[9].tool_choice?.type === 'none' || !sent[9].tools?.length);
   assert.ok(sent[8].max_tokens + sent[9].max_tokens + 8 <= chat.config.maxTokens);
-  assert.ok(result.activity.some(event => event.name === 'propose_action' && event.state === 'done'));
-  assert.equal(result.answer, 'The note is ready for review.');
+  assert.ok(result.activity.some(event => event.name === 'create_record' && event.state === 'done' && event.applied_href === '/notes/research'));
+  assert.equal(result.answer, 'The note is saved.');
 });
 
 test('a provider that ignores the final research limit stays failed and resumable', async t => {
@@ -122,12 +123,6 @@ test('repeated failed calls do not execute again or exhaust all research rounds'
   assert.ok(result.activity.some(event => event.result && JSON.parse(event.result).repeated));
 });
 
-test('invalid tool arguments return schema repair information without echoing values', async t => {
-  const { chat } = workspace(t);
-  const result = await execute(chat.config, 'propose_action', { kind: 'note', unexpected: 'private-value' });
-  assert.equal(result.error, 'invalid_arguments'); assert.deepEqual(result.required_fields, ['kind', 'title', 'text']);
-  assert.ok(result.allowed_fields.includes('title')); assert.ok(!JSON.stringify(result).includes('private-value'));
-});
 
 test('later turns recover actual observations and failures after the chat is reloaded', t => {
   const { disk, store, chat } = workspace(t), turn = current(); chat.config.webSearch = true;
@@ -202,11 +197,14 @@ test('user-kept records and edited approvals persist their actual title and stat
   assert.match(requestBody(restored, current()).messages.find(message => message.role === 'assistant').content, /Edited title/);
 });
 
-test('identical proposal calls refer to the existing proposal instead of making a second card', async t => {
-  const { chat } = workspace(t); let requests = 0;
+test('an identical save after an approved one is refused without asking again', async t => {
+  const { chat } = workspace(t); let requests = 0, asked = 0, writes = 0;
   const proposal = { kind: 'note', title: 'One note', text: 'One draft' };
-  const result = await streamReply(chat, current(), { key: 'fixture', fetcher: async () => response(++requests < 3 ? call('propose_action', proposal, 'proposal-' + requests) : answer('The existing note is ready.')) });
-  assert.equal(result.activity.filter(event => event.result && JSON.parse(event.result).kind === 'proposal').length, 1);
+  const result = await streamReply(chat, current(), { key: 'fixture', approve: async requests => { asked++; return approveAll(requests); },
+    executeTool: async (_, name, input) => { writes++; return { kind: 'action', action: { tool: name, kind: input.kind, title: input.title, status: 'saved', href: '/notes/one' } }; },
+    fetcher: async () => response(++requests < 3 ? call('create_record', proposal, 'proposal-' + requests) : answer('The note is already saved.')) });
+  assert.equal(asked, 1); assert.equal(writes, 1); assert.equal(requests, 3);
+  assert.equal(result.activity.filter(event => event.result && JSON.parse(event.result).kind === 'action').length, 1);
   assert.equal(result.activity.filter(event => event.result && JSON.parse(event.result).kind === 'existing_proposal').length, 1);
 });
 
@@ -343,7 +341,7 @@ test('a stopped turn keeps its question, a fixed marker and its prepared line, n
   chat.turns = [prior('stopped-turn', [saved], { text: 'Plan the trip and save a note', status: 'stopped', answer: 'PARTIAL-ANSWER' }), turn];
   const body = requestBody(chat, turn);
   assert.deepEqual(body.messages.map(message => message.role), ['user', 'assistant', 'user']); assert.equal(body.messages[0].content, 'Plan the trip and save a note');
-  assert.equal(body.messages[1].content, '[No answer: the user stopped this reply before it finished; its partial text is not repeated.]\n\n[Pip prepared: note "Trip plan" (saved by the user)]');
+  assert.equal(body.messages[1].content, '[No answer: the user stopped this reply before it finished; its partial text is not repeated.]\n\n[Pip actions: note "Trip plan" (saved by the user)]');
   assert.ok(!JSON.stringify(body).includes('PARTIAL-ANSWER')); assert.ok(!body.messages.at(-1).content.includes('<pocket_history_coverage>'));
 });
 

@@ -5,7 +5,7 @@ import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings,
 import { notes, tasks, parking, noteTitle, receipt, KIND } from "./store.js";
 import { mascot } from "./pip-pixels.js";
 import { backdrop } from "./pixel-backdrop.js";
-import { CATEGORIES, access, saveAccess, definitions, firecrawlKey, setFirecrawlKey, changeName, changeTarget } from "./pip-tools.js";
+import { CATEGORIES, access, saveAccess, toolNames, firecrawlKey, setFirecrawlKey, changeName, changeTarget } from "./pip-tools.js";
 import { activity, settle, mark, elapsed, activityTitle, phaseLabel } from "./pip-activity.js";
 import { applyProposal, applyChange, applyCoros } from './pip-actions.js';
 import { corosAction, corosCourse, corosDated, corosDate, corosProblem, corosTitle, courseLines, sportName } from '../shared/coros-course.js';
@@ -177,7 +177,16 @@ function updateReply(turn) {
         row.applied_href ? sourceLink({href:row.applied_href,title:'open ' + changeTarget(value.change.change)}) : button('review change', () => reviewChange(parts.chat, turn, row, value), {disabled:active}))),
       ...decoded.filter(item => item.value.kind === 'coros' && typeof item.value.coros?.tool === 'string' && typeof item.value.title === 'string').map(({row,value}) => ui.h('section', {class:'pip-proposal','data-proposal':row.id},
         caption(corosAction(value.coros.tool) + (corosDated(value.coros.tool) && corosDate(value.coros.arguments?.date) ? ' · ' + corosDate(value.coros.arguments.date) : '')), ui.h('strong', {text:value.title}),
-        row.applied_href ? sourceLink({href:row.applied_href,title:'saved to COROS'}) : button('review workout', () => reviewCoros(parts.chat, turn, row, value), {disabled:active}))));
+        row.applied_href ? sourceLink({href:row.applied_href,title:'saved to COROS'}) : button('review workout', () => reviewCoros(parts.chat, turn, row, value), {disabled:active}))),
+      ...decoded.filter(item => item.value.kind === 'action' && typeof item.value.action?.title === 'string').map(({row,value}) => ui.h('section', {class:'pip-proposal','data-proposal':row.id},
+        caption(actionName(row.name, value.action.kind) + ' · ' + (row.applied_href ? 'saved' : 'declined')), ui.h('strong', {text:value.action.title}),
+        row.applied_href ? sourceLink({href:row.applied_href,title:'open'}) : null)),
+      ...rows.filter(row => row.state === 'awaiting').flatMap(row => { try { return [{row,value:JSON.parse(row.result || '{}'),input:JSON.parse(row.input || '{}')}]; } catch { return []; } }).map(({row,value,input}) => {
+        const waiting = runner.approvalOf(turn.uid, row.id), decided = waiting?.decision;
+        return ui.h('section', {class:'pip-proposal','data-proposal':row.id},
+          caption(actionName(row.name, value.action?.kind) + ' · ' + (decided ? (decided.approved ? 'approved' : 'declined') : 'needs your approval')), ui.h('strong', {text:value.action?.title || row.title}),
+          waiting && !decided ? [button('review', () => reviewApproval(parts.chat, turn, row, value, input), {class:'accent'}), button('decline', () => runner.decide(turn.uid, row.id, {approved:false}))] : null);
+      }));
     parts.agentSignature = signature + active;
   }
   parts.toolGroup.hidden = !rows.length; parts.toolTitle.textContent = activityTitle(rows);
@@ -249,7 +258,19 @@ function sourceLink(item, title = item.title) {
     : ui.h("a", { class: "pip-source", href: item.href, target: "_blank", rel: "noopener noreferrer", text: title });
 }
 
-async function reviewProposal(chat, turn, row, proposal) {
+const actionName = (name, kind) => name === 'change_record' ? changeName(kind) : name === 'coros_write' ? corosAction(kind) : kind || 'record';
+
+/** A write Pip asked for, in the same review as a proposal. Saving approves the call with the user's edits; the AI SDK then runs it. */
+function reviewApproval(chat, turn, row, value, input) {
+  const approve = edited => runner.decide(turn.uid, row.id, { approved: true, input: edited });
+  if (row.name === 'create_record') return reviewProposal(chat, turn, row, input, payload => approve({ kind: payload.kind, title: payload.title.trim(), text: payload.text,
+    ...(payload.kind === 'task' ? { due: payload.due, steps: payload.steps } : {}), ...(payload.kind === 'appointment' ? { when: payload.when, minutes: payload.minutes } : {}) }));
+  if (row.name === 'change_record') return reviewChange(chat, turn, row, value, approve);
+  return reviewCoros(chat, turn, row, { coros: { tool: input.tool, arguments: input.arguments, summary: input.summary }, title: value.action?.title, before: value.before }, (tool, args) => approve({ tool, arguments: args, summary: input.summary }));
+}
+
+/** A new note, task or appointment. With approve, the edits go back to Pip instead of being saved here. */
+async function reviewProposal(chat, turn, row, proposal, approve = null) {
   let saving = false;
   const title = ui.h('input', {'aria-label':'Proposal title',maxlength:200,value:proposal.title});
   const text = ui.h('textarea', {'aria-label':'Proposal text',maxlength:6000,rows:5}); text.value = proposal.text || '';
@@ -267,11 +288,12 @@ async function reviewProposal(chat, turn, row, proposal) {
       if (saving) return;
       saving = true;
       try {
+        const payload = {...proposal,title:title.value,text:text.value,due:due.value,steps:steps.value.split('\n').map(s=>s.trim()).filter(Boolean),minutes:Number(minutes.value),
+          ...(proposal.kind === 'appointment' ? {when:new Date(when.value).toISOString()} : {})};
+        if (approve) { approve(payload); ui.closeDialog(); render(); return; }
         const current = store.get(chat.uid), latest = current?.turns.find(t => t.uid === turn.uid), event = activity(latest?.activity).find(item => item.id === row.id);
         if (!event || runner.active?.chatId === chat.uid) throw new Error('Let Pip finish first.');
         if (event.applied_href) { ui.closeDialog(); return; }
-        const payload = {...proposal,title:title.value,text:text.value,due:due.value,steps:steps.value.split('\n').map(s=>s.trim()).filter(Boolean),minutes:Number(minutes.value),
-          ...(proposal.kind === 'appointment' ? {when:new Date(when.value).toISOString()} : {})};
         const href = await applyProposal(chat.uid, turn.uid, row.id, payload);
         store.recordApplied(chat.uid, turn.uid, row.id, href, { kind: 'proposal', proposal: payload, requires_confirmation: false });
         ui.closeDialog(); render();
@@ -282,7 +304,7 @@ async function reviewProposal(chat, turn, row, proposal) {
 }
 
 /** A change to an existing record: what it is now, what it becomes, and nothing applied until the button. */
-async function reviewChange(chat, turn, row, value) {
+async function reviewChange(chat, turn, row, value, approve = null) {
   const change = value.change, before = value.before, error = caption(''), fields = [];
   let saving = false, read = () => ({ ...change });
   error.classList.add('warn');
@@ -311,6 +333,7 @@ async function reviewChange(chat, turn, row, value) {
       if (saving) return;
       saving = true;
       try {
+        if (approve) { approve(read()); ui.closeDialog(); render(); return; }
         const current = store.get(chat.uid), latest = current?.turns.find(t => t.uid === turn.uid), event = activity(latest?.activity).find(item => item.id === row.id);
         if (!event || runner.active?.chatId === chat.uid) throw new Error('Let Pip finish first.');
         if (event.applied_href) { ui.closeDialog(); return; }
@@ -324,7 +347,7 @@ async function reviewChange(chat, turn, row, value) {
 }
 
 /** A COROS workout change: the date, name and sections as they will appear in COROS. Nothing is sent until the button. */
-async function reviewCoros(chat, turn, row, value) {
+async function reviewCoros(chat, turn, row, value, approve = null) {
   const tool = value.coros.tool, args = structuredClone(value.coros.arguments), error = caption('');
   let saving = false;
   error.classList.add('warn');
@@ -342,12 +365,13 @@ async function reviewCoros(chat, turn, row, value) {
       if (saving) return;
       saving = true;
       try {
-        const current = store.get(chat.uid), latest = current?.turns.find(t => t.uid === turn.uid), event = activity(latest?.activity).find(item => item.id === row.id);
-        if (!event || runner.active?.chatId === chat.uid) throw new Error('Let Pip finish first.');
-        if (event.applied_href) { ui.closeDialog(); return; }
         if (day) args.date = day.value.replaceAll('-', '');
         if (name) { args.course.courseName = name.value.trim(); args.course.courseDescription = notes.value.trim(); }
         const problem = corosProblem(tool, args); if (problem) throw new Error(problem);
+        if (approve) { approve(tool, args); ui.closeDialog(); render(); return; }
+        const current = store.get(chat.uid), latest = current?.turns.find(t => t.uid === turn.uid), event = activity(latest?.activity).find(item => item.id === row.id);
+        if (!event || runner.active?.chatId === chat.uid) throw new Error('Let Pip finish first.');
+        if (event.applied_href) { ui.closeDialog(); return; }
         const href = await applyCoros(chat.uid, turn.uid, row.id, tool, args);
         store.recordApplied(chat.uid, turn.uid, row.id, href, { ...value, coros: { ...value.coros, arguments: args }, title: corosTitle(tool, args), requires_confirmation: false });
         ui.closeDialog(); render();
@@ -432,7 +456,7 @@ function composer(chat) {
   const historyControl = button("history", () => chatHistory(chat.uid, historyControl), { class: "pip-history-control", "aria-haspopup": "dialog" });
   updateHistoryControl(historyControl, contextCoverage(chat));
   const capabilities = ui.h("div", { class: "pip-capabilities" },
-    button("□ tools [" + definitions(chat.config).length + "]", () => pocketAccess(chat), { title: "Choose Pocket sources Pip can read" }),
+    button("□ tools [" + toolNames(chat.config).length + "]", () => pocketAccess(chat), { title: "Choose Pocket sources Pip can read" }),
     button("△ web · " + (chat.config.webSearch ? "on" : "off"), () => {
       if (runner.active) runner.stop();
       const value = config({ ...chat.config, webSearch: !chat.config.webSearch });
