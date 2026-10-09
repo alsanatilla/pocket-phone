@@ -2,6 +2,13 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.19.2 — Android fullscreen
+
+- The launcher no longer resets system UI visibility. Home, Today, Pocket screens and Camera hide both status and navigation bars, with transient navigation available by swiping.
+- Fullscreen is restored after focus changes and returning from other apps. Android 11 and later use the insets controller; older versions use sticky immersive flags.
+- Windows fill the display around cutouts; existing keyboard and cutout padding remains active. Modern windows clear the legacy fullscreen flag so it cannot block keyboard resizing.
+- Focused API 24/28/30/35 checks cover launch, dialogs/return, camera screen-awake behavior, keyboard dismissal and Pip's composer. Build results and remaining handset/signing checks are recorded in BUILD-STATUS.json.
+
 ## 0.19.1 — Android Movement cockpit
 
 - Android shows the browser's Recovery, Strain and Conditioning histories, HRV/resting HR/sleep/stress/steps trends, fitness assessments and short/long training load. The overview includes seven-day totals and the full activity archive.

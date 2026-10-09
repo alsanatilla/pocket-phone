@@ -1,150 +1,92 @@
 {
-  "component": "Pocket Android launcher/apps and Astro browser workspace",
-  "version_name": "0.19.1",
-  "version_code": 48,
+  "component": "Pocket Android fullscreen patch",
+  "version_name": "0.19.2",
+  "version_code": 49,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-09T10:21:40Z",
-  "build": "Android assembleRom and 35 focused Movement/Workspace checks passed. API 24/35, offline detail caching, shared cache transport and responsive native screens verified with fixtures.",
+  "checked_at_utc": "2026-10-09T19:32:03.211Z",
+  "build": "Android assembleRom and 80 focused checks passed: 64 debug regressions and 16 fullscreen checks in the ROM release variant.",
   "commands": [
-    "./gradlew.bat :app:testRomUnitTest --tests org.textphone.launcher.Movement*Test --tests org.textphone.launcher.WarmConsolePreviewTest :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain",
+    "./gradlew.bat :app:testDebugUnitTest --tests org.textphone.launcher.FullscreenTest --tests org.textphone.launcher.NavigationLifecycleTest --tests org.textphone.launcher.CompactCameraActivityTest --tests org.textphone.launcher.PipChatTest :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain",
+    "./gradlew.bat :app:testRomUnitTest --tests org.textphone.launcher.FullscreenTest --console=plain",
+    "aapt dump badging app/build/outputs/apk/rom/app-rom-unsigned.apk",
+    "apksigner verify app/build/outputs/apk/rom/app-rom-unsigned.apk (unsigned, expected verification failure)",
     "git diff --check"
   ],
   "build_environment": {
     "java": "17.0.20.1+1",
-    "node": "v24.19.0"
+    "android_sdk": 35
   },
   "apk": {
     "file": "app/build/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.19.1-unsigned.apk",
-    "bytes": 11196245,
-    "sha256": "a00882d0b6858d87c0c6a65fdb767a8cdafafbcac011ee0ce8daecfabd85c93e",
+    "release_asset": "pocket-phone-0.19.2-unsigned.apk",
+    "bytes": 11196745,
+    "sha256": "fe488109ed0c77acfa2ed351809716fce195796d8f59d5f0b4c15f5131a9178b",
     "signed": false,
     "installable_update": false,
-    "signing": "Another release agent handles signing"
+    "signing": "Requires the existing Pocket release certificate; handled by the signing agent"
   },
-  "web": {
-    "framework": "Astro server output",
-    "hosting": "Vercel",
-    "url": "https://pocket-phone.vercel.app/",
-    "release_asset": "pocket-web-0.19.0-source.zip",
-    "offline_worker": "pocket-astro-0190-travel-planner",
-    "changed": false
-  },
+  "focused_verification": [
+    {
+      "variant": "debug",
+      "suite": "org.textphone.launcher.CompactCameraActivityTest",
+      "cases": 6,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "variant": "debug",
+      "suite": "org.textphone.launcher.FullscreenTest",
+      "cases": 16,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "variant": "debug",
+      "suite": "org.textphone.launcher.NavigationLifecycleTest",
+      "cases": 18,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "variant": "debug",
+      "suite": "org.textphone.launcher.PipChatTest",
+      "cases": 24,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "variant": "rom",
+      "suite": "org.textphone.launcher.FullscreenTest",
+      "cases": 16,
+      "failures": 0,
+      "errors": 0
+    }
+  ],
   "full_test_suite": {
-    "status": "Not rerun for the Android Movement pass, as requested",
-    "focused_cases": 35,
-    "focused_failures": 0,
-    "additional_legacy_failures": 3,
-    "detail": "HomeDashboardTest uses removed pre-redesign UI selectors (home_footer and all). All Movement and current WarmConsolePreview checks pass; older full-suite findings remain in previous releases."
+    "status": "Not rerun; focused window, lifecycle, camera and Pip checks",
+    "focused_cases": 80,
+    "focused_failures": 0
   },
+  "lint": "Not run; existing release workflow skips lint",
   "changes": [
-    "Android Movement displays full COROS cockpit, score histories, health trends, fitness and weekly totals",
-    "Activity archive opens native GPS routes, linked charts, split speed bars, HR distribution and all recorded metrics",
-    "Complete details persist offline and upload to the same COROS cache the browser uses; signed FIT URLs never persist",
-    "Forced COROS pull-refresh and incoming account/COROS updates repaint the current view",
-    "Clearly marked disconnected sample mode; native layouts and lifecycle checked on Android API 24 and 35"
+    "Shared fullscreen policy for MainActivity, PocketActivity and CompactCameraActivity",
+    "Hide both status and navigation bars with swipe-accessible transient Android navigation",
+    "Restore fullscreen on resume and window focus gain",
+    "Allow display-cutout drawing and retain existing safe content padding",
+    "Clear the legacy fullscreen flag on Android 11+ so keyboard resize remains available"
   ],
   "known_limits": [
-    "APK requires signing before installation.",
-    "No physical handset; external model/search traffic simulated.",
-    "Providers/endpoints must support streaming tool calls; free-provider availability is external to Pocket.",
-    "Agent runs are foreground requests; interrupted work resumes only through the user Continue action.",
-    "Provider keys stay on each device; browser keys remain per tab.",
-    "Cloud storage has not gained end-to-end encryption."
+    "APK requires signing before installation or update.",
+    "No connected handset or working emulator; physical gestures, OEM behavior and camera hardware remain unverified.",
+    "Fullscreen tests use Robolectric Android API 24, 28, 30 and 35."
   ],
   "physical_handset_checked": false,
   "full_custom_rom_compiled": false,
-  "previous_release": "v0.19.0",
-  "focused_verification": {
-    "browser": "No browser source changes or new browser checks in this Android pass. The native detail cache follows the existing authenticated browser API and payload format.",
-    "native": "35 Movement and Warm Console checks pass: COROS text/canonical units, legacy snapshots, FIT formats, bounds/missing channels, cache retries/account isolation, offline views, async navigation, rotation, foreground updates, forced pull-refresh, 320/360/landscape/large-text layouts and API 24/35 lifecycle.",
-    "handset": "No device attached; physical handset behavior remains unverified."
+  "web": {
+    "changed": false,
+    "note": "No browser runtime changes in this Android patch"
   },
-  "web_update": {
-    "checked_at_utc": "2026-10-08T06:42:34.3410809Z",
-    "description": "Web-only native Satteri Markdown update after the COROS web changes; Android remains the released 0.19.0 artifact described above.",
-    "framework_version": "Astro 7.3.6",
-    "renderer": "Satteri 0.10.5 native server engine",
-    "build": "npm run build passed",
-    "verification": [
-      "node scripts/markdown-check.mjs: 20 focused native compiler, endpoint and local note checks passed",
-      "14 browser checks passed against the isolated Astro workspace: actual Pip/notes native formatting, table layouts at 320/390/1280, footnote routes, streaming, offline cache, stale responses, account isolation, corrupt cache and code-block thought saving. 16 native render requests; zero page errors; no external service calls."
-    ],
-    "full_test_suite": "Not rerun for this web-only update",
-    "external_services": "No model, web-search or COROS requests made for Markdown verification",
-    "offline": "Up to 20 completed previews within 600000 cache characters per account; uncached text remains plain and readable without the renderer."
-  },
-  "profile_update": {
-    "checked_at_utc": "2026-10-08T08:39:54Z",
-    "scope": "Web account names and server validation; Android artifact remains unchanged",
-    "behavior": "Choose a name during password or passkey signup, or update the existing account name. Shared trip members and invitation previews use current names.",
-    "build": "Astro production build passed",
-    "verification": [
-      "node scripts/profile-name-check.mjs: isolated local libSQL checks passed for authenticated and account-fenced profile updates, Unicode normalization and validation, password signup, signed passkey registration context and options, and current names in shared trips and invitations",
-      "node --experimental-vm-modules scripts/profile-client-check.mjs: four groups passed for stale refreshes before/during a save, account changes during a save, and signup names kept separate from passkey device labels",
-      "node scripts/travel-server-check.mjs passed with account-name hooks enabled",
-      "Edge browser checks passed against an isolated localhost database: chosen-name signup, edit and reload persistence, 390px layout, separate-account invite/signup/join, live member rename and fresh inviter names; zero page errors"
-    ],
-    "limitations": [
-      "Hardware passkey creation was not performed; actual server registration options and signed context were checked, with a fixture browser ceremony",
-      "All verification accounts and writes were local fixtures; no production user data was changed",
-      "The full test suite was not rerun for this web-only update"
-    ]
-  },
-  "travel_redesign_update": {
-    "checked_at_utc": "2026-10-08T09:18:53Z",
-    "scope": "Web Travel redesign; Android artifact remains unchanged",
-    "behavior": "Route/Stays tabs, compact forms, interactive route overview, stay comparison and chosen status, exact booking-night coverage, selected costs, reorder connection review, during-trip view, shared names beside the title and unsent Pip trip-context drafts",
-    "build": "Astro production build passed",
-    "verification": [
-      "node scripts/travel-planning-check.mjs: seven groups passed for dates/nights, current stop, split/partial/unknown/overlapping bookings, selected costs, reorder/delete review and legacy merge compatibility",
-      "node --experimental-vm-modules scripts/travel-context-check.mjs: six groups passed including actual chat persistence/cloud sanitization and explicit-send runner with a local provider fixture",
-      "node --experimental-vm-modules scripts/test-travel-store.mjs: ten existing offline, migration, conflict, concurrency and account-isolation groups passed",
-      "node scripts/travel-server-check.mjs: existing isolated API, permission, invite, merge, retry and input-validation checks passed",
-      "node scripts/http-failure-check.mjs: numeric BetterAuth status conversion, malformed status handling and private error masking passed",
-      "Edge browser flow passed on an isolated localhost database: create trip/stops/stays, dates/nights, map and tab navigation, comparison/coverage/costs, reload, unsent Pip draft, reorder/review, real invite/join, concurrent partner edits, memories, during-trip mode, member rename, viewer guards and 390/701/1280 layouts; zero page errors or API 500 responses",
-      "Map component checks passed for pointer/keyboard/touch/pinch selection and navigation, viewport restoration, route changes, unknown destinations, instance disposal and Google Maps URL encoding",
-      "Compiled production static bundle passed an Edge offline check with the actual service-worker controller and cached lazy map chunk: created stay and correct coverage survive offline Route/Stays reloads, with no 390px overflow, page errors or external requests"
-    ],
-    "limitations": [
-      "Verification used local fixture accounts only; no production user data or real invitations were changed",
-      "Bundled map covers ten verified destinations; unknown destinations use selectable route order. Google Maps links are available without a key; embedded Maps/geocoding is not configured",
-      "The full suite was not rerun for this web-only update"
-    ]
-  },
-  "pip_map_life_update": {
-    "checked_at_utc": "2026-10-08T13:34:38Z",
-    "scope": "Web Travel map; Android artifact unchanged",
-    "behavior": "Pip wanders near stops, visits neighboring destinations, and waves, juggles, reads, hops and writes. Stop selection interrupts the current journey. Animation time pauses in hidden tabs, offscreen maps and cached pages; reduced motion is respected dynamically.",
-    "build": "npm run build passed (Astro 7.3.6 / Vercel)",
-    "verification": [
-      "12 deterministic behavior groups passed against the actual map adapter, with fixture DOM, SDK, sprites and clock: continuing life after the route, all activities, single-stop and 320/390/1280 map bounds, hidden walk and timer resume, offscreen and page lifecycle, dynamic reduced motion, selection and map reuse, geometry failure and antimeridian fallback, polar fallback, empty/stay/missing-location maps, asset failure and late completion, and auth/offline teardown",
-      "node --check src/client/travel-google-map.js and git diff --check passed"
-    ],
-    "limitations": [
-      "Collaborative browser preview timed out; visual behavior against the live Google SDK was not reverified in this pass",
-      "The focused fixture check made no external service requests or production data changes",
-      "The full test suite was not run for this web-only update"
-    ]
-  },
-  "travel_update": {
-    "limitations": [
-      "Travel sharing is browser-only in this pass",
-      "Five-second live polling while Travel is visible; no WebSocket presence",
-      "Browser preview remained hidden; polling cadence/visibility behavior verified with controlled store fixture, incoming redraw verified with real API sync",
-      "All accounts and mutations for verification were local fixtures; no real invitations sent",
-      "The full test suite was not rerun for this web-only change"
-    ],
-    "checked_at_utc": "2026-10-08T08:22:20.9602974Z",
-    "verification": [
-      "node scripts/travel-server-check.mjs: isolated libSQL/API authorization, origin and account isolation, invite hashing/expiry/revocation/races, permissions, three-way merge conflicts, idempotent replays, tombstones and input validation passed",
-      "node --experimental-vm-modules scripts/test-travel-store.mjs: 10 groups passed including offline reload, multi-tab and in-flight edits, account fencing, deterministic migration, malformed recovery, conflict choices, live polling pause/resume/disposal",
-      "T3 browser checks against isolated localhost Astro database passed: actual invite creation, sign-out/password sign-in/resume/join with another account, draft preserved during remote edits, independent field merges, conflict comparison and resolution, incoming update redraw, read-only controls/deep routes, leaving a trip, backup restore as a private copy with raw recovery retained; layouts checked at 390, 701 and 1280 px"
-    ],
-    "build": "Astro production build passed",
-    "database": "Additive lazy libSQL schema; no new environment variables",
-    "scope": "Web shared trips; Android artifact remains unchanged"
-  }
+  "previous_release": "v0.19.1"
 }

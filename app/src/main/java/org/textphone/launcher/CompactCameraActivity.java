@@ -68,9 +68,8 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
         format = CameraFormat.read(preferences);
         String last = preferences.getString("last_photo", null);
         if (last != null) lastPhoto = Uri.parse(last);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        getWindow().setNavigationBarColor(PocketDesign.INK);
-        if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarContrastEnforced(false);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        PocketWindow.fullscreen(getWindow());
         buildScreen();
         engine = new CameraEngine(this, preview, this);
         engine.setFlash(flashPreference());
@@ -92,6 +91,7 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
 
     @Override protected void onResume() {
         super.onResume(); resumed = true;
+        PocketWindow.fullscreen(getWindow());
         if (orientation.canDetectOrientation()) orientation.enable();
         String latest = preferences.getString("last_photo", null);
         if (latest != null) lastPhoto = Uri.parse(latest);
@@ -100,6 +100,10 @@ public final class CompactCameraActivity extends Activity implements CameraEngin
         else {
             showPermission();
         }
+    }
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) PocketWindow.fullscreen(getWindow());
     }
     @Override protected void onPause() {
         resumed = false; orientation.disable(); engine.stop();
