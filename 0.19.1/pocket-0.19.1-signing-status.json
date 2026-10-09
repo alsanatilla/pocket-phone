@@ -1,0 +1,96 @@
+{
+  "version_name": "0.19.1",
+  "version_code": 48,
+  "package": "org.textphone.launcher",
+  "component": "Launcher and native apps for existing Android/Nothing OS",
+  "source_commit": "428eb076b5a07c8f61280bdfd49b679da17c9b94",
+  "signed_at_utc": "2026-10-09T19:06:56.487399+00:00",
+  "source_worktree_clean": true,
+  "input": {
+    "release": "https://github.com/alsanatilla/pocket-phone/releases/tag/v0.19.1",
+    "file": "pocket-phone-0.19.1-unsigned.apk",
+    "bytes": 11196245,
+    "sha256": "a00882d0b6858d87c0c6a65fdb767a8cdafafbcac011ee0ce8daecfabd85c93e",
+    "published_checksum_verified": true
+  },
+  "source_snapshot": {
+    "published_checksum_verified": true,
+    "tagged_source_matches": true,
+    "tracked_files": 468,
+    "line_ending_normalization": "CRLF to LF",
+    "files_with_only_line_ending_differences": 434
+  },
+  "apk": {
+    "file": "pocket-phone-0.19.1.apk",
+    "bytes": 11218576,
+    "sha256": "237726c545cd338a92c3dccc5aee853217ae5c326c040a414ef394c3884208dc",
+    "certificate_sha256": "883592cb9d2dbcb5817e28b3bb7df39d81f340d3ae2eca07134181fcf6d3e059",
+    "certificate_sha1": "57651e7742d17aa12af0e1c823bd5f73759e9dbf",
+    "signature_schemes": [
+      "v1",
+      "v2",
+      "v3"
+    ],
+    "signed": true,
+    "same_signer_as_0_17_0": true,
+    "installable_update": true,
+    "zip_alignment_16_kib_verified": true,
+    "upstream_apk_entry_contents_unchanged": true
+  },
+  "download_zip": {
+    "file": "pocket-phone-0.19.1.zip",
+    "bytes": 11218720,
+    "sha256": "8e97d345a1409827f4437c5d6fff059221c121b6e4c3f7a10ff23a6b41ccf7de",
+    "entries": [
+      "pocket-phone-0.19.1.apk"
+    ]
+  },
+  "android": {
+    "min_sdk": 24,
+    "target_sdk": 35
+  },
+  "permissions": {
+    "count": 27,
+    "added_since_0_17_0": [],
+    "removed_since_0_17_0": []
+  },
+  "final_app_test_suite": {
+    "status": "Not run",
+    "source": "Upstream BUILD-STATUS.json records that the full suite was skipped"
+  },
+  "final_lint": {
+    "status": "Not run"
+  },
+  "release_checks": {
+    "artifact_checksums": "Passed",
+    "archive_integrity": "Passed",
+    "tagged_source_snapshot": "Passed after line-ending normalization",
+    "unchanged_apk_payload": "Passed",
+    "package_and_version": "Passed",
+    "original_signing_certificate": "Passed",
+    "signature_verification": "Passed",
+    "zip_alignment": "Passed",
+    "no_added_permissions": "Passed"
+  },
+  "upstream_focused_verification": {
+    "browser": "No browser source changes or new browser checks in this Android pass. The native detail cache follows the existing authenticated browser API and payload format.",
+    "native": "35 Movement and Warm Console checks pass: COROS text/canonical units, legacy snapshots, FIT formats, bounds/missing channels, cache retries/account isolation, offline views, async navigation, rotation, foreground updates, forced pull-refresh, 320/360/landscape/large-text layouts and API 24/35 lifecycle.",
+    "handset": "No device attached; physical handset behavior remains unverified."
+  },
+  "upstream_full_suite": {
+    "status": "Not rerun for the Android Movement pass, as requested",
+    "focused_cases": 35,
+    "focused_failures": 0,
+    "additional_legacy_failures": 3,
+    "detail": "HomeDashboardTest uses removed pre-redesign UI selectors (home_footer and all). All Movement and current WarmConsolePreview checks pass; older full-suite findings remain in previous releases."
+  },
+  "prior_checks_are_not_final_build_results": true,
+  "physical_handset_tested": false,
+  "live_api_requests_made_in_signing_step": 0,
+  "unverified": [
+    "Final functional test suite and lint",
+    "Physical Nothing Phone Home/Recents and animation smoothness",
+    "Real camera frames, cellular delivery and live account synchronization"
+  ],
+  "signing_key_in_downloads": false
+}
