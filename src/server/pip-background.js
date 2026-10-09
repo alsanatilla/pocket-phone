@@ -8,6 +8,7 @@ import { EMPTY } from '../shared/workspace.js';
 import { config as pipConfig, requestBody, contextCoverage } from '../client/pip-core.js';
 import { execute as runTool, recordSource, WRITE_TOOLS } from '../client/pip-tools.js';
 import { trainingRuntime, trainingObservation, trainingCheckpoint, trainingChanged, rememberTraining, TRAINING_GRANTS, TRAINING_CHECK_INTERVAL } from './pip-training.js';
+import { trainingChatRoutine } from '../shared/pip-training-chat.js';
 
 // Pip on its own: routines that run on a schedule with the account's dedicated provider key, read the account's
 // server copy and reply in a synced Pip chat. Training routines have scoped writes; calendar appointments stay on the phone.
@@ -45,6 +46,13 @@ export const localDay = (at, timeZone) => { const w = wallClock(at, timeZone); r
 
 // ── Settings, key and routines ──
 const invalid = message => Object.assign(new Error(message), { status: 400 });
+export function trainingMessage(value) {
+  if (!value || !trainingChatRoutine(value.chat) || !/^[A-Za-z0-9_-]{1,100}$/.test(value.uid || '') || !/^[A-Za-z0-9_-]{1,100}$/.test(value.attempt || '')
+    || typeof value.text !== 'string' || !value.text.trim() || value.text.length > 16000) throw invalid('Write a message in your training chat.');
+  const context = value.context || [];
+  if (!Array.isArray(context) || context.length > 3 || context.some(item => !item || typeof item.text !== 'string' || item.text.length > 8000 || typeof item.title !== 'string' || item.title.length > 500)) throw invalid('Attach up to three short sources.');
+  return { chat: value.chat, uid: value.uid, attempt: value.attempt, text: value.text.trim(), context: context.map(item => ({ kind: String(item.kind || ''), title: item.title, text: item.text })) };
+}
 export function backgroundSettings(value) {
   const base = pipConfig(value), grants = Array.isArray(value.grants) ? BACKGROUND_GRANTS.filter(name => value.grants.includes(name)) : [];
   const dailyTokens = Number(value.dailyTokens);
@@ -58,13 +66,14 @@ export function backgroundRoutine(value) {
   const id = typeof value.id === 'string' && /^[a-zA-Z0-9_-]{1,40}$/.test(value.id) ? value.id : randomUUID().replaceAll('-', '');
   const title = String(value.title || (kind === 'checkin' ? 'Morning check-in' : kind === 'training' ? 'Training planner' : '')).trim(), prompt = kind !== 'checkin' ? String(value.prompt || '').trim() : '';
   if (!title || title.length > 80) throw invalid('Give the routine a name, up to 80 characters.');
-  if (kind !== 'checkin' && (!prompt || prompt.length > 4000)) throw invalid('Write the prompt, up to 4,000 characters.');
+  if (kind === 'prompt' && !prompt || prompt.length > 4000) throw invalid('Write the prompt, up to 4,000 characters.');
   if (typeof value.time !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value.time)) throw invalid('Choose a time.');
   const days = [...new Set(Array.isArray(value.days) ? value.days.filter(day => Number.isInteger(day) && day >= 0 && day <= 6) : [])].sort();
   if (!days.length) throw invalid('Choose at least one day.');
   const trainingDays = [...new Set(Array.isArray(value.trainingDays) ? value.trainingDays.filter(day => Number.isInteger(day) && day >= 0 && day <= 6) : [])].sort();
   if (kind === 'training' && !trainingDays.length) throw invalid('Choose your available training days.');
-  return { id, kind, title, prompt, time: value.time, days, enabled: value.enabled !== false, ...(kind === 'training' ? { trainingDays } : {}) };
+  const feedback = (Array.isArray(value.feedback) ? value.feedback : []).filter(item => Number.isSafeInteger(item.at) && typeof item.text === 'string').slice(-12).map(item => ({ at: item.at, text: item.text.slice(0, 1000) }));
+  return { id, kind, title, prompt, time: value.time, days, enabled: value.enabled !== false, ...(kind === 'training' ? { trainingDays, feedback } : {}) };
 }
 const parse = raw => { try { return JSON.parse(String(raw)); } catch { return null; } };
 async function stored(userId) {
@@ -104,7 +113,7 @@ export async function forgetBackgroundKey(userId) {
 export async function saveRoutine(userId, value) {
   const routine = backgroundRoutine(value), saved = await stored(userId);
   if (routine.kind === 'training') {
-    if (!TRAINING_GRANTS.every(grant => saved?.settings?.grants.includes(grant))) throw invalid('Enable Gym, COROS and Tasks access in settings first.');
+    if (routine.enabled && !TRAINING_GRANTS.every(grant => saved?.settings?.grants.includes(grant))) throw invalid('Enable Gym, COROS and Tasks access in settings first.');
     if ((await routines(userId)).some(item => item.kind === 'training' && item.id !== routine.id)) throw invalid('Keep one training planner so your routines do not compete.');
   }
   const count = Number((await sql({ sql: 'SELECT COUNT(*) AS n FROM pocket_pip_routines WHERE user_id = ? AND id != ?', args: [userId, routine.id] })).rows[0].n);
@@ -113,6 +122,20 @@ export async function saveRoutine(userId, value) {
     ON CONFLICT(user_id, id) DO UPDATE SET payload = excluded.payload, next_run = excluded.next_run`,
     args: [userId, routine.id, JSON.stringify(routine), schedule(routine, saved?.settings, Boolean(saved?.credentials))] });
   return backgroundState(userId);
+}
+/** Open the shared training conversation without requiring a prewritten brief or starting a paid run. */
+export async function openTrainingChat(userId, now = Date.now()) {
+  const saved = await stored(userId);
+  if (!saved?.credentials) throw invalid('Add a dedicated API key in “on its own” first.');
+  let routine = (await routines(userId)).find(item => item.kind === 'training');
+  if (!routine) {
+    const state = await saveRoutine(userId, { kind: 'training', title: 'Training with Pip', prompt: '', time: '07:00', days: [0, 1, 2, 3, 4, 5, 6], trainingDays: [0, 1, 2, 3, 4, 5, 6], enabled: false });
+    routine = state.routines.find(item => item.kind === 'training');
+  }
+  const chat = await routineChat(userId, routine, saved.settings, now);
+  if (!chat) throw invalid('This month’s training chat was deleted.');
+  await writeObject(userId, 'chats', chat);
+  return { chat: chat.uid };
 }
 export async function removeRoutine(userId, id) {
   await sql({ sql: 'DELETE FROM pocket_pip_routines WHERE user_id = ? AND id = ?', args: [userId, String(id)] });
@@ -134,52 +157,104 @@ async function serverSource(userId) {
 }
 /** One chat per routine and month keeps every synced chat well within its size limit. */
 async function routineChat(userId, routine, settings, now) {
-  const uid = ('pip-routine-' + routine.id + '-' + localDay(now, settings.timezone).slice(0, 7)).replace(/[^a-zA-Z0-9_-]/g, '');
+  const month = localDay(now, settings.timezone).slice(0, 7), uid = ((routine.kind === 'training' ? 'pip-training-' : 'pip-routine-') + routine.id + '-' + month).replace(/[^a-zA-Z0-9_-]/g, '');
   const row = (await sql({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, uid] })).rows[0], chat = row ? parse(row.payload) : null;
   if (chat?.deleted) return null;
   const { grants, dailyTokens, timezone, enabled, ...config } = settings;
-  return chat || { uid, title: 'Pip · ' + routine.title, created: now, updated: now, draft: '', context: [], turns: [], config };
+  if (chat) return chat;
+  // Keep conversations from the earlier report-only planner when opening its first training chat.
+  const legacy = routine.kind === 'training' ? (await sql({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, 'pip-routine-' + routine.id + '-' + month] })).rows[0] : null;
+  return { uid, title: 'Pip · ' + routine.title, created: now, updated: now, draft: '', context: [], turns: legacy ? (parse(legacy.payload)?.turns || []).slice(-20) : [], config };
 }
-export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.now(), force = false, trainingServices } = {}) {
+export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.now(), force = false, trainingServices, message = null, signal } = {}) {
+  if (message) message = trainingMessage(message);
   const saved = await stored(userId);
-  if (!saved?.credentials || !saved.settings?.enabled) return { status: 'off' };
+  const conversation = Boolean(message);
+  if (!saved?.credentials || !conversation && !saved.settings?.enabled) return { status: 'off' };
   const { settings } = saved, today = localDay(now, settings.timezone), used = saved.usedDay === today ? saved.usedTokens : 0;
   if (used >= settings.dailyTokens) return { status: 'limit', error: 'Today\'s token limit for Pip on its own is used up.' };
   const chat = await routineChat(userId, routine, settings, now);
   if (!chat) return { status: 'skipped', error: 'This month\'s chat for the routine was deleted.' };
-  const { key } = open(userId, saved.credentials), value = { ...pipConfig(settings), grants: settings.grants };
-  let training, observation, checkpoint, dailyReview;
-  if (routine.kind === 'training') {
+  if (conversation && (routine.kind !== 'training' || message.chat !== chat.uid || trainingChatRoutine(message.chat) !== routine.id)) throw invalid('Open your current training chat to continue.');
+  const earlier = conversation ? chat.turns.find(turn => turn.uid === message.uid) : null;
+  if (earlier && earlier.text !== message.text) throw invalid('This message already has different text.');
+  if (earlier?.status === 'done') return { status: 'done', chat: chat.uid, turn: earlier.uid, reply: earlier };
+  const { key } = open(userId, saved.credentials), value = { ...pipConfig(settings), grants: settings.grants, trainingConversation: conversation };
+  let training, trainingLoad, observation, checkpoint, dailyReview;
+  const formats = [];
+  const authorized = async () => {
+    const latest = await stored(userId), current = (await routines(userId)).find(item => item.id === routine.id);
+    return Boolean(!signal?.aborted && latest?.credentials && latest.settings.enabled && current?.enabled && current.kind === 'training' && current.prompt
+      && current.prompt === routine.prompt && JSON.stringify(current.trainingDays) === JSON.stringify(routine.trainingDays)
+      && TRAINING_GRANTS.every(grant => latest.settings.grants.includes(grant)));
+  };
+  const getTraining = async () => {
+    if (!await authorized()) throw invalid('Automatic planning is paused, needs a training goal, or needs Gym, COROS and Tasks access. We can still talk.');
+    if (!training) {
+      trainingLoad ||= trainingRuntime(userId, routine, today, { ...trainingServices, observation, previous: checkpoint, authorized });
+      training = await trainingLoad;
+      for (const item of formats) training.observe('coros_format', item.input, item.result);
+    }
+    return training;
+  };
+  if (routine.kind === 'training' && !conversation) {
     if (!TRAINING_GRANTS.every(grant => settings.grants.includes(grant))) return { status: 'off', error: 'Training planning needs Gym, COROS and Tasks access.' };
     if (routine.enabled === false) return { status: 'off', error: 'Enable the training planner first.' };
+    if (!routine.prompt) return { status: 'unchanged' };
     observation = await trainingObservation(userId, today, trainingServices);
     checkpoint = await trainingCheckpoint(userId, routine.id);
     const wall = wallClock(now, settings.timezone), [hour, minute] = routine.time.split(':').map(Number);
     dailyReview = checkpoint?.reviewDay !== today && routine.days.includes(wall.weekday) && wall.hour * 60 + wall.minute >= hour * 60 + minute;
     if (!force && !dailyReview && !trainingChanged(checkpoint, observation)) return { status: 'unchanged' };
-    training = await trainingRuntime(userId, routine, today, { ...trainingServices, observation, previous: checkpoint, authorized: async () => {
-      const latest = await stored(userId), current = (await routines(userId)).find(item => item.id === routine.id);
-      return Boolean(latest?.credentials && latest.settings.enabled && current?.enabled && current.kind === 'training'
-        && current.prompt === routine.prompt && JSON.stringify(current.trainingDays) === JSON.stringify(routine.trainingDays)
-        && TRAINING_GRANTS.every(grant => latest.settings.grants.includes(grant)));
-    } });
+    await getTraining();
   }
-  const turn = { uid: randomUUID(), text: routine.kind === 'checkin' ? CHECKIN : routine.prompt, context: [], created: now, owner: BACKGROUND_OWNER, attempt: randomUUID(), answer: '', reasoning: '', error: '', status: 'streaming', usage: {}, activity: [], sources: [], phase: 'requesting' };
-  chat.turns.push(turn);
+  const turn = Object.assign(earlier || {}, { uid: message?.uid || randomUUID(), text: message?.text || (routine.kind === 'checkin' ? CHECKIN : routine.kind === 'training' ? 'Check my latest workouts and recovery, using what we discussed, and adjust only the next sessions if needed.' : routine.prompt), context: message?.context || [], created: earlier?.created || now, owner: conversation ? 'pip-training-chat' : BACKGROUND_OWNER, attempt: message?.attempt || randomUUID(), answer: '', reasoning: '', error: '', status: 'streaming', usage: {}, activity: [], sources: [], phase: 'requesting' });
+  if (!earlier) chat.turns.push(turn);
+  if (conversation) { chat.updated = now; await writeObject(userId, 'chats', chat); }
   const view = { ...chat, config: value }, body = requestBody(view, turn);
-  body.tools = body.tools.filter(name => !WRITE_TOOLS.includes(name) || training?.tools.includes(name));
-  body.instructions += training ? '\n\nThis is the authorized proactive training routine. The training tools save automatically within its scope; no interactive confirmation is required. Calendar appointments are unavailable. ' : AWAY;
+  body.tools = body.tools.filter(name => !WRITE_TOOLS.includes(name) || (conversation ? ['coros_write', 'create_record', 'update_training_preferences'].includes(name) : training?.tools.includes(name)));
+  body.instructions += conversation ? `\n\nThis is the user's ongoing training conversation with Pip. Answer their actual message naturally, in their language. Ask one useful follow-up when goals, availability or how a workout felt are unclear; do not demand a fixed prompt or issue a full report on every reply. Remember explicit goals, equipment, availability and constraints with update_training_preferences; keep temporary workout feedback dated. The saved preferences and this chat guide automatic reviews too. More recent corrections supersede old preferences. Use live reads when discussing workout performance; no COROS connection is needed just to talk. Automatic planning is currently ${routine.enabled && settings.enabled ? 'on' : 'paused'}. Only enable/resume it if the user asks. Use scoped workout writes when the user wants the plan adjusted; no per-workout confirmation is needed once automatic planning is enabled. Only saved tool results establish changes. Never schedule beyond the next two sessions within three days. Calendar appointments are unavailable.
+Remembered training brief: ${JSON.stringify(routine.prompt || 'Not set yet; learn it through conversation.')}
+Available weekdays (0=Sunday): ${JSON.stringify(routine.trainingDays)}
+Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '\n\nThis is the authorized proactive training routine. The training tools save automatically within its scope; no interactive confirmation is required. Calendar appointments are unavailable. ' : AWAY;
   if (training) body.messages.push({ role: 'user', content: training.prompt });
   const source = await serverSource(userId);
+  const prepare = async (value, name, input) => {
+    if (name === 'update_training_preferences') return { action: { tool: name, kind: 'training_preferences', title: 'Training preferences' } };
+    try { return await (await getTraining()).prepare(name, input); }
+    catch (error) { return { error: 'training_unavailable', message: error.message }; }
+  };
+  const savePreferences = async input => {
+    if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
+    const current = (await routines(userId)).find(item => item.id === routine.id);
+    if (!current || current.kind !== 'training') throw invalid('This training planner was removed.');
+    const next = backgroundRoutine({ ...current, ...(input.brief !== undefined ? { prompt: input.brief } : {}), ...(input.trainingDays ? { trainingDays: input.trainingDays } : {}), ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+      feedback: [...(current.feedback || []), ...(input.feedback ? [{ at: now, text: input.feedback }] : [])] });
+    await saveRoutine(userId, next); Object.assign(routine, next); training = null; trainingLoad = null;
+    await sql({ sql: 'DELETE FROM pocket_pip_training_state WHERE user_id = ? AND routine_id = ?', args: [userId, routine.id] });
+    const latest = await stored(userId);
+    return { kind: 'action', action: { tool: 'update_training_preferences', kind: 'training_preferences', title: 'Training preferences', status: 'saved', href: '/pip/' + chat.uid },
+      preferences: { brief: next.prompt, trainingDays: next.trainingDays, feedback: next.feedback.slice(-1), enabled: next.enabled, active: Boolean(next.enabled && latest?.settings.enabled && latest.credentials) } };
+  };
+  let pendingChange = Promise.resolve();
+  const conversationWrite = (name, input) => {
+    const next = pendingChange.then(async () => {
+      try { return name === 'update_training_preferences' ? await savePreferences(input) : await (await getTraining()).execute(name, input); }
+      catch (error) { return { error: 'training_not_saved', message: error.message }; }
+    });
+    pendingChange = next.catch(() => {}); return next;
+  };
   // Imported here: the agent runtime and provider adapters load only when a routine runs.
   const { streamChat } = await import('../client/pip-stream.js');
   try {
-    const reply = await streamChat(view, turn, { value, body, key, fetcher, deadlineMs: RUN_DEADLINE, coverage: contextCoverage(view, turn),
+    const reply = await streamChat(view, turn, { value, body, key, fetcher, signal, deadlineMs: RUN_DEADLINE, coverage: contextCoverage(view, turn),
       onUpdate: update => Object.assign(turn, update),
-      ...(training ? { previewTool: (value, name, input) => training.prepare(name, input), approve: training.approve } : {}),
+      ...(training || conversation ? { previewTool: prepare, approve: async requests => new Map(requests.map(request => [request.toolCallId, { approved: true }])) } : {}),
       executeTool: async (value, name, input, signal, context) => {
+        if (conversation && WRITE_TOOLS.includes(name)) return conversationWrite(name, input);
         if (training?.isWrite(name)) return training.execute(name, input);
         const result = await runTool(value, name, input, signal, { ...context, source });
+        if (name === 'coros_format') formats.push({ input, result });
         training?.observe(name, input, result);
         return result;
       } });
@@ -187,19 +262,19 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   } catch (error) { Object.assign(turn, { status: 'failed', phase: 'failed', error: String(error?.message || 'The scheduled reply failed.').slice(0, 500) }); }
   turn.updated = chat.updated = Math.max(Date.now(), chat.updated + 1);
   await writeObject(userId, 'chats', chat);
-  if (training?.complete && turn.status === 'done') await rememberTraining(userId, routine.id, observation, dailyReview ? today : checkpoint?.reviewDay || '');
+  if (!conversation && training?.complete && turn.status === 'done') await rememberTraining(userId, routine.id, observation, dailyReview ? today : checkpoint?.reviewDay || '');
   const spent = (turn.usage?.input_tokens || 0) + (turn.usage?.output_tokens || 0);
   await sql({ sql: 'UPDATE pocket_pip_background SET used_day = ?, used_tokens = ? WHERE user_id = ?', args: [today, used + spent, userId] });
-  return { status: turn.status, chat: chat.uid, turn: turn.uid, ...(turn.error ? { error: turn.error } : {}) };
+  return { status: turn.status, chat: chat.uid, turn: turn.uid, ...(conversation ? { reply: turn } : {}), ...(turn.error ? { error: turn.error } : {}) };
 }
 /** Claims a routine so two jobs never run it at once, runs it and schedules its next time. */
-export async function runClaimed(userId, id, { force = false, fetcher, now = Date.now(), trainingServices } = {}) {
+export async function runClaimed(userId, id, { force = false, fetcher, now = Date.now(), trainingServices, message, signal } = {}) {
   const claimed = (await sql({ sql: `UPDATE pocket_pip_routines SET lock_until = ? WHERE user_id = ? AND id = ? AND lock_until <= ? ${force ? '' : 'AND next_run <= ?'} RETURNING payload`,
     args: [now + 10 * 60000, userId, id, now, ...(force ? [] : [now])] })).rows[0];
   if (!claimed) throw Object.assign(new Error('This routine is already running.'), { status: 409 });
   const routine = parse(claimed.payload);
   let result;
-  try { result = await runRoutine(userId, routine, { fetcher, now, force, trainingServices }); }
+  try { result = await runRoutine(userId, routine, { fetcher, now, force, trainingServices, message, signal }); }
   catch (error) { result = { status: 'failed', error: String(error?.message || 'The routine could not run.').slice(0, 500) }; }
   const saved = await stored(userId);
   const current = (await routines(userId)).find(item => item.id === id);

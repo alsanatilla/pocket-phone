@@ -241,3 +241,88 @@ test('two upcoming sessions is a shared limit across parallel writes and subsequ
   const tomorrow = await trainingRuntime(userId, trainingRoutine, '2026-10-10', { read: trainingRead });
   assert.equal((await tomorrow.execute('create_record', { ...gymTask, due: '2026-10-12' })).action.status, 'saved');
 });
+
+const userMessage = (chat, text, uid = 'message-1') => ({ chat, text, uid, attempt: 'attempt-' + uid, context: [] });
+
+test('a training conversation opens without a fixed brief and works while automation is paused', async () => {
+  const userId = await account(), now = Date.parse('2026-10-09T09:00:00Z');
+  await background.saveBackground(userId, { ...settings, enabled: false }, 'fixture-key-123456');
+  const { chat } = await background.openTrainingChat(userId, now);
+  assert.match(chat, /^pip-training-/);
+  const routine = (await background.backgroundState(userId)).routines[0];
+  assert.equal(routine.prompt, ''); assert.equal(routine.enabled, false);
+  let calls = 0;
+  const fetcher = async (_, options) => {
+    calls++; assert.equal(options.headers.authorization, 'Bearer fixture-key-123456');
+    const body = JSON.parse(options.body);
+    assert.ok(body.tools.some(tool => tool.function.name === 'update_training_preferences'));
+    assert.match(JSON.stringify(body.messages), /I want to talk about my training/);
+    return response(compatibleMessage({ text: 'What are you training for, and how did your last workout feel?' }));
+  };
+  const options = { now, force: true, fetcher, message: userMessage(chat, 'I want to talk about my training'), trainingServices: { read: () => { throw new Error('Conversation must not require a COROS read.'); } } };
+  const result = await background.runClaimed(userId, routine.id, options);
+  assert.equal(result.status, 'done'); assert.equal(calls, 1);
+  assert.equal(result.reply.uid, 'message-1'); assert.match(result.reply.answer, /What are you training for/);
+  const storedChat = await chatOf(userId, chat);
+  assert.equal(storedChat.turns.length, 1); assert.equal(storedChat.turns[0].text, options.message.text);
+  assert.equal(storedChat.turns[0].status, 'done');
+  assert.equal((await background.runClaimed(userId, routine.id, options)).status, 'done');
+  assert.equal(calls, 1, 'retry of a completed message must not generate another paid reply');
+});
+
+test('conversation preferences and dated feedback guide later automatic reviews and survive a new month', async () => {
+  const userId = await account(), now = Date.parse('2026-10-09T09:00:00Z');
+  await background.saveBackground(userId, { ...settings, grants: ['gym', 'coros', 'tasks'] }, 'fixture-key-123456');
+  const { chat } = await background.openTrainingChat(userId, now);
+  const routine = (await background.backgroundState(userId)).routines[0];
+  let calls = 0;
+  const fetcher = async (_, options) => {
+    const body = JSON.parse(options.body); calls++;
+    if (calls === 1) return response(compatibleMessage({ calls: [{ name: 'update_training_preferences', id: 'save-goals', input: { brief: 'Train for a relaxed 10k, plus gym twice weekly.', trainingDays: [0, 6], feedback: 'My legs are sore after yesterday’s run.', enabled: true } }] }));
+    assert.match(JSON.stringify(body.messages), /training_preferences/);
+    return response(compatibleMessage({ text: 'I’ll remember weekends and the 10k goal. How sore are your legs today?' }));
+  };
+  const result = await background.runClaimed(userId, routine.id, { now, force: true, fetcher, message: userMessage(chat, 'Train me for a relaxed 10k. Weekends only; my legs are sore. Please plan automatically.') });
+  assert.equal(result.status, 'done');
+  const updated = (await background.backgroundState(userId)).routines[0];
+  assert.equal(updated.prompt, 'Train for a relaxed 10k, plus gym twice weekly.');
+  assert.deepEqual(updated.trainingDays, [0, 6]); assert.equal(updated.enabled, true);
+  assert.match(updated.feedback[0].text, /legs are sore/); assert.equal(updated.feedback[0].at, now);
+  let backgroundRequest;
+  await background.runRoutine(userId, updated, { now: now + 60000, force: true, trainingServices: { read: trainingRead }, fetcher: async (_, options) => {
+    backgroundRequest = JSON.parse(options.body); return response(compatibleMessage({ text: 'Recovery first; keeping the next session gentle.' }));
+  } });
+  assert.match(JSON.stringify(backgroundRequest.messages), /legs are sore/);
+  assert.match(JSON.stringify(backgroundRequest.messages), /How sore are your legs today/);
+  assert.ok(!backgroundRequest.tools.some(tool => tool.function.name === 'update_training_preferences'));
+  const nextMonth = await background.openTrainingChat(userId, Date.parse('2026-11-01T10:00:00Z'));
+  assert.notEqual(nextMonth.chat, chat);
+  let nextRequest;
+  await background.runClaimed(userId, routine.id, { now: Date.parse('2026-11-01T10:00:00Z'), force: true, message: userMessage(nextMonth.chat, 'Do you remember my goal?', 'message-2'), fetcher: async (_, options) => {
+    nextRequest = JSON.parse(options.body); return response(compatibleMessage({ text: 'Yes: a relaxed 10k, with training on weekends.' }));
+  } });
+  assert.match(nextRequest.messages[0].content, /relaxed 10k/);
+});
+
+test('a follow-up can pause training and preserves earlier conversation without changing its brief', async () => {
+  const userId = await account(), now = Date.parse('2026-10-09T09:00:00Z');
+  await background.saveBackground(userId, { ...settings, grants: ['gym', 'coros', 'tasks'] }, 'fixture-key-123456');
+  const state = await background.saveRoutine(userId, trainingRoutine), routine = state.routines[0];
+  const { chat } = await background.openTrainingChat(userId, now);
+  await background.runClaimed(userId, routine.id, { now, force: true, message: userMessage(chat, 'My last run felt difficult.'), fetcher: async () => response(compatibleMessage({ text: 'Was it your breathing, your legs, or both?' })) });
+  let calls = 0;
+  const result = await background.runClaimed(userId, routine.id, { now: now + 1000, force: true, message: userMessage(chat, 'My legs. Pause automatic planning for now.', 'message-2'), fetcher: async (_, options) => {
+    const body = JSON.parse(options.body);
+    assert.match(JSON.stringify(body.messages), /breathing, your legs/);
+    return response(++calls === 1 ? compatibleMessage({ calls: [{ name: 'update_training_preferences', id: 'pause', input: { enabled: false, feedback: 'Legs felt tired on the last run.' } }] }) : compatibleMessage({ text: 'Planning is paused. We can still talk about recovery.' }));
+  } });
+  assert.equal(result.status, 'done');
+  const after = (await background.backgroundState(userId)).routines[0];
+  assert.equal(after.enabled, false); assert.equal(after.nextRun, 0); assert.equal(after.prompt, trainingRoutine.prompt);
+  assert.equal((await chatOf(userId, chat)).turns.length, 2);
+});
+
+test('training messages validate identifiers and attachment sizes before execution', () => {
+  assert.throws(() => background.trainingMessage(userMessage('ordinary-chat', 'hello')), /training chat/);
+  assert.throws(() => background.trainingMessage({ ...userMessage('pip-training-fixture-2026-10', 'hello'), context: [{ title: 'large', text: 'x'.repeat(8001) }] }), /three short sources/);
+});
