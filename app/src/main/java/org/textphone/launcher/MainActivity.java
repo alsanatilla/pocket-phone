@@ -45,7 +45,6 @@ import android.view.KeyEvent;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.WindowInsets;
-import android.view.WindowManager;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -223,10 +222,7 @@ public class MainActivity extends Activity {
         preferences = getSharedPreferences("text_phone", MODE_PRIVATE);
         tiles = new DashboardTiles(preferences);
         pixelTypeface = PocketFonts.pixel(this);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        getWindow().setNavigationBarColor(BACKGROUND);
-        getWindow().getDecorView().setSystemUiVisibility(0);
-        if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarContrastEnforced(false);
+        PocketWindow.fullscreen(getWindow());
         motion = new PageMotion(this); if (savedInstanceState != null) motion.restore(savedInstanceState.getBundle("page_scrolls"));
         claude = new ClaudeSidebar(this, motion.host(), () -> { if (navigation != null) navigation.update(); },
                 () -> !noteWheelShowing() && ("home".equals(screen) || "today".equals(screen) || "tools".equals(screen)));
@@ -310,6 +306,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        PocketWindow.fullscreen(getWindow());
         briefFailedSignature = "";
         homeResumed = true;
         claude.resume();
@@ -355,6 +352,11 @@ public class MainActivity extends Activity {
         turnOffOwnedTorch();
         super.onStop();
     }
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) PocketWindow.fullscreen(getWindow());
+    }
+
     @Override protected void onPause() { homeResumed = false; homeGesture.cancel(); claude.pause(); dismissNoteWheel(); persistDraft(); motion.settle(); super.onPause(); }
 
     @Override protected void onDestroy() {

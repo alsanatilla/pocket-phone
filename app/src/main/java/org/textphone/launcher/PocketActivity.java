@@ -15,7 +15,6 @@ import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
-import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -48,9 +47,7 @@ public abstract class PocketActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        getWindow().setNavigationBarColor(PocketDesign.INK);
-        if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarContrastEnforced(false);
+        PocketWindow.fullscreen(getWindow());
         motion = new PageMotion(this); if (state != null) motion.restore(state.getBundle("page_scrolls")); setContentView(motion.host());
         navigation = new NativeNavigation(this, new NativeNavigation.Page() {
             public boolean internal() { return hasInternalBack(); }
@@ -60,6 +57,14 @@ public abstract class PocketActivity extends Activity {
             public void progressed(float progress) { motion.progressBack(progress); }
             public void cancelled() { motion.cancelBack(); }
         });
+    }
+    @Override protected void onResume() {
+        super.onResume();
+        PocketWindow.fullscreen(getWindow());
+    }
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) PocketWindow.fullscreen(getWindow());
     }
     protected int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }
     protected void screen(String title) {
