@@ -33,6 +33,7 @@ test('Anthropic streams keep the answer, summary and usage separate', async()=>{
   let request;
   const result=await streamReply(chat,turn,{key:'tab-key',fetcher:async(url,options)=>{request={url,options};return response(wire,1);},onUpdate:value=>updates.push(value)});
   assert.equal(result.answer,'Take the train 🌱');assert.equal(result.reasoning,'Compare options.');assert.equal(result.usage.output_tokens,8);assert.equal(result.model,'canonical-model');
+  assert.equal(result.usage.last_input_tokens,20);assert.equal(result.usage.last_output_tokens,8);assert.equal(result.usage.history_replay.total,0);
   assert.equal(request.url,'https://api.anthropic.com/v1/messages');assert.equal(request.options.headers['x-api-key'],'tab-key');assert.equal(request.options.redirect,'error');assert.equal(request.options.credentials,'omit');
   assert.equal(request.options.headers['anthropic-dangerous-direct-browser-access'],'true');assert.ok(updates.length>1);assert.ok(!JSON.stringify(result).includes('private-signature'));
 });
@@ -42,6 +43,7 @@ test('compatible streams do not double a summary supplied in two fields', async(
   let request;
   const result=await streamReply(chat,turn,{key:'own-key',fetcher:async(url,options)=>{request={url,options};return response(wire);}});
   assert.equal(result.answer,'One answer.');assert.equal(result.reasoning,'One thought.');assert.equal(result.usage.cache_read_input_tokens,4);assert.equal(request.options.headers.authorization,'Bearer own-key');assert.ok(!request.options.headers['x-api-key']);
+  assert.equal(result.usage.last_input_tokens,9);assert.equal(result.usage.last_output_tokens,3);
 });
 test('truncated streams and reply limits stay unfinished', async()=>{
   const {chat}=ready();
@@ -53,10 +55,36 @@ test('request errors do not expose provider text or an echoed API key', async()=
   await assert.rejects(streamReply(chat,turn,{key:'secret',fetcher:async()=>new Response('secret',{status:401})}),error=>!error.message.includes('secret')&&/rejected/.test(error.message));
   await assert.rejects(streamReply(chat,turn,{key:'secret',fetcher:async()=>response(event({error:{message:'secret'}}))}),error=>!error.message.includes('secret')&&/interrupted/.test(error.message));
 });
-test('only answered pairs enter history; reasoning and partials do not repeat',()=>{
+test('context overflow is named with a fixed message, never retried and never echoes the body', async()=>{
+  const overflow='This chat is too long for this model. Start a new chat, or choose a model with a larger context window.', generic='The provider could not accept this request (400). Check its model, tools and search settings.';
+  const attempt=async(settings,status,body)=>{const {chat}=ready();if(settings)chat.config=config({...DEFAULT_CONFIG,...settings});let calls=0,message='';
+    await assert.rejects(streamReply(chat,turn,{key:'key',fetcher:async()=>{calls++;return typeof body==='string'?new Response(body,{status}):body;}}),error=>{message=error.message;return true;});
+    assert.equal(calls,1);assert.ok(!/secret|tokens|128000|200000/.test(message));return message;};
+  const compatible={provider:'compatible',model:'local-model',baseUrl:'https://model.example/v1'}, openrouter={provider:'compatible',model:'openrouter/free',baseUrl:'https://openrouter.ai/api/v1'};
+  assert.equal(await attempt(null,400,JSON.stringify({type:'error',error:{type:'invalid_request_error',message:'prompt is too long: 210000 tokens > 200000 maximum secret'}})),overflow);
+  assert.equal(await attempt(compatible,400,JSON.stringify({error:{message:"This model's maximum context length is 128000 tokens. secret",type:'invalid_request_error',param:'messages',code:'context_length_exceeded'}})),overflow);
+  assert.equal(await attempt(openrouter,400,JSON.stringify({error:{message:'Provider returned error secret',code:400,metadata:{raw:JSON.stringify({error:{message:"This endpoint's maximum context length is 131072 tokens secret"}})}}})),overflow);
+  assert.equal(await attempt(null,413,'secret request entity too large'),overflow);
+  assert.equal(await attempt(null,400,JSON.stringify({type:'error',error:{type:'invalid_request_error',message:'model: secret-model'}})),generic);
+  for (const message of ['max_tokens must be less than the model context length.', 'Too many tokens requested for max_tokens; maximum supported output is 4096.']) {
+    assert.equal(await attempt(compatible,400,JSON.stringify({error:{message}})),generic);
+    assert.match(await attempt(compatible,200,response(event({error:{message}}))),/interrupted/);
+  }
+  // A validation error that echoes the request is not mistaken for overflow because the chat mentions a context window.
+  assert.equal(await attempt(compatible,422,JSON.stringify({detail:[{msg:'Field required secret',input:{messages:[{content:'my context window is too long secret'}]}}]})),generic.replace('400','422'));
+  assert.equal(await attempt(compatible,422,JSON.stringify({error:{message:'Invalid message format',metadata:{raw:JSON.stringify({detail:[{msg:'Field required',input:{messages:[{content:'Explain the maximum context length.'}]}}]})}}})),generic.replace('400','422'));
+  assert.equal(await attempt(null,200,response(event({type:'error',error:{type:'invalid_request_error',message:'prompt is too long: secret'}}))),overflow);
+  assert.match(await attempt(null,200,response(event({type:'error',error:{type:'overloaded_error',message:'secret'}}))),/interrupted/);
+});
+test('unanswered questions keep their place with a marker; reasoning and partials do not repeat',()=>{
   const {chat}=ready();chat.turns=[{uid:'old-1',text:'First',context:[source],answer:'Answer',reasoning:'private trace',status:'done'},{uid:'old-2',text:'Failed',answer:'Partial',status:'failed'},{uid:'old-3',text:'Stopped',answer:'More partial',status:'stopped'},turn];
-  const request=requestBody(chat,turn);
-  assert.equal(request.messages.length,3);assert.equal(request.messages[1].content,'Answer');assert.match(request.messages[0].content,/Take the train/);assert.ok(!JSON.stringify(request).includes('private trace'));assert.ok(!JSON.stringify(request).includes('Partial'));assert.equal(request.model,DEFAULT_CONFIG.model);
+  const request=requestBody(chat,turn), json=JSON.stringify(request);
+  assert.deepEqual(request.messages.map(m=>m.role),['user','assistant','user','assistant','user','assistant','user']);
+  assert.equal(request.messages[1].content,'Answer');assert.match(request.messages[0].content,/Take the train/);
+  assert.equal(request.messages[2].content,'Failed');assert.match(request.messages[3].content,/^\[No answer: this reply failed/);
+  assert.equal(request.messages[4].content,'Stopped');assert.match(request.messages[5].content,/^\[No answer: the user stopped this reply/);
+  for(const hidden of ['private trace','Partial','More partial'])assert.ok(!json.includes(hidden),hidden);
+  assert.ok(!request.messages.at(-1).content.includes('<pocket_history_coverage>'),'nothing omitted, so no coverage block');assert.equal(request.model,DEFAULT_CONFIG.model);
 });
 test('keys are tab-only and bound to their endpoint; settings contain no key',()=>{
   const tab=new Memory(), disk=new Memory(), a=config({...DEFAULT_CONFIG,provider:'compatible',model:'model-a',baseUrl:'https://a.example/v1/'}), b=config({...a,baseUrl:'https://b.example/v1'});
@@ -94,6 +122,16 @@ test('deleted chats cannot be resurrected by an outstanding request',async()=>{
 test('a timeout cancels a stalled response without automatically retrying',async()=>{
   const {chat}=ready();let calls=0;
   await assert.rejects(streamReply(chat,turn,{key:'key',timeoutMs:5,fetcher:async(_,options)=>{calls++;return await new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('Stopped','AbortError'))));}}),/stopped responding/);assert.equal(calls,1);
+});
+for (const reason of ['timeout', 'stop']) test(reason + ' cancels a stalled error body without retrying', { timeout: 1000 }, async t => {
+  const { chat } = ready(), stop = new AbortController(); let calls = 0, cancelled = false, bodyController;
+  const body = new ReadableStream({ start(controller) { bodyController = controller; }, cancel() { cancelled = true; } });
+  t.after(() => { try { bodyController.close(); } catch {} });
+  const pending = streamReply(chat, turn, { key: 'key', signal: stop.signal, timeoutMs: reason === 'timeout' ? 10 : 500,
+    fetcher: async () => { calls++; return new Response(body, { status: 400 }); } });
+  const timer = reason === 'stop' && setTimeout(() => stop.abort(), 10); t.after(() => { if (timer) clearTimeout(timer); });
+  await assert.rejects(pending, error => reason === 'stop' ? error.name === 'AbortError' : /stopped responding/.test(error.message));
+  assert.equal(calls, 1); assert.equal(cancelled, true); assert.equal(body.locked, false);
 });
 test('damaged conversation data is kept rather than silently replaced',()=>{
   const {store,memory,chat}=ready();memory.setItem('pocket:pip-chat:'+chat.uid,'damaged-original');assert.throws(()=>store.get(chat.uid),/original data/);assert.equal(memory.getItem('pocket:pip-chat:'+chat.uid),'damaged-original');

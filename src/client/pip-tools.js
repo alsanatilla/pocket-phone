@@ -2,6 +2,7 @@ import { storage as localStorage, tabStorage as sessionStorage, activeAccount } 
 import { corosAction, corosProblem, corosTitle } from '../shared/coros-course.js';
 import { notes, tasks, parking, gym, noteTitle, NOTE_LIMIT } from "./store.js";
 import { agenda } from './planner.js';
+import { readChatHistory } from './pip-memory.js';
 
 // Web search runs through Firecrawl for every provider: search_web and read_web_page. Works without a key at low volume;
 // a Firecrawl key (API settings) raises the limits. The key stays in this tab, like provider keys.
@@ -45,6 +46,13 @@ const TOOLS = [
   tool("tasks", "read_task", "Read a chosen Pocket task, its steps, source, due date and completion. Never edits a task.", { id: recordId }, ["id"]),
   tool("calendar", "search_calendar", "Search saved Calendar appointments from today through the next 1–30 days. Read only.", { ...search, days: integer("Calendar days beginning today.", 1, 30, 7) }),
   tool("pocket", "search_pocket", "Search Notes, Tasks, parked Thoughts and Calendar together, using only granted categories. Returns links and excerpts.", { query: search.query, limit: integer("Maximum results.", 1, 10, 10), days: integer("Calendar days beginning today.", 1, 30, 7) }),
+  tool("universal", "read_chat_history", "Read this conversation's earlier requests, final answers, actual tool outcomes and user-applied actions. Historical results are not current facts. No other chats or provider reasoning. Source results respect current access. Use next_offset for older matches, turn_id for one reply, or event_id for serialized recorded result pages using next_result_offset. Listings contain excerpts; query searches full requests and completed answers. With turn_id, use answer_offset or request_offset to read exact text in bounded pages, including explicitly attached request snapshots; follow next_answer_offset or next_request_offset. Match offsets locate search hits beyond excerpts.", {
+    query: search.query, turn_id: recordId, event_id: text("An event_id returned by conversation memory or this tool."),
+    offset: integer("Matching reply offset, newest first.", 0, 200000, 0), limit: integer("Maximum matching replies.", 1, 5, 3),
+    result_offset: integer("Recorded result character offset; use next_result_offset.", 0, 8000, 0), result_length: integer("Recorded result characters to read.", 200, 6000, 2000),
+    answer_offset: { type: "integer", description: "Completed answer offset with turn_id; use next_answer_offset or answer_match_offset.", minimum: 0, maximum: 200000 },
+    request_offset: { type: "integer", description: "Original request and attached snapshot offset with turn_id; use next_request_offset or request_match_offset.", minimum: 0, maximum: 200000 }
+  }),
   tool("universal", "update_plan", "Show or update a short plan for this reply. Changes only the displayed plan; never saves Pocket records.", { steps: { type: "array", minItems: 1, maxItems: 6, items: { type: "object", properties: { text: { type: "string", minLength: 1, maxLength: 160 }, status: { type: "string", enum: ["pending", "in_progress", "done"] } }, required: ["text", "status"], additionalProperties: false } } }, ["steps"]),
   tool("universal", "propose_action", "Prepare a note, task or appointment for the user to review and save with a tap. Never saves or changes data. Appointment proposals need when; task due is YYYY-MM-DD.", { kind: { type: "string", enum: ["note", "task", "appointment"] }, title: { type: "string", minLength: 1, maxLength: 200 }, text: { type: "string", maxLength: 6000 }, due: { type: "string", maxLength: 10 }, steps: { type: "array", maxItems: 12, items: { type: "string", minLength: 1, maxLength: 160, pattern: "^[^\\r\\n]+$" } }, when: { type: "string", maxLength: 40 }, minutes: integer("Appointment duration in minutes.", 15, 480, 60) }, ["kind", "title", "text"]),
   tool("changes", "propose_change", "Prepare a change to an existing record for the user to review and apply with a tap: complete_task, update_task (title, due YYYY-MM-DD or empty to clear, add_steps), append_note (text) or move_appointment (when, minutes). Use ids from Pocket searches or reads. Never applies the change.", { change: { type: "string", enum: ["complete_task", "update_task", "append_note", "move_appointment"] }, id: recordId, title: { type: "string", minLength: 1, maxLength: 200 }, due: { type: "string", maxLength: 10 }, add_steps: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 160, pattern: "^[^\\r\\n]+$" } }, text: { type: "string", minLength: 1, maxLength: 4000 }, when: { type: "string", maxLength: 40, description: "An ISO 8601 timestamp with UTC or an offset." }, minutes: integer("Appointment duration in minutes.", 15, 480, 60), reason: { type: "string", maxLength: 300, description: "One short line on why, shown in the review." } }, ["change", "id"]),
@@ -69,6 +77,7 @@ const permitted = (value, definition) => definition.category === "changes" ? acc
 export const definitions = value => [...TOOLS.filter(t => permitted(value, t)).map(({ category, ...definition }) => structuredClone(definition)), ...(webTools(value) ? structuredClone(WEB) : [])];
 export const checkpointIdentity = value => [value.provider, value.baseUrl, value.model].join("|");
 export const accessFingerprint = value => { const granted = access(value); return CATEGORIES.map(([category]) => granted.includes(category) ? "1" : "0").join(""); };
+export const historyPolicy = value => ({ offered: definitions(value).map(tool => tool.name), stateTools: STATE_TOOLS, identity: checkpointIdentity(value), fingerprint: accessFingerprint(value), grants: access(value), webSearch: webTools(value) });
 export const cacheKey = (name, args) => name + ":" + JSON.stringify(canonical(args));
 function canonical(value) { return Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value; }
 function valid(value, schema) {
@@ -106,8 +115,20 @@ async function web(value, name, args, signal, context) {
     // Firecrawl's documented filters: docs.firecrawl.dev/features/search.
     const response = await post("/search", { query, limit, timeout: 20000, ...(domains.length ? { includeDomains: domains.map(domain => domain.toLowerCase()) } : {}), ...(time ? { tbs: time } : {}), ...(sources.length ? { sources } : {}), ...(categories.length ? { categories } : {}) });
     if (!response.ok) return refused(response.status);
-    const found = await response.json(), groups = Array.isArray(found.data) ? [found.data] : Object.values(found.data || {}).filter(Array.isArray), list = groups.flat();
-    return { source: "web:firecrawl", query, results: list.slice(0, limit).filter(item => publicUrl(String(item.url || ""))).map(item => ({ title: String(item.title || item.url).slice(0, 160), url: String(item.url).slice(0, 2048), description: String(item.description || "").slice(0, 400) })) };
+    const found = await response.json();
+    if (!found || found.success === false || found.error || !found.data || typeof found.data !== "object") return failure("web_unavailable", "Web search returned an unsuccessful response.");
+    const groups = Array.isArray(found.data) ? [["web", found.data]] : Object.entries(found.data).filter(([kind, items]) => ["web", "news", "images"].includes(kind) && Array.isArray(items));
+    const results = [], seen = new Set();
+    // Interleave groups: five web hits must not hide all the news hits in a mixed search.
+    for (let index = 0; index < Math.max(0, ...groups.map(([, items]) => items.length)) && results.length < limit; index++) {
+      for (const [kind, items] of groups) {
+        const item = items[index], url = item && publicUrl(String(item.url || ""));
+        if (!url || seen.has(url.href) || results.length >= limit) continue;
+        seen.add(url.href);
+        results.push({ title: String(item.title || item.url).slice(0, 160), url: url.href, description: String(item.description || item.snippet || "").slice(0, 400), source_type: kind, ...(typeof item.date === "string" && item.date ? { date: item.date.slice(0, 120) } : {}) });
+      }
+    }
+    return { source: "web:firecrawl", query, results };
   }
   const url = publicUrl(args.url); if (!url) return failure("invalid_arguments", "Use a public https URL.");
   const pageKey = "page:" + url.href, cache = context?.cache;
@@ -116,21 +137,28 @@ async function web(value, name, args, signal, context) {
     const pending = (async () => {
       const response = await post("/scrape", { url: url.href, formats: ["markdown"], onlyMainContent: true, timeout: 20000 });
       if (!response.ok) return refused(response.status);
-      return (await response.json()).data || {};
+      const found = await response.json(), page = found?.data;
+      if (!found || found.success === false || found.error || !page || typeof page !== "object") return failure("web_unavailable", "The page could not be retrieved.");
+      const status = Number(page.metadata?.statusCode);
+      if (page.metadata?.error || status && !(status >= 200 && status < 300 || status === 304)) return failure("web_unavailable", "The source page did not load successfully.");
+      if (typeof page.markdown !== "string" || !page.markdown.trim()) return failure("web_unavailable", "The source returned no readable page text.");
+      return page;
     })();
     cache?.set(pageKey, pending);
     try { page = await pending; if (page.error) cache?.delete(pageKey); else cache?.set(pageKey, page); }
     catch (error) { cache?.delete(pageKey); throw error; }
   } else page = await page;
   if (page.error) return page;
-  return { source: url.href, url: url.href, title: String(page.metadata?.title || url.hostname).slice(0, 160), ...pageText(String(page.markdown || ""), args), ...(reused ? { cached: true } : {}) };
+  const metadata = page.metadata || {}, date = keys => keys.map(key => metadata[key]).find(value => typeof value === "string" && value.trim());
+  const published = date(["publishedTime", "publishedDate", "datePublished", "article:published_time"]), modified = date(["modifiedTime", "modifiedDate", "dateModified", "article:modified_time"]);
+  return { source: url.href, url: url.href, title: String(metadata.title || url.hostname).slice(0, 160), ...(published ? { published_at: published.slice(0, 120) } : {}), ...(modified ? { modified_at: modified.slice(0, 120) } : {}), ...pageText(page.markdown, args), ...(reused ? { cached: true } : {}) };
 }
 const failure = (error, message) => ({ error, message });
 const matches = (value, query) => query.toLowerCase().trim().split(/\s+/).filter(Boolean).every(word => String(value || "").toLowerCase().includes(word));
 const excerpt = (value, query) => { const at = query.trim() ? value.toLowerCase().indexOf(query.trim().split(/\s+/)[0].toLowerCase()) : 0; return value.slice(Math.max(0, at - 100), Math.max(0, at - 100) + 500); };
 const recent = (items, query) => items.filter(item => matches(item.text, query)).sort((a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0));
 const cached = key => { try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; } };
-const grantSignature = (value, name) => name === "search_pocket" ? access(value).filter(c => pocketCategories.includes(c)).sort().join("|") : name === "read_task" ? (access(value).includes("notes") ? "notes" : "") : "";
+export const grantSignature = (value, name) => name === "read_chat_history" ? accessFingerprint(value) + "|" + Number(webTools(value)) : name === "search_pocket" ? access(value).filter(c => pocketCategories.includes(c)).sort().join("|") : name === "read_task" ? (access(value).includes("notes") ? "notes" : "") : "";
 const bounded = result => JSON.stringify(result).length <= 8000 ? result : failure("result_too_large", "Use a shorter page or narrower request.");
 const validDay = raw => /^\d{4}-\d{2}-\d{2}$/.test(raw) && Number.isFinite(Date.parse(raw + "T12:00:00Z")) && new Date(raw + "T12:00:00Z").toISOString().slice(0, 10) === raw;
 function validInstant(raw) {
@@ -222,13 +250,14 @@ export async function execute(value, name, args = {}, signal, context = {}) {
   if (signal?.aborted) throw new DOMException("Stopped", "AbortError");
   const definition = TOOLS.find(t => t.name === name) || WEB.find(t => t.name === name);
   if (!definition || !permitted(value, definition)) return failure("access_disabled", "Access to this source is off or this tool is unavailable.");
-  if (!valid(args, definition.input_schema)) return failure("invalid_arguments", "Check the tool arguments and their limits.");
+  if (!valid(args, definition.input_schema)) return { ...failure("invalid_arguments", "Correct the arguments to match this tool's schema; unknown fields are not accepted."), required_fields: definition.input_schema.required || [], allowed_fields: Object.keys(definition.input_schema.properties || {}) };
   if (COROS_ARGUMENTS[name] && JSON.stringify(args.arguments ?? {}).length > COROS_ARGUMENTS[name]) return failure("invalid_arguments", "Keep the COROS arguments under " + COROS_ARGUMENTS[name] + " characters.");
   const cache = context.cache, entryKey = cacheKey(name, args), signature = grantSignature(value, name), reuse = !STATE_TOOLS.includes(name), saved = reuse && cache?.get(entryKey);
   if (saved && saved.permissions === signature) return bounded({ ...structuredClone(saved.result), cached: true });
   const query = args.query ?? "", limit = args.limit ?? (name === "search_pocket" ? 10 : 5), window = args.days ?? 7;
   let result;
-  if (name === "search_web" || name === "read_web_page") result = await web(value, name, args, signal, context);
+  if (name === "read_chat_history") result = context.chat && context.turn ? readChatHistory(context.chat, context.turn, historyPolicy(value), args) : failure("history_unavailable", "This conversation's history is unavailable.");
+  else if (name === "search_web" || name === "read_web_page") result = await web(value, name, args, signal, context);
   else if (name === "update_plan") result = args.steps.some(step => !step.text.trim()) ? failure("invalid_arguments", "Write nonempty plan steps.") : { kind: "plan", plan: args.steps.map(step => ({ text: step.text.trim(), status: step.status })) };
   else if (name === "propose_action") {
     const due = args.due || "", when = args.when || "";
@@ -295,6 +324,7 @@ export async function execute(value, name, args = {}, signal, context = {}) {
 const corosName = tool => String(tool || "").replace(/^(query|get)/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().slice(0, 60) || "data";
 export function label(name, input = {}) {
   const query = typeof input?.query === "string" ? input.query.slice(0, 200) : "";
+  if (name === "read_chat_history") return "read chat history" + (query ? " · “" + query + "”" : "");
   if (name === "web_search" || name === "search_web") return "search web" + (query ? " · “" + query + "”" : "");
   if (name === "read_web_page") { try { return "read page · " + new URL(input.url).hostname; } catch { return "read page"; } }
   if (name === "search_pocket") return "search Pocket" + (query ? " · “" + query + "”" : "");
@@ -325,7 +355,16 @@ function resultSummary(name, result) {
   if (name === "propose_coros") return result.title + " · ready to review";
   const count = result.matched || 0; return count + (name === "gym_summary" ? " workouts" : " matches") + (result.truncated ? " · partial" : "");
 }
-export const summary = (name, result) => (result.cached ? "cached · " : "") + resultSummary(name, result);
+export function summary(name, result) {
+  const cached = result.cached ? 'cached · ' : '';
+  if (result.kind === 'existing_proposal') return cached + 'Existing proposal · ' + result.status;
+  if (name === 'read_chat_history' && !result.error) {
+    if (result.event) return cached + 'Recorded event' + (result.next_result_offset != null ? ' · more' : '');
+    for (const kind of ['answer', 'request']) if (result[kind + '_text'] !== undefined) return cached + 'Earlier ' + kind + (result['next_' + kind + '_offset'] != null ? ' · more' : '');
+    return cached + (result.turns?.length || 0) + ' earlier replies' + (result.next_offset != null ? ' · more' : '');
+  }
+  return cached + resultSummary(name, result);
+}
 export function sources(name, result) {
   if (result.error || result.available === false) return [];
   if (name === "coros_summary") return [{ title: "Movement · COROS cache", href: "/movement" }];

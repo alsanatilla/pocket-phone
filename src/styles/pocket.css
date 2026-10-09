@@ -593,6 +593,7 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 .pip-thread { flex: 1; min-height: 160px; background: var(--black); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 12px 4px 12px 0; }
 .pip-thread:focus-visible { outline: 1px solid var(--line); outline-offset: 4px; }
 .pip-message { margin: 8px 0 32px; max-width: 68ch; }
+.pip-message:focus-visible { outline: 1px solid var(--accent); outline-offset: 4px; }
 .pip-question { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 12px; }
 .pip-speaker { font: 24px/1 var(--pixel); color: var(--muted); margin: 10px 0 6px; }
 .pip-answer.md { min-height: 0; font-size: 16px; }
@@ -622,13 +623,21 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 .pip-tool-details pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 120px; overflow: auto; color: var(--muted); font: 13px/1.5 var(--mono); }
 .pip-parameters > summary { min-height: 44px; padding: 12px 0; cursor: pointer; color: var(--muted); }
 .pip-source { display: block; text-align: left; font-size: 13px; min-height: 44px; padding: 10px 0; overflow-wrap: anywhere; }
-.pip-capabilities { display: flex; gap: 16px; }
+.pip-capabilities { display: flex; flex-wrap: wrap; gap: 0 16px; }
 .pip-capabilities { position: relative; padding: 0 8px; border-top: 1px solid var(--line); }
 .pip-capabilities::before, .pip-capabilities::after { content: ""; position: absolute; top: -1px; width: 4px; height: 4px; border-top: 1px solid var(--accent); opacity: .5; pointer-events: none; }
 .pip-capabilities::before { left: 0; border-left: 1px solid var(--accent); }
 .pip-capabilities::after { right: 0; border-right: 1px solid var(--accent); }
 .pip-capabilities button { font-size: 13px; min-height: 44px; padding: 8px 0; }
 .pip-capabilities button[aria-pressed="true"] { color: var(--accent); }
+.pip-history-control { margin-left: auto; }
+.pip-history input { font-size: 15px; }
+.pip-history-list { list-style: none; margin: 4px 0; padding: 0; }
+.pip-history-turn { min-height: 44px; padding: 12px 0; font-size: 14px; border-bottom: 1px solid var(--line); }
+.pip-history-detail, .pip-history-request { display: block; }
+.pip-history-request { margin: 4px 0; }
+.pip-history-turn .sub { font-size: 13px; }
+.pip-usage, .pip-resume-help { margin: 6px 0; max-width: 68ch; }
 .pip-phase:empty { display: none; }
 .pip-reply-actions { display: flex; flex-wrap: wrap; gap: 0 20px; margin: 4px 0 0; }
 .pip-reply-actions button { min-height: 44px; font-size: 14px; padding: 8px 0; color: var(--muted); text-align: left; }

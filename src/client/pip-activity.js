@@ -12,8 +12,11 @@ export function source(value) {
 export function activity(items = []) {
   if (!Array.isArray(items)) return [];
   let size = 0;
-  return items.slice(-64).reverse().flatMap(item => {
-    if (!item?.id || !["queued", "running", "done", "failed", "stopped"].includes(item.state)) return [];
+  const indexed = items.map((item, index) => ({ item, index })).filter(({ item }) => item?.id && ["queued", "running", "done", "failed", "stopped"].includes(item.state));
+  const saved = indexed.filter(({ item }) => source({ href: item.applied_href })?.href.startsWith('/')).slice(-32), savedIndices = new Set(saved.map(entry => entry.index));
+  // Approved outcomes get space before ordinary reads, so restarting research cannot evict a saved action.
+  const selected = [...saved.reverse(), ...indexed.filter(entry => !savedIndices.has(entry.index)).reverse().slice(0, 64 - saved.length)];
+  return selected.flatMap(({ item, index }) => {
     const row = { id: clip(item.id, 200), kind: item.kind === "web" || ["search_web", "read_web_page"].includes(item.name) ? "web" : "tool", name: clip(item.name, 80),
       title: clip(item.title), input: clip(item.input, 8000), state: item.state, summary: clip(item.summary, 500),
       started: Number(item.started) || 0, ended: Number(item.ended) || 0,
@@ -21,8 +24,9 @@ export function activity(items = []) {
     if (typeof item.result === 'string' && item.result.length <= 8000) { try { JSON.parse(item.result); row.result = item.result; } catch {} }
     const applied = source({href:item.applied_href});
     if (applied?.href.startsWith('/')) { row.applied_href = applied.href; row.applied = Math.max(0, Number(item.applied) || 0); }
-    size += JSON.stringify(row).length; return size <= 120000 ? [row] : [];
-  }).reverse();
+    const cost = JSON.stringify(row).length; if (size + cost > 120000) return [];
+    size += cost; return [{ row, index }];
+  }).sort((a, b) => a.index - b.index).map(entry => entry.row);
 }
 export function settle(items, state, summary = "") {
   return activity(items).map(row => ["queued", "running"].includes(row.state) ? { ...row, state, summary: clip(summary || (state === "stopped" ? "Stopped" : "No result returned")), ended: Date.now() } : row);
