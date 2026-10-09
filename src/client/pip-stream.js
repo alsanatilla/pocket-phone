@@ -12,7 +12,7 @@ const stopped = () => new DOMException('Stopped', 'AbortError');
 // The AI SDK owns provider parsing, tool definitions and input validation, tool execution, the user's
 // approval of writes and model continuation. Pocket owns user permissions, bounded research and the
 // recorded outcomes. approve(requests, signal) resolves to Map(toolCallId → { approved, input? }).
-export async function streamChat(chat, turn, { value, body, key, signal, onUpdate = () => {}, fetcher = fetch, executeTool = execute, approve = null, timeoutMs = 90000, deadlineMs = RESEARCH_LIMITS.deadlineMs, resume = null, coverage = null } = {}) {
+export async function streamChat(chat, turn, { value, body, key, signal, onUpdate = () => {}, fetcher = fetch, executeTool = execute, previewTool = preview, approve = null, timeoutMs = 90000, deadlineMs = RESEARCH_LIMITS.deadlineMs, resume = null, coverage = null } = {}) {
   const controller = new AbortController(), abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort();
   let timeout, absolute, timedOut = false, deadlineReached = false, deadlineLeft = Math.min(deadlineMs, RESEARCH_LIMITS.deadlineMs), deadlineFrom = 0;
@@ -118,7 +118,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     if (done) return refuse('existing_proposal', 'This was already saved. Refer to it instead of saving it again.', { existing: { kind: 'existing_proposal', ...done, status: 'applied_by_user', message: 'This was already saved. Refer to it instead of saving it again.' } });
     calls++; if (final) finalCalls++;
     let ready;
-    try { ready = await preview(value, name, input, controller.signal); } catch { check(); ready = { error: 'data_unavailable', message: 'The current record could not be read.' }; }
+    try { ready = await previewTool(value, name, input, controller.signal); } catch { check(); ready = { error: 'data_unavailable', message: 'The current record could not be read.' }; }
     check();
     if (ready.error) return refuse(ready.error, ready.message);
     previews.set(toolCallId, ready);

@@ -36,6 +36,9 @@ export const TABLES = [
   `CREATE TABLE IF NOT EXISTS pocket_coros (user_id TEXT PRIMARY KEY REFERENCES pocket_user(id) ON DELETE CASCADE, credentials TEXT, pending TEXT, snapshot TEXT, generation TEXT NOT NULL, last_success INTEGER NOT NULL DEFAULT 0, last_attempt INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL DEFAULT 0, needs_auth INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '', lock_owner TEXT, lock_until INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS pocket_coros_details (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, activity_id TEXT NOT NULL, payload TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(user_id, activity_id))`,
   `CREATE TABLE IF NOT EXISTS pocket_coros_history (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, date TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(user_id, date))`,
+  `CREATE TABLE IF NOT EXISTS pocket_pip_background (user_id TEXT PRIMARY KEY REFERENCES pocket_user(id) ON DELETE CASCADE, settings TEXT NOT NULL, credentials TEXT, used_day TEXT NOT NULL DEFAULT '', used_tokens INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS pocket_pip_routines (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, id TEXT NOT NULL, payload TEXT NOT NULL, next_run INTEGER NOT NULL, lock_until INTEGER NOT NULL DEFAULT 0, last_run INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', last_chat TEXT NOT NULL DEFAULT '', PRIMARY KEY(user_id, id))`,
+  `CREATE INDEX IF NOT EXISTS pocket_pip_routines_due ON pocket_pip_routines(next_run)`,
   `CREATE TABLE IF NOT EXISTS pocket_coros_writes (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, key TEXT NOT NULL, tool TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, PRIMARY KEY(user_id, key))`,
 ];
 export function ensureSchema() {

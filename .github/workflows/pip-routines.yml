@@ -1,0 +1,32 @@
+name: Run Pip routines
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: pip-routines
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - name: Run due routines for Pocket accounts
+        env:
+          # The same job secret as the COROS refresh: /api/jobs checks it for every scheduled job.
+          POCKET_JOB_SECRET: ${{ secrets.POCKET_COROS_CRON_SECRET }}
+        run: |
+          node --input-type=module <<'JS'
+          if (!process.env.POCKET_JOB_SECRET) throw new Error('POCKET_COROS_CRON_SECRET is missing.');
+          let more = true;
+          for (let page = 0; more && page < 3; page++) {
+            const response = await fetch('https://pocket-phone.vercel.app/api/jobs/pip', {
+              headers: { Authorization: 'Bearer ' + process.env.POCKET_JOB_SECRET },
+              signal: AbortSignal.timeout(290000),
+            });
+            if (!response.ok) throw new Error('Pocket Pip endpoint answered ' + response.status);
+            const result = await response.json();
+            console.log(JSON.stringify(result)); more = result.more;
+          }
+          JS

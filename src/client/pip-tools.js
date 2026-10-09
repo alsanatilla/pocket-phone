@@ -1,6 +1,6 @@
 import { storage as localStorage, tabStorage as sessionStorage, activeAccount } from './workspace-storage.js';
 import { corosAction, corosProblem, corosTitle } from '../shared/coros-course.js';
-import { notes, tasks, parking, gym, noteTitle, NOTE_LIMIT } from "./store.js";
+import { load, gym, noteTitle, listNotes, listTasks, openThoughts, listWorkouts, NOTE_LIMIT } from "./store.js";
 import { agenda } from './planner.js';
 import { readChatHistory } from './pip-memory.js';
 import { applyProposal, applyChange, applyCoros } from './pip-actions.js';
@@ -15,6 +15,8 @@ export const webTools = value => Boolean(value.webSearch);
 export const CATEGORIES = [["notes", "Notes"], ["thoughts", "Thoughts"], ["tasks", "Tasks"], ["calendar", "Calendar"], ["gym", "Gym"], ["coros", "COROS"]];
 const permissionKey = value => "pocket:pip-access:" + value.provider + "|" + value.baseUrl;
 export function access(value, storage = localStorage) {
+  // A scheduled run carries the grants chosen for Pip on its own; the browser keeps them per endpoint.
+  if (Array.isArray(value.grants)) return CATEGORIES.map(([key]) => key).filter(key => value.grants.includes(key));
   try { const allowed = JSON.parse(storage?.getItem(permissionKey(value)) || "[]"); return CATEGORIES.map(([key]) => key).filter(key => Array.isArray(allowed) && allowed.includes(key)); } catch { return []; }
 }
 export function saveAccess(value, categories, storage = localStorage) {
@@ -73,7 +75,7 @@ function pageText(text, args) {
 }
 async function web(value, name, args, signal, context) {
   if (!webTools(value)) return failure("access_disabled", "Web search is off.");
-  const key = firecrawlKey(), headers = { "content-type": "application/json", ...(key ? { authorization: "Bearer " + key } : {}) };
+  const key = context.source.firecrawlKey(), headers = { "content-type": "application/json", ...(key ? { authorization: "Bearer " + key } : {}) };
   const post = (path, body) => fetch(FIRECRAWL + path, { method: "POST", headers, body: JSON.stringify(body), signal, credentials: "omit", referrerPolicy: "no-referrer" });
   const refused = status => failure("web_unavailable", status === 401 || status === 402 || status === 429 ? "Web search is unavailable right now (Firecrawl " + status + "). A Firecrawl key in API settings raises the limit." : "Web search failed (Firecrawl " + status + ").");
   if (name === "search_web") {
@@ -135,14 +137,14 @@ function validInstant(raw) {
   const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-](\d{2}):(\d{2}))$/.exec(raw);
   return Boolean(match && validDay(match[1]) && +match[2] < 24 && +match[3] < 60 && +(match[4] || 0) < 60 && +(match[5] || 0) <= 18 && +(match[6] || 0) < 60 && (+match[5] !== 18 || +match[6] === 0) && Number.isFinite(Date.parse(raw)));
 }
-const calendarItems = days => { const start = new Date(); start.setHours(0, 0, 0, 0); const end = new Date(start); end.setDate(end.getDate() + days); return agenda.all().filter(item => item.when < +end && item.when + item.minutes * 60000 > +start); };
+const calendarItems = (source, days) => { const start = new Date(); start.setHours(0, 0, 0, 0); const end = new Date(start); end.setDate(end.getDate() + days); return source.appointments().filter(item => item.when < +end && item.when + item.minutes * 60000 > +start); };
 /** Validates a change against the record as it is now and keeps a short "before" for the review. Nothing is written here. */
-function changeProposal(value, args) {
+function changeProposal(value, args, source) {
   const category = CHANGE_CATEGORY[args.change], reason = (args.reason || "").trim();
   if (!access(value).includes(category)) return failure("access_disabled", "Turn on " + category + " access before proposing this change.");
   const ready = (change, before) => ({ kind: "change", change: { change: args.change, ...change, ...(reason ? { reason } : {}) }, before, requires_confirmation: true });
   if (args.change === "complete_task" || args.change === "update_task") {
-    const task = tasks.get(args.id); if (!task) return failure("task_not_found", "That task is no longer available.");
+    const task = source.task(args.id); if (!task) return failure("task_not_found", "That task is no longer available.");
     const before = { title: task.text, due: task.due || "", done: Boolean(task.done), steps: (task.steps || []).length };
     if (args.change === "complete_task") return task.done ? failure("already_done", "That task is already complete.") : ready({ id: task.uid }, before);
     const add = (args.add_steps || []).map(step => step.trim()).filter(step => !(task.steps || []).some(old => old.text === step));
@@ -152,19 +154,19 @@ function changeProposal(value, args) {
     return ready({ id: task.uid, ...(args.title !== undefined ? { title: args.title.trim() } : {}), ...(args.due !== undefined ? { due: args.due } : {}), add_steps: add }, before);
   }
   if (args.change === "append_note") {
-    const note = notes.get(args.id), text = (args.text || "").trim();
+    const note = source.note(args.id), text = (args.text || "").trim();
     if (!note) return failure("note_not_found", "That saved note is no longer available.");
     if (!text) return failure("invalid_arguments", "Write the text to add.");
     if (note.text.trimEnd().length + text.length + 2 > NOTE_LIMIT) return failure("note_full", "The note would exceed its length limit.");
     return ready({ id: note.uid, text }, { title: noteTitle(note), ending: note.text.trimEnd().slice(-240) });
   }
-  const item = agenda.get(args.id);
+  const item = source.appointment(args.id);
   if (!item) return failure("appointment_not_found", "That appointment is no longer available.");
   if (!args.when || !validInstant(args.when)) return failure("invalid_arguments", "Use an ISO date and time with timezone.");
   return ready({ id: item.uid, when: args.when, minutes: args.minutes ?? item.minutes }, { title: item.title, when: new Date(item.when).toISOString(), minutes: item.minutes });
 }
 /** Live COROS goes through the signed-in Pocket account, which holds the COROS connection. */
-async function corosApi(action, body, signal) {
+async function corosFetch(action, body, signal) {
   if (!activeAccount()) return { failed: failure("coros_unavailable", "Sign in to Pocket and connect COROS in Movement to use live COROS data.") };
   let response, value = {};
   try { response = await fetch("/api/coros/" + action, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, accountId: activeAccount() }), signal }); }
@@ -173,6 +175,22 @@ async function corosApi(action, body, signal) {
   if (!response.ok) return { failed: failure(response.status === 422 ? "coros_refused" : "coros_unavailable", String(value.error || "COROS is unavailable.").slice(0, 800)) };
   return { value };
 }
+/**
+ * Where tools read Pocket records: read(name) returns a synced document. Calendar, COROS and the Firecrawl key come
+ * from where the run happens. This browser by default; Pip's scheduled runs pass the account's server copy.
+ */
+export function recordSource(read, place = {}) {
+  return {
+    notes: () => listNotes(read("notes.json")), note: id => listNotes(read("notes.json")).find(note => note.uid === id) || null,
+    tasks: () => listTasks(read("tasks.json")), task: id => listTasks(read("tasks.json")).find(task => task.uid === id) || null,
+    thoughts: () => openThoughts(read("parking.json")), workouts: () => listWorkouts(read("gym.json")),
+    appointments: () => [], appointment: () => null, corosCache: () => ({}), firecrawlKey: () => "",
+    coros: async () => ({ failed: failure("coros_unavailable", "Live COROS is unavailable here.") }),
+    ...place
+  };
+}
+const BROWSER = recordSource(load, { appointments: () => agenda.all(), appointment: id => agenda.get(id), coros: corosFetch, firecrawlKey: () => firecrawlKey(),
+  corosCache: () => ({ cockpit: cached("pocket:coros-cockpit"), activities: cached("pocket:coros-activities") }) });
 /** A page that still fits the 8,000-character result limit after JSON escaping (COROS formats are full of quotes). */
 function fitted(text, args, fields) {
   for (let length = args.length ?? 6000; ; length = Math.floor(length * 0.8)) {
@@ -183,10 +201,10 @@ function fitted(text, args, fields) {
 const formats = new Map();
 const firstSentence = text => (String(text).match(/^[\s\S]*?\.(?:\s|$)/)?.[0] || String(text)).trim();
 const slimSchema = value => Array.isArray(value) ? value.map(slimSchema) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, key === "description" && typeof item === "string" ? firstSentence(item) : slimSchema(item)])) : value;
-async function corosFormat(args, signal) {
+async function corosFormat(args, signal, source) {
   let text = formats.get(args.tool);
   if (!text) {
-    const { failed, value } = await corosApi("catalog", { names: [args.tool] }, signal); if (failed) return failed;
+    const { failed, value } = await source.coros("catalog", { names: [args.tool] }, signal); if (failed) return failed;
     const found = value.tools?.[0]; if (!found) return failure("coros_unavailable", "COROS does not offer this tool right now.");
     // COROS's own rules in full; per-field notes keep their first sentence, since the rules repeat them.
     text = found.description + "\n\nArguments (JSON schema):\n" + JSON.stringify(slimSchema(found.inputSchema)); formats.set(args.tool, text);
@@ -197,20 +215,20 @@ async function corosRead(args, signal, context) {
   const request = args.arguments || {}, key = "coros-text:" + cacheKey(args.tool, request);
   let text = context.cache?.get(key);
   if (typeof text !== "string") {
-    const { failed, value } = await corosApi("tool", { name: args.tool, arguments: request }, signal); if (failed) return failed;
+    const { failed, value } = await context.source.coros("tool", { name: args.tool, arguments: request }, signal); if (failed) return failed;
     if (value.error) return failure("coros_refused", "COROS: " + String(value.text || "the request was refused").slice(0, 800));
     text = String(value.text || ""); context.cache?.set(key, text);
   }
   return fitted(text, args, { source: "coros:" + args.tool, tool: args.tool });
 }
 /** Checks the shape and, for updates and library workouts, reads what is there now. Nothing is written to COROS here. */
-async function corosProposal(args, signal) {
+async function corosProposal(args, signal, source) {
   const problem = corosProblem(args.tool, args.arguments); if (problem) return failure("invalid_arguments", problem);
   const lookup = args.tool === "updateScheduledWorkout" ? ["queryScheduledWorkoutDetails", { date: args.arguments.date, idInPlan: String(args.arguments.idInPlan) }]
     : args.tool === "updateWorkoutDetails" || args.tool === "scheduleWorkout" ? ["queryWorkoutDetails", { workoutId: args.arguments.workoutId }] : null;
   let before = "";
   if (lookup) {
-    const { failed, value } = await corosApi("tool", { name: lookup[0], arguments: lookup[1] }, signal); if (failed) return failed;
+    const { failed, value } = await source.coros("tool", { name: lookup[0], arguments: lookup[1] }, signal); if (failed) return failed;
     if (value.error) return failure("workout_not_found", "COROS: " + String(value.text || "that workout was not found").slice(0, 600));
     before = String(value.text || "").slice(0, 1200);
   }
@@ -223,16 +241,16 @@ export function recordProblem(args) {
   return "";
 }
 /** What a write would do, checked against the record as it is now. The approval review shows it; nothing is written. */
-export async function preview(value, name, args, signal) {
+export async function preview(value, name, args, signal, source = BROWSER) {
   if (!WRITE_TOOLS.includes(name) || !permitted(value, name)) return failure("access_disabled", "Access to this record is off or this tool is unavailable.");
   if (name === "create_record") { const problem = recordProblem(args); return problem ? failure("invalid_arguments", problem) : { action: { tool: name, kind: args.kind, title: args.title.trim() } }; }
-  if (name === "change_record") { const ready = changeProposal(value, args); return ready.error ? ready : { action: { tool: name, kind: args.change, title: ready.change.title || ready.before.title }, change: ready.change, before: ready.before }; }
-  const ready = await corosProposal(args, signal);
+  if (name === "change_record") { const ready = changeProposal(value, args, source); return ready.error ? ready : { action: { tool: name, kind: args.change, title: ready.change.title || ready.before.title }, change: ready.change, before: ready.before }; }
+  const ready = await corosProposal(args, signal, source);
   return ready.error ? ready : { action: { tool: name, kind: args.tool, title: ready.title }, ...(ready.before ? { before: ready.before } : {}) };
 }
 /** Runs only after the user approved the call. Stable ids keep a retried write from saving twice. */
 async function write(value, name, args, signal, context) {
-  const ready = await preview(value, name, args, signal); if (ready.error) return ready;
+  const ready = await preview(value, name, args, signal, context.source); if (ready.error) return ready;
   if (!context.chat || !context.turn || !context.eventId) return failure("write_unavailable", "This conversation is unavailable.");
   try {
     const href = name === "create_record" ? await applyProposal(context.chat.uid, context.turn.uid, context.eventId, args)
@@ -246,6 +264,8 @@ async function write(value, name, args, signal, context) {
 }
 export async function execute(value, name, args = {}, signal, context = {}) {
   if (signal?.aborted) throw new DOMException("Stopped", "AbortError");
+  context = { ...context, source: context.source || BROWSER };
+  const source = context.source;
   if (!permitted(value, name)) return failure("access_disabled", "Access to this source is off or this tool is unavailable.");
   if (WRITE_TOOLS.includes(name)) return write(value, name, args, signal, context);
   const cache = context.cache, entryKey = cacheKey(name, args), signature = grantSignature(value, name), reuse = !STATE_TOOLS.includes(name), saved = reuse && cache?.get(entryKey);
@@ -256,41 +276,41 @@ export async function execute(value, name, args = {}, signal, context = {}) {
   else if (name === "search_web" || name === "read_web_page") result = await web(value, name, args, signal, context);
   else if (name === "update_plan") result = args.steps.some(step => !step.text.trim()) ? failure("invalid_arguments", "Write nonempty plan steps.") : { kind: "plan", plan: args.steps.map(step => ({ text: step.text.trim(), status: step.status })) };
   else if (name === "coros_read") result = await corosRead(args, signal, context);
-  else if (name === "coros_format") result = await corosFormat(args, signal);
+  else if (name === "coros_format") result = await corosFormat(args, signal, source);
   else if (name === "search_calendar") {
-    const found = calendarItems(window).filter(item => matches(item.title, query));
+    const found = calendarItems(source, window).filter(item => matches(item.title, query));
     result = { source: "pocket:calendar", days: window, matched: found.length, truncated: found.length > limit, appointments: found.slice(0, limit).map(item => ({ id: item.uid, title: item.title, when: new Date(item.when).toISOString(), minutes: item.minutes, task_uid: item.task_uid || "", href: "/calendar/" + encodeURIComponent(item.uid) })) };
   } else if (name === "search_pocket") {
     const grants = access(value), found = [], add = (collection, item, title, content) => { const id = String(item.uid || item.id), href = "/" + collection + "/" + encodeURIComponent(id), kind = collection === "calendar" ? "appointment" : collection.slice(0, -1); if (matches(content, query)) found.push({ kind, type: kind, id, title: title.slice(0, 200), excerpt: excerpt(content, query), href, route: href, updated: item.updated || item.created || 0 }); };
-    if (grants.includes("notes")) for (const item of notes.list()) add("notes", item, noteTitle(item), item.text);
-    if (grants.includes("tasks")) for (const item of tasks.list()) add("tasks", item, item.text, [item.text, ...(item.steps || []).map(step => step.text)].join("\n"));
-    if (grants.includes("thoughts")) for (const item of parking.open()) add("thoughts", item, item.text, item.text);
-    if (grants.includes("calendar")) for (const item of calendarItems(window)) add("calendar", item, item.title, item.title);
+    if (grants.includes("notes")) for (const item of source.notes()) add("notes", item, noteTitle(item), item.text);
+    if (grants.includes("tasks")) for (const item of source.tasks()) add("tasks", item, item.text, [item.text, ...(item.steps || []).map(step => step.text)].join("\n"));
+    if (grants.includes("thoughts")) for (const item of source.thoughts()) add("thoughts", item, item.text, item.text);
+    if (grants.includes("calendar")) for (const item of calendarItems(source, window)) add("calendar", item, item.title, item.title);
     found.sort((a, b) => b.updated - a.updated);
     result = { source: "pocket:workspace", matched: found.length, truncated: found.length > limit, results: found.slice(0, limit).map(({ updated, ...item }) => item) };
   } else if (name === "read_task") {
-    const item = tasks.get(args.id);
+    const item = source.task(args.id);
     const restricted = (item?.source?.kind === "note" || item?.source?.note_uid) && !access(value).includes("notes");
     result = item ? { source: "pocket:task:" + item.uid, id: item.uid, text: item.text, title: item.text, due: item.due || "", completed: Boolean(item.done), done: Boolean(item.done), steps: (item.steps || []).map(step => ({ text: String(step.text || "").slice(0, 200), done: Boolean(step.done) })), task_source: item.source ? { kind: item.source.kind || "", name: restricted ? "" : String(item.source.name || "").slice(0, 200), text: restricted ? "" : String(item.source.text || "").slice(0, 4000), note_uid: item.source.note_uid || "", ...(restricted ? { access_disabled: true } : {}) } : null } : failure("task_not_found", "That task is no longer available.");
   } else if (name === "search_notes") {
-    const found = recent(notes.list(), query);
+    const found = recent(source.notes(), query);
     result = { source: "pocket:notes", matched: found.length, truncated: found.length > limit, notes: found.slice(0, limit).map(n => ({ id: n.uid, title: noteTitle(n), excerpt: excerpt(n.text, query), text_truncated: n.text.length > 500 })) };
   } else if (name === "read_note") {
     if (typeof args.id !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(args.id)) return failure("invalid_arguments", "Use the id returned by search_notes.");
-    const note = notes.get(args.id);
+    const note = source.note(args.id);
     result = note ? { source: "pocket:note:" + note.uid, id: note.uid, title: noteTitle(note), ...pageText(note.text, args) } : failure("note_not_found", "That saved note is no longer available.");
   } else if (name === "search_thoughts" || name === "search_tasks") {
-    const thought = name === "search_thoughts", found = recent(thought ? parking.open() : tasks.list(), query);
+    const thought = name === "search_thoughts", found = recent(thought ? source.thoughts() : source.tasks(), query);
     const kind = thought ? "thoughts" : "tasks";
     result = { source: "pocket:" + kind, matched: found.length, truncated: found.length > limit, [kind]: found.slice(0, limit).map(item => ({ id: String(item.uid || item.id), text: excerpt(item.text, query), truncated: item.text.length > 500, ...(thought ? { state: "parked" } : { done: Boolean(item.done), due: item.due || "" }) })) };
   } else {
     const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - window + 1);
     if (name === "gym_summary") {
-      const found = gym.all().filter(w => w.started >= +start);
+      const found = source.workouts().filter(w => w.started >= +start);
       result = { source: "pocket:gym", days: window, matched: found.length, truncated: found.length > 10, workouts: found.slice(0, 10).map(w => ({ id: w.id, started: w.started, ended: w.ended, sets: gym.count(w), volume_kg: gym.volume(w), exercises: (w.entries || []).slice(0, 12).map(e => ({ exercise: e.exercise, sets: e.sets.slice(-8), truncated: e.sets.length > 8 })) })) };
     } else {
       // These two caches contain parsed readings, not the COROS session or OAuth tokens.
-      const cockpit = cached("pocket:coros-cockpit"), activities = cached("pocket:coros-activities");
+      const { cockpit = null, activities = null } = source.corosCache();
       const updated = Math.max(cockpit?.at || 0, activities?.at || 0);
       result = { source: "pocket:coros", available: Boolean(updated), cached_only: true, days: window, last_updated: updated ? new Date(updated).toISOString() : null, stale: !updated || Date.now() - updated >= 864e5 };
       if (!updated) result.message = "No cached COROS readings. Open Movement to refresh them.";

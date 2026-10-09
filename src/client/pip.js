@@ -11,6 +11,7 @@ import { applyProposal, applyChange, applyCoros } from './pip-actions.js';
 import { corosAction, corosCourse, corosDated, corosDate, corosProblem, corosTitle, courseLines, sportName } from '../shared/coros-course.js';
 import { travelDraft } from '../shared/travel-context.js';
 import { CONTEXT_OVERFLOW } from './pip-limits.js';
+import { pipAway } from './pip-away.js';
 
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, historyTimer = 0, viewportCleanup = null;
@@ -485,6 +486,7 @@ function render() {
   const header = ui.h("header", { class: "pip-heading" }, ui.h("div", {}, ui.h("h1", { class: "workspace-title", text: "pip" }), caption(chat.title)), ui.h("div", { class: "pip-chat-actions" },
     button("rename", async () => { const title = await ui.ask("Name this chat", { value: chat.title, limit: 80 }); if (title?.trim()) { store.update(chat.uid, c => { c.title = title.trim(); }); render(); } }),
     button("delete", async () => { if (await ui.confirm("Delete this chat?", "delete")) { if (runner.active?.chatId === chat.uid) runner.stop(); store.remove(chat.uid); localStorage.removeItem("pocket:pip-current"); ui.go("/pip"); } }),
+    button("on its own", () => pipAway(ui, uid => ui.go("/pip/" + uid)), { title: "Routines Pip runs while Pocket is closed" }),
     button("API settings", () => apiSettings(chat.config))));
   const panel = ui.h("div", { class: "pip-panel" }, backdrop("glow"), header, other, thread, progress, composer(chat));
   mounted.root.replaceChildren(ui.h("div", { class: "pip-layout" }, conversationNav(chat), panel));

@@ -50,8 +50,13 @@ export const journal = {
 };
 
 // ── Notes ──
+// What each list shows, given its synced document. Pip's scheduled runs apply the same rules to the account's server copy.
+export const listNotes = doc => doc.notes.filter(n => !n.deleted).sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updated - a.updated);
+export const listTasks = doc => doc.tasks.filter(t => !t.deleted).sort((a,b)=>(a.due||"9999").localeCompare(b.due||"9999") || Number(b.important)-Number(a.important));
+export const openThoughts = doc => doc.items.filter(i => i.state === "parked").sort((a, b) => (a.due || Number.MAX_SAFE_INTEGER) - (b.due || Number.MAX_SAFE_INTEGER) || b.created - a.created);
+export const listWorkouts = doc => doc.workouts.filter(w => !w.deleted).sort((a, b) => b.started - a.started);
 export const notes = {
-  list() { return load("notes.json").notes.filter(n => !n.deleted).sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updated - a.updated); },
+  list() { return listNotes(load("notes.json")); },
   get(uid) { return load("notes.json").notes.find(n => n.uid === uid && !n.deleted) || null; },
   create(text) {
     const value = String(text || "").slice(0, NOTE_LIMIT); if (!value.trim()) throw new Error("Write something first.");
@@ -106,7 +111,7 @@ export const noteTitle = note => (note.text.split("\n").find(line => line.trim()
 
 // ── Parking Lot ──
 export const parking = {
-  open(now = Date.now()) { return load("parking.json").items.filter(i => i.state === "parked").sort((a, b) => (a.due || Number.MAX_SAFE_INTEGER) - (b.due || Number.MAX_SAFE_INTEGER) || b.created - a.created); },
+  open(now = Date.now()) { return openThoughts(load("parking.json")); },
   park(text, due) {
     const value = (text || "").trim(); if (!value) throw new Error("Type the thought first.");
     const doc = load("parking.json"), now = Date.now();
@@ -197,7 +202,7 @@ export const dice = {
 // Tasks are commitments. Thoughts become tasks only when the user chooses this transition.
 export const taskDay = (at = Date.now()) => { const d = new Date(at); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
 export const tasks = {
-  list() { return load("tasks.json").tasks.filter(t => !t.deleted).sort((a,b)=>(a.due||"9999").localeCompare(b.due||"9999") || Number(b.important)-Number(a.important)); },
+  list() { return listTasks(load("tasks.json")); },
   get(uid) { return this.list().find(t => t.uid === uid) || null; },
   create(text, source = null, fields = {}) {
     const value = String(text||"").trim(); if(!value || value.length>500)throw new Error("Write an action, up to 500 characters.");
@@ -227,7 +232,7 @@ export const kgText = v => Math.abs(v - Math.round(v)) < .05 ? String(Math.round
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 export const weekStart = at => { const d = new Date(at); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return d.getTime(); };
 export const gym = {
-  all() { return load("gym.json").workouts.filter(w => !w.deleted).sort((a, b) => b.started - a.started); },
+  all() { return listWorkouts(load("gym.json")); },
   get(id) { return gym.all().find(w => w.id === id) || null; },
   active() { return gym.all().find(w => !w.ended) || null; },
   edit(id, change) {
