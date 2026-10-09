@@ -19,6 +19,10 @@ const corosArguments = (name, description) => z.record(z.string(), z.unknown()).
 const checked = problem => (value, context) => { const message = problem(value); if (message) context.addIssue({ code: 'custom', message }); };
 
 const DEFINITIONS = {
+  update_training_preferences: ['Remember training preferences the user states in this conversation. Keep the existing brief when changing only days or pausing. When replacing the brief, retain still-valid goals, equipment and constraints; do not invent them. Put temporary soreness or fatigue in dated feedback, not permanent goals. Save before claiming to remember it. enabled pauses/resumes automatic planning only when the user asks.', object({
+    brief: z.string().min(1).max(4000).optional(), trainingDays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
+    feedback: z.string().min(1).max(1000).optional(), enabled: z.boolean().optional()
+  }).refine(value => Object.keys(value).length > 0, 'Supply a training preference to remember.')],
   search_notes: ['Search saved Pocket notes. All query words must match. Read a result by id for its text; drafts are excluded.', object(search)],
   read_note: ['Read a saved Pocket note in pages. Use next_offset for more text. No drafts or writes.', object({ id: recordId, ...paging })],
   search_thoughts: ['Search undecided, parked Thoughts. Thoughts are separate from Tasks. Read only; never turns an idea into an action.', object(search)],

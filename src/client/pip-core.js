@@ -223,7 +223,7 @@ export class ReplyRunner {
     if (this.active) throw new Error("Let the current reply finish, or stop it first.");
     const chat = this.store.get(uid);
     if (!chat) throw new Error("This chat was removed.");
-    const key = this.key(chat.config);
+    const key = this.key(chat.config, chat);
     if (!key) throw new Error("Add an API key for this chat in API settings. It stays in this tab.");
     let turn, checkpoint = null;
     if (retry || resume) {

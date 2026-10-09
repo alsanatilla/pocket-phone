@@ -36,19 +36,20 @@ export const COROS_INDEX = [
 export const COROS_ARGUMENTS = { coros_read: 4000, coros_write: 6000 };
 // The grant each tool needs. Descriptions and input schemas live in pip-sdk-tools.js, which loads with the AI SDK.
 const TOOL_CATEGORIES = { search_notes: "notes", read_note: "notes", search_thoughts: "thoughts", search_tasks: "tasks", read_task: "tasks", search_calendar: "calendar", search_pocket: "pocket",
-  read_chat_history: "universal", update_plan: "universal", create_record: "universal", change_record: "changes", gym_summary: "gym",
+  read_chat_history: "universal", update_plan: "universal", create_record: "universal", change_record: "changes", gym_summary: "gym", update_training_preferences: "training",
   coros_summary: "coros", coros_read: "coros", coros_format: "coros", coros_write: "coros", search_web: "web", read_web_page: "web" };
 const pocketCategories = ["notes", "tasks", "thoughts", "calendar"];
 /** Tools that show or change something instead of reading: never cached, never replayed as observations. The propose_* names are earlier replies' review cards. */
-export const STATE_TOOLS = ["update_plan", "create_record", "change_record", "coros_write", "propose_action", "propose_change", "propose_coros"];
+export const STATE_TOOLS = ["update_plan", "create_record", "change_record", "coros_write", "update_training_preferences", "propose_action", "propose_change", "propose_coros"];
 /** Tools that write to Pocket or COROS. The AI SDK holds each call until the user approves or declines it. */
-export const WRITE_TOOLS = ["create_record", "change_record", "coros_write"];
+export const WRITE_TOOLS = ["create_record", "change_record", "coros_write", "update_training_preferences"];
 const CHANGE_CATEGORY = { complete_task: "tasks", update_task: "tasks", append_note: "notes", move_appointment: "calendar" };
 const CHANGE_NAMES = { complete_task: "complete task", update_task: "update task", append_note: "add to note", move_appointment: "move appointment" };
 export const changeName = change => CHANGE_NAMES[change] || "change";
 export const changeTarget = change => ({ tasks: "task", notes: "note", calendar: "appointment" })[CHANGE_CATEGORY[change]] || "record";
 const permitted = (value, name) => {
   const category = TOOL_CATEGORIES[name];
+  if (category === "training") return value.trainingConversation === true;
   if (category === "universal") return true;
   if (category === "changes") return access(value).some(c => ["tasks", "notes", "calendar"].includes(c));
   if (category === "pocket") return access(value).some(c => pocketCategories.includes(c));
