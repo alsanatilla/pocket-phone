@@ -1,4 +1,4 @@
-# App status — Pocket 0.11.0
+# App status — Pocket Android 0.19.1
 
 Pocket is a launcher and native apps on Nothing OS, plus an Astro browser workspace on [Vercel](https://pocket-phone.vercel.app/). Android owns system gestures and Recents. The connections between apps are described in [WORKFLOW.md](WORKFLOW.md).
 
@@ -17,7 +17,7 @@ Pocket is a launcher and native apps on Nothing OS, plus an Astro browser worksp
 | Camera / Photos | Native capture, six compact-camera treatments, output size/aspect/quality and Pocket's camera album. | Physical camera/flash/orientation and image quality remain unverified; profiles are approximations. |
 | Paper | Original handwritten pages, positioned transcripts and linked Notes; private account photo sync. | Reading sends the selected page to Anthropic with the user's key; it incurs provider cost. |
 | Pip | Phone/browser conversations, drafts, selected context, tool/search activity and explicit Note/Thought/Task actions. Chats sync to the account. | Provider keys stay on each device. Live provider and handset animation checks remain outstanding. |
-| Movement | Account-persisted COROS readings, reconnect and scheduled background refresh. | COROS authorization may require reconnecting; Pocket scores are estimates. |
+| Movement | Native/browser COROS cockpit: score histories, health/training trends, fitness, weekly totals, full activity archive, routes, linked charts, splits and HR distribution; shared activity caches, offline details and forced pull-refresh. | COROS authorization may require reconnecting; Pocket scores are estimates. Phone offline cache retains 20 complete activities. |
 | Gym | Multiple exercises per workout, set logging, rest timer, volume, history and account sync. | Estimated strength statistics depend on the entered sets. |
 | Activity | Deliberate Pocket actions, completed tasks and personal lines. | Not a device-wide activity monitor; retention is 30 days. |
 | Zines | Browser photo books with captions, order, print treatments, crop options, PDF export and account photo sync. | Browser only, up to 40 photos per book. |

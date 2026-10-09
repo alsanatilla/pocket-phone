@@ -1,19 +1,15 @@
 {
   "component": "Pocket Android launcher/apps and Astro browser workspace",
-  "version_name": "0.19.0",
-  "version_code": 47,
+  "version_name": "0.19.1",
+  "version_code": 48,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-08T04:15:36.297Z",
-  "build": "Android assembleRom and Astro production build passed. Browser change checks (5), agent checks (25), an Edge review flow and the full Android unit suite ran.",
+  "checked_at_utc": "2026-10-09T10:21:40Z",
+  "build": "Android assembleRom and 35 focused Movement/Workspace checks passed. API 24/35, offline detail caching, shared cache transport and responsive native screens verified with fixtures.",
   "commands": [
-    "npm run build",
-    "node pip-change-check.mjs (5 deterministic change-proposal checks)",
-    "node pip-agent-check.mjs (25 deterministic browser agent checks)",
-    "node pip-change-browser.mjs (Edge review flow against the dev server)",
-    "./gradlew.bat :app:testDebugUnitTest --console=plain",
-    "./gradlew.bat :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain"
+    "./gradlew.bat :app:testRomUnitTest --tests org.textphone.launcher.Movement*Test --tests org.textphone.launcher.WarmConsolePreviewTest :app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom --console=plain",
+    "git diff --check"
   ],
   "build_environment": {
     "java": "17.0.20.1+1",
@@ -21,9 +17,9 @@
   },
   "apk": {
     "file": "app/build/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.19.0-unsigned.apk",
-    "bytes": 11159109,
-    "sha256": "cff4545f7e471985766e2420fc50bb5f6d5be58ce20cd189e0a332310e88d4ba",
+    "release_asset": "pocket-phone-0.19.1-unsigned.apk",
+    "bytes": 11196245,
+    "sha256": "a00882d0b6858d87c0c6a65fdb767a8cdafafbcac011ee0ce8daecfabd85c93e",
     "signed": false,
     "installable_update": false,
     "signing": "Another release agent handles signing"
@@ -34,22 +30,21 @@
     "url": "https://pocket-phone.vercel.app/",
     "release_asset": "pocket-web-0.19.0-source.zip",
     "offline_worker": "pocket-astro-0190-travel-planner",
-    "changed": true
+    "changed": false
   },
   "full_test_suite": {
-    "status": "Ran",
-    "cases": 558,
-    "failed_results": 10,
-    "failing_cases": 6,
-    "skipped": 2,
-    "detail": "All six failing cases also fail on the 0.16.0 code (cloud sync tag, Drive scheduling, two short-window planning layouts, one organizer search); four of them also fail at API 24. No failure is new since 0.16.0. Two obsolete Today command-row tests are skipped."
+    "status": "Not rerun for the Android Movement pass, as requested",
+    "focused_cases": 35,
+    "focused_failures": 0,
+    "additional_legacy_failures": 3,
+    "detail": "HomeDashboardTest uses removed pre-redesign UI selectors (home_footer and all). All Movement and current WarmConsolePreview checks pass; older full-suite findings remain in previous releases."
   },
   "changes": [
-    "propose_change tool on phone and web: complete a task, update a task (title, due date, new steps), add to a note, move an appointment",
-    "Changes are validated against the live record and write nothing until the user applies them in the review dialog",
-    "Applying is idempotent: tasks stay done and are logged once, steps and note text are added once, reminders keep their distance from a moved appointment",
-    "Each change needs its own access category; change proposals are never cached or replayed on Continue",
-    "Applied change cards open the changed record and sync with existing approval markers"
+    "Android Movement displays full COROS cockpit, score histories, health trends, fitness and weekly totals",
+    "Activity archive opens native GPS routes, linked charts, split speed bars, HR distribution and all recorded metrics",
+    "Complete details persist offline and upload to the same COROS cache the browser uses; signed FIT URLs never persist",
+    "Forced COROS pull-refresh and incoming account/COROS updates repaint the current view",
+    "Clearly marked disconnected sample mode; native layouts and lifecycle checked on Android API 24 and 35"
   ],
   "known_limits": [
     "APK requires signing before installation.",
@@ -61,10 +56,10 @@
   ],
   "physical_handset_checked": false,
   "full_custom_rom_compiled": false,
-  "previous_release": "v0.18.1",
+  "previous_release": "v0.19.0",
   "focused_verification": {
-    "browser": "5 change-proposal checks (access gating, live validation, no writes before apply, idempotent apply, agent loop) and 25 agent checks pass. Edge drove the review, apply and open flow on the dev server with no page errors. No provider traffic.",
-    "native": "PocketChatTools, PipActions and Pip preview suites pass, including change gating/validation, idempotent apply with reminder shift and the review dialog (cancel, edit, apply, open).",
+    "browser": "No browser source changes or new browser checks in this Android pass. The native detail cache follows the existing authenticated browser API and payload format.",
+    "native": "35 Movement and Warm Console checks pass: COROS text/canonical units, legacy snapshots, FIT formats, bounds/missing channels, cache retries/account isolation, offline views, async navigation, rotation, foreground updates, forced pull-refresh, 320/360/landscape/large-text layouts and API 24/35 lifecycle.",
     "handset": "No device attached; physical handset behavior remains unverified."
   },
   "web_update": {

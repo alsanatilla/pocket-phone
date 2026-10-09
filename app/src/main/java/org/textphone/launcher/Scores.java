@@ -15,8 +15,9 @@ final class Scores {
     static final class Part { final String name, text; final double z; Part(String name, double z, String text) { this.name = name; this.z = z; this.text = text; } }
     static final class Recovery { final int score; final String zone; final List<Part> parts; Recovery(int score, String zone, List<Part> parts) { this.score = score; this.zone = zone; this.parts = parts; } }
     static final class Strain { int strain, workouts, low, high; double active, passive; }
-    static final class Conditioning { int score; String status; double acute, chronic; }
-    static final class Result { Recovery recovery; Strain strain; Conditioning conditioning; int maxHr, restHr; }
+    static final class Conditioning { int score; String status; double acute, chronic; final List<Integer> trail = new ArrayList<>(); }
+    static final class Result { Recovery recovery; Strain strain; Conditioning conditioning; int maxHr, restHr;
+        final List<Recovery> recoveries = new ArrayList<>(); final List<Integer> strains = new ArrayList<>(); }
 
     /** Tanaka's age estimate, raised by a recorded maximum but by at most 10 bpm, since wrist sensors spike. */
     static int maxHeartRate(int age, int observed) {
@@ -79,10 +80,14 @@ final class Scores {
     /** All three for `today`, from 90 days of activities and the last few weeks of health data. */
     static Result compute(LocalDate today, ZoneId zone, List<CorosData.Activity> activities, List<CorosData.Hrv> hrv,
                           Map<LocalDate, Integer> resting, Map<LocalDate, CorosData.Day> daily, int age, boolean female) {
+        return compute(today, zone, activities, hrv, resting, daily, age, female, 0, 0);
+    }
+    static Result compute(LocalDate today, ZoneId zone, List<CorosData.Activity> activities, List<CorosData.Hrv> hrv,
+                          Map<LocalDate, Integer> resting, Map<LocalDate, CorosData.Day> daily, int age, boolean female, int observedMax, int restingFallback) {
         Result result = new Result();
         LocalDate latestRest = null; for (LocalDate d : resting.keySet()) if (latestRest == null || d.isAfter(latestRest)) latestRest = d;
-        result.restHr = latestRest == null ? 0 : resting.get(latestRest);
-        result.maxHr = maxHeartRate(age, 0);
+        result.restHr = latestRest == null ? restingFallback : resting.get(latestRest);
+        result.maxHr = maxHeartRate(age, observedMax);
         int history = 90; double[] active = new double[history], passive = new double[history]; int[] workouts = new int[history], strain = new int[history];
         for (int i = 0; i < history; i++) {
             LocalDate date = today.minusDays(history - 1 - i); double walked = 0;
@@ -95,14 +100,15 @@ final class Scores {
             passive[i] = Math.max(0, (day == null ? 0 : day.steps) - walked) / 1000.0 * 1.5;
             strain[i] = strainOf(active[i] + passive[i]);
         }
-        result.recovery = recovery(today, hrv, resting, daily, strain[history - 2]);
+        for (int i = history - 28; i < history; i++) { result.recoveries.add(recovery(today.minusDays(history - 1 - i), hrv, resting, daily, strain[i - 1])); result.strains.add(strain[i]); }
+        result.recovery = result.recoveries.get(result.recoveries.size() - 1);
         Strain s = new Strain(); s.strain = strain[history - 1]; s.active = active[history - 1]; s.passive = passive[history - 1]; s.workouts = workouts[history - 1];
         double usual = 0; for (int i = history - 15; i < history - 1; i++) usual += strain[i]; usual = Math.max(30, usual / 14);
         double factor = result.recovery == null ? 1 : .6 + .8 * result.recovery.score / 100.0;
         s.low = (int) Math.round(usual * factor * .85); s.high = (int) Math.round(usual * factor * 1.15);
         result.strain = s;
         Conditioning c = new Conditioning(); double peak = 0;
-        for (double load : active) { c.acute += (load - c.acute) / 7; c.chronic += (load - c.chronic) / 42; peak = Math.max(peak, c.chronic); }
+        for (double load : active) { c.acute += (load - c.acute) / 7; c.chronic += (load - c.chronic) / 42; peak = Math.max(peak, c.chronic); c.trail.add((int) Math.round(100 * (1 - Math.exp(-c.chronic / 45)))); }
         c.score = (int) Math.round(100 * (1 - Math.exp(-c.chronic / 45)));
         long oldest = Long.MAX_VALUE; for (CorosData.Activity a : activities) oldest = Math.min(oldest, a.start);
         long days = oldest == Long.MAX_VALUE ? 0 : ChronoUnit.DAYS.between(java.time.Instant.ofEpochMilli(oldest).atZone(zone).toLocalDate(), today);

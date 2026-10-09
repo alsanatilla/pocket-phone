@@ -2,12 +2,19 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.19.1 — Android Movement cockpit
+
+- Android shows the browser's Recovery, Strain and Conditioning histories, HRV/resting HR/sleep/stress/steps trends, fitness assessments and short/long training load. The overview includes seven-day totals and the full activity archive.
+- Activity pages include GPS routes, linked touch/keyboard charts, additional recorded channels, expandable splits with speed bars and fastest accents, heart-rate distribution and all COROS metrics.
+- Complete activity details persist offline and share the browser's cache format through the existing Pocket account. Failed uploads retry; partial files stay retryable. Pull-to-refresh forces COROS refresh alongside account sync.
+- Android compilation and focused Movement/Workspace checks pass. API 24/35 lifecycle and small/large-text/landscape layouts are covered; the full suite and lint remain skipped. No handset or live COROS data was used. The APK is unsigned for the signing agent.
+
 ## Web updates after 0.19.0
 
 - Pip replies, reasoning summaries and note previews now render with Astro 7's native Satteri engine. CommonMark and GFM formatting includes nested lists, tables, reference links, footnotes and code blocks. Handwriting handles and thought status remain attached to their source lines.
 - Streaming text stays visible while formatting catches up. Completed previews have a bounded account-scoped offline cache; uncached text remains readable offline. Stale responses cannot overwrite a newer draft or another account's workspace. Raw HTML is escaped and images become links.
 - The web note editor no longer parks thought markers inside fenced or indented code, and the note index excludes those code markers from its thought chips.
-- This is a web-only update; Android stays on the 0.19.0 release. The native Markdown boundary and browser lifecycle checks passed, followed by an Astro production build.
+- This web-only update kept Android on the 0.19.0 release. The native Markdown boundary and browser lifecycle checks passed, followed by an Astro production build.
 
 ## 0.19.0 — Pip changes what you already have
 

@@ -194,10 +194,13 @@ public abstract class PocketActivity extends Activity {
     private void loadFinished(){loadingCount=Math.max(0,loadingCount-1);if(loadingCount==0&&loading!=null){loading.running(false);loading.setVisibility(View.GONE);}}
     private void refreshCloud(){
         final PullRefreshLayout owner=refreshLayout;
-        if(!CloudSync.enabled(this)){owner.busy(false);message("Connect an account to sync.");return;}
+        if(!canRefreshData()){owner.busy(false);message("Connect an account to sync.");return;}
         quietLoads++; // the pull indicator at the top is the loader here
-        load(() -> {CloudSync.run(getApplicationContext());return true;},value->{quietLoads=Math.max(0,quietLoads-1);owner.busy(false);message("Synced");},error->{quietLoads=Math.max(0,quietLoads-1);owner.busy(false);message(error.getMessage()==null?"Could not sync. Try again.":error.getMessage());});
+        load(() -> {refreshPageData();return true;},value->{quietLoads=Math.max(0,quietLoads-1);owner.busy(false);onPageRefreshed();message("Synced");},error->{quietLoads=Math.max(0,quietLoads-1);owner.busy(false);onPageRefreshed();message(error.getMessage()==null?"Could not sync. Try again.":error.getMessage());});
     }
+    protected boolean canRefreshData() { return CloudSync.enabled(this); }
+    protected void refreshPageData() throws Exception { CloudSync.run(getApplicationContext()); }
+    protected void onPageRefreshed() { }
     /** Read results belong to the page that requested them, including a rebuild of that page. */
     protected <T> void loadPage(Callable<T> operation, Result<T> ready) {
         int page = pageGeneration;
