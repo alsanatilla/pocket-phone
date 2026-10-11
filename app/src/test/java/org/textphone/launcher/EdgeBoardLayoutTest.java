@@ -13,6 +13,7 @@ import android.view.WindowInsets;
 import java.time.Duration;
 import java.util.Arrays;
 import org.junit.Before;
+import org.junit.Assume;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
@@ -36,6 +37,7 @@ public class EdgeBoardLayoutTest {
     }
 
     @Test public void homeArtworkAndTilesReachTheEdgesWhileControlsAvoidTheCutout() {
+        Assume.assumeTrue("The ROM Home includes live tiles", RuntimeEnvironment.getApplication().getResources().getBoolean(R.bool.pocket_rom));
         verify(MainActivity.class, "home_workspace", "home_hero");
     }
 
