@@ -17,6 +17,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.TextView;
+import java.util.List;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -118,8 +119,11 @@ public class WarmConsolePreviewTest {
         try {
             MainActivity activity = controller.get();
             View root = save(activity, "warm-today.png");
-            assertEquals("The chosen task has one Today row", 1, tagCount(root, "task_open_" + chosen));
-            assertNotNull(root.findViewWithTag("task_open_" + overdue));
+            // Today is a live tile board: the tasks tile leads with the chosen task.
+            assertNotNull(root.findViewWithTag("live_tile_board"));
+            TextView tasksTile = root.findViewWithTag("live_detail_tasks");
+            assertTrue("The tasks tile shows the chosen task", tasksTile.getText().toString().contains(LiveTileData.title(planner.find(chosen).text)));
+            assertNotNull(root.findViewWithTag("today_tile_agenda"));
             assertNull(root.findViewWithTag("daily_brief"));
             assertScores(root); assertDock(root, 360);
             assertTrue(ParkingStore.find(context, thought).open());
@@ -197,6 +201,23 @@ public class WarmConsolePreviewTest {
             View root = save(activity, "warm-today-added-tile.png");
             assertNotNull(root.findViewWithTag("today_edit_tiles"));
             assertNotNull(root.findViewWithTag("today_tile_gym"));
+
+            // Sizes and order persist, and the board packs them on four columns.
+            TodayTiles.resize(context, "gym", "small"); TodayTiles.resize(context, "tasks", "wide");
+            assertEquals("small", TodayTiles.size(context, "gym")); assertEquals("wide", TodayTiles.size(context, "tasks"));
+            List<String> order = TodayTiles.visible(context); TodayTiles.move(context, "gym", order.get(0));
+            assertEquals("gym", TodayTiles.visible(context).get(0));
+            assertTrue("Resizing keeps browser-only tiles", TodayTiles.kinds(context).contains("zines"));
+            LiveTileBoard board = root(activity).findViewWithTag("live_tile_board"); board.refresh();
+            root = save(activity, "warm-today-resized-tiles.png");
+            View small = root.findViewWithTag("today_tile_gym"), wide = root.findViewWithTag("today_tile_tasks");
+            assertTrue("A wide tile spans the board", wide.getWidth() >= board.getWidth() - board.getPaddingLeft() - board.getPaddingRight() - 2);
+            assertTrue("A small tile is a quarter", small.getWidth() < board.getWidth() / 3);
+            root.findViewWithTag("today_edit_tiles").performClick();
+            root = save(activity, "warm-today-editing.png");
+            assertTrue("Edit mode shrinks borderless tiles", root.findViewWithTag("today_tile_gym").getScaleX() < 1f);
+            root.findViewWithTag("today_edit_tiles").performClick();
+            assertEquals(1f, root(activity).findViewWithTag("today_tile_gym").getScaleX(), 0f);
         } finally { controller.pause().stop().destroy(); }
     }
 
