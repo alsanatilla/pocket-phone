@@ -580,6 +580,8 @@ public class MainActivity extends Activity {
         homeTiles.clear();
         homeIcons.clear();
         homeLabels.clear();
+        final boolean edgeHome = "home".equals(screen);
+        final boolean edgeBoard = edgeHome || ("today".equals(screen) && "today".equals(workspaceTab));
         ScrollView viewport = new ScrollView(this);
         viewport.setBackgroundColor(BACKGROUND);
         viewport.setFillViewport(true);
@@ -625,6 +627,22 @@ public class MainActivity extends Activity {
             case "focus": renderFocus(); break;
             default: renderHome(); break;
         }
+        if (edgeBoard) {
+            content.setBackground(null);
+            viewport.setBackground(null);
+            for (int i = 0; i < content.getChildCount(); i++) {
+                View child = content.getChildAt(i);
+                if (child == liveTiles) continue;
+                if ("today_tiles".equals(child.getTag())) {
+                    View commands = child.findViewWithTag("today_tile_commands");
+                    if (commands != null) commands.setPadding(dp(horizontal), 0, dp(horizontal), 0);
+                    continue;
+                }
+                child.setPadding(child.getPaddingLeft() + dp(horizontal), child.getPaddingTop(),
+                        child.getPaddingRight() + dp(horizontal), child.getPaddingBottom());
+                if ("home_hero".equals(child.getTag()) || "page_header".equals(child.getTag())) child.setBackground(null);
+            }
+        }
         boolean pullable=!("capture".equals(screen)||"focus".equals(screen)||"assign".equals(screen)||"note_preview".equals(screen));
         pullRefresh=pullable?new PullRefreshLayout(this,viewport,this::pullSync):null;
         View scrollHost=pullRefresh!=null?pullRefresh:viewport, page=scrollHost;
@@ -632,11 +650,28 @@ public class MainActivity extends Activity {
         boolean workspacePage=todayPage||"home".equals(screen)||"apps".equals(screen)||"search".equals(screen)||"capture".equals(screen)||"task_detail".equals(screen)||"thought_detail".equals(screen)||"note_preview".equals(screen)||"focus".equals(screen);
         if(workspacePage){
             LinearLayout shell=new LinearLayout(this);shell.setOrientation(LinearLayout.VERTICAL);shell.setBackgroundColor(BACKGROUND);shell.setTag(todayPage?"today_workspace":taskEditor?"task_editor_workspace":screen+"_workspace");
-            shell.setPadding(dp(horizontal),dp(4),dp(horizontal),dp(4));
+            if (edgeBoard) {
+                shell.setBackground(new PixelBackdrop(this, accent(), edgeHome ? 164 : 116, PixelBackdrop.SKY));
+                shell.setPadding(0, 0, 0, 0);
+            } else shell.setPadding(dp(horizontal),dp(4),dp(horizontal),dp(4));
+            final int[] artworkTop = {0};
             shell.setOnApplyWindowInsetsListener((view,insets)->{int left,top,right,bottom;
                 if(Build.VERSION.SDK_INT>=30){android.graphics.Insets safe=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout()|WindowInsets.Type.ime());left=safe.left;top=safe.top;right=safe.right;bottom=safe.bottom;}
                 else{left=insets.getSystemWindowInsetLeft();top=insets.getSystemWindowInsetTop();right=insets.getSystemWindowInsetRight();bottom=insets.getSystemWindowInsetBottom();}
-                view.setPadding(dp(horizontal)+left,dp(4)+top,dp(horizontal)+right,dp(4)+bottom);return insets.consumeSystemWindowInsets();});
+                if (edgeBoard) {
+                    view.setPadding(0, 0, 0, 0);
+                    View safeHeader = view.findViewWithTag(edgeHome ? "home_hero" : "page_header");
+                    if (safeHeader != null) safeHeader.setPadding(dp(horizontal) + left, dp(4) + top,
+                            dp(horizontal) + right, safeHeader.getPaddingBottom());
+                    View safeDock = view.findViewWithTag("today_actions");
+                    if (safeDock != null) safeDock.setPadding(dp(horizontal) + left, 0, dp(horizontal) + right, bottom);
+                    if (artworkTop[0] != top) {
+                        artworkTop[0] = top;
+                        int artworkHeight = (edgeHome ? 164 : 116) + Math.round(top / getResources().getDisplayMetrics().density);
+                        view.setBackground(new PixelBackdrop(this, accent(), artworkHeight, PixelBackdrop.SKY));
+                    }
+                } else view.setPadding(dp(horizontal)+left,dp(4)+top,dp(horizontal)+right,dp(4)+bottom);
+                return insets.consumeSystemWindowInsets();});
             View header=content.findViewWithTag("page_header");
             if(header!=null){content.removeView(header);shell.addView(header,new LinearLayout.LayoutParams(-1,-2));}
             if(todayPage){
@@ -648,7 +683,9 @@ public class MainActivity extends Activity {
             }
             viewport.setPadding(0,0,0,0);viewport.setOnApplyWindowInsetsListener(null);viewport.setTag(todayPage?"today_scroll":taskEditor?"task_editor_scroll":screen+"_scroll");
             shell.addView(scrollHost,new LinearLayout.LayoutParams(-1,0,1));WarmWorkspace.rule(shell);
-            if(!todayPage)todayActions=workspaceDock();shell.addView(todayActions,new LinearLayout.LayoutParams(-1,-2));page=shell;
+            if(!todayPage)todayActions=workspaceDock();
+            if (edgeBoard) todayActions.setPadding(dp(horizontal), 0, dp(horizontal), 0);
+            shell.addView(todayActions,new LinearLayout.LayoutParams(-1,-2));page=shell;
         }
         motion.show(page, pageKey(screen)); if (appRowsReady || !"apps".equals(screen) && !"assign".equals(screen)) motion.dataReady(); page.requestApplyInsets();if(planHost!=null)refreshDayPlan();refreshDailyBrief();
         renderedOrganizer = "today".equals(screen) || "task_detail".equals(screen) || "thought_detail".equals(screen) || "search".equals(screen) ? organizerState() : "";
@@ -835,6 +872,8 @@ public class MainActivity extends Activity {
         notificationCount.setMinHeight(dp(48)); notificationCount.setMinWidth(dp(48));
         notificationCount.setFocusable(true); notificationCount.setOnClickListener(v -> navigate("notifications"));
         PocketDesign.quiet(notificationCount, PRIMARY); notificationCount.setGravity(Gravity.CENTER);
+        notificationCount.setBackground(PocketDesign.interaction(this, android.graphics.Color.TRANSPARENT));
+        notificationCount.setTag("home_notifications");
         status.addView(notificationCount, new LinearLayout.LayoutParams(-2, -2));
         network = text("", 11, SECONDARY);
         network.setSingleLine(true);
@@ -853,6 +892,7 @@ public class MainActivity extends Activity {
             line.addView(wordmark, new LinearLayout.LayoutParams(0, -2, 1));
             TextView setup = text("set up " + SetupActivity.doneCount(this) + "/" + SetupActivity.total() + " · " + SetupActivity.next(this) + " ›", 12, accent());
             setup.setTag("pocket_setup"); setup.setGravity(Gravity.CENTER_VERTICAL | Gravity.END); setup.setPadding(dp(12), 0, 0, 0); PocketDesign.quiet(setup, accent());
+            setup.setBackground(PocketDesign.interaction(this, android.graphics.Color.TRANSPARENT));
             setup.setContentDescription("Finish setting up Pocket, next " + SetupActivity.next(this) + ". Hold to hide this reminder.");
             setup.setOnClickListener(v -> openPocket(SetupActivity.class));
             setup.setOnLongClickListener(v -> { new AlertDialog.Builder(this).setTitle("Hide the setup reminder?").setMessage("Setup stays in settings.")
