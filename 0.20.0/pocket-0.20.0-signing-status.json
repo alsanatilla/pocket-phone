@@ -1,0 +1,123 @@
+{
+  "version_name": "0.20.0",
+  "version_code": 50,
+  "package": "org.textphone.launcher",
+  "component": "Launcher and native apps for existing Android/Nothing OS",
+  "source_commit": "51dcfedb3f24c4398c9f374a754928118068b961",
+  "signed_at_utc": "2026-10-11T22:04:36.747070+00:00",
+  "source_worktree_clean": true,
+  "input": {
+    "origin": "Local build of merged PR #6 plus version metadata",
+    "release": "https://github.com/alsanatilla/pocket-phone/releases/tag/v0.20.0",
+    "file": "pocket-phone-0.20.0-unsigned.apk",
+    "bytes": 11200857,
+    "sha256": "f34f43452c9b3258f68446087c590241e15917ead46da6e01a949e08f7c9c65a",
+    "published_checksum_verified": false
+  },
+  "source_snapshot": {
+    "published_checksum_verified": false,
+    "tagged_source_matches": true,
+    "tracked_files": 488,
+    "line_ending_normalization": "CRLF to LF",
+    "files_with_only_line_ending_differences": 0
+  },
+  "apk": {
+    "file": "pocket-phone-0.20.0.apk",
+    "bytes": 11222672,
+    "sha256": "83ddbb753ef4478f9798cb94263f62f97c5137cbb8a045287d600b2bffc29728",
+    "certificate_sha256": "883592cb9d2dbcb5817e28b3bb7df39d81f340d3ae2eca07134181fcf6d3e059",
+    "certificate_sha1": "57651e7742d17aa12af0e1c823bd5f73759e9dbf",
+    "signature_schemes": [
+      "v1",
+      "v2",
+      "v3"
+    ],
+    "signed": true,
+    "same_signer_as_0_19_2": true,
+    "installable_update": true,
+    "zip_alignment_16_kib_verified": true,
+    "upstream_apk_entry_contents_unchanged": true
+  },
+  "download_zip": {
+    "file": "pocket-phone-0.20.0.zip",
+    "bytes": 11222816,
+    "sha256": "d26e0fdf2be69901b6ec5f11099e56c428f450194663daceec8407a53a002dba",
+    "entries": [
+      "pocket-phone-0.20.0.apk"
+    ]
+  },
+  "android": {
+    "min_sdk": 24,
+    "target_sdk": 35
+  },
+  "permissions": {
+    "count": 27,
+    "added_since_0_19_2": [],
+    "removed_since_0_19_2": []
+  },
+  "final_app_test_suite": {
+    "status": "Full suite not run; see focused validation and baseline failures below"
+  },
+  "final_lint": {
+    "errors": 0,
+    "warnings": 130,
+    "source": "PR build before merging; final source changes only version metadata"
+  },
+  "release_checks": {
+    "artifact_checksums": "Passed",
+    "archive_integrity": "Passed",
+    "tagged_source_snapshot": "Passed after line-ending normalization",
+    "unchanged_apk_payload": "Passed",
+    "package_and_version": "Passed",
+    "original_signing_certificate": "Passed",
+    "signature_verification": "Passed",
+    "zip_alignment": "Passed",
+    "no_added_permissions": "Passed"
+  },
+  "upstream_build": "Final assembleRom passed; focused checks and lint checked PR source before merging. Release changes only version metadata.",
+  "upstream_focused_verification": {
+    "checked_pr_commit": "bb23f410b82d7cb566df5166dd123993f9500c42",
+    "debug": {
+      "tests": 50,
+      "failures": 3,
+      "errors": 0,
+      "skipped": 3,
+      "passed": 44
+    },
+    "rom": {
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 21
+    },
+    "total_passed": 65,
+    "baseline": {
+      "tests": 2,
+      "failures": 2,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 0
+    },
+    "existing_failure_test_names": [
+      "OrganizerActivityTest.filtersAndSearchFindRealTaskAndNoteTextIncludingSteps",
+      "PlanningLayoutTest.liveSearchFindsStepsAndBackRestoresTheUnfilteredDay"
+    ],
+    "baseline_note": "Both failed test names also fail on prior main. The debug SDK-24 variant is an additional failure of the same filter/search test.",
+    "lint": {
+      "Warning": 130
+    }
+  },
+  "upstream_full_suite": {
+    "status": "Not run"
+  },
+  "prior_checks_are_not_final_build_results": true,
+  "physical_handset_tested": false,
+  "live_api_requests_made_in_signing_step": 0,
+  "unverified": [
+    "Final functional test suite and lint",
+    "Physical Nothing Phone Home/Recents and animation smoothness",
+    "Real camera frames, cellular delivery and live account synchronization"
+  ],
+  "signing_key_in_downloads": false
+}

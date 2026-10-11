@@ -1,0 +1,22 @@
+{
+  "pocket-phone-0.20.0.apk": {
+    "bytes": 11222672,
+    "sha256": "83ddbb753ef4478f9798cb94263f62f97c5137cbb8a045287d600b2bffc29728"
+  },
+  "pocket-phone-0.20.0.zip": {
+    "bytes": 11222816,
+    "sha256": "d26e0fdf2be69901b6ec5f11099e56c428f450194663daceec8407a53a002dba"
+  },
+  "pocket-phone-0.20.0-source.zip": {
+    "bytes": 5719193,
+    "sha256": "aaad0153c282c98aea81491864af7b9a23c8794b6208a5e6840507fac4c81422"
+  },
+  "pocket-0.20.0-signing-status.json": {
+    "bytes": 4012,
+    "sha256": "ff7124c8ec41213f718c39d5d2d37e088c61a0b0bc53f038eb88d49b7c403ac4"
+  },
+  "INSTALL-POCKET-0.20.0.md": {
+    "bytes": 1616,
+    "sha256": "8aef8d8136cd62e9c66d88175f846766fb36e36cb87cf3f5a8ed1d194f42cc89"
+  }
+}
