@@ -123,6 +123,9 @@ public class MainActivity extends Activity {
 
     private SharedPreferences preferences;
     private DashboardTiles tiles;
+    private LiveTileBoard liveTiles;
+    private TextView editLiveTiles;
+    private boolean liveTilesEditing;
     private boolean tileLabelsLoading;
     private String screen = "home";
     private final RouteTrail trail = new RouteTrail();
@@ -186,7 +189,7 @@ public class MainActivity extends Activity {
 
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
-            if (CloudSync.ACTION_SYNCED.equals(intent.getAction())) { if ("today".equals(screen) || "task_detail".equals(screen) || "thought_detail".equals(screen) || "search".equals(screen)) render(); else if ("home".equals(screen)) { homePlanRefresh = true; requestHomeRefresh(false); } return; }
+            if (CloudSync.ACTION_SYNCED.equals(intent.getAction())) { if (liveTiles != null) { liveTiles.refresh(); updateMovement(); } else if ("today".equals(screen) || "task_detail".equals(screen) || "thought_detail".equals(screen) || "search".equals(screen)) render(); else if ("home".equals(screen)) { homePlanRefresh = true; requestHomeRefresh(false); } return; }
             if (CorosRepository.ACTION_UPDATED.equals(intent.getAction())) { if ("home".equals(screen) || "today".equals(screen)) updateMovement(); return; }
             if ("home".equals(screen)) requestHomeRefresh(false);
             else if ("today".equals(screen) && "today".equals(workspaceTab) && (Intent.ACTION_TIME_TICK.equals(intent.getAction()) || Intent.ACTION_TIME_CHANGED.equals(intent.getAction()) || Intent.ACTION_TIMEZONE_CHANGED.equals(intent.getAction()))) { updateMovement(); refreshDayPlan(); }
@@ -565,6 +568,7 @@ public class MainActivity extends Activity {
         pageGeneration++; filterGeneration++; if (appFilter != null) appUi.removeCallbacks(appFilter); appFilter = null; appRowsReady = false;
         clock = date = network = battery = alarm = torchValue = null;
         homeStatus = null;
+        liveTiles = null; editLiveTiles = null;
         notificationCount = null;
         homeDay = homeHint = null;
         nextTaskText = taskCountText = movementConnect = null;
@@ -661,7 +665,7 @@ public class MainActivity extends Activity {
     private String organizerState() {
         return screen + ":" + captureId + ":" + workspaceTab + ":" + planner.tasksRevision() + ":" + planner.notesRevision() + ":" + getSharedPreferences("pocket_parking",0).getString("items","[]").hashCode() + ":" + PlannerDates.today() + ":" + taskFilter + ":" + organizerQuery
                 + ":" + ClockStore.prefs(this).getString("entries", "").hashCode() + ":" + planner.preferences().getLong("next_task", 0)
-                + ":" + planner.hasDraft("task", captureId) + ":" + TodayTiles.kinds(this)
+                + ":" + planner.hasDraft("task", captureId) + ":" + TodayTiles.layoutKey(this)
                 + ("today".equals(screen) && "today".equals(workspaceTab) ? ":" + DailyBriefLocal.signature(this, System.currentTimeMillis()) : "");
     }
 
@@ -872,7 +876,7 @@ public class MainActivity extends Activity {
         if(romProfile&&!HomeChoice.active(this))action("use Pocket as home",14,accent(),this::chooseHome).setTag("home_setup");
         gap(romProfile || compactHome ? 8 : 16);
         renderDashboardMovement(content);
-        if (romProfile) renderDashboardAgenda();
+        if (romProfile) renderTodayTiles();
 
         LinearLayout grid = new LinearLayout(this);
         grid.setTag("home_tiles");
@@ -1715,7 +1719,11 @@ public class MainActivity extends Activity {
         if("thoughts".equals(workspaceTab)){renderThoughts(content);workspaceBottom("capture",this::captureMenu);addFeedback();return;}
         if("notes".equals(workspaceTab)){renderWorkspaceNotes(content);workspaceBottom("capture",this::captureMenu);addFeedback();return;}
         boolean daily="today".equals(workspaceTab);
-        if(daily)renderDashboardMovement(content);
+        if(daily){
+            renderDashboardMovement(content);
+            renderTodayTiles();
+            workspaceBottom("capture",this::captureMenu);addFeedback();return;
+        }
         planHost=new LinearLayout(this);planHost.setOrientation(LinearLayout.VERTICAL);planHost.setTag("today_plan");homePlan=false;content.addView(planHost);
         if(!daily)planHost.setVisibility(View.GONE);
         if(!daily){
@@ -1828,35 +1836,19 @@ public class MainActivity extends Activity {
     // ── Today tiles: a synced, editable set of live readings. Tapping one opens its app. ──
     private void renderTodayTiles() {
         LinearLayout host = new LinearLayout(this); host.setOrientation(LinearLayout.VERTICAL); host.setTag("today_tiles");
-        section(host,"Tiles",false);
-        commands(host, "today_tile_commands", new String[]{"+ add tile", "edit tiles"},
+        LinearLayout controls = commands(host, "today_tile_commands", new String[]{"+ add tile", liveTilesEditing ? "done" : "edit tiles"},
                 new String[]{"today_add_tile", "today_edit_tiles"}, 0, this::addTodayTile, this::editTodayTiles);
-        List<String> kinds = TodayTiles.visible(this);
-        for (int i = 0; i < kinds.size(); i += 2) {
-            LinearLayout line = new LinearLayout(this);
-            for (int k = i; k < Math.min(kinds.size(), i + 2); k++) {
-                LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(0, -2, 1); if (k > i) cell.leftMargin = dp(12);
-                line.addView(todayTile(kinds.get(k)), cell);
-            }
-            if (kinds.size() - i == 1) line.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-            LinearLayout.LayoutParams row = new LinearLayout.LayoutParams(-1, -2); row.bottomMargin = dp(12);
-            host.addView(line, row);
-        }
+        editLiveTiles = (TextView)controls.getChildAt(1);
+        liveTiles = new LiveTileBoard(this, planner, new LiveTileBoard.Actions() {
+            public void open(String kind) { openTodayTile(kind); }
+            public void edit(String kind) { tileMenu(TodayTiles.visible(MainActivity.this), kind); }
+            public void changed() { renderedOrganizer = organizerState(); }
+            public void failed(RuntimeException error) { showFeedback(error.getMessage() == null ? "Could not save the tiles." : error.getMessage()); }
+        });
+        liveTiles.editing(liveTilesEditing);
+        LinearLayout.LayoutParams board = new LinearLayout.LayoutParams(-1, -2); board.topMargin = dp(4); board.bottomMargin = dp(16);
+        host.addView(liveTiles, board);
         content.addView(host);
-    }
-    private View todayTile(String kind) {
-        String[] reading = TodayTiles.reading(this, planner, kind);
-        LinearLayout tile = new LinearLayout(this); tile.setOrientation(LinearLayout.VERTICAL); tile.setPadding(dp(2), dp(10), dp(2), dp(10)); tile.setMinimumHeight(dp(96));
-        tile.setTag("today_tile_" + kind); tile.setFocusable(true); PocketDesign.list(tile);
-        TextView name = text(TodayTiles.label(this,kind), 12, SECONDARY);
-        TextView value = text(reading[0], 32, WarmWorkspace.color(kind)); value.setTypeface(PocketFonts.pixel(this)); value.setSingleLine(true); value.setEllipsize(TextUtils.TruncateAt.END);
-        TextView detail = text(reading[1], 12, SECONDARY); detail.setMaxLines(2); detail.setEllipsize(TextUtils.TruncateAt.END);
-        if ("brief".equals(kind)) { briefTileValue = value; briefTileDetail = detail; }
-        for (TextView part : new TextView[]{name, value, detail}) { part.setPadding(0, dp(2), 0, dp(2)); part.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO); tile.addView(part); }
-        tile.setContentDescription(TodayTiles.label(this,kind) + ", " + reading[0] + ", " + reading[1] + ". Open. Hold to edit tile.");
-        tile.setOnClickListener(v -> openTodayTile(kind));
-        tile.setOnLongClickListener(v -> { tileMenu(TodayTiles.visible(this), kind); return true; });
-        return tile;
     }
     private void openTodayTile(String kind) {
         switch (kind) {
@@ -1874,16 +1866,11 @@ public class MainActivity extends Activity {
             default: break;
         }
     }
-    /** One list: add a tile, or open a tile to move or remove it. Changes save at once and sync to the browser. */
+    /** Edit mode supports drag ordering; each tile also exposes the same actions without dragging. */
     private void editTodayTiles() {
-        List<String> kinds = TodayTiles.visible(this);
-        List<String> missing = new ArrayList<>(); for (String kind : TodayTiles.CATALOG) if (TodayTiles.onPhone(kind) && !kinds.contains(kind)) missing.add(kind);
-        List<String> rows = new ArrayList<>(); if (!missing.isEmpty()) rows.add("+ add a tile"); rows.addAll(kinds);
-        if (rows.isEmpty()) return;
-        new AlertDialog.Builder(this).setTitle("Today tiles").setItems(rows.toArray(new String[0]), (dialog, which) -> {
-            if (!missing.isEmpty() && which == 0) { addTodayTile(); return; }
-            tileMenu(kinds, kinds.get(which - (missing.isEmpty() ? 0 : 1)));
-        }).setNegativeButton("Done", null).show();
+        liveTilesEditing = !liveTilesEditing;
+        if (liveTiles != null) liveTiles.editing(liveTilesEditing);
+        if (editLiveTiles != null) editLiveTiles.setText(liveTilesEditing ? "done" : "edit tiles");
     }
     private void addTodayTile() {
         List<String> kinds = TodayTiles.visible(this), missing = new ArrayList<>();
@@ -1896,20 +1883,27 @@ public class MainActivity extends Activity {
     }
     private void tileMenu(List<String> kinds, String kind) {
         int at = kinds.indexOf(kind); if (at < 0) return; List<String> choices = new ArrayList<>();
-        if (at > 0) choices.add("Move up"); if (at < kinds.size() - 1) choices.add("Move down"); choices.add("Remove");
-        new AlertDialog.Builder(this).setTitle(kind).setItems(choices.toArray(new String[0]), (dialog, which) -> {
+        choices.add("Small"); choices.add("Square"); choices.add("Wide");
+        if (at > 0) choices.add("Move up"); if (at < kinds.size() - 1) choices.add("Move down"); choices.add("Unpin");
+        new AlertDialog.Builder(this).setTitle(TodayTiles.label(this,kind)).setItems(choices.toArray(new String[0]), (dialog, which) -> {
             List<String> next = TodayTiles.visible(this); int current = next.indexOf(kind); if (current < 0) return;
             String choice = choices.get(which);
+            if (which < 3) {
+                try { TodayTiles.resize(this, kind, choice.toLowerCase(Locale.ROOT)); refreshLiveTiles(); }
+                catch (RuntimeException error) { showFeedback(error.getMessage() == null ? "Could not resize the tile." : error.getMessage()); }
+                return;
+            }
             if ("Move up".equals(choice)) { if (current > 0) java.util.Collections.swap(next, current, current - 1); }
             else if ("Move down".equals(choice)) { if (current < next.size() - 1) java.util.Collections.swap(next, current, current + 1); }
             else next.remove(kind);
             saveTodayTiles(next);
-        }).setNegativeButton("Back", (dialog, which) -> editTodayTiles()).show();
+        }).setNegativeButton("Done", null).show();
     }
     private void saveTodayTiles(List<String> kinds) {
         try { TodayTiles.saveVisible(this, kinds); } catch (RuntimeException error) { showFeedback(error.getMessage() == null ? "Could not save the tiles." : error.getMessage()); return; }
-        persistDraft(); render();
+        refreshLiveTiles();
     }
+    private void refreshLiveTiles() { if (liveTiles != null) liveTiles.refresh(); renderedOrganizer = organizerState(); }
     private void workspaceBottom(String label,Runnable capture) { todayActions=workspaceDock(); }
     private LinearLayout workspaceDock(){
         LinearLayout bar=new LinearLayout(this);bar.setTag("today_actions");bar.setGravity(Gravity.CENTER_VERTICAL);bar.setBackgroundColor(BACKGROUND);bar.setMinimumHeight(dp(80));

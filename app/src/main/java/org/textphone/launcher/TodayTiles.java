@@ -12,7 +12,7 @@ import org.json.JSONObject;
 
 /**
  * The tiles on Today: which ones, in what order. The layout is the synced "today-tiles" preference
- * ([{uid, kind, label?}]); the browser reads the same list. Zines only exist in the browser, so the phone keeps them but does not draw them.
+ * ([{uid, kind, label?, size?}]); the browser reads the same list. Zines only exist in the browser, so the phone keeps them but does not draw them.
  */
 final class TodayTiles {
     static final String[] CATALOG = {"brief", "tasks", "agenda", "thoughts", "notes", "movement", "gym", "pip", "activity", "focus", "clock", "paper", "zines", "dice"};
@@ -21,6 +21,44 @@ final class TodayTiles {
 
     static boolean known(String kind) { return Arrays.asList(CATALOG).contains(kind); }
     static boolean onPhone(String kind) { return known(kind) && !"zines".equals(kind); }
+
+    static String defaultSize(String kind) {
+        if ("agenda".equals(kind) || "notes".equals(kind) || "movement".equals(kind)) return "wide";
+        if ("activity".equals(kind) || "dice".equals(kind) || "paper".equals(kind)) return "small";
+        return "square";
+    }
+    static boolean validSize(String size) { return "small".equals(size) || "square".equals(size) || "wide".equals(size); }
+    static String size(Context c, String kind) {
+        JSONArray saved = stored(c);
+        if (saved != null) for (int i = 0; i < saved.length(); i++) {
+            JSONObject item = saved.optJSONObject(i);
+            if (item != null && kind.equals(item.optString("kind")) && validSize(item.optString("size"))) return item.optString("size");
+        }
+        return defaultSize(kind);
+    }
+    /** A resize never recreates a tile removed by a newer sync. Other tiles and browser metadata survive. */
+    static void resize(Context c, String kind, String size) {
+        if (!validSize(size)) throw new IllegalArgumentException("Unknown tile size.");
+        List<String> all = kinds(c);
+        if (!all.contains(kind)) return;
+        JSONArray saved = stored(c);
+        if (saved == null) { save(c, all); saved = stored(c); }
+        try {
+            JSONArray out = new JSONArray(saved.toString());
+            for (int i = 0; i < out.length(); i++) {
+                JSONObject item = out.optJSONObject(i);
+                if (item != null && kind.equals(item.optString("kind"))) item.put("size", size);
+            }
+            WorkspaceExtras.preference(c, PREFERENCE, out);
+        } catch (JSONException error) { throw new IllegalStateException("Could not resize the tile.", error); }
+    }
+    static String layoutKey(Context c) { JSONArray saved = stored(c); return saved == null ? "default" : saved.toString(); }
+    static void move(Context c, String kind, String target) {
+        List<String> visible = visible(c);
+        int from = visible.indexOf(kind), to = visible.indexOf(target);
+        if (from < 0 || to < 0 || from == to) return;
+        visible.remove(from); visible.add(to, kind); saveVisible(c, visible);
+    }
 
     static String label(Context c, String kind) {
         JSONArray saved = stored(c);
