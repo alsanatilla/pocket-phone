@@ -43,6 +43,7 @@ import java.util.LinkedHashMap;
 import java.text.NumberFormat;
 import java.text.DateFormat;
 import java.util.Date;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
@@ -69,12 +70,12 @@ final class ClaudeSidebar extends FrameLayout {
     private final LinearLayout panel, log, errorRow, loadingRow, empty, contextRow;
     private final ScrollView scroll;
     private final EditText composer;
-    private final Button back, settings, setup, send, retry, continueRun, chats, newChat, openReply, modelPicker, toolsPicker, webPicker;
+    private final Button back, setup, send, retry, continueRun, chats, newChat, openReply, options;
     private String shownContext="";
     private final TextView error, cacheStatus, loadingLabel, accessStatus, emptyText, conversationTitle;
     private final PixelLoadingView loading, emptyAvatar;
-    private final LinearLayout chatHeader;
-    private WrapRow chatActions;
+    private final LinearLayout chatHeader, starters;
+    private String startersKey = "";
     private boolean opened, observing, destroyed, applyingDraft, renderQueued, swipeCandidate, capturedSwipe;
     private float startX, startY;
     private long lastSubmitAt;
@@ -136,14 +137,8 @@ final class ClaudeSidebar extends FrameLayout {
         title.setTypeface(PocketFonts.pixel(activity));identityColumn.addView(title);
         conversationTitle=label("new chat",12,PocketDesign.MUTED);conversationTitle.setTag("pip_conversation_title");conversationTitle.setMaxLines(2);conversationTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);identityColumn.addView(conversationTitle);
         header.addView(identityColumn,new LinearLayout.LayoutParams(0,-2,1));
-        WrapRow chatCommands=new WrapRow(activity);chatCommands.setPadding(dp(PocketDesign.INSET),0,dp(PocketDesign.INSET),0);chatActions=chatCommands;
-        Button rename=control("rename",()->renameChat(new ChatStore.Summary(repository.currentId(),repository.snapshot().title,System.currentTimeMillis(),0)));
-        Button remove=control("delete",()->showDialog(new AlertDialog.Builder(activity).setTitle("Delete chat?").setNegativeButton("cancel",null).setPositiveButton("delete",(d,w)->{repository.delete(repository.currentId());render();}).create()));
-        settings = control("API settings", this::showSettings);
-        settings.setContentDescription("Chat settings");
-        for(Button action:new Button[]{rename,remove,settings}){PocketDesign.command(action,false);action.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));chatCommands.addView(action,PocketDesign.commandCell(activity,action==rename));}
+        // Rename and delete live in the chats list; settings sit behind the composer's "+".
         panel.addView(header, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-        panel.addView(chatCommands, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
         scroll = new ScrollView(activity);
         scroll.setTag("claude_chat_scroll");
@@ -156,15 +151,16 @@ final class ClaudeSidebar extends FrameLayout {
         empty = new LinearLayout(activity);
         empty.setOrientation(LinearLayout.VERTICAL);
         empty.setTag("claude_chat_empty");
-        empty.setGravity(Gravity.CENTER_VERTICAL);empty.setMinimumHeight(dp(260));
+        empty.setGravity(Gravity.CENTER);empty.setMinimumHeight(dp(260));
         emptyAvatar=new PixelLoadingView(activity);emptyAvatar.setRunning(true);empty.addView(emptyAvatar,new LinearLayout.LayoutParams(dp(96),dp(96)));
-        TextView greeting = label("new chat", 40, PocketDesign.WHITE);
-        greeting.setTypeface(PocketFonts.pixel(activity));
-        greeting.setPadding(0, dp(32), 0, dp(12));
-        empty.addView(greeting, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        // An empty chat says what Pip can read and offers a few starters drawn from today's tasks, thoughts and scores.
         emptyText = label("", 14, PocketDesign.MUTED);
-        emptyText.setPadding(0, dp(8), 0, dp(8));
-        empty.addView(emptyText, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        emptyText.setTag("pip_reads"); PocketDesign.quiet(emptyText, PocketDesign.MUTED); emptyText.setGravity(Gravity.CENTER);
+        emptyText.setPadding(dp(8), dp(8), dp(8), dp(8)); emptyText.setOnClickListener(view -> { if (!destroyed) showPocketAccess(); });
+        LinearLayout.LayoutParams reads = new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT); reads.topMargin = dp(8); reads.bottomMargin = dp(12);
+        empty.addView(emptyText, reads);
+        starters = new LinearLayout(activity); starters.setOrientation(LinearLayout.VERTICAL); starters.setTag("pip_starters");
+        empty.addView(starters, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         setup = control("add api key", this::showKey);
         setup.setTag("claude_add_api_key");
         PocketDesign.command(setup, true);
@@ -239,8 +235,11 @@ final class ClaudeSidebar extends FrameLayout {
         panel.addView(statusRow, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         // Draft attachments belong to the scrollable thread so long context titles cannot push the composer below the keyboard.
         contextRow=new LinearLayout(activity);contextRow.setOrientation(LinearLayout.VERTICAL);contextRow.setPadding(0,dp(8),0,0);contextRow.setTag("pip_context");page.addView(contextRow);
-        LinearLayout capabilities = horizontal(); capabilities.setPadding(dp(16), 0, dp(16), 0);
-        capabilities.setBackground(new android.graphics.drawable.Drawable() {
+        // One composer row: "+" holds context, web search, Pocket access, model and settings; send sits beside the text.
+        LinearLayout inputRow = horizontal();
+        inputRow.setGravity(Gravity.BOTTOM);
+        inputRow.setPadding(dp(PocketDesign.INSET - 12), dp(4), dp(PocketDesign.INSET - 8), dp(8));
+        inputRow.setBackground(new android.graphics.drawable.Drawable() {
             final android.graphics.Paint line = new android.graphics.Paint();
             @Override public void draw(android.graphics.Canvas canvas) {
                 android.graphics.Rect bounds = getBounds(); line.setColor(PocketDesign.LINE); line.setStrokeWidth(dp(1));
@@ -253,17 +252,9 @@ final class ClaudeSidebar extends FrameLayout {
             @Override public void setColorFilter(android.graphics.ColorFilter filter) { }
             @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
         });
-        toolsPicker = control("tools [0]", this::showPocketAccess); toolsPicker.setTag("pip_tools");
-        webPicker = control("web · off", this::toggleWebSearch); webPicker.setTag("pip_web_search");
-        for (Button command : new Button[]{toolsPicker, webPicker}) {
-            PocketDesign.command(command, false); command.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));
-            capabilities.addView(command, PocketDesign.commandCell(activity, command == toolsPicker));
-        }
-        panel.addView(capabilities);
-
-        LinearLayout inputRow = horizontal();
-        inputRow.setGravity(Gravity.BOTTOM);
-        inputRow.setPadding(dp(PocketDesign.INSET), 0, dp(PocketDesign.INSET - 8), dp(4));
+        options = control("+", this::showComposerOptions); options.setTag("pip_options");
+        options.setContentDescription("Add context and chat options");
+        inputRow.addView(options, new LinearLayout.LayoutParams(dp(48), dp(56)));
         composer = new EditText(activity);
         composer.setTag("claude_chat_composer");
         PocketDesign.input(composer);
@@ -304,11 +295,8 @@ final class ClaudeSidebar extends FrameLayout {
         send.setTag("claude_chat_send");
         PocketDesign.softKey(send, 1, 2, true);
         send.setMinWidth(dp(64));
+        inputRow.addView(send, new LinearLayout.LayoutParams(dp(64), dp(56)));
         panel.addView(inputRow, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-        LinearLayout composerActions=horizontal();composerActions.setPadding(dp(16),0,dp(16),dp(8));
-        Button attach=control("+ context",this::attachContext);attach.setTag("pip_attach_context");PocketDesign.command(attach,false);attach.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));composerActions.addView(attach,PocketDesign.commandCell(activity,true));
-        modelPicker=control(ChatProvider.get(activity).model,this::showProvider);PocketDesign.command(modelPicker,false);modelPicker.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));modelPicker.setMaxLines(1);modelPicker.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);modelPicker.setGravity(Gravity.CENTER_VERTICAL|Gravity.END);composerActions.addView(modelPicker,new LinearLayout.LayoutParams(0,dp(48),1));
-        composerActions.addView(send,new LinearLayout.LayoutParams(dp(64),dp(48)));panel.addView(composerActions);
 
         // Read the incoming insets here, before a page consumes them during child dispatch.
         setOnApplyWindowInsetsListener((view, insets) -> {
@@ -531,11 +519,7 @@ final class ClaudeSidebar extends FrameLayout {
         ChatProvider.Config provider = ChatProvider.get(activity);
         boolean keyed = ChatProvider.present(activity, provider);
         setup.setVisibility(View.GONE);
-        emptyText.setVisibility(View.GONE);
-        chats.setText("chats ["+repository.chats().size()+"]");modelPicker.setText(provider.model);
-        toolsPicker.setText("tools [" + PocketChatTools.definitions(activity).size() + "]");
-        webPicker.setText("web · " + (provider.webSearch ? "on" : "off"));
-        webPicker.setEnabled(true); webPicker.setTextColor(provider.webSearch ? PocketDesign.accent(activity) : PocketDesign.MUTED);
+        chats.setText("chats ["+repository.chats().size()+"]");
         String context=ChatContext.write(repository.context());if(!context.equals(shownContext)){shownContext=context;contextRow.removeAllViews();addContextRows(contextRow,repository.context(),true);}
         StringBuilder access = new StringBuilder();
         String[] categories = {PocketChatTools.NOTES, PocketChatTools.COROS};
@@ -549,7 +533,7 @@ final class ClaudeSidebar extends FrameLayout {
         accessStatus.setContentDescription(access.length() == 0 ? "Pocket access off. Change access." : "Chat may read " + access + ". Change access.");
         empty.setVisibility(snapshot.turns.isEmpty() ? View.VISIBLE : View.GONE);
         emptyAvatar.setPaused(!opened || !observing || !snapshot.turns.isEmpty());
-        emptyText.setText(" ");
+        if (snapshot.turns.isEmpty()) renderStarters();
         loadingRow.setVisibility(snapshot.running || snapshot.busyElsewhere ? View.VISIBLE : View.GONE);
         String status = snapshot.status == null || snapshot.status.isEmpty() ? "requesting" : snapshot.status;
         String progress = snapshot.busyElsewhere ? "replying in another chat" : status;
@@ -560,14 +544,21 @@ final class ClaudeSidebar extends FrameLayout {
         loading.setPaused(!opened || !observing);
         Set<String> retained = new HashSet<>();
         int index = 0;
+        // A message sent or a reply starting in this chat rises into place; opening a chat draws its history at once.
+        boolean enter = !switched && opened && PageMotion.enabled(activity);
         for (ClaudeChatRepository.Turn turn : snapshot.turns) {
             retained.add(turn.id);
             TurnView row = rows.get(turn.id);
-            if (row == null) { row = new TurnView(); rows.put(turn.id, row); }
+            boolean fresh = row == null;
+            if (fresh) { row = new TurnView(); rows.put(turn.id, row); }
             row.update(turn);
             if (log.indexOfChild(row.root) != index) {
                 if (row.root.getParent() == log) log.removeView(row.root);
                 log.addView(row.root, Math.min(index, log.getChildCount()), new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+            }
+            if (fresh && enter) {
+                row.root.setAlpha(0); row.root.setTranslationY(dp(8));
+                row.root.animate().alpha(1).translationY(0).setDuration(220).setInterpolator(PageMotion.OUT).withLayer().start();
             }
             index++;
         }
@@ -605,6 +596,71 @@ final class ClaudeSidebar extends FrameLayout {
         send.setText(running ? "stop" : "send");
         send.setContentDescription(running ? "Stop response" : "Send message");
         send.setEnabled(running || (!repository.snapshot().busyElsewhere && !composer.getText().toString().trim().isEmpty()));
+    }
+
+    /** Everything that shapes the next message sits behind "+", so the composer stays a single row. */
+    private void showComposerOptions() {
+        if (destroyed) return;
+        ChatProvider.Config provider = ChatProvider.get(activity);
+        String[] items = {"add context", "web search · " + (provider.webSearch ? "on" : "off"), "what Pip can read",
+                "model · " + modelName(provider.model), "chat settings"};
+        showDialog(new AlertDialog.Builder(activity).setItems(items, (choice, index) -> {
+            if (destroyed) return;
+            if (index == 0) attachContext(); else if (index == 1) toggleWebSearch(); else if (index == 2) showPocketAccess();
+            else if (index == 3) showProvider(); else showSettings();
+        }).setNegativeButton("close", null).create());
+    }
+
+    /** "claude-sonnet-5-5-20261001" reads as "Sonnet 5.5"; other model IDs are shown as they are. */
+    static String modelName(String id) {
+        String model = id == null ? "" : id;
+        java.util.regex.Matcher name = java.util.regex.Pattern.compile("^claude-([a-z]+)-(\\d{1,2})(?:-(\\d{1,2}))?(?:-\\d{8})?$").matcher(model);
+        if (!name.matches()) return model;
+        return Character.toUpperCase(name.group(1).charAt(0)) + name.group(1).substring(1) + " " + name.group(2) + (name.group(3) == null ? "" : "." + name.group(3));
+    }
+
+    /** An empty chat names what Pip may read and offers up to three starters from what is waiting today. Local reads only. */
+    private void renderStarters() {
+        String[] categories = {"tasks", "calendar", "thoughts", "notes", "gym", "coros"}, names = {"tasks", "calendar", "thoughts", "notes", "gym", "COROS"};
+        List<String> reads = new ArrayList<>();
+        for (int i = 0; i < categories.length; i++) if (PocketChatTools.enabled(activity, categories[i])) reads.add(names[i]);
+        PlannerStore planner = new PlannerStore(activity.getSharedPreferences("pocket_planner", 0));
+        int overdue = 0, notes = 0; String today = PlannerDates.today();
+        for (PlannerStore.Entry entry : planner.entries()) {
+            if ("task".equals(entry.kind) && !entry.done && !entry.due.isEmpty() && entry.due.compareTo(today) < 0) overdue++;
+            else if ("note".equals(entry.kind)) notes++;
+        }
+        int parked = reads.contains("thoughts") ? ParkingStore.open(activity).size() : 0;
+        List<String[]> picks = new ArrayList<>();
+        if (reads.contains("tasks") && overdue > 0) picks.add(new String[]{"what's overdue?", "Look at my overdue tasks. Which should I do first, which should move, and which can I drop?"});
+        if (reads.contains("tasks") || reads.contains("calendar")) picks.add(new String[]{"plan my day", "Plan my day from my calendar and open tasks. Keep it short."});
+        if (parked > 0) picks.add(new String[]{"sort my thoughts", "Go through my parked thoughts. For each, should it become a task, stay parked, or go?"});
+        if (reads.contains("COROS")) picks.add(new String[]{"how's my recovery?", "How are my recovery and training load today, and what does that mean for today?"});
+        if (reads.contains("notes") && notes > 0) picks.add(new String[]{"what did I note lately?", "Summarise my most recent notes in a few lines."});
+        while (picks.size() > 3) picks.remove(picks.size() - 1);
+        StringBuilder key = new StringBuilder(String.join(",", reads));
+        for (String[] pick : picks) key.append('|').append(pick[0]);
+        if (key.toString().equals(startersKey)) return;
+        startersKey = key.toString();
+        String list = reads.size() < 2 ? String.join("", reads) : String.join(", ", reads.subList(0, reads.size() - 1)) + " and " + reads.get(reads.size() - 1);
+        emptyText.setText(reads.isEmpty() ? "Pip can't read Pocket yet · choose what" : "reads your " + list);
+        emptyText.setContentDescription(reads.isEmpty() ? "Pip can't read Pocket yet. Choose what Pip may read." : "Pip may read your " + list + ". Change what Pip can read.");
+        starters.removeAllViews();
+        for (int i = 0; i < picks.size(); i++) {
+            String[] pick = picks.get(i);
+            Button starter = control(pick[0], () -> { composer.setText(pick[1]); composer.setSelection(composer.length()); submit(); });
+            starter.setTag("pip_starter_" + i); starter.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            starter.setTextSize(PocketDesign.typeSize(activity, PocketDesign.BODY)); starter.setMinHeight(dp(52));
+            starter.setPadding(dp(16), dp(12), dp(16), dp(12)); starter.setBackground(PocketDesign.interaction(activity, WarmWorkspace.PLANE));
+            starter.setContentDescription("Ask Pip: " + pick[1]); PocketDesign.pressScale(starter);
+            LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT); cell.topMargin = i == 0 ? 0 : dp(8);
+            starters.addView(starter, cell);
+            // Starters rise in one after another once the panel has arrived; they stay tappable throughout.
+            if (opened && PageMotion.enabled(activity)) {
+                starter.setAlpha(0); starter.setTranslationY(dp(8));
+                starter.animate().alpha(1).translationY(0).setStartDelay(120 + 50L * i).setDuration(220).setInterpolator(PageMotion.OUT).withLayer().start();
+            }
+        }
     }
 
     private void showChats() {
@@ -999,13 +1055,14 @@ final class ClaudeSidebar extends FrameLayout {
 
     private void refreshTheme() {
         int accent = PocketDesign.accent(activity);
-        PocketDesign.headerControl(back, PocketDesign.MUTED); PocketDesign.headerControl(settings, PocketDesign.MUTED);
+        PocketDesign.headerControl(back, PocketDesign.MUTED);
         PocketDesign.headerControl(chats, accent); PocketDesign.headerControl(newChat, accent);
-        settings.setTextSize(PocketDesign.typeSize(activity, PocketDesign.META));
+        PocketDesign.quiet(options, accent); options.setTextSize(PocketDesign.typeSize(activity, 22)); options.setPadding(0, 0, 0, 0);
         PocketDesign.command(setup, true); PocketDesign.command(retry, true); PocketDesign.softKey(send, 1, 2, true); send.setMinWidth(dp(64));
         PocketDesign.input(composer, android.graphics.Color.TRANSPARENT); composer.setTextSize(PocketDesign.typeSize(activity, PocketDesign.BODY)); composer.setGravity(Gravity.TOP | Gravity.START);
         composer.setShadowLayer(0, 0, 0, 0);
-        glowControls(panel);
+        glowControls(panel); PocketDesign.pressScale(send); PocketDesign.pressScale(options);
+        startersKey = ""; // glowControls flattened the starter cards; the next render rebuilds them.
         if (markdown == null || accent != themedAccent) {
             themedAccent = accent;
             panel.setBackgroundColor(PocketDesign.INK);
@@ -1541,7 +1598,6 @@ final class ClaudeSidebar extends FrameLayout {
         if (panel == null) return;
         int headerVisibility = keyboardVisible ? View.GONE : View.VISIBLE;
         if (chatHeader != null && chatHeader.getVisibility() != headerVisibility) chatHeader.setVisibility(headerVisibility);
-        if (chatActions != null && chatActions.getVisibility() != headerVisibility) chatActions.setVisibility(headerVisibility);
         int left = Math.max(0, insetLeft - Math.max(0, getWidth() - panelWidth()));
         int bottom = Math.max(insetBottom, keyboardBottom);
         if (panel.getPaddingLeft() != left || panel.getPaddingTop() != insetTop || panel.getPaddingRight() != insetRight || panel.getPaddingBottom() != bottom)

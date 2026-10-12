@@ -23,6 +23,8 @@ final class PageMotion {
     private static final PathInterpolator EASE = new PathInterpolator(.2f, 0, 0, 1);
     private static final PathInterpolator EXIT = new PathInterpolator(.4f, 0, 1, 1), ENTER = new PathInterpolator(0, 0, .2f, 1);
     static final long EXIT_MS = 90, ENTER_DELAY_MS = 60, ENTER_MS = 210, SHIFT_DP = 24;
+    /** Strong ease-out for feedback and small state changes: it moves at once, then settles. */
+    static final PathInterpolator OUT = new PathInterpolator(.23f, 1, .32f, 1);
     private final Activity activity;
     private final FrameLayout host;
     private final Map<String, View> previews = new LinkedHashMap<>();
