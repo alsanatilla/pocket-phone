@@ -1965,6 +1965,7 @@ public class MainActivity extends Activity {
                 cell.setTag(i==0?"workspace_today":i==1?"today_search":i==2?"workspace_capture":"workspace_apps");target=cell;
                 target.setContentDescription(i==2?"Capture":names[i]+(selected?", selected":""));
             }
+            if(i==2||i==3)PocketDesign.pressScale(target); // The capture pill and Pip are the dock's buttons; the rest are tabs.
             target.setFocusable(true);target.setSelected(selected);target.setOnClickListener(v->{if(item==0)selectWorkspace("today");else if(item==1)navigate("search");else if(item==2)captureMenu();else if(item==3)openChat();else navigate("apps");});
             bar.addView(target,i==3?new LinearLayout.LayoutParams(dp(80),dp(80)):new LinearLayout.LayoutParams(0,dp(80),1));
         }return bar;

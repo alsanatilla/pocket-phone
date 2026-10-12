@@ -145,6 +145,22 @@ final class PocketDesign {
     static int headerHeight(Context c){return Math.max(dp(c,HEADER),(int)Math.ceil(typeSize(c,SECTION)*c.getResources().getDisplayMetrics().scaledDensity)+dp(c,8));}
     static int headerWidth(TextView v,int base){return Math.max(dp(v.getContext(),base),(int)Math.ceil(v.getPaint().measureText(v.getText().toString()))+dp(v.getContext(),16));}
     static void headerControl(TextView view,int color){quiet(view,color);view.setTextSize(typeSize(view.getContext(),SMALL));view.setMinHeight(dp(view.getContext(),HEADER));view.setMinimumHeight(dp(view.getContext(),HEADER));view.setPadding(dp(view.getContext(),8),dp(view.getContext(),4),dp(view.getContext(),8),dp(view.getContext(),4));}
+    /**
+     * Cards and primary buttons dip to 97% under the finger and settle back, so a tap is felt before anything opens.
+     * Call after styling: the control styles clear the state animator. Off with reduced motion.
+     */
+    static void pressScale(View view) {
+        if (!(view.getContext() instanceof android.app.Activity) || !PageMotion.enabled((android.app.Activity) view.getContext())) return;
+        android.animation.StateListAnimator states = new android.animation.StateListAnimator();
+        states.addState(new int[]{android.R.attr.state_pressed}, scale(.97f, 100));
+        states.addState(new int[]{}, scale(1f, 160));
+        view.setStateListAnimator(states);
+    }
+    private static android.animation.Animator scale(float to, long ms) {
+        android.animation.ObjectAnimator scale = android.animation.ObjectAnimator.ofPropertyValuesHolder((Object) null,
+                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, to), android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, to));
+        scale.setDuration(ms); scale.setInterpolator(PageMotion.OUT); return scale;
+    }
     static Drawable tile(Context c, boolean selected) {
         int accent = accent(c); return new RippleDrawable(ColorStateList.valueOf(selected ? 0x22000000 : 0x33FFFFFF),
                 shape(c, selected ? accent : BLACK, Color.TRANSPARENT), shape(c, WHITE, Color.TRANSPARENT));

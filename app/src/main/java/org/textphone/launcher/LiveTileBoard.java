@@ -13,6 +13,7 @@ import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.DragEvent;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
@@ -36,6 +37,8 @@ final class LiveTileBoard extends ViewGroup {
     private String dragged, dropTarget;
     private int dragDirection;
     private static final int RESIZE = 0x01020001, EARLIER = 0x01020002, LATER = 0x01020003, UNPIN = 0x01020004;
+    /** Degrees a pressed tile leans at its edge. */
+    private static final float TILT = 6f;
     private final Runnable changed = this::refresh;
     private final SharedPreferences.OnSharedPreferenceChangeListener listener = (prefs, key) -> {
         removeCallbacks(changed); if (attached) postDelayed(changed, 100);
@@ -60,14 +63,19 @@ final class LiveTileBoard extends ViewGroup {
     }
     boolean editing() { return editing; }
     void editing(boolean value) {
-        editing = value; emphasis();
+        editing = value; emphasis(true);
     }
-    /** Tiles are borderless: edit mode shrinks them a little, and the tile under a drag returns to full size. */
-    private void emphasis() {
+    /**
+     * Tiles are borderless: edit mode shrinks them a little, and the tile under a drag returns to full size.
+     * The change eases out over 200 ms and retargets if it is interrupted; a rebuilt board takes its sizes at once.
+     */
+    private void emphasis(boolean animate) {
+        boolean motion = animate && PageMotion.enabled(activity);
         for (int i = 0; i < getChildCount(); i++) {
-            Tile tile = (Tile)getChildAt(i);
-            float scale = editing && !(tile.kind.equals(dropTarget) && !tile.kind.equals(dragged)) ? .94f : 1f;
-            tile.setScaleX(scale); tile.setScaleY(scale);
+            Tile tile = (Tile)getChildAt(i); float scale = tile.rest();
+            if (!motion) { tile.animate().cancel(); tile.setScaleX(scale); tile.setScaleY(scale); tile.setRotationX(0); tile.setRotationY(0); }
+            else if (tile.target != scale) tile.animate().scaleX(scale).scaleY(scale).rotationX(0).rotationY(0).setDuration(200).setInterpolator(PageMotion.OUT).start();
+            tile.target = scale;
         }
     }
     void refresh() {
@@ -76,7 +84,7 @@ final class LiveTileBoard extends ViewGroup {
         if (!next.equals(layout) || getChildCount() == 0) {
             layout = next; removeAllViews();
             for (String kind : TodayTiles.visible(activity)) addView(new Tile(kind, TodayTiles.size(activity, kind)));
-            requestLayout(); emphasis();
+            requestLayout(); emphasis(false);
         }
         for (int i = 0; i < getChildCount(); i++) ((Tile)getChildAt(i)).reading(LiveTileData.read(activity, planner, ((Tile)getChildAt(i)).kind));
     }
@@ -149,14 +157,14 @@ final class LiveTileBoard extends ViewGroup {
                 float y = screen[1] + event.getY();
                 dragDirection = y < visible.top + dp(48) ? -1 : y > visible.bottom - dp(48) ? 1 : 0;
                 removeCallbacks(scrollDrag); if (dragDirection != 0) post(scrollDrag);
-                emphasis(); return true;
+                emphasis(true); return true;
             }
             case DragEvent.ACTION_DROP: {
                 try { if (dropTarget != null) TodayTiles.move(activity, dragged, dropTarget); }
                 catch (RuntimeException error) { actions.failed(error); }
                 return true;
             }
-            case DragEvent.ACTION_DRAG_EXITED: dropTarget = null; dragDirection = 0; removeCallbacks(scrollDrag); emphasis(); return true;
+            case DragEvent.ACTION_DRAG_EXITED: dropTarget = null; dragDirection = 0; removeCallbacks(scrollDrag); emphasis(true); return true;
             case DragEvent.ACTION_DRAG_ENDED: endDrag(); refresh(); return true;
             default: return true;
         }
@@ -164,7 +172,7 @@ final class LiveTileBoard extends ViewGroup {
     private void endDrag() {
         dragged = dropTarget = null; dragDirection = 0; removeCallbacks(scrollDrag);
         for (int i = 0; i < getChildCount(); i++) getChildAt(i).setAlpha(1f);
-        emphasis();
+        emphasis(true);
     }
     private ScrollView scrollParent() { for (ViewParent p = getParent(); p != null; p = p.getParent()) if (p instanceof ScrollView) return (ScrollView)p; return null; }
 
@@ -176,6 +184,9 @@ final class LiveTileBoard extends ViewGroup {
         final int ink = WarmWorkspace.INK;
         final GradientDrawable base = new GradientDrawable();
         int fill;
+        float target = 1f;
+        private float touchX, touchY;
+        private String rolling;
 
         Tile(String kind, String size) {
             super(activity); this.kind = kind; this.size = size;
@@ -220,6 +231,34 @@ final class LiveTileBoard extends ViewGroup {
             int next = alert ? WarmWorkspace.OVERDUE : PocketDesign.accent(activity);
             if (next != fill) { fill = next; base.setColor(fill); }
         }
+        float rest() { return editing && !(kind.equals(dropTarget) && !kind.equals(dragged)) ? .94f : 1f; }
+        @Override public boolean onTouchEvent(MotionEvent event) {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) { touchX = event.getX(); touchY = event.getY(); }
+            return super.onTouchEvent(event);
+        }
+        /**
+         * Windows Phone tilt: a pressed tile dips and leans away from the finger, then settles back.
+         * Pressed state arrives after the tap timeout, so a scroll never tilts a tile.
+         */
+        @Override public void setPressed(boolean pressed) {
+            boolean changed = pressed != isPressed(); super.setPressed(pressed);
+            if (!changed || getWidth() == 0 || !PageMotion.enabled(activity)) return;
+            float rest = rest();
+            if (pressed && dragged == null) {
+                float x = Math.max(-1, Math.min(1, touchX / getWidth() * 2 - 1)), y = Math.max(-1, Math.min(1, touchY / getHeight() * 2 - 1));
+                setCameraDistance(getResources().getDisplayMetrics().density * 8000);
+                animate().scaleX(rest * .97f).scaleY(rest * .97f).rotationY(x * TILT).rotationX(-y * TILT).setDuration(100).setInterpolator(PageMotion.OUT).start();
+            } else if (!pressed) animate().scaleX(rest).scaleY(rest).rotationX(0).rotationY(0).setDuration(200).setInterpolator(PageMotion.OUT).start();
+        }
+        /** A live reading rolls in: the old value lifts out quickly and the new one rises into place. A newer reading mid-roll just replaces the incoming text. */
+        private void roll(String next) {
+            boolean running = rolling != null; rolling = next; if (running) return;
+            float lift = dp(8);
+            value.animate().translationY(-lift).alpha(0).setDuration(90).setInterpolator(PageMotion.OUT).withLayer().withEndAction(() -> {
+                value.setText(rolling); rolling = null; value.setTranslationY(lift);
+                value.animate().translationY(0).alpha(1).setDuration(220).setInterpolator(PageMotion.OUT).withLayer().withEndAction(null).start();
+            }).start();
+        }
         int columns() { return "wide".equals(size) ? 4 : "small".equals(size) ? 1 : 2; }
         int rows() { return "small".equals(size) ? 1 : 2; }
         TextView label(float sp, boolean pixel) {
@@ -231,8 +270,13 @@ final class LiveTileBoard extends ViewGroup {
         }
         void reading(LiveTileData data) {
             fill(data.alert);
-            String key = data.key(); if (key.equals(dataKey)) return; dataKey = key;
-            value.setText(data.value); detail.setText(data.detail);
+            String key = data.key(); if (key.equals(dataKey)) return;
+            // The first reading is drawn as is; later changes to the headline value roll in, like a Windows Phone live tile.
+            boolean live = !dataKey.isEmpty() && isAttachedToWindow() && PageMotion.enabled(activity); dataKey = key;
+            String shown = rolling != null ? rolling : value.getText().toString();
+            if (live && !shown.equals(data.value)) roll(data.value);
+            else if (!live) { value.animate().cancel(); rolling = null; value.setAlpha(1); value.setTranslationY(0); value.setText(data.value); }
+            detail.setText(data.detail);
             name.setText(TodayTiles.label(activity, kind));
             if (!"small".equals(size) && !data.status.isEmpty()) {
                 // Status goes with the reading; the app name remains a stable scan point at the foot.

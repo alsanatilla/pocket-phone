@@ -69,7 +69,24 @@ public class PipPreviewTest {
         ((SQLiteOpenHelper) ReflectionHelpers.getField(store, "helper")).close();
         ReflectionHelpers.setStaticField(ClaudeChatRepository.class, "instance", null);
     }
-    @Test public void emptyPage() throws Exception { open(); save(controller.get(), "pocket-22-pip-empty.png"); }
+    @Test public void emptyPage() throws Exception {
+        PlannerStore planner = new PlannerStore(context.getSharedPreferences("pocket_planner", 0));
+        planner.saveTask(0, "Renew the bike insurance", java.time.LocalDate.now().minusDays(3).toString(), false, "");
+        ParkingStore.park(context, "A little photo zine from Saturday's trip.", 0);
+        for (String category : new String[]{"tasks", "calendar", "thoughts"}) PocketChatTools.enabled(context, category, true);
+        open(); View root = save(controller.get(), "pocket-22-pip-empty.png");
+        // The empty chat names what Pip reads and offers starters from today's data; the composer is one row.
+        assertEquals("reads your tasks, calendar and thoughts", ((TextView) root.findViewWithTag("pip_reads")).getText().toString());
+        assertEquals("what's overdue?", ((TextView) root.findViewWithTag("pip_starter_0")).getText().toString());
+        assertEquals("plan my day", ((TextView) root.findViewWithTag("pip_starter_1")).getText().toString());
+        assertEquals("sort my thoughts", ((TextView) root.findViewWithTag("pip_starter_2")).getText().toString());
+        assertNull(PocketAppsTest.find(root, "API settings")); assertNull(PocketAppsTest.find(root, "tools [2]"));
+        View plus = root.findViewWithTag("pip_options"), send = root.findViewWithTag("claude_chat_send"), input = root.findViewWithTag("claude_chat_composer");
+        assertSame("+, input and send share one row", plus.getParent(), send.getParent()); assertSame(plus.getParent(), input.getParent());
+        assertEquals("Sonnet 5.5", ClaudeSidebar.modelName("claude-sonnet-5-5-20261001"));
+        assertEquals("Haiku 4.5", ClaudeSidebar.modelName("claude-haiku-4-5"));
+        assertEquals("claude-mythos-preview", ClaudeSidebar.modelName("claude-mythos-preview"));
+    }
     @Test public void formattedReply() throws Exception {
         seed(); open(); View root = save(controller.get(), "pocket-22-pip-chat.png");
         assertNotNull(root.findViewWithTag("pip_title")); assertEquals(360, root.findViewWithTag("claude_sidebar").getWidth());
