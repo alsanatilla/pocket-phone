@@ -3,7 +3,8 @@ import { storage as localStorage, tabStorage as workspaceSession } from './works
 import * as cloud from "./cloud.js";
 import * as legacyDrive from "./drive.js";
 import { clearWorkspace, activeAccount, guestHasData } from "./workspace-storage.js";
-import { FILES, importDocument, merge } from "./store.js";
+import { FILES, importDocument, merge, onChange as onWorkspaceChange } from "./store.js";
+import { motionOff, rollText, pressMotion } from './ui-motion.js';
 import { validDocument } from '../shared/workspace.js';
 import { SEARCH_KINDS, documentRows, chatRows, localSearch } from '../shared/search.js';
 import { markdownNode } from '../shared/markdown.js';
@@ -21,7 +22,7 @@ import * as coros from "./coros.js";
 import { syncNow, describe, onStatus, status } from "./sync.js";
 import { gym, weekStart } from "./store.js";
 import { installRefresh } from "./retro-loading.js";
-import { initExtras, todayTiles, TODAY_CATALOG } from "./extras.js";
+import { initExtras, preferences, todayTiles, TODAY_CATALOG, TILE_SIZES, tileSize } from "./extras.js";
 import * as travel from "./travel.js";
 import * as sharedTravel from './travel-store.js';
 import { INVITE_RESUME } from './travel-sharing.js';
@@ -33,9 +34,8 @@ import * as setup from './setup.js';
 import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
-const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const TOOLS = ["today", "thoughts", "tasks", "notes", "movement", "gym", "apps"];
-let content = null, notice = null, parkingDraft = "", parkingDraftOwner = activeAccount(), briefView = null, flushNote = null;
+let content = null, notice = null, parkingDraft = "", parkingDraftOwner = activeAccount(), briefView = null, flushNote = null, todayBoard = null;
 
 // ── DOM helpers ──
 function h(tag, props = {}, ...children) {
@@ -69,11 +69,13 @@ function shell() {
       h("button", { class: "pip-entry", id: "pip-entry", "aria-label": "Pip", title: "Pip", onclick: () => go("/pip") }, mascot(true)),
       h("button", { class: "status", id: "sync-status", onclick: () => go("/sync"), title: "Sync settings" }, statusLabel())),
     content, notice);
+  pressMotion(document.getElementById('pip-entry'));
 }
 /** The sync state on two short lines: "SIGN IN" over "7 WAITING". */
 const statusLabel = () => describe().replace(" · ", "\n");
 /** Clears the work area for one tool; toolbar actions sit right under its header. */
 function view(tool, actions = []) {
+  todayBoard?.dispose(); todayBoard = null;
   flushNote?.(); flushNote = null;
   briefView?.(); briefView = null;
   zines.leave(); pip.leave(); travel.leave(); shell(); closeDialog(); say("");
@@ -87,7 +89,8 @@ function view(tool, actions = []) {
   content.classList.toggle('content-pip', tool === 'pip');
   if (actions.length) add(content, h("div", { class: "toolbar" }, actions.map(([label, run, extra]) => h("button", { onclick: run, ...(extra || {}) }, label))));
   const body = h("div", { class: "tool tool-" + tool }); add(content, body);
-  if (!reduceMotion) body.classList.add("enter");
+  document.documentElement.classList.toggle('reduce-motion', motionOff());
+  if (!motionOff()) body.classList.add("enter");
   return body;
 }
 const split = (body, ...columns) => { add(body, h("div", { class: "split" }, columns.map(c => h("div", { class: "col" }, c)))); };
@@ -181,57 +184,155 @@ async function capture() {
   if(choice === 0)go("/thoughts"); else if(choice === 1)go("/tasks/new"); else if(choice === 2)go("/notes/new");
 }
 const MINUTE = 60000;
+// One strong ease-out for feedback and small state changes: it moves at once, then settles.
+const TILE_ICON = { agenda: "calendar", activity: "receipt" };
+const tileName = tile => tile.label || ({ agenda: "calendar", brief: "daily brief" })[tile.kind] || tile.kind;
+const clockTime = at => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const lines = (...values) => values.filter(Boolean).join("\n");
+/** A tile's live reading from local stores, the same readings the phone shows. Drawing a tile never waits on the network. */
 function tileReading(kind) {
-  const now = Date.now();
+  const now = Date.now(), reading = (value, detail = "", status = "", path = "/today", extra = {}) => ({ value, detail, status, path, progress: -1, bars: null, alert: false, ...extra });
   switch (kind) {
-    case "brief": return ["daily brief", briefEnabled() ? readBrief().summary : "disabled", "/brief"];
-    case "tasks": { const open = tasks.list().filter(t => !t.done); return [open.length ? open.length + " open" : "clear", open[0]?.text || "nothing waiting", "/tasks"]; }
+    case "tasks": {
+      const all = tasks.list(), open = all.filter(t => !t.done), chosen = load("tasks.json").next?.uid, today = taskDay();
+      const overdue = open.filter(t => t.due && t.due < today).length, first = open.find(t => t.uid === chosen) || open[0];
+      return reading(String(open.length), [first, open.find(t => t !== first)].filter(Boolean).map(t => t.text).join("\n") || "All clear", overdue ? overdue + " overdue" : "open", "/tasks",
+        { progress: all.length ? Math.round((all.length - open.length) * 100 / all.length) : -1, alert: overdue > 0 });
+    }
     case "agenda": {
       const next = agenda.all().find(event => event.when + event.minutes * MINUTE >= now);
-      if (!next) return ["free", "no appointments", "/calendar"];
+      if (!next) return reading("Free", "No upcoming events", "", "/calendar");
       const same = new Date(next.when).toDateString() === new Date(now).toDateString();
-      return [(same ? "" : new Date(next.when).toLocaleDateString([], { weekday: "short" }) + " ") + new Date(next.when).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), next.title, "/calendar"];
+      return reading(clockTime(next.when), next.title, next.when <= now ? "now" : same ? "today" : new Date(next.when).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }), "/calendar/" + next.uid);
     }
-    case "thoughts": { const open = parking.open(), ready = open.filter(t => t.due > 0 && t.due <= now).length; return [open.length + " open", ready ? ready + " to revisit" : "undecided", "/thoughts"]; }
-    case "notes": { const list = notes.list(); return [String(list.length), list[0] ? noteTitle(list[0]) : "no notes yet", "/notes"]; }
-    case "movement": { const percent = coros.connected() ? coros.cachedCockpit()?.recovery?.percent : null; return coros.connected() ? [percent != null ? percent + "%" : "…", "recovery", "/movement"] : ["connect", "COROS", "/movement"]; }
-    case "gym": { if (gym.active()) return ["now", "workout in progress", "/gym"]; const week = gym.all().filter(w => w.started >= weekStart(now)).length; return [week + "×", "this week", "/gym"]; }
-    case "pip": return ["ask", "think with context", "/pip"];
-    case "activity": return [String(receipt.lines(now).length), "recorded today", "/receipt"];
-    case "focus": return ["start", "a focus session", "/clock/new/focus"];
-    case "clock": { const running = clockStore.all().filter(entry => entry.enabled && entry.kind !== "stopwatch").length; return [running ? running + " running" : "clock", "alarms · timers", "/clock"]; }
-    case "paper": { const pages = load("journal.json").pages.filter(p => !p.deleted); return [String(pages.length), journal.unread().length ? "waiting to be read" : "handwritten pages", "/notes"]; }
-    case "zines": return ["zines", "photo books", "/zines"];
-    case "dice": return ["roll", "dice · coin · pick", "/dice"];
-    default: return ["", "", "/today"];
+    case "thoughts": {
+      const open = parking.open(), ready = open.filter(t => t.due > 0 && t.due <= now), first = ready[0] || open[0];
+      return reading(String(open.length), first ? first.text : "Nothing parked", ready.length ? ready.length + " to revisit" : "parked", "/thoughts");
+    }
+    case "notes": { const list = notes.list(); return reading(String(list.length), list[0] ? noteTitle(list[0]) : "No notes yet", "saved", "/notes"); }
+    case "movement": {
+      const deck = coros.cachedCockpit(), cache = coros.cached();
+      if (!deck && !cache) return reading("—", coros.connected() ? "Waiting for COROS" : "Connect COROS", "", "/movement");
+      const result = scores({ activities: cache?.list || [], deck: deck || {}, profile: { ...deck?.profile, observedMax: coros.observedMaxHr() } });
+      // Strain only counts today's training; an older activity list cannot say today was a rest day.
+      const recovery = result.recovery?.score, strain = Array.isArray(cache?.list) && taskDay(cache.at || 0) === taskDay() ? result.strain?.strain : null, condition = Array.isArray(cache?.list) ? result.conditioning?.score : null;
+      return reading(Number.isFinite(recovery) ? recovery + "%" : "—", lines("Recovery" + (Number.isFinite(strain) ? " · strain " + strain + "%" : ""), Number.isFinite(condition) ? "Condition " + condition : ""),
+        result.recovery?.zone || "", "/movement", { progress: Number.isFinite(recovery) ? recovery : -1 });
+    }
+    case "gym": {
+      if (gym.active()) return reading("now", "Workout in progress", "", "/gym");
+      const all = gym.all(), start = weekStart(now), week = all.filter(w => w.started >= start).length, last = all.reduce((at, w) => Math.max(at, w.started || 0), 0), WEEK = 7 * 24 * 60 * MINUTE;
+      const bars = Array.from({ length: 8 }, (_, i) => { const from = start - (7 - i) * WEEK; return all.filter(w => w.started >= from && w.started < from + WEEK).length; });
+      return reading(String(week), last ? "Last " + new Date(last).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }) : "No sessions yet", (week === 1 ? "session" : "sessions") + " this week", "/gym", { bars });
+    }
+    case "clock": {
+      const running = clockStore.all().filter(entry => entry.enabled && entry.kind !== "stopwatch").length;
+      return reading(clockTime(now), new Date(now).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }), running ? running + " running" : "", "/clock");
+    }
+    case "focus": {
+      const active = clockStore.all().find(entry => entry.enabled && entry.kind === 'focus' && entry.due > now);
+      if (active) return reading(String(Math.ceil((active.due - now) / MINUTE)), active.title, 'min left', '/clock/' + active.uid);
+      const chosen = load("tasks.json").next?.uid, task = tasks.list().find(t => t.uid === chosen && !t.done);
+      return reading("25", task ? task.text : "Start a session", "min", "/clock/new/focus");
+    }
+    case "activity": { const list = receipt.lines(now); return reading(String(list.length), list.length ? list[list.length - 1].x : "Nothing recorded", "today", "/receipt"); }
+    case "pip": return reading("", "", "", "/pip");
+    case "brief": return reading(briefEnabled() ? "today" : "off", briefEnabled() ? readBrief().summary : "Turned off", "", "/brief");
+    case "paper": { const pages = load("journal.json").pages.filter(p => !p.deleted); return reading(String(pages.length), journal.unread().length ? "Waiting to be read" : "Handwritten pages", "", "/notes"); }
+    case "zines": return reading("zines", "Photo books", "", "/zines");
+    case "dice": return reading("roll", "Dice · coin · pick", "", "/dice");
+    default: return reading("", "");
   }
 }
-function tileGrid() {
-  const grid = h("div", { class: "today-tiles" });
-  for (const tile of todayTiles.list()) {
-    const [value, detail, path] = tileReading(tile.kind), name = tile.label || tile.kind;
-    grid.append(h("button", { class: "row-button today-tile", "data-tile": tile.kind, "aria-label": name + ", " + value + ", " + detail, onclick: () => go(path) },
-      h("span", { class: "section muted", text: name }), h("span", { class: "tile-value", text: value }), h("span", { class: "sub", text: detail })));
-  }
-  return grid;
+function liveTile(tile) {
+  const size = tileSize(tile), small = size === "small", pip = tile.kind === "pip";
+  const value = h("span", { class: "live-value" }), detail = small ? null : h("span", { class: "live-detail" }), chart = small ? null : h("span", { class: "live-chart", "aria-hidden": "true", hidden: true });
+  const node = h("button", { class: "live-tile", "data-tile": tile.kind, "data-size": size }, pip ? mascot() : value, detail, chart,
+    // The foot is the scan point: icon and name. A small tile has room for the icon only; Pip's sprite is its own icon.
+    small && pip ? null : h("span", { class: "live-foot" }, appGlyph(TILE_ICON[tile.kind] || tile.kind), small ? null : h("span", { class: "live-name", text: tileName(tile) })));
+  node.live = { kind: tile.kind, name: tileName(tile), value, detail, chart };
+  node.addEventListener("click", () => go(node.live.path || "/today"));
+  node.addEventListener('contextmenu', event => { event.preventDefault(); void editTiles(tile.kind); });
+  node.releasePress = pressMotion(node, true);
+  return node;
 }
-async function editTiles() {
-  const body = h("div", { class: "today-tile-editor" });
+function paintTile(node, roll) {
+  const live = node.live; let data;
+  try { data = tileReading(live.kind); } catch { data = { value: "—", detail: "Unavailable", status: "", path: "/today", progress: -1, bars: null, alert: false }; }
+  live.path = data.path;
+  // Every tile wears the accent; only an alert, such as overdue tasks, changes the colour, and it then leads with its status.
+  node.classList.toggle("alert", data.alert);
+  if (roll) rollText(live.value, data.value); else live.value.textContent = data.value;
+  if (live.detail) live.detail.textContent = data.alert ? lines(data.status, data.detail) : lines(data.detail, data.status);
+  if (live.chart) {
+    const bars = data.bars, count = bars ? bars.length : 12, max = Math.max(1, ...(bars || [])), filled = Math.round(Math.max(0, data.progress) / 100 * count);
+    live.chart.hidden = data.progress < 0 && !bars;
+    live.chart.replaceChildren(...Array.from({ length: count }, (_, i) => h("i", bars ? { class: bars[i] ? "on" : "", style: "height:" + Math.max(20, Math.round(bars[i] / max * 100)) + "%" } : { class: i < filled ? "on" : "" })));
+  }
+  node.setAttribute("aria-label", [live.name, data.value, data.detail, data.status].filter(Boolean).join(", "));
+}
+/** Today's live tiles: dense four-column packing like the phone, refreshed on the minute and whenever synced data lands. */
+function tileBoard() {
+  const owner = activeAccount(), board = h("section", { class: "live-tiles", "aria-label": "Today tiles" });
+  let timer = 0, layout = '', stopped = false;
+  const disposeTiles = () => board.querySelectorAll('.live-tile').forEach(node => { node.releasePress?.(); node.getAnimations({ subtree: true }).forEach(a => a.cancel()); node.querySelectorAll('.pip-mascot').forEach(c => c.dispose?.()); });
+  const paint = roll => {
+    if (owner !== activeAccount()) { disposeTiles(); board.replaceChildren(); return; }
+    const appearance = preferences.get('appearance') || {};
+    board.style.setProperty('--accent', ['#ecc981', '#adbf9c', '#a5bfdc', '#f0e9dd'][appearance.accent] || '#ecc981');
+    document.documentElement.classList.toggle('reduce-motion', Boolean(appearance.reduceMotion));
+    const list = todayTiles.list(), key = JSON.stringify(list);
+    if (key !== layout) {
+      const focus = board.contains(document.activeElement) ? document.activeElement.dataset.tile : null;
+      disposeTiles(); board.replaceChildren(...list.map(liveTile)); layout = key; roll = false;
+      if (focus) board.querySelector(`[data-tile="${focus}"]`)?.focus({ preventScroll: true });
+    }
+    board.querySelectorAll('.live-tile').forEach(node => paintTile(node, roll));
+  };
+  const schedule = () => { clearTimeout(timer); if (!stopped && !document.hidden) timer = setTimeout(synced, MINUTE - Date.now() % MINUTE + 50); };
+  const stop = () => {
+    stopped = true; clearTimeout(timer); disposeTiles();
+    for (const name of ['pocket-objects-synced', 'pocket-coros-synced', 'pocket-extras-applied', 'storage']) removeEventListener(name, synced);
+    document.removeEventListener('visibilitychange', synced);
+  };
+  const synced = () => { if (stopped) return; if (!board.isConnected) return stop(); if (!document.hidden) paint(true); schedule(); };
+  paint(false); schedule();
+  for (const name of ['pocket-objects-synced', 'pocket-coros-synced', 'pocket-extras-applied', 'storage']) addEventListener(name, synced);
+  document.addEventListener('visibilitychange', synced);
+  const frame = h("div", { class: "live-tiles-frame" }, board); frame.refresh = synced; frame.dispose = stop;
+  return frame;
+}
+async function editTiles(selected = '') {
+  const owner = activeAccount(), body = h("div", { class: "today-tile-editor" });
   const draw = () => {
     const list = todayTiles.list(), missing = TODAY_CATALOG.filter(kind => !list.some(tile => tile.kind === kind));
-    const mutate = next => { todayTiles.save(next); draw(); };
+    const mutate = (kind, action, size) => {
+      if (activeAccount() !== owner) return;
+      try {
+        const current = todayTiles.list(), at = current.findIndex(t => t.kind === kind);
+        if (action === 'add') { if (at < 0) current.push({ uid: kind, kind }); }
+        else if (at < 0) { draw(); return; }
+        else if (action === 'remove') current.splice(at, 1);
+        else if (action === 'size') current[at] = { ...current[at], size };
+        else { const to = at + (action === 'up' ? -1 : 1); if (to >= 0 && to < current.length) [current[at], current[to]] = [current[to], current[at]]; }
+        todayTiles.save(current); draw(); todayBoard?.refresh();
+        body.querySelector(`[data-edit-tile="${kind}"] select`)?.focus({ preventScroll: true });
+      } catch (error) { say(error.message); }
+    };
     body.replaceChildren(
-      ...list.map((tile, i) => h("div", { class: "tile-row" }, h("span", { text: tile.label || tile.kind }),
+      ...list.map((tile, i) => h("div", { class: "tile-row", 'data-edit-tile': tile.kind }, h("span", { text: tileName(tile) }),
         h("span", { class: "tile-row-keys" },
-          h("button", { disabled: i === 0, "aria-label": "Move " + tile.kind + " up", onclick: () => { const next = [...list]; [next[i - 1], next[i]] = [next[i], next[i - 1]]; mutate(next); } }, "↑"),
-          h("button", { disabled: i === list.length - 1, "aria-label": "Move " + tile.kind + " down", onclick: () => { const next = [...list]; [next[i + 1], next[i]] = [next[i], next[i + 1]]; mutate(next); } }, "↓"),
-          h("button", { "aria-label": "Remove " + tile.kind, onclick: () => mutate(list.filter((_, k) => k !== i)) }, "×")))),
+          h("select", { class: "tile-size", "aria-label": "Size of " + tileName(tile), onchange: event => mutate(tile.kind, 'size', event.target.value) }, TILE_SIZES.map(size => h('option', { value: size, selected: size === tileSize(tile), text: size }))),
+          h("button", { disabled: i === 0, "aria-label": "Move " + tile.kind + " up", onclick: () => mutate(tile.kind, 'up') }, "↑"),
+          h("button", { disabled: i === list.length - 1, "aria-label": "Move " + tile.kind + " down", onclick: () => mutate(tile.kind, 'down') }, "↓"),
+          h("button", { "aria-label": "Unpin " + tile.kind, onclick: () => mutate(tile.kind, 'remove') }, "×")))),
       missing.length ? section("ADD") : null,
-      ...missing.map(kind => rowButton("+ " + kind, "", () => mutate([...list, { uid: kind, kind }]))));
+      ...missing.map(kind => rowButton("+ " + tileName({ kind }), "", () => mutate(kind, 'add'))));
   };
   draw();
-  await dialog("Today tiles", body, [["done", true]]);
-  if (location.hash === "#/today" || location.hash === "" || location.hash === "#/") route();
+  const closed = dialog("Today tiles", body, [["done", true]]);
+  if (TODAY_CATALOG.includes(selected)) body.querySelector(`[data-edit-tile="${selected}"] select`)?.focus();
+  await closed; todayBoard?.refresh();
 }
 // Until every connection is made or skipped, Today points to the one setup path.
 function setupBanner(body) {
@@ -239,56 +340,14 @@ function setupBanner(body) {
   add(body, h('div', { class: 'setup-banner' }, rowButton('finish setting up pocket', state.done + ' of ' + state.total + ' connected · next: ' + state.next, () => go('/setup')),
     h('button', { class: 'setup-hide', 'aria-label': 'Hide the setup reminder', onclick: () => { setup.hide(); route(); } }, 'hide')));
 }
-function todayHealth(body) {
-  const strip = h('div', { class: 'health-strip', 'aria-label': 'Recovery, strain and condition' });
-  const draw = (fresh = false) => {
-    const deck = coros.cachedCockpit() || {}, cache = coros.cached(), items = cache?.list || [];
-    const profile = { ...deck.profile, observedMax: coros.observedMaxHr() }, result = scores({ activities: items, deck, profile });
-    const activityData = Array.isArray(cache?.list), currentActivities = activityData && taskDay(cache.at || 0) === taskDay(), dayData = deck.daily?.days?.some(day => day.date === taskDay() && Number.isFinite(day.steps));
-    const strain = currentActivities || dayData ? result.strain.strain : null;
-    // A stale snapshot cannot establish that subsequent days contained no training.
-    const conditionResult = activityData && cache.at && !currentActivities ? scores({ activities: items, deck, profile, today: taskDay(cache.at) }).conditioning : result.conditioning;
-    const condition = activityData ? conditionResult.score : null;
-    const at = Math.max(deck.at || 0, cache?.at || 0), state = at ? fresh && taskDay(at) === taskDay() ? 'live' : 'cached' : 'missing';
-    strip.dataset.state = state;
-    if (state === 'missing' && !coros.connected()) {
-      strip.replaceChildren(h('button', { class: 'health-connect', onclick: () => go('/movement') },
-        h('span', { class: 'health-connect-action', text: 'connect COROS' }), h('span', { class: 'meta muted', text: 'recovery · strain · condition' })));
-      return;
-    }
-    strip.replaceChildren(...[
-      ['recovery', 'recovery', result.recovery?.score ?? null, '%', result.recovery?.zone || '—', deck.at || 0],
-      ['strain', 'strain', strain, '%', strain != null ? result.strain.target.join('–') + '%' : '—', currentActivities ? cache.at : deck.at || 0],
-      ['condition', 'conditioning', condition, '', condition != null ? conditionResult.status : '—', cache?.at || 0],
-    ].map(([label, name, value, unit, zone, readingAt]) => {
-      const available = Number.isFinite(value), bar = h('span', { class: 'health-bar', 'aria-hidden': 'true' }, Array.from({ length: 10 }, (_, i) => h('i', { class: available && i < Math.round(Math.min(100, value) / 10) ? 'filled' : '' })));
-      return h('button', { class: 'health-stat ' + label, 'data-score': name, 'data-state': available ? fresh && readingAt && taskDay(readingAt) === taskDay() ? 'live' : 'cached' : 'missing', 'aria-label': label + ': ' + (available ? value + unit + ', ' + zone : 'no reading'), title: readingAt ? 'Updated ' + new Date(readingAt).toLocaleString() : label,
-        onclick: () => { workspaceSession.setItem('pocket:movement-open', name); go('/movement'); } },
-        h('span', { class: 'health-label', text: label }), h('span', { class: 'health-value' }, available ? String(value) : '—', available && unit ? h('small', { text: unit }) : null), bar, h('span', { class: 'health-zone', text: zone }));
-    }));
-  };
-  draw();
-  if (coros.connected()) Promise.allSettled([coros.activities(90), coros.cockpit(28)]).then(results => { if (body.isConnected) draw(results.every(result => result.status === 'fulfilled')); });
-  return strip;
-}
 function todayView() {
   const body = view("today", [["+ capture", capture], ["search", () => go("/search")]]);
   workspaceTitle(body, "today", new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }));
-  add(body, todayHealth(body));
-  const now = Date.now(), appointments = agenda.all(), next = appointments.find(event => event.when + event.minutes * MINUTE > now);
-  if (next) {
-    const sameDay = new Date(next.when).toDateString() === new Date(now).toDateString();
-    add(body, groupHeading('Up next', appointments.filter(event => new Date(event.when).toDateString() === new Date(now).toDateString()).length + ' today'),
-      h('button', { class: 'today-event', onclick: () => go('/calendar/' + next.uid) }, h('span', { class: 'event-time', text: new Date(next.when).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }),
-        h('span', { class: 'event-main' }, h('span', { class: 'event-name', text: next.title }), h('span', { class: 'meta muted', text: [!sameDay ? new Date(next.when).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '', next.minutes + ' min', 'until ' + new Date(next.when + next.minutes * MINUTE).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })].filter(Boolean).join(' · ') }))));
-  }
-  const chosen = load("tasks.json").next?.uid, all = tasks.list(), due = all.filter(t => !t.done && (t.uid === chosen || t.due && t.due <= taskDay()));
-  due.sort((a,b) => Number(b.uid === chosen) - Number(a.uid === chosen) || String(a.due || '').localeCompare(String(b.due || '')));
-  const ready = parking.open().filter(t => t.due > 0 && t.due <= Date.now());
-  add(body, groupHeading('Do today', due.length), due.map(task => taskRow(task)), keys(['all tasks', () => go('/tasks')], ['+ task', () => go('/tasks/new')], ['focus', () => go('/clock/new/focus')]));
-  if (ready.length) add(body, groupHeading('Revisit', ready.length + (ready.length === 1 ? ' thought' : ' thoughts')),
-    ready.map(item => rowButton(item.text, thoughtMeta(item), () => go('/thoughts/' + item.id), { class: 'row-button today-thought' })));
-  add(body, groupHeading('Your tiles', null, [['+ add', editTiles], ['edit', editTiles]]), tileGrid());
+  // Today is the tile board, as on the phone: recovery sits on the movement tile, the next event on the calendar tile and the chosen task on the tasks tile.
+  // Adding and editing follow the tiles, so the board starts right under the header.
+  const board = tileBoard(); todayBoard = board;
+  add(body, board, h("div", { class: "keys today-tile-keys" }, h("button", { onclick: editTiles }, "+ add tile"), h("button", { onclick: editTiles }, "edit tiles")));
+  if (coros.connected()) Promise.allSettled([coros.activities(90), coros.cockpit(28)]).then(() => board.refresh());
   setupBanner(body);
 }
 function parkingView(id) {
@@ -437,6 +496,7 @@ const APP_GLYPHS = {
   tasks: 'M2 4l2 2 3-4M9 4h5M2 11l2 2 3-4M9 11h5', notes: 'M3 2h8l2 2v10H3zM6 6h4M6 9h4M6 12h2', zines: 'M2 3h5l1 2 1-2h5v10H9l-1 1-1-1H2zM8 5v8',
   movement: 'M2 9h3l2-5 3 9 2-4h2', gym: 'M1 6v4M3 4v8M3 8h10M13 4v8M15 6v4', dice: 'M3 2h10l1 1v10l-1 1H3l-1-1V3zM5 5h1M10 5h1M8 8h1M5 11h1M10 11h1',
   receipt: 'M3 2h10v12H3zM5 11V9M8 11V7M11 11V4', travel: 'M2 6h12v8H2zM5 6V3h6v3M6 6v8M10 6v8', pip: 'M2 3h12v8H8l-3 3v-3H2zM5 6h6',
+  focus: 'M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4M6 6h4v4H6z', paper: 'M3 2h10v12H3zM5 5h6M5 8h6M5 11h4',
   setup: 'M8 2v3M8 11v3M2 8h3M11 8h3M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2M6 6h4v4H6z', sync: 'M6 2h4v4H6zM3 14v-4l2-2h6l2 2v4',
 };
 function appGlyph(name) {
@@ -805,7 +865,7 @@ async function roll(result, detail) {
   const { mode, count } = diceState(), list = dice.list();
   if (mode === "pick" && list.length < 2) { say("Add at least two things to pick from."); editList(); return; }
   rolling = true;
-  if (!reduceMotion) for (let i = 0; i < 7; i++) { result.textContent = face(mode, preview(mode, count, list), list); await new Promise(r => setTimeout(r, 55)); }
+  if (!motionOff()) for (let i = 0; i < 7; i++) { result.textContent = face(mode, preview(mode, count, list), list); await new Promise(r => setTimeout(r, 55)); }
   const values = preview(mode, count, list), shown = face(mode, values, list); let note = "", log;
   if (mode === "d20") { note = values[0] === 20 ? "NAT 20!" : values[0] === 1 ? "critical fail" : ""; log = "d20 → " + shown; }
   else if (mode === "coin") log = "coin → " + shown;
@@ -1027,6 +1087,7 @@ let lastState = status.state;
 onStatus(() => {
   const state = document.getElementById("sync-status"); if (state) state.textContent = statusLabel();
   const finished = lastState === "syncing" && status.state === "idle"; lastState = status.state;
+  if (finished && todayBoard) { todayBoard.refresh(); return; }
   // Merged edits from the phone appear without a reload, unless the user is typing or a dialog is open.
   if (finished && status.changed && !searchOpening && !["#/zines", "#/movement", "#/pip", "#/travel", "#/account", "#/sync", "#/setup"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea, select")) {
     if (location.hash === '#/brief') { briefView?.refresh(); return; }
@@ -1063,5 +1124,6 @@ initExtras();
 startClockRuntime();
 const refresh = installRefresh({ sync: syncNow, status, onStatus, describe, say });
 if ('serviceWorker' in navigator && !import.meta.env.DEV) navigator.serviceWorker.register('/sw.js').catch(() => {});
-addEventListener("pagehide", () => { flushNote?.(); zines.leave(); travel.leave(); briefView?.(); briefView=null; });
+onWorkspaceChange(() => { if (todayBoard) queueMicrotask(() => todayBoard?.refresh()); });
+addEventListener("pagehide", () => { todayBoard?.dispose(); todayBoard=null; flushNote?.(); zines.leave(); travel.leave(); briefView?.(); briefView=null; });
 addEventListener("pageshow", event => { if (event.persisted) route(); });
