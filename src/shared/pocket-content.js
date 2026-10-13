@@ -1,4 +1,5 @@
 import { canonical } from './objects.js';
+import { validTraining } from './movement.js';
 
 export const CONTENT_FILES = ['agenda.json', 'clock.json', 'drafts.json', 'preferences.json'];
 export const CONTENT_EMPTY = {
@@ -24,7 +25,7 @@ export function validContent(name,doc){
     if(name==='preferences.json'&&!PREFERENCE_IDS.includes(item.uid))return false;
     if(name==='preferences.json'&&item.uid==='daily-brief'&&item.deleted!==undefined&&typeof item.deleted!=='boolean')return false;
     if(item.deleted===true)return true;
-    if(name==='agenda.json')return string(item.title,500)&&item.title.trim().length>0&&stamp(item.when)&&Number.isInteger(item.minutes)&&item.minutes>=1&&item.minutes<=1440&&link(item.task_uid)&&stamp(item.remindAt??0)&&stamp(item.created);
+    if(name==='agenda.json')return string(item.title,500)&&item.title.trim().length>0&&stamp(item.when)&&Number.isInteger(item.minutes)&&item.minutes>=1&&item.minutes<=1440&&link(item.task_uid)&&stamp(item.remindAt??0)&&stamp(item.created)&&validTraining(item.training);
     if(name==='clock.json')return ['alarm','timer','focus','stopwatch'].includes(item.kind)&&string(item.title,500)&&typeof item.enabled==='boolean'&&typeof item.daily==='boolean'&&Number.isInteger(item.hour)&&item.hour>=0&&item.hour<=23&&Number.isInteger(item.minute)&&item.minute>=0&&item.minute<=59&&stamp(item.due)&&stamp(item.remaining)&&link(item.task_uid)&&stamp(item.created)&&(item.laps===undefined||string(item.laps,2400));
     if(name==='drafts.json')return ['note','task','thought','capture','appointment'].includes(item.kind)&&link(item.target_uid)&&object(item.value)&&JSON.stringify(item.value).length<=32000;
     if(item.uid==='daily-brief')return object(item.value)&&typeof item.value.enabled==='boolean'&&Object.keys(item.value).every(key=>key==='enabled');
@@ -38,7 +39,8 @@ export function mergeContent(name,stored,incoming){
     // Match native concurrent Brief edits: deletion wins, then the canonical boolean value.
     const briefTie=old&&name==='preferences.json'&&item.uid==='daily-brief'&&item.updated===old.updated
       &&(item.deleted===true&&old.deleted!==true||item.deleted!==true&&old.deleted!==true&&canonical(item.value)>canonical(old.value));
-    if(!old||item.updated>old.updated||briefTie)all.set(item.uid,item);
+    if(!old||item.updated>old.updated||briefTie)all.set(item.uid,
+      name==='agenda.json'&&old?.training&&item.training===undefined&&!item.deleted ? {...item,training:old.training} : item);
   }
   return {v:1,[key]:[...all.values()]};
 }

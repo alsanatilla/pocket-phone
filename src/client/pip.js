@@ -82,6 +82,11 @@ export function withBrief(brief) {
   }).uid;
 }
 
+export function withMovement(text) {
+  const chat = store.create();
+  return store.update(chat.uid, value => { value.title = 'Training'; value.draft = String(text).slice(0,8000); }).uid;
+}
+
 /** Travel prepares a separate draft; only the composer's Send starts a provider request. */
 export function withTravel(trip, stop, action = 'find') {
   const prepared = travelDraft(trip, stop, action);

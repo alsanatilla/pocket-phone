@@ -84,6 +84,10 @@ final class Scores {
     }
     static Result compute(LocalDate today, ZoneId zone, List<CorosData.Activity> activities, List<CorosData.Hrv> hrv,
                           Map<LocalDate, Integer> resting, Map<LocalDate, CorosData.Day> daily, int age, boolean female, int observedMax, int restingFallback) {
+        return compute(today,zone,activities,hrv,resting,daily,age,female,observedMax,restingFallback,28);
+    }
+    static Result compute(LocalDate today, ZoneId zone, List<CorosData.Activity> activities, List<CorosData.Hrv> hrv,
+                          Map<LocalDate, Integer> resting, Map<LocalDate, CorosData.Day> daily, int age, boolean female, int observedMax, int restingFallback, int span) {
         Result result = new Result();
         LocalDate latestRest = null; for (LocalDate d : resting.keySet()) if (latestRest == null || d.isAfter(latestRest)) latestRest = d;
         result.restHr = latestRest == null ? restingFallback : resting.get(latestRest);
@@ -100,7 +104,7 @@ final class Scores {
             passive[i] = Math.max(0, (day == null ? 0 : day.steps) - walked) / 1000.0 * 1.5;
             strain[i] = strainOf(active[i] + passive[i]);
         }
-        for (int i = history - 28; i < history; i++) { result.recoveries.add(recovery(today.minusDays(history - 1 - i), hrv, resting, daily, strain[i - 1])); result.strains.add(strain[i]); }
+        for (int i = history - Math.max(1,Math.min(90,span)); i < history; i++) { result.recoveries.add(recovery(today.minusDays(history - 1 - i), hrv, resting, daily, i==0?0:strain[i - 1])); result.strains.add(strain[i]); }
         result.recovery = result.recoveries.get(result.recoveries.size() - 1);
         Strain s = new Strain(); s.strain = strain[history - 1]; s.active = active[history - 1]; s.passive = passive[history - 1]; s.workouts = workouts[history - 1];
         double usual = 0; for (int i = history - 15; i < history - 1; i++) usual += strain[i]; usual = Math.max(30, usual / 14);

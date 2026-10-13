@@ -82,7 +82,7 @@ export function dayBars(days, values, { format = String, label = "", max = null 
   values.forEach((v, i) => {
     const left = DAY_PAD + i * slot;
     if (v) root.append(svg("rect", { x: left.toFixed(1), y: y(v).toFixed(1), width: width.toFixed(1), height: (DAY_H - y(v)).toFixed(1), class: i === last ? "chart-fill-accent" : "chart-fill-context" }));
-    root.append(svg("rect", { x: left.toFixed(1), y: 0, width: slot.toFixed(1), height: DAY_H, class: "chart-hit" }, title(`${days[i]} · ${v ? format(v) : "no data"}`)));
+    root.append(svg("rect", { x: left.toFixed(1), y: 0, width: slot.toFixed(1), height: DAY_H, class: "chart-hit" }, title(`${days[i]} · ${v != null ? format(v) : "no data"}`)));
   });
   return root;
 }

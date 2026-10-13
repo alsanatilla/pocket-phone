@@ -2,6 +2,14 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.21.0 — Movement: readiness, plan and history
+
+- Web and Android share a compact overview, separate activity archive and 7/28/90-day trends. Readiness cards open their underlying instruments; missing readings remain empty and dated. Routes, linked activity charts, splits and full COROS metrics remain available.
+- Plan sessions in Movement and see them in Calendar. Sport, duration and Gym exercises persist through account sync, offline edits and Calendar drafts. Starting a planned Gym session opens the log with its exercises; repeated starts reuse that workout. Pip's existing training tasks also appear in the week.
+- COROS activities and completed Gym logs share one history. Explicitly link a watch strength recording to its Gym log to count it once, or unlink it. Mixed-sport totals use time; distance totals stay within the chosen sport.
+- Talk training with Pip starts an unsent draft with dated readings, recent workouts and upcoming sessions. Existing conversations remain intact.
+- Focused Movement checks and isolated browser flows cover the plan-to-Gym cycle, sync formats, incoming edits, offline planning, activity detail navigation, missing data and small screens. Full test suite and lint are skipped. See BUILD-STATUS.json for build results and signing status. No physical handset or live COROS account was used.
+
 ## 0.19.2 — Android fullscreen
 
 - The launcher no longer resets system UI visibility. Home, Today, Pocket screens and Camera hide both status and navigation bars, with transient navigation available by swiping.

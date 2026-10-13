@@ -38,26 +38,18 @@ public class MovementActivityTest {
         c=RuntimeEnvironment.getApplication();for(String key:new String[]{"text_phone","pocket_cloud","pocket_movement","pocket_coros_auth"})c.getSharedPreferences(key,0).edit().clear().commit();
         c.getSharedPreferences("text_phone",0).edit().putBoolean("reduce_motion",true).commit(); repo=new CorosRepository(c,new MovementRepositoryTest.FakeIO()); ReflectionHelpers.setStaticField(CorosRepository.class,"instance",repo);
     }
-    @Test public void sampleShowsCompleteCockpitWithoutWritingInventedData() throws Exception {
+    @Test public void emptyWorkspaceShowsNoInventedReadingsOrActivities() throws Exception {
         ActivityController<MovementActivity> ctl=Robolectric.buildActivity(MovementActivity.class).setup();MovementActivity a=ctl.get();
-        try {
-            assertNotNull(a.root.findViewWithTag("movement_sample"));assertEquals(3,countPrefix(a.body,"movement_activity_"));
-            a.root.findViewWithTag("movement_score_0").performClick();assertTrue(text(a.body).contains("LAST SLEEP"));assertTrue(text(a.body).contains("STRESS · 0–100"));save(a,360,800,"recovery");
-            a.root.findViewWithTag("movement_score_2").performClick();assertTrue(text(a.body).contains("VO2max"));assertTrue(text(a.body).contains("3:52:00"));save(a,360,800,"conditioning");
-            a.root.findViewWithTag("movement_activity_sample-0").performClick();assertNotNull(a.root.findViewWithTag("movement_route"));assertNotNull(a.root.findViewWithTag("movement_chart_pace"));save(a,360,800,"activity");
-            a.root.findViewWithTag("movement_more_charts").performClick();assertNotNull(a.root.findViewWithTag("movement_chart_cadence"));
-            a.root.findViewWithTag("movement_more").performClick();assertNotNull(a.root.findViewWithTag("movement_splits"));assertTrue(text(a.body).contains("TIME BY HEART RATE"));saveBody(a,360,"activity-metrics");
-            assertFalse(c.getSharedPreferences("pocket_movement",0).contains("snapshot"));assertFalse(c.getSharedPreferences("pocket_movement",0).contains("activity_details"));
-        } finally {ctl.pause().stop().destroy();}
+        try {assertNull(a.root.findViewWithTag("movement_sample"));assertEquals(0,countPrefix(a.body,"movement_activity_"));assertNotNull(a.root.findViewWithTag("movement_plan_add"));assertTrue(text(a.body).contains("no reading"));assertFalse(c.getSharedPreferences("pocket_movement",0).contains("snapshot"));save(a,360,800,"empty");}finally{ctl.pause().stop().destroy();}
     }
     @Test public void offlineArchiveHasEveryActivityAndOpenedRoutesRemainUsable() throws Exception {
         seed();CorosData.Activity run=repo.cached().activities.get(0);repo.rememberDetail("local",run.id,MovementSample.detail(run),true);
         ActivityController<MovementActivity> ctl=Robolectric.buildActivity(MovementActivity.class).setup();MovementActivity a=ctl.get();
         try{
-            assertNull(a.root.findViewWithTag("movement_sample"));assertEquals(39,countPrefix(a.body,"movement_activity_"));
-            a.root.findViewWithTag("movement_activity_"+run.id).performClick();assertNotNull(a.root.findViewWithTag("movement_route"));assertNull(a.root.findViewWithTag("movement_detail_retry"));
+            activities(a);assertNull(a.root.findViewWithTag("movement_sample"));assertEquals(39,countPrefix(a.body,"movement_activity_"));
+            activities(a);a.root.findViewWithTag("movement_activity_"+run.id).performClick();assertNotNull(a.root.findViewWithTag("movement_route"));assertNull(a.root.findViewWithTag("movement_detail_retry"));
             a.root.findViewWithTag("app_settings").performClick();assertEquals("movement settings",((TextView)a.root.findViewWithTag("page_heading")).getText().toString());
-            a.onBackPressed();assertNotNull(a.root.findViewWithTag("movement_route"));a.onBackPressed();assertNotNull(a.root.findViewWithTag("movement_scores"));assertFalse(a.isFinishing());
+            a.onBackPressed();assertNotNull(a.root.findViewWithTag("movement_route"));a.onBackPressed();assertNotNull(a.root.findViewWithTag("movement_tabs"));assertFalse(a.isFinishing());
         }finally{ctl.pause().stop().destroy();}
     }
     @Test public void homeScoreDeepLinkReturnsHomeAndOrdinaryScoreBackClosesPanel() throws Exception {
@@ -70,18 +62,18 @@ public class MovementActivityTest {
         seed();CorosData.Activity run=repo.cached().activities.get(0);repo.rememberDetail("local",run.id,MovementSample.detail(run),true);
         ActivityController<MovementActivity> ctl=Robolectric.buildActivity(MovementActivity.class).setup();
         try{
-            MovementActivity a=ctl.get();a.root.findViewWithTag("movement_activity_"+run.id).performClick();a.root.findViewWithTag("movement_more_charts").performClick();a.root.findViewWithTag("movement_more").performClick();
+            MovementActivity a=ctl.get();activities(a);a.root.findViewWithTag("movement_activity_"+run.id).performClick();a.root.findViewWithTag("movement_more_charts").performClick();a.root.findViewWithTag("movement_more").performClick();
             MovementChart pace=(MovementChart)a.root.findViewWithTag("movement_chart_pace"), hr=(MovementChart)a.root.findViewWithTag("movement_chart_hr");
             MovementChart.Cursor cursor=ReflectionHelpers.getField(pace,"cursor");assertSame(cursor,ReflectionHelpers.getField(hr,"cursor"));pace.onKeyDown(KeyEvent.KEYCODE_DPAD_RIGHT,new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_RIGHT));assertTrue(cursor.index>=0);assertFalse(((TextView)a.root.findViewWithTag("movement_cursor")).getText().toString().equals("average"));
             ctl.recreate();a=ctl.get();assertNotNull(a.root.findViewWithTag("movement_splits"));assertNotNull(a.root.findViewWithTag("movement_chart_cadence"));
         }finally{ctl.pause().stop().destroy();}
     }
-    @Test @Config(qualifiers="w320dp-h640dp-mdpi") public void smallestPhoneAndLandscapeKeepAllInstrumentsInsideViewport() throws Exception {
+    @Test @Config(qualifiers="w320dp-h640dp-mdpi") public void smallestPhoneAndLandscapeKeepAllInstrumentsInsideViewport() throws Exception { seed();CorosData.Activity run=repo.cached().activities.get(0);repo.rememberDetail("local",run.id,MovementSample.detail(run),true);
         ActivityController<MovementActivity> ctl=Robolectric.buildActivity(MovementActivity.class).setup();
         try{
             MovementActivity a=ctl.get();layout(a,320,640);View scores=a.root.findViewWithTag("movement_scores");assertTrue(scores.getWidth()<=320);checkWidths((ViewGroup)scores);assertEquals(1,((TextView)a.root.findViewWithTag("movement_score_name_2")).getLineCount());save(a,320,640,"small-phone");
             a.root.findViewWithTag("movement_score_0").performClick();layout(a,320,640);assertEquals(0,overflows(a.body,a.body.getWidth()));
-            a.root.findViewWithTag("movement_activity_sample-0").performClick();save(a,640,360,"landscape");assertNotNull(a.root.findViewWithTag("movement_chart_hr"));
+            activities(a);a.root.findViewWithTag("movement_activity_sample-0").performClick();save(a,640,360,"landscape");assertNotNull(a.root.findViewWithTag("movement_chart_hr"));
         }finally{ctl.pause().stop().destroy();}
     }
     @Test public void incomingSyncRepaintsCurrentPanelWithoutNavigatingAway() throws Exception {
@@ -93,7 +85,7 @@ public class MovementActivityTest {
     }
     @Test @Config(sdk={24,35}) @GraphicsMode(GraphicsMode.Mode.LEGACY) public void oldestAndCurrentAndroidSupportNativeScreensAndLifecycle() throws Exception {
         seed();ActivityController<MovementActivity> ctl=Robolectric.buildActivity(MovementActivity.class).setup();
-        try {MovementActivity a=ctl.get();a.root.findViewWithTag("movement_score_0").performClick();assertNotNull(a.root.findViewWithTag("movement_method"));a.root.findViewWithTag("movement_activity_sample-0").performClick();assertNotNull(a.root.findViewWithTag("coros_connect"));a.onBackPressed();assertNotNull(a.root.findViewWithTag("movement_scores"));}finally{ctl.pause().stop().destroy();}
+        try {MovementActivity a=ctl.get();a.root.findViewWithTag("movement_score_0").performClick();assertNotNull(a.root.findViewWithTag("movement_method"));activities(a);a.root.findViewWithTag("movement_activity_sample-0").performClick();assertNotNull(a.root.findViewWithTag("coros_connect"));a.onBackPressed();assertNotNull(a.root.findViewWithTag("movement_tabs"));}finally{ctl.pause().stop().destroy();}
     }
     @Test @Config(qualifiers="w320dp-h640dp-mdpi") public void largeTextUsesFullWidthScoresWithoutClippedLabels() throws Exception {
         c.getSharedPreferences("text_phone",0).edit().putBoolean("large_text",true).commit();ActivityController<MovementActivity> ctl=Robolectric.buildActivity(MovementActivity.class).setup();
@@ -108,9 +100,9 @@ public class MovementActivityTest {
         });ReflectionHelpers.setStaticField(CorosRepository.class,"instance",repo);c.getSharedPreferences("pocket_coros_auth",0).edit().putString("tokens","fixture-presence").commit();
         ActivityController<MovementActivity> ctl=Robolectric.buildActivity(MovementActivity.class).setup();
         try{
-            MovementActivity a=ctl.get();CorosData.Activity run=repo.cached().activities.get(0);a.root.findViewWithTag("movement_activity_"+run.id).performClick();assertTrue(started.await(3,TimeUnit.SECONDS));a.onBackPressed();finish.countDown();
+            MovementActivity a=ctl.get();CorosData.Activity run=repo.cached().activities.get(0);activities(a);a.root.findViewWithTag("movement_activity_"+run.id).performClick();assertTrue(started.await(3,TimeUnit.SECONDS));a.onBackPressed();finish.countDown();
             long until=System.nanoTime()+TimeUnit.SECONDS.toNanos(3);while(repo.cachedDetail(run.id)==null&&System.nanoTime()<until)Thread.sleep(10);Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(250));
-            assertNotNull(repo.cachedDetail(run.id));assertNotNull(a.root.findViewWithTag("movement_scores"));assertNull(a.root.findViewWithTag("movement_chart_hr"));
+            assertNotNull(repo.cachedDetail(run.id));assertNotNull(a.root.findViewWithTag("movement_tabs"));assertNull(a.root.findViewWithTag("movement_chart_hr"));
         }finally{finish.countDown();ctl.pause().stop().destroy();}
     }
     @Test public void pullRefreshForcesCorosAndReplacesReadingsEvenWithoutPocketAccount() throws Exception {
@@ -140,6 +132,7 @@ public class MovementActivityTest {
     private static String text(View view){StringBuilder s=new StringBuilder();if(view instanceof TextView)s.append(((TextView)view).getText()).append('\n');if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++)s.append(text(((ViewGroup)view).getChildAt(i)));return s.toString();}
     private static void checkWidths(ViewGroup view){for(int i=0;i<view.getChildCount();i++){View child=view.getChildAt(i);assertTrue(child.getRight()<=view.getWidth());if(child instanceof ViewGroup)checkWidths((ViewGroup)child);}}
     private static int overflows(ViewGroup group,int width){int n=0;for(int i=0;i<group.getChildCount();i++){View child=group.getChildAt(i);if(child.getRight()>width)n++;if(child instanceof ViewGroup)n+=overflows((ViewGroup)child,child.getWidth());}return n;}
+    private static void activities(MovementActivity a){ViewGroup tabs=a.root.findViewWithTag("movement_tabs");if(tabs!=null)tabs.getChildAt(1).performClick();}
     private static void layout(MovementActivity a,int w,int h){a.root.measure(View.MeasureSpec.makeMeasureSpec(w,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(h,View.MeasureSpec.EXACTLY));a.root.layout(0,0,w,h);}
     private static void save(MovementActivity a,int w,int h,String name)throws Exception{layout(a,w,h);image(a.root,w,h,name);}
     private static void saveBody(MovementActivity a,int w,String name)throws Exception{layout(a,w,800);a.body.measure(View.MeasureSpec.makeMeasureSpec(a.body.getWidth(),View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED));a.body.layout(0,0,a.body.getMeasuredWidth(),a.body.getMeasuredHeight());image(a.body,a.body.getWidth(),Math.min(12000,a.body.getHeight()),name);}

@@ -11,7 +11,7 @@ export const HECKLE = 3;
 export const KIND = { ROLL: "ROLL", PARK: "PARK", CLEAR: "CLEAR", KILL: "KILL", MEMO: "MEMO", DONE: "DONE", PHOTO: "PHOTO", ALARM: "ALARM", TASK: "TASK" };
 
 const listeners = new Set();
-export const onChange = fn => listeners.add(fn);
+export const onChange = fn => { listeners.add(fn); return () => listeners.delete(fn); };
 export const changed = name => { markDirty(name); listeners.forEach(fn => fn(name)); };
 
 export function load(name) {
@@ -239,6 +239,16 @@ export const gym = {
     const doc = load("gym.json"), w = doc.workouts.find(x => x.id === id && !x.deleted);
     if (!w) throw new Error("This workout was removed.");
     change(w); w.updated = Math.max(Date.now(), (w.updated || 0) + 1); save("gym.json", doc); changed("gym.json"); return w;
+  },
+  startPlan(plan) {
+    if (plan.training?.sport !== 'gym') throw new Error('Choose a Gym session.');
+    const existing = gym.all().find(w => w.plan_uid === plan.uid); if (existing) return existing;
+    if (gym.active()) throw new Error('Finish the current Gym workout first.');
+    const doc = load('gym.json'), id='plan-'+plan.uid, previous=doc.workouts.find(w=>w.id===id), now=Math.max(Date.now(),(previous?.updated||0)+1);
+    doc.workouts=doc.workouts.filter(w=>w.id!==id);
+    const w = { id, started:now, ended:0, updated:now, plan_uid:plan.uid, name:plan.title,
+      entries:[...new Set(plan.training.exercises)].map(exercise => ({exercise,sets:[]})) };
+    doc.workouts.push(w); save('gym.json',doc); changed('gym.json'); return w;
   },
   start() {
     const open = gym.active(); if (open) return open;

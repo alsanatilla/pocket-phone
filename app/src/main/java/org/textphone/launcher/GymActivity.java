@@ -30,6 +30,7 @@ public final class GymActivity extends PocketActivity {
         super.onCreate(state);
         if (state != null) { page = state.getString("page", HOME); exercise = state.getString("exercise", ""); workoutId = state.getString("workout", ""); kg = state.getDouble("kg", 20); reps = state.getInt("reps", 8); }
         else { String linked = getIntent().getStringExtra("pocket_workout"); if (linked != null && GymStore.find(this, linked) != null) { workoutId = linked; page = WORKOUT; } }
+        if(state==null&&getIntent().getBooleanExtra("pocket_resume",false)&&GymStore.active(this)!=null){java.util.List<String> names=GymStore.exerciseNames(GymStore.active(this));if(!names.isEmpty()){openLog(names.get(0));return;}}
         render();
     }
     @Override protected void onSaveInstanceState(Bundle state) {

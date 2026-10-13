@@ -76,6 +76,20 @@ final class GymStore {
             list.add(w); write(c, list); CloudSync.changed(c); return w;
         }
     }
+    static JSONObject startPlan(Context c, AgendaStore.Event plan) {
+        if(plan.training==null || !MovementData.validTraining(plan.training) || !"gym".equals(plan.training.optString("sport")))throw new IllegalArgumentException("Choose a Gym session.");
+        synchronized(LOCK){
+            for(JSONObject w:workouts(c))if(plan.uid.equals(w.optString("plan_uid")))return w;
+            if(active(c)!=null)throw new IllegalStateException("Finish the current Gym workout first.");
+            List<JSONObject> list=all(c);long now=System.currentTimeMillis();String id="plan-"+plan.uid;
+            JSONObject w=new JSONObject();try{
+                for(int i=list.size()-1;i>=0;i--)if(id.equals(list.get(i).optString("id"))){now=Math.max(now,list.get(i).optLong("updated")+1);list.remove(i);}
+                w.put("id",id).put("plan_uid",plan.uid).put("name",plan.title).put("started",now).put("ended",0).put("updated",now).put("entries",new JSONArray());
+                JSONArray names=plan.training.getJSONArray("exercises");for(int i=0;i<names.length();i++)entry(w,names.getString(i));
+            }catch(JSONException e){throw new IllegalStateException(e);}
+            list.add(w);write(c,list);CloudSync.changed(c);return w;
+        }
+    }
     static JSONObject addSet(Context c, String id, String exercise, double kg, int reps) {
         if (exercise == null || exercise.trim().isEmpty()) throw new IllegalArgumentException("Choose an exercise.");
         if (reps < 1 || reps > 100 || kg < 0 || kg > 1000) throw new IllegalArgumentException("Use 1–100 reps and up to 1000 kg.");
