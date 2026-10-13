@@ -37,8 +37,12 @@ export const preferences = {
   clear(uid) { if (!PREFS.has(uid)) throw new Error('Unknown preference.'); return put('preferences.json', uid, null, {}, true); },
 };
 export const TODAY_CATALOG = Object.freeze(['brief', 'tasks', 'agenda', 'thoughts', 'notes', 'movement', 'gym', 'pip', 'activity', 'focus', 'clock', 'paper', 'zines', 'dice']);
-export const TODAY_DEFAULTS = Object.freeze(['agenda', 'thoughts', 'tasks', 'activity'].map(kind => Object.freeze({ uid: kind, kind })));
-function tiles(value) { const seen = new Set(); return (Array.isArray(value) ? value : TODAY_DEFAULTS).filter(tile => tile && TODAY_CATALOG.includes(tile.kind) && !seen.has(tile.kind) && seen.add(tile.kind)).slice(0, TODAY_CATALOG.length).map(tile => ({ uid: String(tile.uid || tile.kind).slice(0, 100), kind: tile.kind, ...(typeof tile.label === 'string' && tile.label.trim() ? { label: tile.label.trim().slice(0, 40) } : {}) })); }
+export const TODAY_DEFAULTS = Object.freeze(['movement', 'agenda', 'thoughts', 'tasks', 'activity'].map(kind => Object.freeze({ uid: kind, kind })));
+// Tile sizes match the phone: a small tile is one cell, a square two by two, a wide one the full row.
+export const TILE_SIZES = Object.freeze(['small', 'square', 'wide']);
+export const tileSize = tile => TILE_SIZES.includes(tile?.size) ? tile.size : ['agenda', 'notes', 'movement'].includes(tile?.kind) ? 'wide' : ['activity', 'dice', 'paper'].includes(tile?.kind) ? 'small' : 'square';
+// The phone writes "size" into the same synced list, so saving here must keep it.
+function tiles(value) { const seen = new Set(); return (Array.isArray(value) ? value : TODAY_DEFAULTS).filter(tile => tile && TODAY_CATALOG.includes(tile.kind) && !seen.has(tile.kind) && seen.add(tile.kind)).slice(0, TODAY_CATALOG.length).map(tile => ({ uid: String(tile.uid || tile.kind).slice(0, 100), kind: tile.kind, ...(typeof tile.label === 'string' && tile.label.trim() ? { label: tile.label.trim().slice(0, 40) } : {}), ...(TILE_SIZES.includes(tile.size) ? { size: tile.size } : {}) })); }
 export const todayTiles = { catalog: TODAY_CATALOG, list: () => tiles(preferences.get('today-tiles')), save: value => preferences.set('today-tiles', tiles(value)) };
 
 function draftKey(key) {
