@@ -78,7 +78,7 @@ function view(tool, actions = []) {
   todayBoard?.dispose(); todayBoard = null;
   flushNote?.(); flushNote = null;
   briefView?.(); briefView = null;
-  zines.leave(); pip.leave(); travel.leave(); shell(); closeDialog(); say("");
+  zines.leave(); pip.leave(); travel.leave(); movement.leave(); shell(); closeDialog(); say("");
   content.querySelectorAll('.pixel-backdrop').forEach(canvas=>canvas.dispose?.());
   const pipEntry = document.getElementById("pip-entry"); pipEntry.classList.toggle("selected", tool === "pip"); pipEntry.setAttribute("aria-current", tool === "pip" ? "page" : "false");
   document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync", "calendar", "clock", "travel", "account", "brief", "setup"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
@@ -1073,7 +1073,7 @@ function route() {
   if (name === "notes") notesView(arg); else if (name === "receipt") receiptView(arg); else if (name === "dice") diceView(); else if (name === "sync" || name === "account" || name === "link") accountView(name === "link" ? arg || "" : "", name === "account" && arg === "new");
   else if (name === "pip") pip.mount(view("pip"), arg, pipHelpers);
   else if (name === "zines") zines.mount(view("zines"), arg, { go, say, dialog, confirm: confirmBox });
-  else if (name === "movement") movement.mount(view("movement"), { say });
+  else if (name === "movement") movement.mount(view("movement"), { say, go, arg, choose, askPip: text => go('/pip/' + pip.withMovement(text)) });
   else if (name === "calendar") mountAgenda(view("calendar"), plannerApi);
   else if (name === "clock") mountClock(view("clock"), plannerApi);
   else if (name === "travel") travel.mount(view("travel"), { tripId: arg || "", sub: sub || "", leaf: leaf || "", extra: deep || "" }, plannerApi);
@@ -1125,5 +1125,5 @@ startClockRuntime();
 const refresh = installRefresh({ sync: syncNow, status, onStatus, describe, say });
 if ('serviceWorker' in navigator && !import.meta.env.DEV) navigator.serviceWorker.register('/sw.js').catch(() => {});
 onWorkspaceChange(() => { if (todayBoard) queueMicrotask(() => todayBoard?.refresh()); });
-addEventListener("pagehide", () => { todayBoard?.dispose(); todayBoard=null; flushNote?.(); zines.leave(); travel.leave(); briefView?.(); briefView=null; });
+addEventListener("pagehide", () => { todayBoard?.dispose(); todayBoard=null; flushNote?.(); zines.leave(); travel.leave(); movement.leave(); briefView?.(); briefView=null; });
 addEventListener("pageshow", event => { if (event.persisted) route(); });

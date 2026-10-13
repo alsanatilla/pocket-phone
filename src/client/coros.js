@@ -181,8 +181,8 @@ export async function cockpit(days = 28) {
   const names = Object.keys(asks), answers = await Promise.allSettled(names.map(name => asks[name]()));
   const expired = answers.find(answer => answer.reason instanceof Expired);
   if (expired) throw expired.reason;
-  const result = { ...before, at: Date.now() };
-  answers.forEach((answer, i) => { if (answer.status === "fulfilled") result[names[i]] = answer.value; });
+  const result = { ...before, at: Date.now(), partAt:{...before.partAt} };
+  answers.forEach((answer, i) => { if (answer.status === "fulfilled") { result[names[i]] = answer.value; result.partAt[names[i]]=result.at; } });
   if (answers.every(answer => answer.status === "rejected")) throw answers[0].reason;
   write(COCKPIT, result);
   return result;

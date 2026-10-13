@@ -11,7 +11,7 @@ import * as travel from './travel-store.js';
 
 export const status = { state: "idle", last: Number(localStorage.getItem("pocket:last-sync") || 0), error: "" };
 const listeners = new Set();
-export const onStatus = fn => listeners.add(fn);
+export const onStatus = fn => { listeners.add(fn); return () => listeners.delete(fn); };
 const emit = () => listeners.forEach(fn => fn(status));
 let running = null, timer = 0;
 

@@ -32,7 +32,7 @@ final class AgendaCloud {
                 AgendaStore.Event event=new AgendaStore.Event();event.id=mine==null?0:mine.id;event.alarm=mine==null?0:mine.alarm;
                 event.uid=uid;event.title=value.getString("title");event.when=value.getLong("when");event.minutes=value.getInt("minutes");
                 event.taskUid=value.optString("task_uid");event.task=task==null?0:task.id;event.remindAt=value.optLong("remindAt");
-                event.created=value.getLong("created");event.updated=updated;
+                event.created=value.getLong("created");event.updated=updated;event.training=MovementData.copy(value.has("training")?value.optJSONObject("training"):mine==null?null:mine.training);
                 reconcile(c,event,task);AgendaStore.saveSynced(c,event);deleted.remove(uid);
             }
             if(!prefs(c).edit().putString("cloud_deleted",deleted.toString()).commit())throw new IllegalStateException("Could not save synced appointments.");
@@ -49,7 +49,7 @@ final class AgendaCloud {
             if(!taskUid.equals(event.taskUid)){event.taskUid=taskUid;migrated=true;}
             if(migrated){ClockStore.Entry alarm=event.alarm==0?null:ClockStore.find(c,event.alarm);if(alarm!=null)event.remindAt=alarm.due;AgendaStore.saveSynced(c,event);}
             active.put(new JSONObject().put("uid",event.uid).put("title",event.title).put("when",event.when).put("minutes",event.minutes)
-                    .put("task_uid",event.taskUid).put("remindAt",event.remindAt).put("created",event.created).put("updated",event.updated).put("deleted",false));
+                    .put("task_uid",event.taskUid).put("remindAt",event.remindAt).put("created",event.created).put("updated",event.updated).put("deleted",false).put("training",event.training));
         }
         JSONArray markers=new JSONArray();JSONObject deleted=new JSONObject(prefs(c).getString("cloud_deleted","{}"));
         for(Iterator<String> keys=deleted.keys();keys.hasNext();){String uid=keys.next();markers.put(new JSONObject().put("uid",uid).put("updated",deleted.getLong(uid)).put("deleted",true));}
@@ -69,6 +69,7 @@ final class AgendaCloud {
     private static void validate(JSONObject value)throws JSONException{
         String uid=value.getString("uid");if(!uid.matches("[a-zA-Z0-9_-]{1,100}")||!ClockCloud.time(value.getLong("updated")))throw new JSONException("Invalid appointment id or time.");
         if(value.optBoolean("deleted"))return;
+        if(value.has("training")&&!value.isNull("training")&&(!(value.opt("training") instanceof JSONObject)||!MovementData.validTraining(value.optJSONObject("training"))))throw new JSONException("Invalid training session.");
         String title=value.getString("title");if(title.trim().isEmpty()||title.length()>500||!ClockCloud.time(value.getLong("when"))||!ClockCloud.time(value.getLong("created"))||!ClockCloud.time(value.optLong("remindAt")))throw new JSONException("Invalid appointment.");
         if(value.getInt("minutes")<1||value.getInt("minutes")>1440||!value.optString("task_uid").matches("[a-zA-Z0-9_-]{0,100}"))throw new JSONException("Invalid appointment duration or task.");
     }

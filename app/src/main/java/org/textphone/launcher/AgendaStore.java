@@ -8,8 +8,9 @@ import java.util.List;
 
 final class AgendaStore {
     static final class Event { long id, when, task, alarm, google, calendar, revision, created, updated, remindAt; String title, uid = "", taskUid = ""; boolean syncPending; int minutes = 60;
+        JSONObject training;
         long end() { return when + minutes * 60000L; }
-        Event copy() { Event e = new Event(); e.id=id; e.when=when; e.task=task; e.alarm=alarm; e.google=google; e.calendar=calendar; e.revision=revision; e.title=title; e.syncPending=syncPending; e.minutes=minutes; e.uid=uid;e.taskUid=taskUid;e.created=created;e.updated=updated;e.remindAt=remindAt;return e; }
+        Event copy() { Event e = new Event(); e.id=id; e.when=when; e.task=task; e.alarm=alarm; e.google=google; e.calendar=calendar; e.revision=revision; e.title=title; e.syncPending=syncPending; e.minutes=minutes; e.uid=uid;e.taskUid=taskUid;e.created=created;e.updated=updated;e.remindAt=remindAt;e.training=MovementData.copy(training);return e; }
     }
     static synchronized long reserveId(Context c) {
         android.content.SharedPreferences p = c.getSharedPreferences("pocket_agenda", 0);
@@ -20,13 +21,14 @@ final class AgendaStore {
         List<Event> all = new ArrayList<>(); try { JSONArray values = new JSONArray(c.getSharedPreferences("pocket_agenda", 0).getString("events", "[]"));
             for (int i = 0; i < values.length(); i++) { JSONObject o = values.getJSONObject(i); Event e = new Event();
                 e.id = o.getLong("id"); e.when = o.getLong("when"); e.task = o.optLong("task"); e.alarm = o.optLong("alarm"); e.title = o.getString("title");
-                e.google = o.optLong("google"); e.calendar = o.optLong("calendar"); e.revision = o.optLong("revision"); e.syncPending = o.optBoolean("sync_pending"); e.minutes = o.optInt("minutes", 60);e.uid=o.optString("uid");e.taskUid=o.optString("task_uid");e.created=o.optLong("created");e.updated=o.optLong("updated");e.remindAt=o.optLong("remindAt"); validateMinutes(e.minutes); all.add(e); }
+                e.google = o.optLong("google"); e.calendar = o.optLong("calendar"); e.revision = o.optLong("revision"); e.syncPending = o.optBoolean("sync_pending"); e.minutes = o.optInt("minutes", 60);e.uid=o.optString("uid");e.taskUid=o.optString("task_uid");e.created=o.optLong("created");e.updated=o.optLong("updated");e.remindAt=o.optLong("remindAt"); e.training=o.optJSONObject("training"); validateMinutes(e.minutes); all.add(e); }
         } catch (Exception e) { throw new IllegalStateException("Agenda data unavailable.", e); } java.util.Collections.sort(all, (a,b) -> Long.compare(a.when, b.when)); return all;
     }
     static synchronized void save(Context c, Event event) { save(c,event,true); }
     static synchronized void saveSynced(Context c, Event event) { save(c,event,false); }
     private static void save(Context c, Event event, boolean local) { if (event.title == null || event.title.trim().isEmpty()) throw new IllegalArgumentException("Enter a title.");
         validateMinutes(event.minutes);
+        if(!MovementData.validTraining(event.training))throw new IllegalArgumentException("Invalid training session.");
         List<Event> all = list(c); boolean found = false;
         if (event.id == 0) event.id = Math.max(System.currentTimeMillis(), c.getSharedPreferences("pocket_agenda", 0).getLong("last_id", 0) + 1);
         for (int i = 0; i < all.size(); i++) if (all.get(i).id == event.id) { Event old = all.get(i); event.revision = old.revision + 1;
@@ -43,7 +45,7 @@ final class AgendaStore {
     private static void write(Context c, List<Event> all, long id) { JSONArray values = new JSONArray(); try { for (Event e : all) values.put(new JSONObject()
             .put("id", e.id).put("when", e.when).put("task", e.task).put("alarm", e.alarm).put("title", e.title)
             .put("google", e.google).put("calendar", e.calendar).put("revision", e.revision).put("sync_pending", e.syncPending).put("minutes", e.minutes)
-            .put("uid",e.uid).put("task_uid",e.taskUid).put("created",e.created).put("updated",e.updated).put("remindAt",e.remindAt)); } catch (Exception e) { throw new IllegalStateException(e); }
+            .put("uid",e.uid).put("task_uid",e.taskUid).put("created",e.created).put("updated",e.updated).put("remindAt",e.remindAt).put("training",e.training)); } catch (Exception e) { throw new IllegalStateException(e); }
         android.content.SharedPreferences p = c.getSharedPreferences("pocket_agenda", 0);
         if (!p.edit().putString("events", values.toString()).putLong("last_id", Math.max(id, p.getLong("last_id", 0))).commit()) throw new IllegalStateException("Agenda could not save.");
     }

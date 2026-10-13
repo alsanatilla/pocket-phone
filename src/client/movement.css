@@ -1,0 +1,34 @@
+.tool-movement{max-width:920px;margin-inline:auto}
+.movement-header{display:flex;justify-content:space-between;align-items:center;gap:20px;margin:4px 0 18px}
+.movement-header-actions{display:flex;flex-direction:column;align-items:flex-end;min-width:0}.movement-header .movement-settings{font-size:12px;color:#b6ac9d;min-height:32px;padding:0}
+.movement-header .movement-title{font-size:52px;margin:0;line-height:1}
+.movement-header p{margin:8px 0 0}.movement-header .movement-source{font-size:12px;line-height:1.7;text-align:right;max-width:210px;min-height:44px;white-space:normal;overflow-wrap:anywhere}
+.movement-tabs{display:flex;gap:28px;border-bottom:1px solid var(--line,#3e392f);margin-bottom:24px}
+.movement-tabs button{min-height:44px;padding:8px 0 12px;color:var(--muted,#b6ac9d);border-bottom:2px solid transparent}
+.movement-tabs button[aria-current=page]{color:var(--accent,#ecc981);border-bottom-color:currentColor}
+.movement-score-cards{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:8px}
+.movement-score{background:#24231e;display:flex;flex-direction:column;align-items:stretch;text-align:left;gap:10px;padding:18px 16px;min-width:0;color:#ecc981}
+.movement-score.recovery{background:#adbf9c;color:#12110f}.movement-score.conditioning{color:#a5bfdc}
+.tool-movement .movement-score.recovery:hover{color:#12110f}.tool-movement .movement-score.conditioning:hover{color:#a5bfdc}
+.movement-score>strong{font:60px/.95 var(--pixel,'VT323',monospace);font-weight:400}.movement-score strong small{font:16px var(--mono,monospace)}
+.movement-score-label{font-size:13px}.movement-score-status{font-size:12px;color:#b6ac9d;overflow-wrap:anywhere;line-height:1.45}.recovery .movement-score-status{color:#283322}
+.movement-segments{display:flex;gap:3px;height:12px}.movement-segments i{flex:1;background:currentColor;opacity:.16}.movement-segments i.on{opacity:.8}
+.movement-score-details{padding:16px 0}.movement-score-details[hidden]{display:none}
+.movement-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:26px 0 10px}
+.movement-section-head h2{margin:0;font:28px/1.1 var(--pixel,'VT323',monospace);font-weight:400}.movement-section-head button{font-size:13px;min-height:40px}
+.movement-session{display:flex;align-items:center;gap:16px;padding:14px 0;min-width:0}.movement-session.featured{background:#24231e;padding:16px;width:100%;text-align:left}
+.movement-session-time{font:32px/1 var(--pixel,'VT323',monospace);color:#ecc981;white-space:nowrap}
+.movement-session-copy{display:flex;flex:1;flex-direction:column;gap:6px;min-width:0;overflow-wrap:anywhere}.movement-session-copy strong{font-weight:400}
+.movement-session-actions{display:flex;gap:14px}.movement-session-actions button{min-height:44px;font-size:13px}
+.movement-night{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.movement-night button{display:flex;flex-direction:column;align-items:start;gap:8px;text-align:left}.movement-night strong{font:32px/1.1 var(--pixel,'VT323',monospace);font-weight:400}
+.movement-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin:14px 0}
+.movement-week button{display:flex;flex-direction:column;align-items:center;gap:8px;padding:9px 0;border-bottom:2px solid transparent;min-width:0}.movement-week button.selected{background:#24231e;border-color:#ecc981}.movement-week strong{font-weight:400}.movement-day-mark{color:#adbf9c;min-height:18px}
+.movement-section-head .keys{margin:0;gap:14px}.movement-plan-add{color:#ecc981;font-size:14px;min-height:44px;margin-block:6px}
+.movement-pip{display:flex;align-items:center;gap:12px;width:100%;text-align:left;border-top:1px solid #3e392f;margin-top:20px;padding-top:10px;color:#ecc981}.movement-pip .pip-mascot{width:54px;height:54px;flex:none}.movement-pip>span:last-child{margin-left:auto}
+.movement-filters{display:flex;gap:20px;overflow-x:auto;padding-bottom:8px}.movement-filters button{min-height:44px;color:#b6ac9d;white-space:nowrap}.movement-filters button[aria-pressed=true]{color:#ecc981}
+.movement-activity{display:flex;align-items:center;gap:16px;width:100%;text-align:left;padding:17px 0;border-bottom:1px solid #3e392f;min-width:0}
+.movement-sport{width:44px;height:44px;flex:none;display:grid;place-items:center;background:#252b23;color:#adbf9c;font-size:22px}.movement-sport.gym{background:#2c271c;color:#ecc981}.movement-activity-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;overflow-wrap:anywhere}.movement-activity-copy strong{font-weight:400}.movement-activity-value{font:30px/1 var(--pixel,'VT323',monospace);font-weight:400;white-space:nowrap}
+.movement-trend{padding:6px 0 24px;border-bottom:1px solid #3e392f}.movement-trend .movement-section-head strong{font:34px/1 var(--pixel,'VT323',monospace);font-weight:400}.movement-trend .chart-days{height:140px;width:100%}.movement-back{min-height:44px;margin-bottom:16px}
+.movement-form-error{color:#efa58e;font-size:13px}
+.movement-plan-dialog{color:#f0e9dd;background:#1e1c18;border:1px solid #3e392f;padding:24px;width:min(480px,calc(100vw - 32px));max-height:90dvh;overflow-y:auto}.movement-plan-dialog::backdrop{background:#0009}.movement-plan-dialog h2{margin-top:0}.movement-plan-dialog label{display:flex;flex-direction:column;gap:6px;font-size:13px;margin:12px 0}.movement-plan-dialog label[hidden]{display:none}.movement-plan-dialog input,.movement-plan-dialog textarea,.movement-plan-dialog select{width:100%;min-width:0;color:#f0e9dd;background:#12110f;font:inherit;border:0;border-bottom:1px solid #837c70;padding:10px;min-height:44px;box-sizing:border-box}.movement-plan-dialog .keys{justify-content:flex-end}
+@media(max-width:520px){.movement-header .movement-title{font-size:44px}.movement-header{gap:8px}.movement-header .movement-source{max-width:150px}.movement-score{padding:14px 10px}.movement-score>strong{font-size:49px}.movement-score-label{font-size:12px}.movement-segments{gap:2px;height:10px}.movement-session{gap:10px;flex-wrap:wrap}.movement-session-copy{min-width:130px}.movement-session-time{font-size:27px}.movement-session-actions{margin-left:auto}.movement-night{gap:10px}.movement-night strong{font-size:27px}.movement-activity{gap:10px}.movement-activity-value{font-size:26px}.movement-tabs{gap:24px}}

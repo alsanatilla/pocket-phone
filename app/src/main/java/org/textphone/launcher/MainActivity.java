@@ -442,6 +442,13 @@ public class MainActivity extends Activity {
     private boolean showBriefPip(Intent intent) {
         // Setup's "another provider" opens Pip itself, whose settings hold every provider.
         if (intent.getBooleanExtra("pocket_open_pip", false)) { intent.removeExtra("pocket_open_pip"); openChat(); return true; }
+        String movement = intent.getStringExtra("pocket_movement_context");
+        if (movement != null) {
+            intent.removeExtra("pocket_movement_context"); persistDraft();
+            ClaudeChatRepository chats = ClaudeChatRepository.get(this); chats.newChat();
+            chats.draft(movement.substring(0,Math.min(8000,movement.length()))); chats.rename(chats.currentId(),"Training");
+            openChat(); return true;
+        }
         String context = intent.getStringExtra("pocket_brief_context");
         if (context == null) return false;
         intent.removeExtra("pocket_brief_context");

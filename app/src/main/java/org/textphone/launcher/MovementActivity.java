@@ -33,7 +33,14 @@ public final class MovementActivity extends PocketActivity {
     private static final int GREEN = PocketDesign.MOVEMENT, BLUE = PocketDesign.CALENDAR;
     private CorosRepository repository;
     private boolean busy, visible, settings, direct, allCharts, more, sample;
-    private int selected = -1;
+    private int selected=-1,tab=0,period=28,weekOffset=0;
+    private String gymId="",filter="all";
+    private LocalDate selectedDay=LocalDate.now();
+    private boolean hasReadings;
+    private java.util.List<MovementData.Session> feed=new java.util.ArrayList<>();
+    private java.util.List<AgendaStore.Event> plans=new java.util.ArrayList<>();
+    private android.app.AlertDialog planDialog;
+    private Scores.Result todayScores;
     private String activityId = "", owner = "", settingsReturn = "movement";
     private CorosRepository.Snapshot snapshot;
     private final Map<String, JSONObject> details = new HashMap<>();
@@ -48,14 +55,14 @@ public final class MovementActivity extends PocketActivity {
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state); repository = CorosRepository.get(this);
         if (state != null) {
-            selected = state.getInt("score", -1); settings = state.getBoolean("settings"); direct = state.getBoolean("direct");
+            tab=state.getInt("tab");period=state.getInt("period",28);weekOffset=state.getInt("weekOffset");selectedDay=LocalDate.parse(state.getString("day",LocalDate.now().toString()));gymId=state.getString("gym","");filter=state.getString("filter","all"); selected = state.getInt("score", -1); settings = state.getBoolean("settings"); direct = state.getBoolean("direct");
             activityId = state.getString("activity", ""); allCharts = state.getBoolean("charts"); more = state.getBoolean("more"); settingsReturn = state.getString("settingsReturn", "movement");
         } else chooseScore(getIntent());
         render();
     }
     private void chooseScore(Intent intent) {
         int chosen = intent.getIntExtra("score", -1);
-        if (chosen >= 0 && chosen < 3) { selected = chosen; settings = false; activityId = ""; direct = true; }
+        if (chosen >= 0 && chosen < 3) { tab=0; gymId=""; selected = chosen; settings = false; activityId = ""; direct = true; }
     }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); chooseScore(intent); render(); }
     @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -70,14 +77,14 @@ public final class MovementActivity extends PocketActivity {
     }
     @Override protected void onPause() { visible = false; ui.removeCallbacks(claim); ui.removeCallbacks(redraw); super.onPause(); }
     @Override protected void onSaveInstanceState(Bundle state) {
-        state.putInt("score", selected); state.putBoolean("settings", settings); state.putBoolean("direct", direct);
+        state.putInt("tab",tab);state.putInt("period",period);state.putInt("weekOffset",weekOffset);state.putString("day",selectedDay.toString());state.putString("gym",gymId);state.putString("filter",filter); state.putInt("score", selected); state.putBoolean("settings", settings); state.putBoolean("direct", direct);
         state.putString("activity", activityId); state.putBoolean("charts", allCharts); state.putBoolean("more", more); state.putString("settingsReturn", settingsReturn); super.onSaveInstanceState(state);
     }
-    @Override protected boolean hasInternalBack() { return settings || !activityId.isEmpty() || selected >= 0 && !direct; }
+    @Override protected boolean hasInternalBack() { return settings || !gymId.isEmpty() || !activityId.isEmpty() || selected >= 0 && !direct; }
     @Override protected String backPageKey(String rootPage) { return settings ? settingsReturn : "movement"; }
     @Override protected String scene() { return PixelBackdrop.TERRAIN; }
     @Override public void onBackPressed() {
-        if (hasInternalBack()) back(() -> { if (settings) settings = false; else if (!activityId.isEmpty()) activityId = ""; else selected = -1; render(); });
+        if (hasInternalBack()) back(() -> { if (settings) settings = false; else if (!gymId.isEmpty()) gymId = ""; else if (!activityId.isEmpty()) activityId = ""; else selected = -1; render(); });
         else super.onBackPressed();
     }
     private void queueRedraw() { ui.removeCallbacks(redraw); ui.postDelayed(redraw, 120); }
@@ -94,41 +101,145 @@ public final class MovementActivity extends PocketActivity {
     private void render() {
         ui.removeCallbacks(redraw);
         String currentOwner = repository.detailOwner();
-        if (!owner.equals(currentOwner)) { owner = currentOwner; details.clear(); errors.clear(); loadingDetails.clear(); }
-        snapshot = repository.cached(); sample = snapshot == null && !repository.connected() && !repository.pending();
-        if (sample) snapshot = MovementSample.snapshot();
+        if (!owner.equals(currentOwner)) { owner=currentOwner;details.clear();errors.clear();loadingDetails.clear();if(planDialog!=null){planDialog.dismiss();planDialog=null;} }
+        snapshot=repository.cached();hasReadings=snapshot!=null;sample=false;
+        if(snapshot==null)try{snapshot=new CorosRepository.Snapshot(new JSONObject().put("updated",System.currentTimeMillis()));}catch(Exception e){throw new IllegalStateException(e);}
+        feed=MovementData.feed(snapshot.activities,GymStore.workouts(this));plans=MovementData.plans(this);todayScores=computeScores(28);
         CorosData.Activity activity = findActivity(activityId); if (activity == null) activityId = "";
         String key = activity == null ? "movement" : "movement-activity-" + activity.id;
         screen(settings ? "movement settings" : activity == null ? "movement" : activity.type.toLowerCase(Locale.ROOT), settings ? "movement-settings" : key);
         if (settings) { renderSettings(); return; }
         appSettings(() -> { settingsReturn = key; settings = true; render(); });
+        if(!gymId.isEmpty()){renderGym();return;}
         if (activity != null) { renderActivity(activity); return; }
         renderSource();
-        if (snapshot == null) { section(busy ? "LOADING FROM COROS…" : "NO READINGS"); return; }
-        Scores.Result scores = snapshot.scores; LinearLayout rings = row(); rings.setTag("movement_scores");
-        boolean large = getResources().getConfiguration().fontScale > 1.25f || getSharedPreferences("text_phone", 0).getBoolean("large_text", false);
-        if (large) rings.setOrientation(LinearLayout.VERTICAL);
-        score(rings, 0, "recovery", scores.recovery == null ? Double.NaN : scores.recovery.score, scores.recovery == null ? "—" : scores.recovery.score + "%", scores.recovery == null ? "no reading" : scores.recovery.zone);
-        score(rings, 1, "strain", scores.strain.strain, scores.strain.strain + "%", scores.strain.low + "–" + scores.strain.high + "%");
-        score(rings, 2, "conditioning", scores.conditioning.score, String.valueOf(scores.conditioning.score), scores.conditioning.status); body.addView(rings);
-        if (selected >= 0) scorePanel(scores, snapshot.cockpit);
-        week(); section("ACTIVITIES");
-        if (snapshot.activities.isEmpty()) note("No activities", GRAY);
-        for (CorosData.Activity item : snapshot.activities) {
-            // Invented older workouts inform sample scores but do not belong in the sample archive.
-            if (sample && item.id.startsWith("sample-history-")) continue;
-            Button entry = action(item.type + " · " + date(item.day(ZoneId.systemDefault())) + "\n" + decimal(item.km, 1) + " km · " + moving(item.seconds) + (item.hr > 0 ? " · " + item.hr + " bpm" : ""), () -> { activityId = item.id; render(); });
-            entry.setTag("movement_activity_" + item.id); entry.setContentDescription(item.name + ", " + entry.getText());
-        }
+        commands(body,new String[]{"overview","activities","trends"},tab,()->chooseTab(0),()->chooseTab(1),()->chooseTab(2)).setTag("movement_tabs");
+        if(tab==0)overview();else if(tab==1)activities();else trends();
     }
+    private void chooseTab(int next){tab=next;selected=-1;direct=false;render();}
+    private Scores.Result computeScores(int days){
+        JSONObject p=snapshot.cockpit.optJSONObject("profile"),health=snapshot.cockpit.optJSONObject("daily");
+        return Scores.compute(LocalDate.now(),ZoneId.systemDefault(),snapshot.activities,snapshot.hrv,snapshot.resting,snapshot.daily,p==null?0:p.optInt("age"),p!=null&&"Female".equals(p.optString("gender")),repository.observedMax(),health==null?0:health.optInt("restingHr"),days);
+    }
+    private void overview(){
+        LinearLayout cards=row();cards.setTag("movement_scores");
+        if(getResources().getConfiguration().fontScale>1.25f||getSharedPreferences("text_phone",0).getBoolean("large_text",false))cards.setOrientation(LinearLayout.VERTICAL);
+        Scores.Result s=todayScores;boolean daily=snapshot.daily.containsKey(LocalDate.now());for(CorosData.Activity a:snapshot.activities)if(a.day(ZoneId.systemDefault()).equals(LocalDate.now()))daily=true;
+        score(cards,0,"recovery",s.recovery==null?Double.NaN:s.recovery.score,s.recovery==null?"—":s.recovery.score+"%",s.recovery==null?"no reading":s.recovery.zone);
+        score(cards,1,"strain",daily?s.strain.strain:Double.NaN,daily?s.strain.strain+"%":"—",daily?"target "+s.strain.low+"–"+s.strain.high+"%":"no reading");
+        score(cards,2,"condition",snapshot.activities.isEmpty()?Double.NaN:s.conditioning.score,snapshot.activities.isEmpty()?"—":String.valueOf(s.conditioning.score),snapshot.activities.isEmpty()?"no history":conditionLabel(s.conditioning.status));body.addView(cards);
+        if(selected>=0){note("Pocket estimate · COROS readings",GRAY);scorePanel(s,snapshot.cockpit);}
+        section("next session");AgendaStore.Event next=null;java.util.List<JSONObject> workouts=GymStore.workouts(this);
+        for(AgendaStore.Event p:plans)if(!MovementData.done(p,workouts)&&(!MovementData.day(p.when).isBefore(LocalDate.now())||MovementData.workout(p,workouts)!=null)){next=p;break;}
+        PlannerStore.Entry nextTask=null;for(PlannerStore.Entry t:MovementData.trainingTasks(this))if(!t.done&&t.due.compareTo(LocalDate.now().toString())>=0){nextTask=t;break;}
+        if(nextTask!=null&&(next==null||nextTask.due.compareTo(MovementData.day(next.when).toString())<0))trainingTaskRow(nextTask);
+        else if(next==null)action("plan a session",()->editPlan(null)).setTag("movement_plan_empty");else planRow(next,true);
+        lastNight();weekPlan();
+        LinearLayout pip=row();pip.setGravity(Gravity.CENTER_VERTICAL);pip.setTag("movement_pip");pip.setClickable(true);pip.setFocusable(true);pip.setContentDescription("Talk training with Pip");
+        View sprite=PocketDesign.navMascot(this,54);sprite.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);pip.addView(sprite,new LinearLayout.LayoutParams(dp(54),dp(54)));TextView text=compact("talk training with Pip  →",14,YELLOW);pip.addView(text,new LinearLayout.LayoutParams(0,-2,1));pip.setOnClickListener(v->askTraining());body.addView(pip);
+    }
+    private void editPlan(AgendaStore.Event event){if(planDialog!=null)planDialog.dismiss();planDialog=MovementPlanEditor.show(this,event,selectedDay,this::render);}
+    private void planRow(AgendaStore.Event p,boolean featured){
+        java.util.List<JSONObject> workouts=GymStore.workouts(this);JSONObject workout=MovementData.workout(p,workouts);boolean done=MovementData.done(p,workouts);
+        LinearLayout block=column();if(featured){block.setBackgroundColor(PocketDesign.PLANE);block.setPadding(dp(12),dp(8),dp(12),dp(8));}
+        TextView title=compact(time(p.when)+" · "+p.title,16,WHITE);block.addView(title);
+        int count=p.training.optJSONArray("exercises").length();block.addView(compact((featured?date(MovementData.day(p.when))+" · ":"")+p.training.optString("sport")+" · "+p.minutes+" min"+(count>0?" · "+count+" exercises":"")+(done?" · done":""),13,GRAY));
+        LinearLayout controls=row();Button edit=button("edit",()->editPlan(p));PocketDesign.command(edit,false);controls.addView(edit,new LinearLayout.LayoutParams(0,-2,1));
+        boolean gym="gym".equals(p.training.optString("sport"));Button launch=button(gym?(done?"view":workout==null?"start":"resume"):done?"reopen":"done",()->{
+            AgendaStore.Event current=AgendaStore.find(this,p.id);if(current==null){message("This session was removed.");return;}
+            if(gym){JSONObject w=GymStore.startPlan(this,current);if(w.optLong("ended")>0)startActivity(new Intent(this,GymActivity.class).putExtra("pocket_workout",w.optString("id")));else startActivity(new Intent(this,GymActivity.class).putExtra("pocket_resume",true));}
+            else {try{current.training.put("completedAt",done?0:System.currentTimeMillis());AgendaStore.save(this,current);render();}catch(Exception e){message(e.getMessage());}}
+        });launch.setTag("movement_plan_start_"+p.uid);PocketDesign.command(launch,true);controls.addView(launch,new LinearLayout.LayoutParams(0,-2,1));block.addView(controls);body.addView(block);
+    }
+    private void lastNight(){
+        section("last night");JSONObject d=snapshot.cockpit.optJSONObject("daily"),n=latestSleep(d==null?null:d.optJSONArray("days")),h=latest(snapshot.cockpit.optJSONArray("hrv")),r=latest(snapshot.cockpit.optJSONArray("resting"));
+        JSONObject sleep=n==null?null:n.optJSONObject("sleep");double base=0;int count=0;
+        if(r!=null)for(java.util.Map.Entry<LocalDate,Integer> e:snapshot.resting.entrySet())if(e.getKey().toString().compareTo(r.optString("date"))<0){base+=e.getValue();count++;}
+        String delta=count>0?((r.optDouble("bpm")-base/count)>=0?"+":"")+Math.round(r.optDouble("bpm")-base/count)+" vs baseline":"";
+        String[][] values={{"sleep",sleep==null?"—":minutes(sleep.optDouble("total")),n==null?"no reading":shortDate(n.optString("date"))},
+            {"HRV",number(h,"avg"," ms"),h==null?"no reading":shortDate(h.optString("date"))+(h.has("low")?" · normal "+number(h,"low","")+"–"+number(h,"high",""):"")},
+            {"resting HR",number(r,"bpm"," bpm"),r==null?"no reading":shortDate(r.optString("date"))+" · "+delta}};
+        LinearLayout line=row();boolean large=getResources().getConfiguration().fontScale>1.25f||getSharedPreferences("text_phone",0).getBoolean("large_text",false);if(large)line.setOrientation(LinearLayout.VERTICAL);
+        for(String[] value:values){LinearLayout cell=column();cell.setPadding(0,dp(8),dp(6),dp(8));cell.addView(compact(value[0],12,GRAY));TextView big=compact(value[1],28,WHITE);big.setTypeface(PocketFonts.pixel(this));cell.addView(big);cell.addView(compact(value[2],12,GRAY));cell.setClickable(true);cell.setFocusable(true);cell.setContentDescription(String.join(", ",value));cell.setOnClickListener(v->{selected=0;render();});line.addView(cell,large?new LinearLayout.LayoutParams(-1,-2):new LinearLayout.LayoutParams(0,-2,1));}body.addView(line);
+    }
+    private void weekPlan(){
+        LocalDate monday=MovementData.monday(LocalDate.now()).plusWeeks(weekOffset);if(selectedDay.isBefore(monday)||selectedDay.isAfter(monday.plusDays(6)))selectedDay=monday;
+        section(weekOffset==0?"this week":date(monday)+" – "+date(monday.plusDays(6)));
+        commands(body,new String[]{"‹","today","›"},-1,()->{weekOffset--;selectedDay=monday.minusWeeks(1);render();},()->{weekOffset=0;selectedDay=LocalDate.now();render();},()->{weekOffset++;selectedDay=monday.plusWeeks(1);render();});
+        int completed=0,planned=0;double total=0;java.util.List<JSONObject> workouts=GymStore.workouts(this);
+        for(MovementData.Session s:feed)if(!MovementData.day(s.start).isBefore(monday)&&MovementData.day(s.start).isBefore(monday.plusDays(7))){completed++;total+=s.seconds;}
+        for(AgendaStore.Event p:plans)if(!MovementData.day(p.when).isBefore(monday)&&MovementData.day(p.when).isBefore(monday.plusDays(7))&&!MovementData.done(p,workouts)&&MovementData.workout(p,workouts)==null)planned++;
+        java.util.List<PlannerStore.Entry> trainingTasks=MovementData.trainingTasks(this);for(PlannerStore.Entry t:trainingTasks)if(!t.done&&t.due.compareTo(monday.toString())>=0&&t.due.compareTo(monday.plusDays(7).toString())<0)planned++;
+        note(completed+" completed · "+planned+" planned · "+moving((int)total),GRAY);
+        LinearLayout rail=row();rail.setTag("movement_week");
+        for(int i=0;i<7;i++){LocalDate d=monday.plusDays(i);int count=0,pending=0;for(MovementData.Session s:feed)if(MovementData.day(s.start).equals(d))count++;for(AgendaStore.Event p:plans)if(MovementData.day(p.when).equals(d)&&!MovementData.done(p,workouts))pending++;
+            for(PlannerStore.Entry t:trainingTasks)if(!t.done&&t.due.equals(d.toString()))pending++;
+            String day=d.format(DateTimeFormatter.ofPattern("EEE",Locale.getDefault()));Button b=button(day+"\n"+d.getDayOfMonth()+"\n"+(count>0?"●":pending>0?"◇":"·"),()->{selectedDay=d;render();});PocketDesign.text(b,12,d.equals(selectedDay)?YELLOW:GRAY);b.setPadding(0,dp(6),0,dp(6));b.setMinWidth(0);b.setMinimumWidth(0);b.setSelected(d.equals(selectedDay));b.setContentDescription(date(d)+", "+count+" completed, "+pending+" planned");rail.addView(b,new LinearLayout.LayoutParams(0,-2,1));}body.addView(rail);
+        boolean any=false;java.util.Set<String> logged=new java.util.HashSet<>();for(MovementData.Session s:feed)if(MovementData.day(s.start).equals(selectedDay)){sessionRow(s);any=true;if(s.workout!=null)logged.add(s.workout.optString("plan_uid"));}for(AgendaStore.Event p:plans)if(MovementData.day(p.when).equals(selectedDay)&&!logged.contains(p.uid)){planRow(p,false);any=true;}for(PlannerStore.Entry t:trainingTasks)if(t.due.equals(selectedDay.toString())){trainingTaskRow(t);any=true;}if(!any)note("No sessions",GRAY);
+        action("+ plan session",()->editPlan(null)).setTag("movement_plan_add");
+    }
+    private void activities(){
+        HorizontalScrollView scroll=new HorizontalScrollView(this);scroll.setHorizontalScrollBarEnabled(false);LinearLayout filters=row();
+        String[] names={"all","run","gym","ride","swim","walk","other"};for(String name:names){Button b=button(name,()->{filter=name;render();});PocketDesign.command(b,name.equals(filter));b.setSelected(name.equals(filter));b.setTag("movement_filter_"+name);filters.addView(b);}scroll.addView(filters);body.addView(scroll);
+        int count=0;double total=0,km=0;for(MovementData.Session s:feed)if(filter.equals("all")||filter.equals(s.sport)){count++;total+=s.seconds;km+=s.km;}
+        note(count+" sessions · "+moving((int)total)+(!filter.equals("all")&&!filter.equals("gym")&&km>0?" · "+decimal(km,1)+" km":""),GRAY);
+        for(MovementData.Session s:feed)if(filter.equals("all")||filter.equals(s.sport))sessionRow(s);if(count==0)note("No activities",GRAY);
+    }
+    private void sessionRow(MovementData.Session s){
+        LinearLayout line=row();line.setGravity(Gravity.CENTER_VERTICAL);line.setPadding(0,dp(12),0,dp(12));line.setClickable(true);line.setFocusable(true);line.setTag(s.workout!=null?"movement_gym_"+s.workout.optString("id"):"movement_activity_"+s.coros.id);
+        TextView symbol=compact(s.sport.equals("gym")?"Ⅱ":s.sport.equals("ride")?"○":s.sport.equals("swim")?"≈":"↗",24,s.sport.equals("gym")?YELLOW:GREEN);symbol.setGravity(Gravity.CENTER);symbol.setBackgroundColor(PocketDesign.PLANE);line.addView(symbol,new LinearLayout.LayoutParams(dp(40),dp(44)));
+        LinearLayout text=column();text.setPadding(dp(10),0,dp(8),0);text.addView(compact(s.name,16,WHITE));text.addView(compact(date(MovementData.day(s.start))+" · "+s.source+" · "+moving((int)s.seconds),12,GRAY));line.addView(text,new LinearLayout.LayoutParams(0,-2,1));
+        TextView value=compact(s.workout!=null?GymStore.setCount(s.workout)+" sets":s.km>0?decimal(s.km,1)+" km":moving((int)s.seconds),25,WHITE);value.setTypeface(PocketFonts.pixel(this));line.addView(value);line.setContentDescription(s.name+", "+s.source+", "+date(MovementData.day(s.start))+", "+value.getText());
+        line.setOnClickListener(v->{if(s.workout!=null)gymId=s.workout.optString("id");else activityId=s.coros.id;render();});body.addView(line);
+    }
+    private void renderGym(){
+        MovementData.Session session=null;for(MovementData.Session s:feed)if(s.workout!=null&&gymId.equals(s.workout.optString("id")))session=s;
+        if(session==null){gymId="";render();return;}JSONObject workout=session.workout;section(session.name);note(date(MovementData.day(session.start))+" · "+session.source,GRAY);
+        metrics(new String[][]{{"duration",moving((int)session.seconds)},{"sets",String.valueOf(GymStore.setCount(workout))},{"volume",integer(GymStore.volume(workout))+" kg"}});
+        action("open Gym log",()->startActivity(new Intent(this,GymActivity.class).putExtra("pocket_workout",workout.optString("id"))));
+        java.util.List<CorosData.Activity> choices=MovementData.choices(workout,snapshot.activities,GymStore.workouts(this));
+        if(!workout.optString("coros_id").isEmpty())action("unlink COROS recording",()->{GymStore.update(this,gymId,w->w.remove("coros_id"));render();});
+        else if(!choices.isEmpty())action("link COROS recording",()->{String requestOwner=owner;String[] names=new String[choices.size()];for(int i=0;i<names.length;i++)names[i]=time(choices.get(i).start)+" · "+choices.get(i).name+" · "+moving(choices.get(i).seconds);new android.app.AlertDialog.Builder(this).setTitle("COROS recording").setItems(names,(dialog,index)->{if(requestOwner.equals(repository.detailOwner())){GymStore.update(this,workout.optString("id"),w->w.put("coros_id",choices.get(index).id));render();}}).setNegativeButton("cancel",null).show();});
+        if(session.coros!=null)renderActivity(session.coros);
+    }
+    private void trends(){
+        commands(body,new String[]{"7 days","28 days","90 days"},period==7?0:period==28?1:2,()->{period=7;render();},()->{period=28;render();},()->{period=90;render();});String[] dates=dateKeys(LocalDate.now(),period);Scores.Result all=computeScores(period);
+        double[] recovery=new double[period],strain=new double[period],condition=new double[period],training=new double[period];
+        for(int i=0;i<period;i++){Scores.Recovery r=all.recoveries.get(i);recovery[i]=r==null?Double.NaN:r.score;boolean known=snapshot.daily.containsKey(LocalDate.parse(dates[i])),history=false;
+            for(CorosData.Activity a:snapshot.activities){if(a.day(ZoneId.systemDefault()).toString().equals(dates[i]))known=true;if(a.day(ZoneId.systemDefault()).toString().compareTo(dates[i])<=0)history=true;}
+            strain[i]=known?all.strains.get(i):Double.NaN;condition[i]=history?all.conditioning.trail.get(90-period+i):Double.NaN;
+            for(MovementData.Session s:feed)if(MovementData.day(s.start).toString().equals(dates[i]))training[i]+=s.seconds/60;
+        }
+        trendCard("recovery",recovery,dates,MovementChart.Kind.LINE,GREEN,v->integer(v)+"%");trendCard("training time",training,dates,MovementChart.Kind.BARS,YELLOW,MovementActivity::minutes);
+        trendCard("resting HR",onDays(snapshot.cockpit.optJSONArray("resting"),"bpm",dates),dates,MovementChart.Kind.LINE,YELLOW,v->integer(v)+" bpm");
+        trendCard("HRV",onDays(snapshot.cockpit.optJSONArray("hrv"),"avg",dates),dates,MovementChart.Kind.LINE,GREEN,v->integer(v)+" ms");JSONObject daily=snapshot.cockpit.optJSONObject("daily");
+        trendCard("sleep",onDays(daily==null?null:daily.optJSONArray("days"),"sleep.total",dates),dates,MovementChart.Kind.BARS,BLUE,MovementActivity::minutes);
+        trendCard("strain",strain,dates,MovementChart.Kind.BARS,YELLOW,v->integer(v)+"%");trendCard("condition",condition,dates,MovementChart.Kind.LINE,BLUE,MovementActivity::integer);fitness(snapshot.cockpit.optJSONObject("fitness"));
+    }
+    private void trendCard(String name,double[] values,String[] dates,MovementChart.Kind kind,int color,DoubleFunction<String> format){
+        if(!present(values)){section(name);note("No readings in this period",GRAY);return;}plot(name,values,dates,kind,color,format);int count=0,last=0;for(int i=0;i<values.length;i++)if(Double.isFinite(values[i])){count++;last=i;}note(count+"/"+values.length+" days · latest "+shortDate(dates[last]),GRAY);
+    }
+    private void askTraining(){
+        StringBuilder text=new StringBuilder("Help me plan my training. Check reading dates and propose changes for me to review.\n\nMovement snapshot: ").append(LocalDate.now()).append(". COROS saved: ").append(hasReadings?new Date(snapshot.updated):"unavailable").append(".\nPocket estimates from COROS: recovery ").append(todayScores.recovery==null?"unavailable":todayScores.recovery.score).append("; strain ").append(snapshot.daily.containsKey(LocalDate.now())||todayScores.strain.workouts>0?todayScores.strain.strain:"unavailable").append("; condition ").append(snapshot.activities.isEmpty()?"unavailable":todayScores.conditioning.score).append(".\n");
+        JSONObject h=latest(snapshot.cockpit.optJSONArray("hrv")),r=latest(snapshot.cockpit.optJSONArray("resting")),daily=snapshot.cockpit.optJSONObject("daily"),n=latestSleep(daily==null?null:daily.optJSONArray("days"));
+        text.append("HRV: ").append(number(h,"avg"," ms")).append(" (").append(text(h,"date")).append("). Resting HR: ").append(number(r,"bpm"," bpm")).append(" (").append(text(r,"date")).append("). Sleep: ").append(n==null?"unavailable":number(n.optJSONObject("sleep"),"total"," min")+" ("+n.optString("date")+")").append(".\nThis week:\n");
+        LocalDate monday=MovementData.monday(LocalDate.now());int count=0;for(MovementData.Session s:feed)if(!MovementData.day(s.start).isBefore(monday)&&MovementData.day(s.start).isBefore(monday.plusDays(7))&&count++<20)text.append(s.name).append(", ").append(MovementData.day(s.start)).append(", ").append(moving((int)s.seconds)).append(", ").append(s.source).append('\n');
+        text.append("Planned:\n");count=0;for(AgendaStore.Event p:plans)if(!MovementData.done(p,GymStore.workouts(this))&&!MovementData.day(p.when).isBefore(monday)&&count++<14)text.append(p.title).append(", ").append(date(MovementData.day(p.when))).append(' ').append(time(p.when)).append(", ").append(p.minutes).append(" min, ").append(p.training.optString("sport")).append(", ").append(p.training.optJSONArray("exercises")).append('\n');
+        text.append("Pip training tasks:\n");for(PlannerStore.Entry task:MovementData.trainingTasks(this))if(!task.done&&task.due.compareTo(monday.toString())>=0)text.append(task.due).append(": ").append(task.text).append('\n');
+        startActivity(new Intent(this,MainActivity.class).putExtra("pocket_movement_context",text.toString()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+    }
+    private String time(long at){return android.text.format.DateFormat.getTimeFormat(this).format(new Date(at));}
+    private void trainingTaskRow(PlannerStore.Entry t){action(t.text+"\n"+shortDate(t.due)+" · Pip training"+(t.done?" · done":""),()->startActivity(new Intent(this,OrganizerActivity.class).putExtra("pocket_task",t.id))).setTag("movement_training_task_"+t.id);}
+    private String conditionLabel(String s){switch(s){case "calibrating":return "building base";case "maintaining":return "steady";case "overtraining":return "high load";case "productive":return "building";case "detraining":return "easing off";default:return s;}}
+    @Override protected void onDestroy(){if(planDialog!=null)planDialog.dismiss();super.onDestroy();}
     private void renderSource() {
         if (!repository.connected()) {
             if (repository.pending()) { action("check COROS sign-in", this::completeLogin).setTag("coros_check"); action("start again", this::connect); }
-            else action(snapshot != null && !sample ? "reconnect COROS" : "connect COROS", this::connect).setTag("coros_connect");
+            else action(hasReadings ? "reconnect COROS" : "connect COROS", this::connect).setTag("coros_connect");
         }
         if (sample) { section("SAMPLE DATA").setTag("movement_sample"); return; }
-        String device = snapshot == null ? "" : CorosData.string(snapshot.cockpit, "device"); if (device != null && !device.isEmpty()) note(device, GRAY);
-        String time = snapshot == null ? "" : DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(new Date(snapshot.updated));
+        String device = !hasReadings ? "" : CorosData.string(snapshot.cockpit, "device"); if (device != null && !device.isEmpty()) note(device, GRAY);
+        String time = !hasReadings ? "" : DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(new Date(snapshot.updated));
         if (repository.connected()) {
             Button source = action(busy ? "COROS · refreshing…" : "COROS · " + (repository.error().isEmpty() ? time : "retry"), () -> refresh(true)); source.setTag("movement_refresh"); source.setEnabled(!busy);
         } else if (!time.isEmpty()) note("COROS · " + time, GRAY);
@@ -142,25 +253,20 @@ public final class MovementActivity extends PocketActivity {
         }));
         action("open web movement", () -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(CloudSync.WEB + "#/movement"))));
     }
-    private void score(LinearLayout host, int index, String title, double number, String value, String meta) {
-        int color = index == 0 ? GREEN : index == 1 ? YELLOW : BLUE;
-        LinearLayout cell = column(); cell.setPadding(dp(2), dp(8), dp(2), dp(8)); cell.setGravity(Gravity.CENTER_HORIZONTAL);
-        cell.setFocusable(true); cell.setClickable(true); cell.setTag("movement_score_" + index); cell.setSelected(selected == index);
-        TextView name = compact(title, 11, selected == index ? color : GRAY), status = compact(meta, 11, GRAY);
-        name.setTypeface(PocketFonts.pixel(this)); name.setTextSize(18); name.setMaxLines(1); name.setGravity(Gravity.CENTER); name.setTag("movement_score_name_" + index); status.setGravity(Gravity.CENTER);
-        MovementChart ring = MovementChart.ring(this, number, value, color);
-        if (host.getOrientation() == LinearLayout.VERTICAL) {
-            cell.setOrientation(LinearLayout.HORIZONTAL); cell.setGravity(Gravity.CENTER_VERTICAL);
-            cell.addView(ring, new LinearLayout.LayoutParams(dp(104), dp(104)));
-            LinearLayout info = column(); info.setPadding(dp(18), 0, 0, 0); name.setGravity(Gravity.START); status.setGravity(Gravity.START);
-            info.addView(name); info.addView(status); cell.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
-        } else { cell.addView(name); cell.addView(ring, new LinearLayout.LayoutParams(-1, dp(96))); cell.addView(status); }
-        cell.setContentDescription(title + " " + value + ", " + meta + (selected == index ? ". Close details." : ". Show details."));
-        name.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO); status.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        cell.setOnClickListener(v -> { selected = selected == index ? -1 : index; direct = false; render(); }); host.addView(cell, host.getOrientation() == LinearLayout.VERTICAL ? new LinearLayout.LayoutParams(-1, -2) : new LinearLayout.LayoutParams(0, -2, 1));
+    private void score(LinearLayout host,int index,String title,double number,String value,String meta){
+        int color=index==0?GREEN:index==1?YELLOW:BLUE,ink=index==0?PocketDesign.INK:color;
+        LinearLayout cell=column();cell.setPadding(dp(10),dp(14),dp(10),dp(14));cell.setBackgroundColor(index==0?GREEN:PocketDesign.PLANE);cell.setClickable(true);cell.setFocusable(true);cell.setTag("movement_score_"+index);cell.setSelected(selected==index);
+        TextView name=compact(title,18,ink);name.setTypeface(PocketFonts.pixel(this));name.setTextSize(18);name.setTag("movement_score_name_"+index);name.setMaxLines(1);cell.addView(name);
+        TextView reading=compact(value,44,ink);reading.setTypeface(PocketFonts.pixel(this));reading.setTextSize(44);reading.setSingleLine(true);
+        if(value.endsWith("%")){android.text.SpannableString styled=new android.text.SpannableString(value);styled.setSpan(new android.text.style.RelativeSizeSpan(.4f),value.length()-1,value.length(),0);reading.setText(styled);}cell.addView(reading);
+        View segments=new View(this){final android.graphics.Paint paint=new android.graphics.Paint();@Override protected void onDraw(android.graphics.Canvas canvas){float slot=getWidth()/16f;paint.setColor(ink);for(int i=0;i<16;i++){paint.setAlpha(Double.isFinite(number)&&i<number/100*16?210:40);canvas.drawRect(i*slot,0,(i+1)*slot-dp(2),getHeight(),paint);}}};segments.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);cell.addView(segments,new LinearLayout.LayoutParams(-1,dp(10)));
+        TextView status=compact(meta,12,index==0?0xFF283322:GRAY);status.setPadding(0,dp(9),0,0);cell.addView(status);
+        cell.setContentDescription(title+" "+value+", "+meta+(selected==index?". Close details.":". Show details."));
+        cell.setOnClickListener(v->{selected=selected==index?-1:index;direct=false;render();});
+        LinearLayout.LayoutParams layout=host.getOrientation()==LinearLayout.VERTICAL?new LinearLayout.LayoutParams(-1,-2):new LinearLayout.LayoutParams(0,-1,1);if(index>0){if(host.getOrientation()==LinearLayout.VERTICAL)layout.topMargin=dp(8);else layout.leftMargin=dp(8);}host.addView(cell,layout);
     }
     private void scorePanel(Scores.Result scores, JSONObject deck) {
-        String[] dates = dateKeys(snapshot.date, 28);
+        String[] dates = dateKeys(LocalDate.now(), 28);
         if (selected == 0) {
             section("RECOVERY");
             if (scores.recovery != null) for (Scores.Part p : scores.recovery.parts) note((p.z > .3 ? "▲ " : p.z < -.3 ? "▼ " : "· ") + p.text, WHITE);
@@ -231,13 +337,6 @@ public final class MovementActivity extends PocketActivity {
         };
         new android.app.AlertDialog.Builder(this).setTitle("Pocket " + new String[]{"recovery", "strain", "conditioning"}[selected]).setMessage(methods[selected] + "\n\nPocket estimates from COROS readings. Bevel's formulas are not public; these are not Bevel or COROS scores.").setPositiveButton("Close", null).show();
     }
-    private void week() {
-        section("LAST 7 DAYS"); LocalDate today = LocalDate.now(); double km = 0; int seconds = 0, kcal = 0, count = 0; double[] distances = new double[7];
-        for (CorosData.Activity item : snapshot.activities) { LocalDate d = item.day(ZoneId.systemDefault()); long offset = java.time.temporal.ChronoUnit.DAYS.between(today.minusDays(6), d); if (offset < 0 || offset > 6) continue; distances[(int) offset] += item.km; km += item.km; seconds += item.seconds; kcal += item.kcal; count++; }
-        metrics(new String[][]{{"distance", decimal(km, 1) + " km"}, {"moving", moving(seconds)}, {"activities", String.valueOf(count)}, {"kcal", String.valueOf(kcal)}});
-        plot("DISTANCE · KM", distances, dateKeys(today, 7), MovementChart.Kind.BARS, GREEN, v -> decimal(v, 1) + " km").setTag("movement_week");
-    }
-
     private CorosData.Activity findActivity(String id) { if (snapshot != null) for (CorosData.Activity item : snapshot.activities) if (item.id.equals(id)) return item; return null; }
     private void renderActivity(CorosData.Activity item) {
         int index = snapshot.activities.indexOf(item) + 1; note(item.type + " · " + date(item.day(ZoneId.systemDefault())) + (sample ? " · SAMPLE DATA" : " · " + index + "/" + snapshot.activities.size()), GRAY);
@@ -275,10 +374,10 @@ public final class MovementActivity extends PocketActivity {
         if (loadingDetails.contains(item.id)) return; String requestOwner = owner; loadingDetails.add(item.id); errors.remove(item.id);
         load(() -> repository.detail(item, force), value -> {
             if (!requestOwner.equals(repository.detailOwner())) return; loadingDetails.remove(item.id); details.put(item.id, value);
-            if (activityId.equals(item.id) && !settings && visible) render();
+            if ((activityId.equals(item.id) || !gymId.isEmpty()) && !settings && visible) render();
         }, error -> {
             if (!requestOwner.equals(repository.detailOwner())) return; loadingDetails.remove(item.id); errors.put(item.id, error.getMessage() == null ? "Activity unavailable" : error.getMessage());
-            if (activityId.equals(item.id) && !settings && visible) render();
+            if ((activityId.equals(item.id) || !gymId.isEmpty()) && !settings && visible) render();
         });
         if (force) render();
     }
