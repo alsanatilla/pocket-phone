@@ -4,6 +4,7 @@ import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, apiKey, setKey, saveSet
 import { streamChat } from '../src/client/pip-stream.js';
 import { execute } from '../src/client/pip-tools.js';
 import { SCHEMAS } from '../src/client/pip-sdk-tools.js';
+import { sanitizeObject, validObject } from '../src/shared/objects.js';
 import { event, response, anthropicMessage } from './pip-provider-fixtures.mjs';
 
 class Memory {
@@ -201,4 +202,26 @@ test('replayed history tells Pip which actions it already took or had declined',
   const assistant=body.messages.find(message=>message.role==='assistant');
   assert.ok(assistant,'the finished turn is replayed');
   assert.match(assistant.content,/\[Pip actions: note "Car industry turmoil" \(saved by the user\); append_note on "Trip" \(not applied\); task "Call the dealer" \(saved after the user approved it\); complete_task "Old task" \(declined by the user\)\]/);
+});
+
+test('a pinned chat stays at the top, and the flag survives the account copy', () => {
+  const memory = new Memory(), store = new ChatStore(memory);
+  const write = (uid, title, updated, pinned) => memory.setItem('pocket:pip-chat:' + uid, JSON.stringify({ uid, title, created: updated, updated, draft: '', context: [], turns: [], pinned, config: DEFAULT_CONFIG }));
+  write('older', 'older', 1000, false); write('newer', 'newer', 2000, false);
+  assert.deepEqual(store.list().map(chat => chat.title), ['newer', 'older']);
+  // Pinning beats recency: a routine's chat keeps its place above the rest.
+  write('older', 'older', 1000, true);
+  assert.deepEqual(store.list().map(chat => chat.title), ['older', 'newer']);
+  // Unpinning returns it to time order.
+  write('older', 'older', 1000, false);
+  assert.deepEqual(store.list().map(chat => chat.title), ['newer', 'older']);
+  // The pin button writes a real flag that a save keeps.
+  store.update('older', chat => { chat.pinned = true; });
+  assert.equal(JSON.parse(memory.getItem('pocket:pip-chat:older')).pinned, true);
+  assert.deepEqual(store.list().map(chat => chat.title), ['older', 'newer']);
+  // The server keeps the flag; only a real boolean is accepted, and a deleted chat carries none.
+  const chat = { uid: 'pinned', title: 'pinned', created: 1, updated: 2, draft: '', context: [], turns: [], config: DEFAULT_CONFIG, pinned: true };
+  assert.equal(sanitizeObject('chats', chat).pinned, true); assert.equal(validObject('chats', chat), true);
+  assert.equal(validObject('chats', { ...chat, pinned: 'yes' }), false);
+  assert.equal(sanitizeObject('chats', { uid: 'pinned', updated: 3, deleted: true }).pinned, undefined);
 });

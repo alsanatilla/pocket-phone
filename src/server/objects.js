@@ -25,8 +25,9 @@ export async function writeObject(userId, collection, incoming, { appendTurns = 
     tx = await database().transaction('write');
     const rows = await tx.execute({ sql: 'SELECT payload, revision FROM pocket_objects WHERE user_id = ? AND collection = ? AND uid = ?', args: [userId, collection, uid] });
     const previous = rows.rows[0], stored = previous ? JSON.parse(String(previous.payload)) : null;
-    // A background reply adds turns without replacing a concurrently edited title, model or draft.
-    const change = appendTurns && stored && !stored.deleted ? { ...stored, turns: incoming.turns,
+    // A background reply adds turns without replacing a concurrently edited title, model, draft or pin. It may pin a
+    // chat whose pin was never set (a routine's own chat); once the user pins or unpins it, that choice stays.
+    const change = appendTurns && stored && !stored.deleted ? { ...stored, turns: incoming.turns, ...(stored.pinned === undefined && incoming.pinned !== undefined ? { pinned: incoming.pinned } : {}),
       draftUpdated: stored.draftUpdated ?? stored.updated, updated: Math.max(stored.updated, incoming.updated) } : incoming;
     const value = mergeObject(collection, stored, change);
     const payload = JSON.stringify(value);

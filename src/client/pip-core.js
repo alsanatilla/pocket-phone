@@ -48,7 +48,8 @@ export class ChatStore {
       const key = this.storage.key(i);
       if (key?.startsWith(PREFIX)) chats.push(this.get(key.slice(PREFIX.length)));
     }
-    return chats.filter(Boolean).sort((a, b) => b.updated - a.updated);
+    // Pinned chats stay at the top, then the most recently edited: a routine's chat can hold its place.
+    return chats.filter(Boolean).sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updated - a.updated);
   }
   get(uid) {
     const raw = this.storage.getItem(PREFIX + uid);

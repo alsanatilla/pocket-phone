@@ -11,7 +11,8 @@ import { applyProposal, applyChange, applyCoros } from './pip-actions.js';
 import { corosAction, corosCourse, corosDated, corosDate, corosProblem, corosTitle, courseLines, sportName } from '../shared/coros-course.js';
 import { travelDraft } from '../shared/travel-context.js';
 import { CONTEXT_OVERFLOW } from './pip-limits.js';
-import { pipAway } from './pip-away.js';
+import { pipScheduled, scheduledProblemCount, scheduledState } from './pip-scheduled.js';
+import { routineCaption, sortRoutines } from './pip-routine-model.js';
 import { trainingContext } from './pip-training.js';
 
 const store = new ChatStore();
@@ -38,6 +39,24 @@ export function leave() {
   mounted?.root.querySelectorAll(".pip-mascot, .pixel-backdrop").forEach(c=>c.dispose?.());
   clearTimeout(paintTimer); clearInterval(phaseTimer); clearTimeout(historyTimer); paintTimer = phaseTimer = historyTimer = 0; mounted = null;
   viewportCleanup?.(); viewportCleanup = null;
+}
+
+/** Every routine, its next run and its recent outcomes; the launcher and header point at it when something failed. */
+async function scheduledView(root) {
+  try { await pipScheduled(ui, { root, go: ui.go, openChat: id => ui.go("/pip/" + id) }); }
+  catch (error) { root.replaceChildren(ui.h("p", { class: "meta warn", text: error.message || "Scheduled runs are unavailable." })); }
+}
+/** A failed or overdue routine is visible from the Pip page and the launcher, not only in settings. */
+async function markScheduled(node) {
+  try {
+    const count = await scheduledProblemCount(), entry = document.getElementById("pip-entry");
+    // Cleared again once nothing needs attention, so a fixed routine does not keep the launcher dot.
+    entry?.classList.toggle("warn", Boolean(count) && !entry.classList.contains("replying"));
+    if (!count) return;
+    const label = count === 1 ? "1 scheduled run needs attention" : count + " scheduled runs need attention";
+    if (node.isConnected) { node.textContent = "scheduled ⚠"; node.classList.add("warn"); node.title = label; node.setAttribute("aria-label", label); }
+    if (entry && !entry.classList.contains("replying")) entry.title = label;
+  } catch { /* the scheduled screen reports its own errors */ }
 }
 
 function fitViewport() {
@@ -92,6 +111,7 @@ export function withTravel(trip, stop, action = 'find') {
 
 export function mount(root, uid, helpers) {
   leave(); ui = helpers;
+  if (uid === "scheduled") { void scheduledView(root); return; }
   try {
     let chat;
     if (uid === "new") chat = store.create();
@@ -107,17 +127,36 @@ export function mount(root, uid, helpers) {
 
 function conversationNav(current) {
   const chats = store.list(), query = ui.h("input", { type: "search", "aria-label": "Find a chat", placeholder: "find a chat…" });
+  const routines = ui.h("div", { class: "pip-routine-list", "aria-label": "Chats Pip writes on a schedule" });
   const list = ui.h("div", { class: "pip-chat-list" });
   const filter = () => {
     const q = query.value.trim().toLowerCase();
     const matches = chats.filter(c => (c.title + " " + c.turns.map(t => t.text).join(" ")).toLowerCase().includes(q));
-    list.replaceChildren(...matches.map(c => button(c.title, () => ui.go("/pip/" + c.uid), { class: "row-button" + (c.uid === current.uid ? " selected" : ""), "aria-current": c.uid === current.uid ? "page" : "false" })));
+    list.replaceChildren(...matches.map(c => button((c.pinned ? "▪ " : "") + c.title, () => ui.go("/pip/" + c.uid), { class: "row-button" + (c.uid === current.uid ? " selected" : ""), "aria-current": c.uid === current.uid ? "page" : "false" })));
     if (!matches.length) list.append(caption("No chats found."));
   };
   query.oninput = filter; filter();
+  void fillRoutines(routines, current);
   return ui.h("details", { class: "pip-navigation", ...(matchMedia("(min-width: 900px)").matches ? { open: true } : {}) },
     ui.h("summary", { text: "chats [" + chats.length + "]" }),
-    ui.h("nav", { "aria-label": "pip conversations" }, button("+ new chat", () => ui.go("/pip/new"), { class: "row-button accent" }), query, list));
+    ui.h("nav", { "aria-label": "pip conversations" }, button("+ new chat", () => ui.go("/pip/new"), { class: "row-button accent" }), routines, query, list));
+}
+
+/** Each routine's own chat, above the rest: the quickest way to what ran on its own, and where a failure shows. */
+async function fillRoutines(node, current) {
+  try {
+    const state = await scheduledState(), list = sortRoutines(state.routines || []).filter(routine => routine.chat || routine.lastChat);
+    if (!list.length || !node.isConnected) return;
+    node.replaceChildren(ui.h("p", { class: "meta muted pip-routine-heading", text: "routines · " + (state.settings?.enabled === false || !state.hasKey ? "paused" : "on schedule") }),
+      ...list.map(routine => {
+        const chat = routine.chat || routine.lastChat, problem = routine.lastError || routine.lastStatus === 'failed';
+        return button(ui.h("span", {}, ui.h("span", { class: "pip-routine-name", text: (problem ? "⚠ " : "") + routine.title }),
+          ui.h("span", { class: "sub", text: routineCaption(routine) })),
+          () => ui.go("/pip/" + chat),
+          { class: "row-button pip-routine-row" + (chat === current.uid ? " selected" : ""), "aria-current": chat === current.uid ? "page" : "false",
+            title: problem ? routine.title + " · " + (routine.lastError || "the last run failed") : routine.title + " · open its chat" });
+      }));
+  } catch { /* signed out or offline: the chat list stays as it is */ }
 }
 
 function contextCards(items, remove = null) {
@@ -485,13 +524,17 @@ function render() {
   else thread.append(ui.h("div", { class: "pip-empty" }, mascot()));
   const other = runner.active && runner.active.chatId !== chat.uid ? ui.h("div", { class: "pip-running" }, button("open reply", () => ui.go("/pip/" + runner.active.chatId)), button("stop", () => runner.stop())) : null;
   const progress=runner.active?.chatId===chat.uid ? ui.h("div",{class:"pip-loading"},mascot(true),ui.h("span",{class:"meta muted",text:phaseLabel(runner.active.turn.phase),role:"status"})) : null;
+  const scheduledControl = button("scheduled", () => ui.go("/pip/scheduled"), { title: "Every routine, when it runs next and how its last runs went" });
   const header = ui.h("header", { class: "pip-heading" }, ui.h("div", {}, ui.h("h1", { class: "workspace-title", text: "pip" }), caption(chat.title)), ui.h("div", { class: "pip-chat-actions" },
     button("rename", async () => { const title = await ui.ask("Name this chat", { value: chat.title, limit: 80 }); if (title?.trim()) { store.update(chat.uid, c => { c.title = title.trim(); }); render(); } }),
+    button(chat.pinned ? "pinned" : "pin", () => { store.update(chat.uid, c => { c.pinned = !c.pinned; }); render(); },
+      { class: chat.pinned ? "pinned" : "", "aria-pressed": String(Boolean(chat.pinned)), title: chat.pinned ? "Stop holding this chat at the top of the list" : "Hold this chat at the top of the list" }),
     button("delete", async () => { if (await ui.confirm("Delete this chat?", "delete")) { if (runner.active?.chatId === chat.uid) runner.stop(); store.remove(chat.uid); localStorage.removeItem("pocket:pip-current"); ui.go("/pip"); } }),
-    button("on its own", () => pipAway(ui, uid => ui.go("/pip/" + uid)), { title: "Routines Pip runs while Pocket is closed" }),
+    scheduledControl,
     button("API settings", () => apiSettings(chat.config))));
   const panel = ui.h("div", { class: "pip-panel" }, backdrop("glow"), header, other, thread, progress, composer(chat));
   mounted.root.replaceChildren(ui.h("div", { class: "pip-layout" }, conversationNav(chat), panel));
+  void markScheduled(scheduledControl);
   if (runner.active?.chatId === chat.uid) phaseTimer = setInterval(() => { if (!document.hidden && mounted?.thread === thread && runner.active) updateReply(runner.active.turn); }, 1000);
   requestAnimationFrame(() => { if (mounted?.thread === thread) { fitViewport(); thread.scrollTop = thread.scrollHeight; } });
 }

@@ -1,12 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { execute as sql } from './database.js';
 import { seal, open } from './secrets.js';
-import { readDocuments } from './workspace.js';
 import { writeObject } from './objects.js';
-import { corosState, corosTool, corosCatalog } from './coros.js';
-import { EMPTY } from '../shared/workspace.js';
+import { serverRecordSource } from './pip-source.js';
 import { config as pipConfig, requestBody, contextCoverage, BACKGROUND_OWNER } from '../client/pip-core.js';
-import { execute as runTool, recordSource, WRITE_TOOLS } from '../client/pip-tools.js';
+import { execute as runTool, WRITE_TOOLS } from '../client/pip-tools.js';
 import { trainingRuntime, trainingObservation, trainingCheckpoint, trainingChanged, rememberTraining, TRAINING_GRANTS, TRAINING_CHECK_INTERVAL } from './pip-training.js';
 import { objectId } from '../shared/objects.js';
 
@@ -68,7 +66,7 @@ export function backgroundRoutine(value) {
   const trainingDays = [...new Set(Array.isArray(value.trainingDays) ? value.trainingDays.filter(day => Number.isInteger(day) && day >= 0 && day <= 6) : [])].sort();
   if (kind === 'training' && !trainingDays.length) throw invalid('Choose your available training days.');
   const feedback = (Array.isArray(value.feedback) ? value.feedback : []).filter(item => Number.isSafeInteger(item.at) && typeof item.text === 'string').slice(-12).map(item => ({ at: item.at, text: item.text.slice(0, 1000) }));
-  return { id, kind, title, prompt, time: value.time, days, enabled: value.enabled !== false, ...(kind === 'training' ? { trainingDays, feedback, chat: objectId(value.chat) ? value.chat : '' } : {}) };
+  return { id, kind, title, prompt, time: value.time, days, enabled: value.enabled !== false, ...(objectId(value.chat) ? { chat: value.chat } : {}), ...(kind === 'training' ? { trainingDays, feedback } : {}) };
 }
 const parse = raw => { try { return JSON.parse(String(raw)); } catch { return null; } };
 async function stored(userId) {
@@ -76,15 +74,37 @@ async function stored(userId) {
   return row ? { settings: parse(row.settings), credentials: row.credentials ? String(row.credentials) : '', usedDay: String(row.used_day), usedTokens: Number(row.used_tokens) } : null;
 }
 async function routines(userId) {
-  const rows = (await sql({ sql: 'SELECT payload, next_run, last_run, last_error, last_chat FROM pocket_pip_routines WHERE user_id = ? ORDER BY rowid', args: [userId] })).rows;
-  return rows.map(row => ({ ...parse(row.payload), nextRun: Number(row.next_run) === NEVER ? 0 : Number(row.next_run), lastRun: Number(row.last_run), lastError: String(row.last_error), lastChat: String(row.last_chat) }));
+  const rows = (await sql({ sql: `SELECT payload, next_run, last_run, last_error, last_chat,
+    (SELECT status FROM pocket_pip_routine_runs r WHERE r.user_id = pocket_pip_routines.user_id AND r.routine_id = pocket_pip_routines.id ORDER BY r.seq DESC LIMIT 1) AS last_status
+    FROM pocket_pip_routines WHERE user_id = ? ORDER BY rowid`, args: [userId] })).rows;
+  return rows.map(row => ({ ...parse(row.payload), nextRun: Number(row.next_run) === NEVER ? 0 : Number(row.next_run), lastRun: Number(row.last_run),
+    lastError: String(row.last_error), lastChat: String(row.last_chat), lastStatus: String(row.last_status || '') }));
+}
+const RUN_STATUS = ['done', 'failed', 'limit', 'off', 'skipped', 'unchanged'], RUN_KEEP = 20;
+/** Records what a scheduled run did, so a failure stays visible after the routine row moves on. Training
+ * check-ins that find nothing new are recorded too, but left out of the overview a person reads. */
+export async function recordRun(userId, routineId, result, now = Date.now()) {
+  const status = RUN_STATUS.includes(result?.status) ? result.status : 'failed';
+  await sql({ sql: 'INSERT INTO pocket_pip_routine_runs (user_id, routine_id, at, status, error, chat, turn) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    args: [userId, String(routineId), now, status, String(result?.error || '').slice(0, 500), String(result?.chat || ''), String(result?.turn || '')] });
+  await sql({ sql: `DELETE FROM pocket_pip_routine_runs WHERE user_id = ? AND routine_id = ? AND seq NOT IN (
+    SELECT seq FROM pocket_pip_routine_runs WHERE user_id = ? AND routine_id = ? ORDER BY seq DESC LIMIT ${RUN_KEEP})`, args: [userId, String(routineId), userId, String(routineId)] });
+}
+/** The recent runs of every routine, newest first, with the routine's name. Quiet training checks are left out. */
+export async function routineRuns(userId, limit = 30) {
+  const rows = (await sql({ sql: `SELECT r.routine_id, r.at, r.status, r.error, r.chat, r.turn, p.payload
+    FROM pocket_pip_routine_runs r LEFT JOIN pocket_pip_routines p ON p.user_id = r.user_id AND p.id = r.routine_id
+    WHERE r.user_id = ? AND r.status != 'unchanged' ORDER BY r.seq DESC LIMIT ?`, args: [userId, Math.min(Math.max(Number(limit) || 30, 1), 100)] })).rows;
+  return rows.map(row => { const routine = parse(row.payload) || {};
+    return { routine: String(row.routine_id), title: String(routine.title || 'Removed routine'), kind: String(routine.kind || ''), at: Number(row.at),
+      status: String(row.status), error: String(row.error || ''), chat: String(row.chat || ''), turn: String(row.turn || '') }; });
 }
 const trainingReady = saved => Boolean(saved?.credentials && saved.settings?.enabled && TRAINING_GRANTS.every(grant => saved.settings.grants.includes(grant)));
 /** What the browser shows. The key itself never leaves the server. */
 export async function backgroundState(userId) {
   const saved = await stored(userId), today = saved?.settings ? localDay(Date.now(), saved.settings.timezone) : '';
   return { settings: saved?.settings || null, hasKey: Boolean(saved?.credentials), usedToday: saved && saved.usedDay === today ? saved.usedTokens : 0, routines: await routines(userId),
-    trainingReady: trainingReady(saved) };
+    runs: await routineRuns(userId), trainingReady: trainingReady(saved) };
 }
 const schedule = (routine, settings, active, after = Date.now()) => active && settings?.enabled && routine.enabled
   ? Math.min(nextRun(routine, settings.timezone, after), routine.kind === 'training' ? after + TRAINING_CHECK_INTERVAL : NEVER) : NEVER;
@@ -149,22 +169,13 @@ export async function removeRoutine(userId, id) {
 }
 
 // ── Running a routine ──
-/** The account's server copy as Pip's record source. Live COROS uses the account's own connection. */
-async function serverSource(userId) {
-  const documents = await readDocuments(userId), coros = await corosState(userId).catch(() => null);
-  const live = async run => {
-    try { return { value: await run() }; }
-    catch (error) { return { failed: { error: error.status === 422 ? 'coros_refused' : 'coros_unavailable', message: String(error.message || 'COROS is unavailable.').slice(0, 800) } }; }
-  };
-  return recordSource(name => documents[name]?.value || EMPTY[name](), {
-    corosCache: () => ({ cockpit: coros?.data?.cockpit || null, activities: coros?.data?.activities || null }),
-    coros: (action, body) => action === 'tool' ? live(() => corosTool(userId, body.name, body.arguments)) : action === 'catalog' ? live(() => corosCatalog(userId, body.names)) : Promise.resolve({ failed: { error: 'coros_unavailable', message: 'This COROS request is unavailable here.' } })
-  });
-}
+/** The account's server copy as Pip's record source. Calendar stays on the phone for a scheduled run. */
+const serverSource = userId => serverRecordSource(userId, { calendar: false });
 const chatObject = async (userId, uid) => { const row = (await sql({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, uid] })).rows[0]; return row ? parse(row.payload) : null; };
 const roomy = chat => chat && !chat.deleted && chat.turns.length < 1990 && JSON.stringify(chat).length < 2500000;
-/** Check-ins and prompts get one chat per routine and month. Training reviews reply in the chat where the user last talked
- * training with Pip, else their latest chat, so it stays one conversation. */
+/** Check-ins and prompts get one chat each, for the routine's whole life, pinned at the top of the chat list.
+ * Training reviews reply in the chat where the user last talked training, else their latest chat, so it stays one
+ * conversation. A chat that is full, or that the user deleted, rolls over to a fresh one the routine then keeps. */
 async function routineChat(userId, routine, settings, now) {
   const { grants, dailyTokens, timezone, enabled, ...config } = settings;
   if (routine.kind === 'training') {
@@ -177,10 +188,20 @@ async function routineChat(userId, routine, settings, now) {
     }
     return chat;
   }
-  const month = localDay(now, settings.timezone).slice(0, 7), uid = ('pip-routine-' + routine.id + '-' + month).replace(/[^a-zA-Z0-9_-]/g, '');
-  const chat = await chatObject(userId, uid);
-  if (chat?.deleted) return null;
-  return chat || { uid, title: 'Pip · ' + routine.title, created: now, updated: now, draft: '', context: [], turns: [], config };
+  const base = ('pip-routine-' + routine.id).replace(/[^a-zA-Z0-9_-]/g, '');
+  const remember = uid => sql({ sql: "UPDATE pocket_pip_routines SET payload = json_set(payload, '$.chat', ?) WHERE user_id = ? AND id = ?", args: [uid, userId, routine.id] });
+  // Continue in the chat this routine already writes into — including the monthly chat an earlier version used —
+  // and record it so it stays the routine's chat from now on.
+  const legacy = base + '-' + localDay(now, settings.timezone).slice(0, 7);
+  const known = routine.chat ? await chatObject(userId, routine.chat) : await chatObject(userId, base) || await chatObject(userId, legacy);
+  if (roomy(known)) { if (known.pinned === undefined) known.pinned = true; if (!routine.chat) await remember(known.uid); return known; }
+  // The routine's first chat keeps the stable id. After one that filled up or was deleted, a dated id is used so
+  // the old chat is never revived, and the routine remembers which chat it writes into next.
+  const stamp = localDay(now, settings.timezone).replaceAll('-', '');
+  let uid = routine.chat || known ? base + '-' + stamp : base;
+  if (await chatObject(userId, uid)) uid = base + '-' + stamp + '-' + randomUUID().replaceAll('-', '').slice(0, 8);
+  await remember(uid);
+  return { uid, title: 'Pip · ' + routine.title, created: now, updated: now, draft: '', context: [], turns: [], config, pinned: true };
 }
 export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.now(), force = false, trainingServices } = {}) {
   const saved = await stored(userId);
@@ -207,7 +228,7 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
     training = await trainingRuntime(userId, routine, today, { ...trainingServices, observation, previous: checkpoint, authorized });
   }
   const chat = await routineChat(userId, routine, settings, now);
-  if (!chat) return { status: 'skipped', error: 'This month\'s chat for the routine was deleted.' };
+  if (!chat) return { status: 'skipped', error: 'The routine\'s chat could not be opened.' };
   const { key } = open(userId, saved.credentials), value = { ...pipConfig(settings), grants: settings.grants };
   const turn = { uid: randomUUID(), text: routine.kind === 'checkin' ? CHECKIN : training ? TRAINING_CHECK : routine.prompt, context: [], created: now, owner: BACKGROUND_OWNER, attempt: randomUUID(), answer: '', reasoning: '', error: '', status: 'streaming', usage: {}, activity: [], sources: [], phase: 'requesting' };
   chat.turns.push(turn);
@@ -251,6 +272,7 @@ export async function runClaimed(userId, id, { force = false, fetcher, now = Dat
   const current = (await routines(userId)).find(item => item.id === id);
   await sql({ sql: 'UPDATE pocket_pip_routines SET lock_until = 0, last_run = ?, last_error = ?, last_chat = ?, next_run = ? WHERE user_id = ? AND id = ?',
     args: [now, result.error || '', result.chat || current?.lastChat || '', current ? schedule(current, saved?.settings, Boolean(saved?.credentials)) : NEVER, userId, id] });
+  await recordRun(userId, id, result, now);
   return result;
 }
 export async function runPipJob({ fetcher, now = Date.now() } = {}) {

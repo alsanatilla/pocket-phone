@@ -75,6 +75,85 @@ test('the job runs due routines once, and the daily limit stops further runs', a
   assert.equal(result.status, 'limit'); assert.equal(requests, 1);
   const state = await background.backgroundState(userId);
   assert.match(state.routines[0].lastError, /token limit/); assert.equal(state.usedToday, 1100);
+  // Both the run that answered and the run the limit stopped are readable afterwards, newest first.
+  assert.deepEqual(state.runs.map(run => run.status), ['limit', 'done']);
+  assert.match(state.runs[0].error, /token limit/);
+});
+
+test('every claimed run is recorded, and a failure stays visible afterwards', async () => {
+  const userId = await account();
+  await background.saveBackground(userId, settings, 'fixture-key-123456');
+  const { routines } = await background.saveRoutine(userId, { kind: 'prompt', title: 'Car watch', prompt: 'Anything about the blue car?', time: '07:30', days: [1] });
+  const id = routines[0].id;
+  const good = await background.runClaimed(userId, id, { force: true, fetcher: async () => response(compatibleMessage({ text: 'Nothing needs attention.' })) });
+  assert.equal(good.status, 'done');
+  // A provider that answers with an unreadable stream fails the run rather than the job.
+  const failed = await background.runClaimed(userId, id, { force: true, fetcher: async () => response('data: {"broken":true}\r\n\r\n') });
+  assert.equal(failed.status, 'failed'); assert.ok(failed.error);
+  const state = await background.backgroundState(userId);
+  assert.equal(state.routines[0].lastStatus, 'failed'); assert.match(state.routines[0].lastError, /./);
+  assert.deepEqual(state.runs.map(run => run.status), ['failed', 'done']);
+  assert.equal(state.runs[0].title, 'Car watch'); assert.equal(state.runs[0].kind, 'prompt'); assert.ok(state.runs[0].error);
+  assert.equal(state.runs[1].chat, good.chat);
+})
+
+test('a routine keeps one chat of its own, pinned, and starts a new one only when it is full or deleted', async () => {
+  const { writeObject } = await import('../src/server/objects.js');
+  const userId = await account();
+  await background.saveBackground(userId, settings, 'fixture-key-123456');
+  const { routines } = await background.saveRoutine(userId, { kind: 'prompt', title: 'Car watch', prompt: 'Anything about the blue car?', time: '07:30', days: [1, 2, 3, 4, 5] });
+  const id = routines[0].id, fetcher = async () => response(compatibleMessage({ text: 'Nothing new.' }));
+  const first = await background.runClaimed(userId, id, { force: true, now: Date.parse('2026-10-09T06:00:00Z'), fetcher });
+  assert.equal(first.chat, 'pip-routine-' + id);
+  const chat = await chatOf(userId, first.chat);
+  assert.equal(chat.title, 'Pip · Car watch'); assert.equal(chat.pinned, true, 'the routine chat is pinned so it keeps its place');
+  assert.equal(chat.turns.length, 1);
+  // A month later the same routine writes into the same chat instead of starting a new one.
+  const second = await background.runClaimed(userId, id, { force: true, now: Date.parse('2026-11-09T06:00:00Z'), fetcher });
+  assert.equal(second.chat, first.chat); assert.equal((await chatOf(userId, first.chat)).turns.length, 2);
+  // A chat that is full rolls over, and the routine remembers where it writes now.
+  const full = await chatOf(userId, first.chat);
+  await writeObject(userId, 'chats', { ...full, updated: full.updated + 1, pinned: true,
+    turns: Array.from({ length: 1990 }, (unused, index) => ({ uid: 'turn-' + index, text: 'x', context: [], status: 'done', answer: '' })) });
+  const third = await background.runClaimed(userId, id, { force: true, now: Date.parse('2026-11-10T06:00:00Z'), fetcher });
+  assert.notEqual(third.chat, first.chat); assert.equal((await chatOf(userId, third.chat)).turns.length, 1);
+  assert.equal((await background.backgroundState(userId)).routines[0].chat, third.chat);
+  const fourth = await background.runClaimed(userId, id, { force: true, now: Date.parse('2026-11-11T06:00:00Z'), fetcher });
+  assert.equal(fourth.chat, third.chat); assert.equal((await chatOf(userId, third.chat)).turns.length, 2);
+  // Deleting the routine's chat does not silence it forever: the next run starts a fresh thread.
+  await writeObject(userId, 'chats', { uid: third.chat, updated: Date.now(), deleted: true });
+  const fifth = await background.runClaimed(userId, id, { force: true, now: Date.parse('2026-11-12T06:00:00Z'), fetcher });
+  assert.notEqual(fifth.chat, third.chat); assert.equal((await chatOf(userId, fifth.chat)).turns.length, 1);
+});
+
+test('a routine adopts the chat an earlier version wrote into, instead of starting a new one', async () => {
+  const userId = await account();
+  await background.saveBackground(userId, settings, 'fixture-key-123456');
+  const now = Date.parse('2026-10-09T06:00:00Z');
+  // The chat a monthly version left behind, and a routine that does not know about it yet.
+  const { routines } = await background.saveRoutine(userId, { kind: 'prompt', title: 'Car watch', prompt: 'Anything about the blue car?', time: '07:30', days: [1, 2, 3, 4, 5] });
+  const id = routines[0].id, legacy = 'pip-routine-' + id + '-2026-10';
+  const { writeObject } = await import('../src/server/objects.js');
+  await writeObject(userId, 'chats', { uid: legacy, title: 'Pip · Car watch', created: now - 3600000, updated: now - 3600000, draft: '', context: [], turns: [], config: { provider: 'anthropic', model: 'claude-sonnet-5-5', baseUrl: 'https://api.anthropic.com/v1', maxTokens: 4096, thinking: false, webSearch: false } });
+  const run = await background.runClaimed(userId, id, { force: true, now, fetcher: async () => response(compatibleMessage({ text: 'Nothing new.' })) });
+  assert.equal(run.chat, legacy, 'the routine keeps its existing chat');
+  const chat = await chatOf(userId, legacy);
+  assert.equal(chat.turns.length, 1); assert.equal(chat.pinned, true);
+  assert.equal((await background.backgroundState(userId)).routines[0].chat, legacy);
+});
+
+test('a routine reply keeps the pin the user chose while it ran', async () => {
+  const { writeObject } = await import('../src/server/objects.js');
+  const userId = await account();
+  await background.saveBackground(userId, settings, 'fixture-key-123456');
+  const { routines } = await background.saveRoutine(userId, { kind: 'prompt', title: 'Car watch', prompt: 'Anything about the blue car?', time: '07:30', days: [1, 2, 3, 4, 5] });
+  const id = routines[0].id, reply = async () => response(compatibleMessage({ text: 'Nothing new.' }));
+  const first = await background.runClaimed(userId, id, { force: true, now: Date.parse('2026-10-09T06:00:00Z'), fetcher: reply });
+  // The user unpins the routine's chat while the next run waits for the provider.
+  const unpin = async () => { const chat = await chatOf(userId, first.chat); await writeObject(userId, 'chats', { ...chat, pinned: false, updated: chat.updated + 1 }); return reply(); };
+  await background.runClaimed(userId, id, { force: true, now: Date.parse('2026-10-10T06:00:00Z'), fetcher: unpin });
+  const chat = await chatOf(userId, first.chat);
+  assert.equal(chat.turns.length, 2); assert.equal(chat.pinned, false, 'the reply does not pin the chat again');
 });
 
 test('forgetting the key stops scheduling, and settings are validated', async () => {

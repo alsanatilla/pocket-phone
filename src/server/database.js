@@ -41,6 +41,10 @@ export const TABLES = [
   `CREATE INDEX IF NOT EXISTS pocket_pip_routines_due ON pocket_pip_routines(next_run)`,
   `CREATE TABLE IF NOT EXISTS pocket_pip_training_state (user_id TEXT NOT NULL, routine_id TEXT NOT NULL, workouts TEXT NOT NULL DEFAULT '{}', review_day TEXT NOT NULL DEFAULT '', PRIMARY KEY(user_id, routine_id), FOREIGN KEY(user_id, routine_id) REFERENCES pocket_pip_routines(user_id, id) ON DELETE CASCADE)`,
   `CREATE TABLE IF NOT EXISTS pocket_pip_training_slots (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, routine_id TEXT NOT NULL, slot TEXT NOT NULL, day TEXT NOT NULL, PRIMARY KEY(user_id, routine_id, slot))`,
+  // Every scheduled run and what it did: the routine row keeps only the latest outcome, this keeps the recent
+  // history a person can check after a failure instead of hunting through chats.
+  `CREATE TABLE IF NOT EXISTS pocket_pip_routine_runs (seq INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, routine_id TEXT NOT NULL, at INTEGER NOT NULL, status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', chat TEXT NOT NULL DEFAULT '', turn TEXT NOT NULL DEFAULT '')`,
+  `CREATE INDEX IF NOT EXISTS pocket_pip_routine_runs_owner ON pocket_pip_routine_runs(user_id, at)`,
   `CREATE TABLE IF NOT EXISTS pocket_coros_writes (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, key TEXT NOT NULL, tool TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, PRIMARY KEY(user_id, key))`,
 ];
 export function ensureSchema() {

@@ -33,6 +33,8 @@ input[type=checkbox] { accent-color: var(--accent); }
 .pip-entry .pip-mascot { width: 80px; height: 80px; max-width: none; image-rendering: pixelated; pointer-events: none; }
 .pip-entry.selected { box-shadow: inset 0 -2px var(--accent); }
 .pip-entry.replying::after { content: ''; position: absolute; width: 5px; height: 5px; background: var(--accent); border-radius: 50%; margin: 52px 0 0 44px; }
+/* A scheduled Pip run failed or never ran: the launcher says so without opening anything. */
+.pip-entry.warn::after { content: ''; position: absolute; width: 5px; height: 5px; background: var(--warning); border-radius: 50%; margin: 52px 0 0 44px; }
 .status { font-size: 13px; line-height: 1.4; font-weight: 400; letter-spacing: 0; color: var(--muted); max-width: 160px; white-space: pre-line; text-align: right; overflow-wrap: anywhere; }
 .content { padding-top: 0; padding-bottom: max(28px, env(safe-area-inset-bottom)); }
 .tool { min-width: 0; }
