@@ -13,7 +13,8 @@ export async function readObjects(userId, collection, after = 0) {
   for (const row of result.rows) { const bytes = Buffer.byteLength(String(row.payload)); if (selected.length && size + bytes > 3 * 1024 * 1024) break; selected.push(row); size += bytes; }
   return { items: selected.map(row => JSON.parse(String(row.payload))), cursor: selected.length ? Number(selected.at(-1).revision) : after, more: selected.length < result.rows.length || result.rows.length === 25 };
 }
-export async function writeObject(userId, collection, incoming) {
+export async function writeObject(userId, collection, incoming, { appendTurns = false } = {}) {
+  if (appendTurns && collection !== 'chats') throw new Error('Only chats can append turns.');
   if (!validObject(collection, incoming)) throw Object.assign(new Error('Invalid ' + collection + ' record.'), { status: 400 });
   incoming = sanitizeObject(collection, incoming);
   const uid = collection === 'chats' ? incoming.uid : incoming.id;
@@ -23,7 +24,11 @@ export async function writeObject(userId, collection, incoming) {
   try {
     tx = await database().transaction('write');
     const rows = await tx.execute({ sql: 'SELECT payload, revision FROM pocket_objects WHERE user_id = ? AND collection = ? AND uid = ?', args: [userId, collection, uid] });
-    const previous = rows.rows[0], value = mergeObject(collection, previous ? JSON.parse(String(previous.payload)) : null, incoming);
+    const previous = rows.rows[0], stored = previous ? JSON.parse(String(previous.payload)) : null;
+    // A background reply adds turns without replacing a concurrently edited title, model or draft.
+    const change = appendTurns && stored && !stored.deleted ? { ...stored, turns: incoming.turns,
+      draftUpdated: stored.draftUpdated ?? stored.updated, updated: Math.max(stored.updated, incoming.updated) } : incoming;
+    const value = mergeObject(collection, stored, change);
     const payload = JSON.stringify(value);
     if (Buffer.byteLength(payload) > 3 * 1024 * 1024) throw Object.assign(new Error('This conversation is too large for one sync.'), { status: 413 });
     let revision = Number(previous?.revision || 0);

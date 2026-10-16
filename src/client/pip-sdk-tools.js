@@ -19,7 +19,7 @@ const corosArguments = (name, description) => z.record(z.string(), z.unknown()).
 const checked = problem => (value, context) => { const message = problem(value); if (message) context.addIssue({ code: 'custom', message }); };
 
 const DEFINITIONS = {
-  update_training_preferences: ['Remember training preferences the user states in this conversation. Keep the existing brief when changing only days or pausing. When replacing the brief, retain still-valid goals, equipment and constraints; do not invent them. Put temporary soreness or fatigue in dated feedback, not permanent goals. Save before claiming to remember it. enabled pauses/resumes automatic planning only when the user asks.', object({
+  update_training_preferences: ['Remember what the user tells you about their training, on their account; saves without a review. brief holds goals, equipment and constraints: when replacing it, keep still-valid parts and invent nothing. Put temporary soreness or fatigue in dated feedback, not the brief. Save before claiming to remember it. enabled turns automatic planning on or off only when the user asks. Automatic reviews reply in the chat where preferences were last saved. The result says whether automatic planning is on and what setup is missing.', object({
     brief: z.string().min(1).max(4000).optional(), trainingDays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
     feedback: z.string().min(1).max(1000).optional(), enabled: z.boolean().optional()
   }).refine(value => Object.keys(value).length > 0, 'Supply a training preference to remember.')],

@@ -2,7 +2,8 @@ import { connected, post, request } from './cloud.js';
 import { syncNow } from './sync.js';
 
 // Pip on its own: a dedicated key, what Pip may read, and routines that run on Pocket's server while
-// Pocket is closed. Training routines may also maintain workouts and their own dated gym tasks.
+// Pocket is closed. The training planner may also maintain workouts and their own dated gym tasks; it starts
+// when the user asks for it in any Pip chat and replies there.
 const GRANTS = [['notes', 'Notes'], ['thoughts', 'Thoughts'], ['tasks', 'Tasks'], ['gym', 'Gym'], ['coros', 'COROS']];
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'], WEEK = [1, 2, 3, 4, 5, 6, 0];
 const START = { provider: 'compatible', model: 'openrouter/free', baseUrl: 'https://openrouter.ai/api/v1', maxTokens: 8192, webSearch: false, grants: ['notes', 'thoughts', 'tasks'], dailyTokens: 200000, enabled: true };
@@ -10,15 +11,6 @@ const API = '/api/pip/background';
 const timezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const dayList = days => days.length === 7 ? 'every day' : days.join() === '1,2,3,4,5' ? 'weekdays' : WEEK.filter(day => days.includes(day)).map(day => DAYS[day]).join(' ');
 const when = at => new Date(at).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-
-export async function openTraining(ui, openChat) {
-  if (!connected()) { ui.say('Sign in to Pocket to talk about training.'); ui.go('/account'); return; }
-  const state = await request(API);
-  if (!state.hasKey) { ui.say('Add a dedicated key once, then open your training chat.'); await pipAway(ui, openChat); return; }
-  const { chat } = await post(API, { action: 'training-chat' });
-  if (!await syncNow()) throw new Error('The training chat could not sync. Try again when Pocket is online.');
-  ui.closeDialog(); openChat(chat);
-}
 
 export async function pipAway(ui, openChat) {
   const caption = text => ui.h('p', { class: 'meta muted', text });
@@ -45,7 +37,6 @@ export async function pipAway(ui, openChat) {
       ui.h('strong', { text: routine.title }),
       caption([routine.kind === 'training' ? 'after workouts · daily check ' + routine.time + ' · ' + dayList(routine.days) : routine.time + ' · ' + dayList(routine.days), routine.nextRun ? (routine.kind === 'training' ? 'next data check ' : 'next ') + when(routine.nextRun) : 'paused', routine.lastError].filter(Boolean).join(' · ')),
       ui.h('div', { class: 'pip-routine-actions' },
-        routine.kind === 'training' ? button('talk to Pip', () => openTraining(ui, openChat)) : null,
         button('run now', async () => {
           ui.say('Pip is running “' + routine.title + '”…');
           const next = await post(API, { action: 'run', id: routine.id });
@@ -54,7 +45,7 @@ export async function pipAway(ui, openChat) {
           if (next.run.chat) { await syncNow(); ui.closeDialog(); openChat(next.run.chat); return; }
           await show(next);
         }),
-        routine.lastChat ? button('open chat', async () => { await syncNow(); ui.closeDialog(); openChat(routine.lastChat); }) : null,
+        routine.chat || routine.lastChat ? button('open chat', async () => { await syncNow(); ui.closeDialog(); openChat(routine.chat || routine.lastChat); }) : null,
         button('edit', () => edit(routine)))));
     const edit = async (routine = { kind: 'prompt', title: '', prompt: '', time: '08:00', days: [1, 2, 3, 4, 5], enabled: true }) => {
       const training = routine.kind === 'training';
@@ -69,8 +60,7 @@ export async function pipAway(ui, openChat) {
         catch (failure) { problem.textContent = failure.message; }
       };
       await ui.dialog(routine.id ? routine.title : training ? 'training planner' : routine.kind === 'checkin' ? 'morning check-in' : 'scheduled prompt', ui.h('div', { class: 'pip-settings' },
-        ui.h('label', {}, 'name', title), training ? caption('Talk to Pip about your goals, available days and how each workout felt. Pip remembers your preferences and uses the same conversation for automatic check-ins.') : routine.kind === 'prompt' ? ui.h('label', {}, 'what Pip should do', prompt) : caption('Overdue and due tasks, old parked thoughts, COROS readiness and load, with up to three suggestions.'),
-        training ? button('open training chat', () => openTraining(ui, openChat), { class: 'row-button accent' }) : null,
+        ui.h('label', {}, 'name', title), training ? caption('Talk to Pip about your goals, available days and how each workout felt in any chat. Pip remembers it and replies in the chat where you last talked training.') : routine.kind === 'prompt' ? ui.h('label', {}, 'what Pip should do', prompt) : caption('Overdue and due tasks, old parked thoughts, COROS readiness and load, with up to three suggestions.'),
         training && routine.prompt ? caption('remembered · ' + routine.prompt) : null,
         training ? caption('Reviews how your latest workouts went, then adjusts just the next one or two sessions within three days, starting tomorrow. Checks for completed COROS and synced Gym workouts about every 30 minutes, and reviews recovery at the daily check below. Unchanged data does not start another AI review.') : null,
         training ? caption('Running, cycling and trail workouts go to COROS; gym and recovery sessions become dated Pocket tasks. Pip reviews actual workout details, updates its own upcoming sessions and explains what changed. Manual workouts stay intact.') : null,
@@ -86,7 +76,7 @@ export async function pipAway(ui, openChat) {
     };
     const hasCheckin = state.routines.some(routine => routine.kind === 'checkin');
     await ui.dialog('pip · on its own', ui.h('div', { class: 'pip-settings' },
-      caption('Runs on Pocket\'s server while Pocket is closed, with a key used only for this. Replies arrive as Pip chats. Check-ins and prompts suggest changes. The training planner automatically saves workouts and its own gym tasks.'),
+      caption('Runs on Pocket\'s server while Pocket is closed, with a key used only for this. Check-ins and prompts reply in their own Pip chats and suggest changes. The training planner replies in your chat with Pip and saves workouts and its own gym tasks automatically.'),
       caption(state.hasKey ? 'today · ' + state.usedToday.toLocaleString() + ' of ' + settings.dailyTokens.toLocaleString() + ' tokens' : 'Add a key to start. Set a spending limit for it at your provider.'),
       ui.h('label', {}, 'Provider', provider), ui.h('label', {}, 'API base URL', endpoint), ui.h('label', {}, 'Model', model), ui.h('label', {}, 'Dedicated key', key),
       ui.h('label', {}, 'Daily token limit', limit), ui.h('label', {}, 'Reply token limit', replyLimit), caption('Workout analysis and detailed sessions may need up to 8,192 reply tokens.'), enabled.view,
@@ -98,7 +88,7 @@ export async function pipAway(ui, openChat) {
       state.hasKey ? button('forget key', async () => show(await post(API, { action: 'forget-key' }))) : null,
       caption('routines'), ...(routines.length ? routines : [caption('No routines yet.')]),
       hasCheckin ? null : button('+ morning check-in', () => edit({ kind: 'checkin', title: 'Morning check-in', time: '07:30', days: [0, 1, 2, 3, 4, 5, 6], enabled: true })),
-      state.routines.some(routine => routine.kind === 'training') ? null : button('+ training chat', () => openTraining(ui, openChat)),
+      state.routines.some(routine => routine.kind === 'training') ? null : caption('Training planner · tell Pip in any chat what you’re training for and ask it to plan automatically. It needs Gym, COROS and Tasks access above.'),
       button('+ scheduled prompt', () => edit())), [['close', null]]);
   };
   await show(await request(API));

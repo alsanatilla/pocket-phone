@@ -1,7 +1,7 @@
 import { storage as localStorage, tabStorage as sessionStorage } from './workspace-storage.js';
 // Component structure informed by beautifului.dev: conversation navigation,
 // reply + expandable details, context cards, composer. Pocket owns the visuals.
-import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings, apiKey, setKey, keyName, identity, contextCoverage, streamReply } from "./pip-core.js";
+import { ChatStore, ReplyRunner, DEFAULT_CONFIG, BACKGROUND_OWNER, config, settings, saveSettings, setKey, keyName, identity, contextCoverage, streamReply } from "./pip-core.js";
 import { notes, tasks, parking, noteTitle, receipt, KIND } from "./store.js";
 import { mascot } from "./pip-pixels.js";
 import { backdrop } from "./pixel-backdrop.js";
@@ -11,13 +11,12 @@ import { applyProposal, applyChange, applyCoros } from './pip-actions.js';
 import { corosAction, corosCourse, corosDated, corosDate, corosProblem, corosTitle, courseLines, sportName } from '../shared/coros-course.js';
 import { travelDraft } from '../shared/travel-context.js';
 import { CONTEXT_OVERFLOW } from './pip-limits.js';
-import { pipAway, openTraining } from './pip-away.js';
-import { trainingChatRoutine, trainingReply } from './pip-training-chat.js';
+import { pipAway } from './pip-away.js';
+import { trainingContext } from './pip-training.js';
 
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, historyTimer = 0, viewportCleanup = null;
-const runner = new ReplyRunner(store, { key: (value, chat) => trainingChatRoutine(chat.uid) ? 'account-key' : apiKey(value),
-  stream: (chat, turn, options) => trainingChatRoutine(chat.uid) ? trainingReply(chat, turn, options) : streamReply(chat, turn, options), onChange: event => {
+const runner = new ReplyRunner(store, { stream: async (chat, turn, options) => streamReply(chat, turn, { ...options, training: await trainingContext(chat.config, options.signal) }), onChange: event => {
   const entry = document.getElementById("pip-entry");
   if (entry) {
     entry.classList.toggle('replying', Boolean(runner.active));
@@ -145,7 +144,8 @@ function replyComponent(turn, chat) {
   const resumeHelp = ui.h("p", { class: "meta muted pip-resume-help", hidden: true, text: "Continue keeps completed lookups. Restart starts new research." });
   const reply = ui.h("article", { class: "pip-reply", "aria-label": "pip reply" }, ui.h("div", { class: "pip-speaker", text: "pip" }), plan, toolGroup, reasoning, replyStatus, answer, proposals, sources, contextLine, usageLine, phase, actions, resumeHelp);
   const message = ui.h("section", { class: "pip-message", "data-turn": turn.uid, tabindex: -1, "aria-label": "Conversation turn" },
-    ui.h("p", { class: "pip-question" }, ui.h("span", { class: "accent", text: "> " }), turn.text), contextCards(turn.context || []), reply);
+    turn.owner === BACKGROUND_OWNER ? ui.h("p", { class: "pip-question meta muted" }, ui.h("span", { class: "accent", text: "◷ " }), "on its own · " + turn.text)
+      : ui.h("p", { class: "pip-question" }, ui.h("span", { class: "accent", text: "> " }), turn.text), contextCards(turn.context || []), reply);
   mounted.replies.set(turn.uid, { answer, reasoning, reasoningText, tools, toolGroup, toolTitle, sources, sourceTitle, sourceList, usageLine, contextLine, replyStatus, phase, actions, resumeHelp, chat, plan, proposals });
   updateReply(turn); return message;
 }
@@ -224,7 +224,7 @@ function updateReply(turn) {
   }
   parts.phase.textContent = label;
   parts.phase.classList.toggle("warn", !active && turn.status !== "done");
-  const resumable = !active && turn.status !== "done" && parts.chat.turns.at(-1)?.uid === turn.uid;
+  const resumable = !active && turn.status !== "done" && parts.chat.turns.at(-1)?.uid === turn.uid && turn.owner !== BACKGROUND_OWNER;
   const contextTooLong = turn.error === CONTEXT_OVERFLOW;
   parts.resumeHelp.hidden = !resumable;
   parts.resumeHelp.textContent = contextTooLong ? 'Start a new chat with this question, or choose a model with more context.' : 'Continue keeps completed lookups. Restart starts new research.';
@@ -439,8 +439,7 @@ function updateHistoryControl(control, coverage) {
 }
 
 function composer(chat) {
-  const training = Boolean(trainingChatRoutine(chat.uid));
-  const field = ui.h("textarea", { id: "pip-prompt", "aria-label": "Message Pip", placeholder: training ? 'how did training feel? what would you like to change?' : "message Pip…", maxlength: 16000, rows: 3 });
+  const field = ui.h("textarea", { id: "pip-prompt", "aria-label": "Message Pip", placeholder: "message Pip…", maxlength: 16000, rows: 3 });
   field.value = chat.draft;
   const draftStatus = caption(""), saveDraft = () => {
     try {
@@ -460,15 +459,15 @@ function composer(chat) {
   const historyControl = button("history", () => chatHistory(chat.uid, historyControl), { class: "pip-history-control", "aria-haspopup": "dialog" });
   updateHistoryControl(historyControl, contextCoverage(chat));
   const capabilities = ui.h("div", { class: "pip-capabilities" },
-    training ? button('training settings', () => pipAway(ui, uid => ui.go('/pip/' + uid))) : button("□ tools [" + toolNames(chat.config).length + "]", () => pocketAccess(chat), { title: "Choose Pocket sources Pip can read" }),
-    training ? null : button("△ web · " + (chat.config.webSearch ? "on" : "off"), () => {
+    button("□ tools [" + toolNames(chat.config).length + "]", () => pocketAccess(chat), { title: "Choose Pocket sources Pip can read" }),
+    button("△ web · " + (chat.config.webSearch ? "on" : "off"), () => {
       if (runner.active) runner.stop();
       const value = config({ ...chat.config, webSearch: !chat.config.webSearch });
       store.update(chat.uid, c => { c.config = value; }); saveSettings(value); render();
     }, { "aria-pressed": String(chat.config.webSearch), title: "Web search through Firecrawl" }), historyControl);
   const actions = ui.h("div", { class: "pip-composer-actions" },
     button("+ context", () => attachSource(chat.uid)),
-    button(training ? 'account key' : chat.config.model, () => training ? pipAway(ui, uid => ui.go('/pip/' + uid)) : apiSettings(chat.config), { class: "pip-model", title: "Model and API settings" }),
+    button(chat.config.model, () => apiSettings(chat.config), { class: "pip-model", title: "Model and API settings" }),
     activeHere ? button("stop", () => runner.stop(), { class: "accent", id: "pip-send" }) : button("send", send, { class: "accent", id: "pip-send", disabled: Boolean(runner.active) }));
   return ui.h("form", { class: "pip-composer", onsubmit: event => event.preventDefault() },
     contextCards(chat.context, i => { store.update(chat.uid, c => c.context.splice(i, 1)); render(); }), capabilities, field, actions, draftStatus);
@@ -483,15 +482,14 @@ function render() {
   mounted.replies.clear(); mounted.latest = null;
   const thread = ui.h("div", { class: "pip-thread", tabindex: 0, "aria-label": "Conversation" }); mounted.thread = thread;
   if (chat.turns.length) thread.append(...chat.turns.map(turn => replyComponent(turn, chat)));
-  else thread.append(ui.h("div", { class: "pip-empty" }, mascot(), trainingChatRoutine(chat.uid) ? caption('Tell me what you’re training for, or how your last workout felt. We’ll work out the next step together. You can also ask me to plan automatically or take a break.') : null));
+  else thread.append(ui.h("div", { class: "pip-empty" }, mascot()));
   const other = runner.active && runner.active.chatId !== chat.uid ? ui.h("div", { class: "pip-running" }, button("open reply", () => ui.go("/pip/" + runner.active.chatId)), button("stop", () => runner.stop())) : null;
   const progress=runner.active?.chatId===chat.uid ? ui.h("div",{class:"pip-loading"},mascot(true),ui.h("span",{class:"meta muted",text:phaseLabel(runner.active.turn.phase),role:"status"})) : null;
   const header = ui.h("header", { class: "pip-heading" }, ui.h("div", {}, ui.h("h1", { class: "workspace-title", text: "pip" }), caption(chat.title)), ui.h("div", { class: "pip-chat-actions" },
     button("rename", async () => { const title = await ui.ask("Name this chat", { value: chat.title, limit: 80 }); if (title?.trim()) { store.update(chat.uid, c => { c.title = title.trim(); }); render(); } }),
     button("delete", async () => { if (await ui.confirm("Delete this chat?", "delete")) { if (runner.active?.chatId === chat.uid) runner.stop(); store.remove(chat.uid); localStorage.removeItem("pocket:pip-current"); ui.go("/pip"); } }),
     button("on its own", () => pipAway(ui, uid => ui.go("/pip/" + uid)), { title: "Routines Pip runs while Pocket is closed" }),
-    trainingChatRoutine(chat.uid) ? null : button('training chat', () => openTraining(ui, uid => ui.go('/pip/' + uid))),
-    trainingChatRoutine(chat.uid) ? null : button("API settings", () => apiSettings(chat.config))));
+    button("API settings", () => apiSettings(chat.config))));
   const panel = ui.h("div", { class: "pip-panel" }, backdrop("glow"), header, other, thread, progress, composer(chat));
   mounted.root.replaceChildren(ui.h("div", { class: "pip-layout" }, conversationNav(chat), panel));
   if (runner.active?.chatId === chat.uid) phaseTimer = setInterval(() => { if (!document.hidden && mounted?.thread === thread && runner.active) updateReply(runner.active.turn); }, 1000);

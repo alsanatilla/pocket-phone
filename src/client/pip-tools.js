@@ -41,15 +41,17 @@ const TOOL_CATEGORIES = { search_notes: "notes", read_note: "notes", search_thou
 const pocketCategories = ["notes", "tasks", "thoughts", "calendar"];
 /** Tools that show or change something instead of reading: never cached, never replayed as observations. The propose_* names are earlier replies' review cards. */
 export const STATE_TOOLS = ["update_plan", "create_record", "change_record", "coros_write", "update_training_preferences", "propose_action", "propose_change", "propose_coros"];
-/** Tools that write to Pocket or COROS. The AI SDK holds each call until the user approves or declines it. */
-export const WRITE_TOOLS = ["create_record", "change_record", "coros_write", "update_training_preferences"];
+/** Tools that write to Pocket or COROS. The AI SDK holds each call until the user approves or declines it. Training
+ * preferences are Pip's own memory of what the user said, so they save without a review. */
+export const WRITE_TOOLS = ["create_record", "change_record", "coros_write"];
 const CHANGE_CATEGORY = { complete_task: "tasks", update_task: "tasks", append_note: "notes", move_appointment: "calendar" };
 const CHANGE_NAMES = { complete_task: "complete task", update_task: "update task", append_note: "add to note", move_appointment: "move appointment" };
 export const changeName = change => CHANGE_NAMES[change] || "change";
 export const changeTarget = change => ({ tasks: "task", notes: "note", calendar: "appointment" })[CHANGE_CATEGORY[change]] || "record";
 const permitted = (value, name) => {
   const category = TOOL_CATEGORIES[name];
-  if (category === "training") return value.trainingConversation === true;
+  // Offered in signed-in browser chats with Gym or COROS access; see pip-training.js.
+  if (category === "training") return Boolean(value.training) && access(value).some(category => category === 'gym' || category === 'coros');
   if (category === "universal") return true;
   if (category === "changes") return access(value).some(c => ["tasks", "notes", "calendar"].includes(c));
   if (category === "pocket") return access(value).some(c => pocketCategories.includes(c));
@@ -187,10 +189,12 @@ export function recordSource(read, place = {}) {
     thoughts: () => openThoughts(read("parking.json")), workouts: () => listWorkouts(read("gym.json")),
     appointments: () => [], appointment: () => null, corosCache: () => ({}), firecrawlKey: () => "",
     coros: async () => ({ failed: failure("coros_unavailable", "Live COROS is unavailable here.") }),
+    training: async () => failure("training_unavailable", "Training preferences are saved from a Pip chat."),
     ...place
   };
 }
 const BROWSER = recordSource(load, { appointments: () => agenda.all(), appointment: id => agenda.get(id), coros: corosFetch, firecrawlKey: () => firecrawlKey(),
+  training: async (chat, preferences, signal, accountId) => (await import("./pip-training.js")).saveTraining(chat, preferences, signal, accountId),
   corosCache: () => ({ cockpit: cached("pocket:coros-cockpit"), activities: cached("pocket:coros-activities") }) });
 /** A page that still fits the 8,000-character result limit after JSON escaping (COROS formats are full of quotes). */
 function fitted(text, args, fields) {
@@ -276,6 +280,7 @@ export async function execute(value, name, args = {}, signal, context = {}) {
   if (name === "read_chat_history") result = context.chat && context.turn ? readChatHistory(context.chat, context.turn, historyPolicy(value), args) : failure("history_unavailable", "This conversation's history is unavailable.");
   else if (name === "search_web" || name === "read_web_page") result = await web(value, name, args, signal, context);
   else if (name === "update_plan") result = args.steps.some(step => !step.text.trim()) ? failure("invalid_arguments", "Write nonempty plan steps.") : { kind: "plan", plan: args.steps.map(step => ({ text: step.text.trim(), status: step.status })) };
+  else if (name === "update_training_preferences") result = context.chat ? await source.training(context.chat.uid, args, signal, value.training.accountId) : failure("training_unavailable", "This conversation is unavailable.");
   else if (name === "coros_read") result = await corosRead(args, signal, context);
   else if (name === "coros_format") result = await corosFormat(args, signal, source);
   else if (name === "search_calendar") {
@@ -343,6 +348,7 @@ export function label(name, input = {}) {
   if (name === "read_note") return "read note";
   if (name === "read_task") return "read task";
   if (name === "update_plan") return "update plan";
+  if (name === "update_training_preferences") return "remember training";
   if (name === "create_record") return "save " + (input.kind || "record");
   if (name === "change_record") return changeName(input.change);
   if (name === "propose_action") return "prepare " + (input.kind || "action");
@@ -360,6 +366,7 @@ function resultSummary(name, result) {
   if (result.available === false) return result.message || "No cached data";
   if (name === "read_note" || name === "read_task") return result.title || "Record read";
   if (name === "update_plan") return result.plan.filter(step => step.status === "done").length + "/" + result.plan.length + " steps";
+  if (name === "update_training_preferences") return "remembered · automatic planning " + result.automatic;
   if (result.kind === "action") return result.action.title + " · " + (result.action.status === "saved" ? "saved" : "declined");
   if (name === "propose_action") return result.proposal.title + " · ready to review";
   if (name === "propose_change") return result.before.title + " · ready to review";
