@@ -216,8 +216,11 @@ public class WarmConsolePreviewTest {
             root.findViewWithTag("today_edit_tiles").performClick();
             root = save(activity, "warm-today-editing.png");
             assertTrue("Edit mode shrinks borderless tiles", root.findViewWithTag("today_tile_gym").getScaleX() < 1f);
-            root.findViewWithTag("today_edit_tiles").performClick();
+            // Back leaves tile editing instead of leaving the page, and the control follows the board.
+            activity.onBackPressed(); settle(activity);
             assertEquals(1f, root(activity).findViewWithTag("today_tile_gym").getScaleX(), 0f);
+            assertEquals("edit tiles", ((TextView) root(activity).findViewWithTag("today_edit_tiles")).getText().toString());
+            assertNotNull("Back kept Today open", root(activity).findViewWithTag("live_tile_board"));
         } finally { controller.pause().stop().destroy(); }
     }
 

@@ -431,6 +431,8 @@ public class MainActivity extends Activity {
     @Override public void onBackPressed() {
         if (claude.isOpen()) { claude.close(); return; }
         if (noteWheelShowing()) { dismissNoteWheel(); return; }
+        // Editing tiles is a mode on Today: Back leaves it before it leaves the page.
+        if (liveTilesEditing && "today".equals(screen) && liveTiles != null) { editTodayTiles(); return; }
         if (trail.peek()!=null) { returnToPrevious(); return; }
         if (workspace() && "today".equals(screen)) { super.onBackPressed(); return; }
         if (!"home".equals(screen)) {persistDraft();if(captureEditor!=null)hideKeyboard(captureEditor);finishPage(backDestination());}
@@ -1890,6 +1892,11 @@ public class MainActivity extends Activity {
             public void open(String kind) { openTodayTile(kind); }
             public void edit(String kind) { tileMenu(TodayTiles.visible(MainActivity.this), kind); }
             public void changed() { renderedOrganizer = organizerState(); }
+            // A long press starts editing and a tap on empty board space ends it: the control follows the board.
+            public void editing(boolean on) {
+                liveTilesEditing = on;
+                if (editLiveTiles != null) editLiveTiles.setText(on ? "done" : "edit tiles");
+            }
             public void failed(RuntimeException error) { showFeedback(error.getMessage() == null ? "Could not save the tiles." : error.getMessage()); }
         });
         liveTiles.editing(liveTilesEditing);
