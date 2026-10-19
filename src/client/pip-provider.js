@@ -1,6 +1,6 @@
 import { APICallError, generateId, wrapLanguageModel } from 'ai';
 import { CONTEXT_OVERFLOW } from './pip-limits.js';
-import { opencodeSession } from '../shared/pip-opencode.js';
+import { OPENCODE_UA, opencodeSession } from '../shared/pip-opencode.js';
 const httpError = code => code === 401 || code === 403 ? 'The provider rejected your key or access. Check API settings.'
   : code === 429 ? 'The provider is busy or your quota is exhausted. Retry when you’re ready.'
   : code >= 500 ? 'The provider is temporarily unavailable. Retry when you’re ready.'
@@ -54,18 +54,19 @@ async function errorText(response, signal) {
 }
 
 // AI SDK owns framing/parsing. This boundary enforces browser privacy and bounds.
-/** Request headers plus OpenCode Go's routing session, taken from the key that is already being sent. */
+/** Request headers plus OpenCode Go's routing session and its client name, from the key already being sent. */
 function withSession(headers) {
   const plain = headers instanceof Headers ? Object.fromEntries(headers.entries()) : { ...(headers || {}) };
-  const authorization = Object.entries(plain).find(([name]) => name.toLowerCase() === 'authorization')?.[1] || '';
-  return { ...plain, 'x-opencode-session': opencodeSession(String(authorization).replace(/^Bearer\s+/i, '')) };
+  const read = name => Object.entries(plain).find(([key]) => key.toLowerCase() === name)?.[1] || '';
+  const key = String(read('authorization') || read('x-api-key')).replace(/^Bearer\s+/i, '');
+  return { ...plain, 'user-agent': OPENCODE_UA, 'x-opencode-session': opencodeSession(key) };
 }
 function guardedFetch(value, fetcher, signal, clock, onRetry) {
   const endpoint = value.baseUrl + (value.provider === 'anthropic' ? '/messages' : '/chat/completions');
-  // OpenCode Go speaks the OpenAI protocol but routes each request by a session header. A browser cannot reach it
-  // at all (no CORS), so the browser goes through Pocket's own /api/pip/opencode proxy; a server or a phone
-  // calling the endpoint directly needs the header here.
-  const direct = value.provider === 'compatible' && /^https:\/\/opencode\.ai\/inference\//.test(value.baseUrl);
+  // OpenCode Go speaks the OpenAI (or Anthropic) protocol but routes each request by a session header and asks a
+  // client to name itself. A browser cannot reach it at all (no CORS), so the browser goes through Pocket's own
+  // /api/pip/opencode proxy; a server or a phone calling the endpoint directly needs both headers here.
+  const direct = /^https:\/\/opencode\.ai\/inference\//.test(value.baseUrl);
   return async (url, options) => {
     if (String(url) !== endpoint) throw publicError('The provider requested an unexpected endpoint. Check API settings.');
     if (signal.aborted) throw new DOMException('Stopped', 'AbortError');

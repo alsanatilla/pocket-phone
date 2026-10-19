@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { json, failure } from '../../../../server/http.js';
-import { opencodeSession, opencodeTarget } from '../../../../shared/pip-opencode.js';
+import { OPENCODE_GO, OPENCODE_UA, opencodeSession, opencodeTarget } from '../../../../shared/pip-opencode.js';
 
 // OpenCode Go answers no CORS preflight, so a browser cannot reach it from a tab. This route is the same-origin
 // door Pip uses instead: it forwards the caller's own key (never stored here) to the one chat endpoint and adds
@@ -17,7 +17,7 @@ export const POST: APIRoute = async ({ request, params }) => {
     const upstream = await fetch(target, {
       method: 'POST', body, redirect: 'error', signal: request.signal,
       headers: { authorization, 'content-type': 'application/json', accept: 'text/event-stream',
-        'x-opencode-session': opencodeSession(authorization.slice(7)) }
+        'user-agent': OPENCODE_UA, 'x-opencode-session': opencodeSession(authorization.slice(7)) }
     });
     return new Response(upstream.body, { status: upstream.status, headers: {
       'content-type': upstream.headers.get('content-type') || 'application/json', 'cache-control': 'no-store'

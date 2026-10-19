@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OPENCODE_GO, opencodeSession, opencodeTarget } from '../src/shared/pip-opencode.js';
+import { OPENCODE_GO, OPENCODE_UA, opencodeSession, opencodeTarget } from '../src/shared/pip-opencode.js';
 
 // OpenCode Go: the browser needs Pocket's proxy (no CORS), and every request needs a routing session.
 test('only the chat endpoint is proxied', () => {
@@ -19,4 +19,10 @@ test('the routing session is stable, opaque and different per key', () => {
   assert.notEqual(session, opencodeSession(key + 'x'), 'another key gets another session');
   assert.ok(!session.includes(key.slice(8, 24)), 'the session never carries key material');
   assert.notEqual(opencodeSession(''), opencodeSession(' '));
+});
+
+test('the client names itself, as their docs ask', () => {
+  // "Identify itself with its own user agent, such as my-coding-agent/1.0, rather than a generic SDK name."
+  assert.match(OPENCODE_UA, /^[a-z0-9][a-z0-9._-]*\/\d+(\.\d+)*/i);
+  assert.ok(!/node|undici|fetch|axios|openai|ai-sdk/i.test(OPENCODE_UA), 'never a generic HTTP library or SDK name');
 });
