@@ -34,3 +34,31 @@ self.addEventListener('fetch', event => {
     }
   })());
 });
+
+// Pip's notifications. A pushed message names a chat and links to it; tapping it brings Pocket forward on that chat.
+self.addEventListener('push', event => {
+  let message = {};
+  try { message = event.data ? event.data.json() : {}; } catch { /* an unreadable message still shows */ }
+  const href = typeof message.href === 'string' && message.href.startsWith('/') ? message.href : '/pip';
+  event.waitUntil(self.registration.showNotification(String(message.title || 'Pip'),
+    { body: String(message.body || ''), tag: String(message.tag || 'pip'), renotify: true, data: { href } }));
+});
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const href = event.notification.data?.href || '/pip';
+  event.waitUntil((async () => {
+    const open = (await self.clients.matchAll({ type: 'window', includeUncontrolled: true })).find(client => new URL(client.url).origin === self.location.origin);
+    if (!open) { await self.clients.openWindow('/#' + href); return; }
+    await open.focus().catch(() => {});
+    open.postMessage({ type: 'pocket-open', href });
+  })());
+});
+// The browser replaced its subscription; the new one keeps the account the old one belonged to.
+self.addEventListener('pushsubscriptionchange', event => {
+  event.waitUntil((async () => {
+    const old = event.oldSubscription, fresh = event.newSubscription || (old ? await self.registration.pushManager.subscribe(old.options) : null);
+    if (!old || !fresh) return;
+    await fetch('/api/pip/push', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'renew', old: old.endpoint, subscription: fresh.toJSON() }) });
+  })().catch(() => {}));
+});

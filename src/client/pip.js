@@ -7,7 +7,9 @@ import { modelName, starters } from './pip-presentation.js';
 import { enter, pressMotion } from './ui-motion.js';
 import { mascot } from "./pip-pixels.js";
 import { backdrop } from "./pixel-backdrop.js";
-import { CATEGORIES, access, saveAccess, firecrawlKey, setFirecrawlKey, changeName, changeTarget } from "./pip-tools.js";
+import { CATEGORIES, access, saveAccess, firecrawlKey, setFirecrawlKey, changeName, changeTarget, label as toolLabel } from "./pip-tools.js";
+import { notifyHere } from './pip-notify.js';
+import { replyNotice, waitingNotice } from '../shared/pip-notice.js';
 import { activity, settle, mark, elapsed, activityTitle, phaseLabel } from "./pip-activity.js";
 import { applyProposal, applyChange, applyCoros } from './pip-actions.js';
 import { corosAction, corosCourse, corosDated, corosDate, corosProblem, corosTitle, courseLines, sportName } from '../shared/coros-course.js';
@@ -26,6 +28,7 @@ let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, viewportCleanup =
 const runner = new ReplyRunner(store, { key: (value, chat) => trainingChatRoutine(chat.uid) ? 'account-key' : resolveCredential(value),
   remote: { available: chat => trainingChatRoutine(chat.uid) ? false : serverRuns({ chat: chat.uid, config: chat.config }).then(state => state.available), stream: streamReplyRemote },
   stream: (chat, turn, options) => trainingChatRoutine(chat.uid) ? trainingReply(chat, turn, options) : streamReply(chat, turn, options), title: suggestTitle, onChange: event => {
+  if (event.type === "finished" || event.type === "approval") noticeAway(event);
   const entry = document.getElementById("pip-entry");
   if (entry) {
     entry.classList.toggle('replying', Boolean(runner.active));
@@ -38,6 +41,15 @@ const runner = new ReplyRunner(store, { key: (value, chat) => trainingChatRoutin
     if (!paintTimer) paintTimer = setTimeout(() => { paintTimer = 0; if (mounted?.latest) updateReply(mounted.latest); }, 100);
   } else if (event.type !== "delta") render();
 } });
+/** While this tab is hidden it tells the user itself: the server leaves a reply that a tab is following to that tab. */
+function noticeAway(event) {
+  if (document.visibilityState === "visible") return;
+  const chat = store.get(event.chatId), waiting = event.type === "approval" && runner.active?.chatId === event.chatId ? runner.active.approvals : null;
+  const notice = event.type === "approval"
+    ? waiting && waitingNotice(chat, waiting.requests.map(item => toolLabel(item.toolName, item.input || {}) + (item.input?.title ? " “" + item.input.title + "”" : "")))
+    : chat && replyNotice(chat, chat.turns.at(-1));
+  if (notice) void notifyHere(notice).catch(() => {});
+}
 const safely = run => async () => { try { await run(); } catch (error) { ui?.say(error.message); } };
 const button = (text, run, props = {}) => ui.h("button", { onclick: safely(run), ...props }, text);
 const caption = text => ui.h("p", { class: "meta muted", text });

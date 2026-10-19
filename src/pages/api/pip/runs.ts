@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { signedIn } from '../../../server/auth.js';
 import { ensureSchema } from '../../../server/database.js';
 import { json, failure, sameOrigin, readJson } from '../../../server/http.js';
-import { serverRunState, submitRun, decideRun, continueRun, stopRun, runView } from '../../../server/pip-runs.js';
+import { serverRunState, submitRun, decideRun, continueRun, stopRun, runView, followView } from '../../../server/pip-runs.js';
 
 // Pip's shared conversations: any device linked to the account submits, watches, decides and stops the same
 // run. GET watches (with an event cursor); POST changes it. Nothing here trusts a device's own history. continue
@@ -11,8 +11,9 @@ export const GET: APIRoute = async ({ request, url }) => {
   try {
     const user = await signedIn(request); await ensureSchema();
     const run = url.searchParams.get('run') || '', chat = url.searchParams.get('chat') || '', requestId = url.searchParams.get('request') || '';
-    // A submitting tab asks by its own request id, which it knows before its submit answers.
-    if (run || requestId) return json({ accountId: user.id, ...await runView(user.id, { runId: run, request: requestId, after: Number(url.searchParams.get('after') || 0) }) });
+    // A submitting tab asks by its own request id, which it knows before its submit answers. Asking about a run
+    // follows it, so a reply this device is polling is not also pushed to it.
+    if (run || requestId) return json({ accountId: user.id, ...await followView(user.id, { runId: run, request: requestId, after: Number(url.searchParams.get('after') || 0) }) });
     const provider = url.searchParams.get('provider') || '', baseUrl = url.searchParams.get('baseUrl') || '';
     const asked = provider ? { provider, baseUrl, webSearch: url.searchParams.get('webSearch') === '1' } : null;
     return json({ accountId: user.id, ...await serverRunState(user.id, chat, asked) });

@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { anthropicMessage, compatibleMessage, event, response } from './pip-provider-fixtures.mjs';
+import { browser, pushService } from './push-fixture.mjs';
 
 // A real libSQL file database; no Turso account or provider key is used.
 const folder = mkdtempSync(join(tmpdir(), 'pocket-pip-run-'));
@@ -15,6 +16,7 @@ const { saveBackground, backgroundState } = await import('../src/server/pip-back
 const { seal } = await import('../src/server/secrets.js');
 const { endpoint } = await import('../src/server/pip-keys.js');
 const runs = await import('../src/server/pip-runs.js');
+const notices = await import('../src/server/pip-notify.js');
 await ensureSchema();
 test.after(() => { database().close(); try { rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); } catch {} });
 
@@ -426,4 +428,74 @@ test('a follower that asks by request id sees the run\'s lookups while the submi
   const finished = await submitting;
   assert.equal(finished.run.status, 'done', finished.run.turn.error);
   assert.equal(finished.run.turn.answer, 'Your note says the blue car costs 21,000 euros.');
+});
+
+test('a reply nobody follows is pushed to each of the account’s browsers when it finishes', async () => {
+  const userId = await account(), laptop = browser(), phone = browser('https://web.push.apple.com/fixture-phone');
+  await notices.subscribe(userId, laptop.subscription, 'laptop'); assert.equal(await notices.subscribe(userId, phone.subscription, 'phone'), 2);
+  const service = pushService();
+  try {
+    const view = await runs.submitRun(userId, { requestId: 'req-push-done', chat: header('chat-push-done', 'Blue car'), text: 'What do my notes say?', device: 'browser-1' },
+      { fetcher: provider([], compatibleMessage({ text: 'Your **note** says the blue car costs [21,000 euros](/notes/note-car).' })) });
+    assert.equal(view.run.status, 'done', view.run.turn.error);
+    assert.equal(service.pushed.length, 2);
+    const sent = endpoint => service.pushed.find(item => item.endpoint === endpoint);
+    assert.deepEqual(laptop.read(sent(laptop.subscription.endpoint).body),
+      { title: 'Pip · Blue car', body: 'Your note says the blue car costs 21,000 euros.', href: '/pip/chat-push-done', tag: 'pip-chat-push-done' });
+    assert.equal(phone.read(sent(phone.subscription.endpoint).body).title, 'Pip · Blue car');
+  } finally { service.restore(); }
+});
+
+test('a change waiting for approval is pushed with what it waits for', async () => {
+  const userId = await account(), laptop = browser();
+  await notices.subscribe(userId, laptop.subscription);
+  const service = pushService();
+  try {
+    await waiting(userId, 'chat-push-wait');
+    assert.equal(service.pushed.length, 1);
+    const message = laptop.read(service.pushed[0].body);
+    assert.equal(message.body, 'Waiting for your OK: save note “Blue car”'); assert.equal(message.href, '/pip/chat-push-wait');
+  } finally { service.restore(); }
+});
+
+test('a reply a tab is following is left to that tab, until the tab goes away', async () => {
+  const userId = await account(), laptop = browser();
+  await notices.subscribe(userId, laptop.subscription);
+  const service = pushService();
+  try {
+    for (const leaves of [false, true]) {
+      let release; const held = new Promise(resolve => { release = resolve; });
+      const requestId = 'req-follow-push-' + leaves, fetcher = async () => { await held; return response(compatibleMessage({ text: 'Done.' })); };
+      const submitting = runs.submitRun(userId, { requestId, chat: header('chat-follow-push-' + leaves), text: 'Hello', device: 'browser-1' }, { fetcher });
+      const tab = new AbortController(), frames = runs.runFrames(userId, { request: requestId, ttl: 5000, signal: tab.signal });
+      assert.equal((await frames.next()).value.run.status, 'running');
+      // A tab that closes stops counting as watching; one that stays open keeps reading to the end.
+      if (leaves) { tab.abort(); await frames.return(); }
+      release();
+      assert.equal((await submitting).run.status, 'done');
+      if (!leaves) for await (const frame of frames) if (frame?.run.status === 'done') break;
+    }
+    assert.deepEqual(service.pushed.map(item => laptop.read(item.body).tag), ['pip-chat-follow-push-true']);
+  } finally { service.restore(); }
+});
+
+test('a browser its push service no longer knows is forgotten, and only real push services are accepted', async () => {
+  const userId = await account(), old = browser(), other = await account();
+  await notices.subscribe(userId, old.subscription);
+  const service = pushService(410);
+  try {
+    await runs.submitRun(userId, { requestId: 'req-push-gone', chat: header('chat-push-gone'), text: 'Hello', device: 'browser-1' }, { fetcher: provider([], compatibleMessage({ text: 'Hi.' })) });
+    assert.equal(service.pushed.length, 1); assert.equal(await notices.devices(userId), 0);
+  } finally { service.restore(); }
+  const keys = browser().subscription.keys;
+  assert.throws(() => notices.subscription({ endpoint: 'https://pocket.example/push', keys }), /not supported/);
+  assert.throws(() => notices.subscription({ endpoint: 'http://fcm.googleapis.com/fcm/send/x', keys }), /not supported/);
+  assert.throws(() => notices.subscription({ endpoint: 'https://fcm.googleapis.com.evil.example/x', keys }), /not supported/);
+  assert.throws(() => notices.subscription({ endpoint: 'https://fcm.googleapis.com/fcm/send/x', keys: { p256dh: 'x y', auth: keys.auth } }), /unusable/);
+  // A browser signed in to another account moves there with its subscription.
+  const shared = browser();
+  await notices.subscribe(userId, shared.subscription); await notices.subscribe(other, shared.subscription);
+  assert.equal(await notices.devices(userId), 0); assert.equal(await notices.devices(other), 1);
+  assert.equal(await notices.subscribed(userId, shared.subscription.endpoint), false); assert.equal(await notices.subscribed(other, shared.subscription.endpoint), true);
+  assert.equal(await notices.subscribed(other, ''), false);
 });

@@ -90,6 +90,8 @@ export const noteHistory = uid => request('/api/history/notes/' + encodeURICompo
 export const restoreNote = (uid, version, current) => post('/api/history/notes/' + encodeURIComponent(uid) + '/restore', { version, current });
 export const deletedNotes = () => request('/api/history/deleted');
 export async function disconnect() {
+  // This browser stops receiving the account's notifications while it is still signed in to say so.
+  await import('./pip-notify.js').then(module => module.disablePush()).catch(() => {});
   await request('/api/auth/sign-out', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   user = null; switchAccount(''); location.reload();
 }

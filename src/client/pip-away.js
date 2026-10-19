@@ -1,5 +1,6 @@
 import { connected, post, request } from './cloud.js';
 import { syncNow } from './sync.js';
+import { notificationControls } from './pip-notify.js';
 
 // Pip on its own: a dedicated key, what Pip may read, and routines that run on Pocket's server while
 // Pocket is closed. Training routines may also maintain workouts and their own dated gym tasks.
@@ -120,6 +121,7 @@ export async function pipAway(ui, openChat) {
     await ui.dialog('pip · on its own', ui.h('div', { class: 'pip-settings' },
       caption('Runs on Pocket\'s server while Pocket is closed, with a key used only for this. Replies arrive as Pip chats. Check-ins and prompts suggest changes. The training planner automatically saves workouts and its own gym tasks.'),
       caption(state.hasKey ? 'today · ' + state.usedToday.toLocaleString() + ' of ' + settings.dailyTokens.toLocaleString() + ' tokens' : 'Add a key to start. Set a spending limit for it at your provider.'),
+      notificationControls(ui),
       ui.h('label', {}, 'Provider', provider), ui.h('label', {}, 'API base URL', endpoint), ui.h('label', {}, 'Model', model), ui.h('label', {}, 'Dedicated key', key),
       ui.h('label', {}, 'Daily token limit', limit), ui.h('label', {}, 'Reply token limit', replyLimit), caption('Workout analysis and detailed sessions may need up to 8,192 reply tokens.'), enabled.view,
       caption('Pip may read'), ...grants.map(item => item.view), web.view, caption('Calendar appointments stay on your phone.'), error,

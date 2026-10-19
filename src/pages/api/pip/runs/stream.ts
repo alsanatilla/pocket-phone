@@ -14,16 +14,22 @@ export const GET: APIRoute = async ({ request, url }) => {
     const runId = url.searchParams.get('run') || '', asked = url.searchParams.get('request') || '', chat = url.searchParams.get('chat') || '';
     const after = Number(url.searchParams.get('after') || 0);
     const encoder = new TextEncoder();
+    // The follower is gone when the request aborts, the response body is cancelled or a frame cannot be written,
+    // whichever this host reports. Until then it counts as watching the run, so its devices are not also notified.
+    const gone = new AbortController(), leave = () => gone.abort();
+    request.signal.addEventListener('abort', leave, { once: true });
     const body = new ReadableStream({
       async start(controller) {
-        const send = text => { try { controller.enqueue(encoder.encode(text)); } catch { /* the client is gone */ } };
+        const send = text => { try { controller.enqueue(encoder.encode(text)); } catch { leave(); } };
         try {
-          for await (const frame of runFrames(user.id, { runId, request: asked, chat, after, signal: request.signal })) {
+          for await (const frame of runFrames(user.id, { runId, request: asked, chat, after, signal: gone.signal })) {
             send(frame ? 'data: ' + JSON.stringify(frame) + '\n\n' : ': keep-alive\n\n');
+            if (gone.signal.aborted) break;
           }
         } catch { /* stop quietly: the tab will ask again, and the run keeps its own state */ }
         try { controller.close(); } catch { /* already closed */ }
-      }
+      },
+      cancel: leave
     });
     return new Response(body, { headers: {
       'content-type': 'text/event-stream; charset=utf-8',

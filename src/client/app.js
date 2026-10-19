@@ -1131,6 +1131,10 @@ initExtras();
 startClockRuntime();
 const refresh = installRefresh({ sync: syncNow, status, onStatus, describe, say });
 if ('serviceWorker' in navigator && !import.meta.env.DEV) navigator.serviceWorker.register('/sw.js').catch(() => {});
+// A tapped notification opens its chat in the Pocket window it brought forward.
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', event => {
+  if (event.data?.type === 'pocket-open' && typeof event.data.href === 'string' && event.data.href.startsWith('/')) go(event.data.href);
+});
 onWorkspaceChange(() => { if (todayBoard) queueMicrotask(() => todayBoard?.refresh()); });
 addEventListener("pagehide", () => { todayBoard?.dispose(); todayBoard=null; flushNote?.(); zines.leave(); travel.leave(); movement.leave(); briefView?.(); briefView=null; });
 addEventListener("pageshow", event => { if (event.persisted) route(); });

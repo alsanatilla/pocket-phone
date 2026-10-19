@@ -7,9 +7,11 @@ import { applyApprovedWrite } from './pip-writes.js';
 import { backgroundAccount, chargeTokens, localDay, tokensLeft, validTimezone, JOB_BUDGET } from './pip-background.js';
 import { readKey } from './pip-keys.js';
 import { config as pipConfig, requestBody, contextCoverage } from '../client/pip-core.js';
-import { execute as runTool, preview as previewTool, WRITE_TOOLS } from '../client/pip-tools.js';
+import { execute as runTool, preview as previewTool, label, WRITE_TOOLS } from '../client/pip-tools.js';
 import { settle } from '../client/pip-activity.js';
 import { objectId, validObject } from '../shared/objects.js';
+import { replyNotice, waitingNotice } from '../shared/pip-notice.js';
+import { notify, watched, watching, unwatch, forgetWatches } from './pip-notify.js';
 
 // Pip's shared conversations: the account's server runs each turn once for every device. A run holds its own
 // provider messages and budgets, so it can stop at a change waiting for approval and continue in a later
@@ -302,11 +304,19 @@ async function drive(userId, run, leaseId, { fetcher }) {
   // A reply continued across requests keeps adding to the same usage.
   const prior = Object.fromEntries(USAGE.map(name => [name, Number(turn.usage?.[name]) || 0]));
   const total = usage => ({ ...usage, ...Object.fromEntries(USAGE.map(name => [name, prior[name] + (Number(usage?.[name]) || 0)])) });
+  // A device that is not following this run hears about it; a tab that is following shows it already.
+  const tell = async notice => {
+    if (await watched(userId, runId).catch(() => false)) return;
+    const chat = await chatObject(userId, chatUid).catch(() => null);
+    if (chat && !chat.deleted) await notify(userId, notice({ ...chat, uid: chatUid }));
+  };
   const end = async (status, error = '') => {
     await quiet();
     if (status !== 'done') endTurn(turn, status, error);
     else Object.assign(turn, { status: 'done', phase: 'done' });
-    return closeRun(userId, runId, leaseId, status, turn, error ? { error } : {});
+    const closed = await closeRun(userId, runId, leaseId, status, turn, error ? { error } : {});
+    if (closed) await tell(chat => replyNotice(chat, turn));
+    return closed;
   };
   // A pause and the requests it waits for are stored together, and only by the request that still owns the run.
   const pause = async state => {
@@ -337,6 +347,11 @@ async function drive(userId, run, leaseId, { fetcher }) {
     paused = true;
     await writeTurn(userId, chatUid, turn);
     await event(userId, runId, 'awaiting', { requests: (state.pending || []).map(item => ({ id: item.approvalId || item.toolCallId, tool: item.toolName, kind: WRITE_TOOLS.includes(item.toolName) ? 'write' : 'device' })) }, at);
+    const changes = (state.pending || []).filter(item => WRITE_TOOLS.includes(item.toolName)).map(item => {
+      const title = state.previews?.[item.toolCallId]?.action?.title;
+      return label(item.toolName, item.input || {}) + (title ? ' “' + title + '”' : '');
+    });
+    await tell(chat => waitingNotice(chat, changes));
   };
   try {
     saved = await account(userId, snapshot, snapshot.grants, snapshot.timezone);
@@ -383,6 +398,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
  */
 export async function sweepRuns({ fetcher, now = Date.now(), deadline = Date.now() + JOB_BUDGET } = {}) {
   let interrupted = 0, expired = 0, continued = 0, more = false;
+  await forgetWatches().catch(() => {});
   for (const row of (await sql({ sql: "SELECT * FROM pocket_pip_runs WHERE status IN ('running', 'stopping') AND lease_until <= ? LIMIT 50", args: [Date.now()] })).rows)
     if (['failed', 'stopped'].includes(String((await recover(String(row.user_id), row))?.status))) interrupted++;
   const unanswered = JSON.stringify({ error: 'device_unavailable', message: 'The device did not answer in time; use what you already have.' });
@@ -412,8 +428,11 @@ export async function runView(userId, { runId = '', request = '', chat = '', aft
   return view(userId, await recover(userId, row), cursor);
 }
 
-/** How a follower watches: a tick that re-reads the run, a ping so idle proxies stay open, and one connection's life. */
-const STREAM_TICK = 250, STREAM_PING = 15000, STREAM_TTL = 45000;
+/**
+ * How a follower watches: a tick that re-reads the run, a ping so idle proxies stay open, one connection's life, and
+ * how often it renews the mark that it is watching.
+ */
+const STREAM_TICK = 250, STREAM_PING = 15000, STREAM_TTL = 45000, WATCH_REFRESH = 4000;
 const idle = (ms, signal) => new Promise(resolve => {
   const timer = setTimeout(resolve, ms);
   signal?.addEventListener?.('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
@@ -431,22 +450,36 @@ const idle = (ms, signal) => new Promise(resolve => {
 export async function* runFrames(userId, { runId = '', request = '', chat = '', after = 0, ttl = STREAM_TTL, signal = null } = {}) {
   let cursor = Number.isSafeInteger(Number(after)) && Number(after) > 0 ? Number(after) : 0;
   const started = Date.now(), expected = Boolean(request && !runId);
-  let seen = '', sent = Date.now();
-  for (;;) {
-    const current = await runView(userId, { runId, request, chat, after: cursor });
-    const run = current.run;
-    if (!run && !expected) { yield current; return; }
-    if (run) {
-      cursor = Number(current.cursor) || cursor;
-      const mark = JSON.stringify([run.status, run.turn, current.requests]);
-      if (mark !== seen) { seen = mark; sent = Date.now(); yield current; }
-      if (!ACTIVE.includes(String(run.status))) return;
+  let seen = '', sent = Date.now(), marked = 0, followed = '';
+  try {
+    for (;;) {
+      const current = await runView(userId, { runId, request, chat, after: cursor });
+      const run = current.run;
+      if (!run && !expected) { yield current; return; }
+      if (run) {
+        // While a follower reads a run, what it shows is not also pushed to the account's devices.
+        if (ACTIVE.includes(String(run.status)) && Date.now() - marked >= WATCH_REFRESH) { marked = Date.now(); followed = run.runId; await watching(userId, run.runId).catch(() => {}); }
+        cursor = Number(current.cursor) || cursor;
+        const mark = JSON.stringify([run.status, run.turn, current.requests]);
+        if (mark !== seen) { seen = mark; sent = Date.now(); yield current; }
+        if (!ACTIVE.includes(String(run.status))) return;
+      }
+      if (Date.now() - started >= ttl) return;
+      await idle(STREAM_TICK, signal);
+      if (signal?.aborted) return;
+      if (Date.now() - sent >= STREAM_PING) { sent = Date.now(); yield null; }
     }
-    if (Date.now() - started >= ttl) return;
-    await idle(STREAM_TICK, signal);
-    if (signal?.aborted) return;
-    if (Date.now() - sent >= STREAM_PING) { sent = Date.now(); yield null; }
+  } finally {
+    // A follower that went away no longer counts as watching; one that reached the time limit reconnects at once.
+    if (followed && signal?.aborted) await unwatch(userId, followed).catch(() => {});
   }
+}
+
+/** runView for a client that is following the run (the polling fallback), which counts as watching it. */
+export async function followView(userId, query) {
+  const current = await runView(userId, query);
+  if (current.run && ACTIVE.includes(current.run.status)) await watching(userId, current.run.runId).catch(() => {});
+  return current;
 }
 
 

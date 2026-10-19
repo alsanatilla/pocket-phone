@@ -2,6 +2,13 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## Web updates after 0.22.0
+
+- **Notify me on this device** (Pip → **on its own**) turns on browser notifications for the signed-in account. Pip notifies when a server reply finishes or fails, when a reply waits for your OK, and when a scheduled routine writes in its chat. Tapping a notification opens that chat. A reply a tab is following stays with that tab, which shows the notice itself while hidden. **send a test** checks a device.
+- Each message is encrypted for its browser and signed with a key derived from Pocket's server secret, so nothing new needs configuring. Only the major browsers' push services are accepted. Signing out removes the browser's subscription. The Android app does not receive these yet.
+- A new chat now names itself after its first answer, with one small background request. This replaces the rename tool from 0.22.0. A name you chose is never overwritten, and a failed naming request leaves the current name.
+- This web-only update keeps Android on the 0.22.0 release. Encryption matches RFC 8291's worked example byte for byte. Engine, routine, service-worker and browser-module checks pass, and the Astro production build passed. On a dev server with a throwaway database and simulated provider and push services, a reply nobody followed was pushed and decrypted correctly. A reply a tab followed was not pushed, and an approval wait and its finished reply were each pushed once. Headless Edge cannot reach a real push service, so subscribing was not exercised on a real device.
+
 ## 0.22.0 — Pip on Pocket's server
 
 - A signed-in browser chat now runs on Pocket's server when the account holds a key for that chat's endpoint, either in the account vault or as the dedicated **on its own** key. The reply keeps going after the tab closes. Other signed-in browsers see the same answer, tool activity and changes waiting for approval; the first to decide settles each one. The phone receives the reply through account sync. The chat's model, access and timezone travel with each message. Replies that ran there say **on Pocket's server**. Guest chats and accounts without a stored key still run in the tab.

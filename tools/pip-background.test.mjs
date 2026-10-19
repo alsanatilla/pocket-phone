@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { compatibleMessage, response } from './pip-provider-fixtures.mjs';
+import { browser, pushService } from './push-fixture.mjs';
 
 // A real libSQL file database; no Turso account or provider key is used.
 const folder = mkdtempSync(join(tmpdir(), 'pocket-pip-'));
@@ -12,6 +13,7 @@ process.env.TURSO_AUTH_TOKEN = 'fixture-token'; process.env.POCKET_ENCRYPTION_SE
 const { ensureSchema, execute, database } = await import('../src/server/database.js');
 const { syncDocuments } = await import('../src/server/workspace.js');
 const background = await import('../src/server/pip-background.js');
+const notices = await import('../src/server/pip-notify.js');
 await ensureSchema();
 // Windows releases the database file a moment after close; a leftover temp folder is harmless.
 test.after(() => { database().close(); try { rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); } catch {} });
@@ -325,4 +327,21 @@ test('a follow-up can pause training and preserves earlier conversation without 
 test('training messages validate identifiers and attachment sizes before execution', () => {
   assert.throws(() => background.trainingMessage(userMessage('ordinary-chat', 'hello')), /training chat/);
   assert.throws(() => background.trainingMessage({ ...userMessage('pip-training-fixture-2026-10', 'hello'), context: [{ title: 'large', text: 'x'.repeat(8001) }] }), /three short sources/);
+});
+
+test('a scheduled routine that replied is pushed to the account; one the user ran is not', async () => {
+  const userId = await account(), phone = browser();
+  await background.saveBackground(userId, settings, 'fixture-key-123456');
+  const { routines } = await background.saveRoutine(userId, { kind: 'checkin', time: '07:00', days: [0, 1, 2, 3, 4, 5, 6] });
+  await notices.subscribe(userId, phone.subscription);
+  const service = pushService(), fetcher = async () => response(compatibleMessage({ text: 'Two tasks are **overdue**.' }));
+  try {
+    const started = await background.runClaimed(userId, routines[0].id, { force: true, fetcher });
+    assert.equal(started.status, 'done'); assert.equal(service.pushed.length, 0, 'the user is looking at the run they started');
+    await execute({ sql: 'UPDATE pocket_pip_routines SET next_run = 1 WHERE user_id = ?', args: [userId] });
+    await background.runPipJob({ fetcher });
+    const pushes = service.pushed.filter(item => item.endpoint === phone.subscription.endpoint);
+    assert.equal(pushes.length, 1);
+    assert.deepEqual(phone.read(pushes[0].body), { title: 'Pip · Morning check-in', body: 'Two tasks are overdue.', href: '/pip/' + started.chat, tag: 'pip-' + started.chat });
+  } finally { service.restore(); }
 });

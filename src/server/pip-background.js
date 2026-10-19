@@ -10,6 +10,8 @@ import { execute as runTool, recordSource, WRITE_TOOLS } from '../client/pip-too
 import { trainingRuntime, trainingObservation, trainingCheckpoint, trainingChanged, rememberTraining, TRAINING_GRANTS, TRAINING_CHECK_INTERVAL } from './pip-training.js';
 import { trainingChatRoutine } from '../shared/pip-training-chat.js';
 import { sweepRuns } from './pip-runs.js';
+import { notify } from './pip-notify.js';
+import { replyNotice } from '../shared/pip-notice.js';
 
 // Pip on its own: routines that run on a schedule with the account's dedicated provider key, read the account's
 // server copy and reply in a synced Pip chat. Training routines have scoped writes; calendar appointments stay on the phone.
@@ -320,7 +322,16 @@ export async function runClaimed(userId, id, { force = false, fetcher, now = Dat
   await sql({ sql: 'UPDATE pocket_pip_routines SET lock_until = 0, last_run = ?, last_error = ?, last_chat = ?, next_run = ? WHERE user_id = ? AND id = ?',
     args: [now, result.error || '', result.chat || current?.lastChat || '', current ? schedule(current, saved?.settings, Boolean(saved?.credentials)) : NEVER, userId, id] });
   await recordRun(userId, id, result, now);
+  // A scheduled run that wrote in its chat, or failed there, is worth a notification; one the user started is not.
+  if (!force && !message && ['done', 'failed'].includes(result.status) && result.chat) await notifyRoutine(userId, routine, result);
   return result;
+}
+async function notifyRoutine(userId, routine, result) {
+  try {
+    const row = (await sql({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, result.chat] })).rows[0];
+    const chat = row ? parse(row.payload) : null, turn = chat?.turns?.find(item => item.uid === result.turn);
+    await notify(userId, replyNotice({ uid: result.chat, title: chat?.title || 'Pip · ' + routine.title }, turn || { status: result.status, error: result.error }));
+  } catch { /* A notification is not part of the run. */ }
 }
 export async function runPipJob({ fetcher, now = Date.now() } = {}) {
   // A shared chat run nobody answered does not wait forever: its requests are settled and it finishes.
