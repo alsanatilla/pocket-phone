@@ -23,6 +23,7 @@ import { syncNow, describe, onStatus, status } from "./sync.js";
 import { gym, weekStart } from "./store.js";
 import { installRefresh } from "./retro-loading.js";
 import { initExtras, preferences, todayTiles, TODAY_CATALOG, TILE_SIZES, tileSize } from "./extras.js";
+import { arrangeTiles } from "./tile-arrange.js";
 import * as travel from "./travel.js";
 import * as sharedTravel from './travel-store.js';
 import { INVITE_RESUME } from './travel-sharing.js';
@@ -252,7 +253,7 @@ function liveTile(tile) {
     small && pip ? null : h("span", { class: "live-foot" }, appGlyph(TILE_ICON[tile.kind] || tile.kind), small ? null : h("span", { class: "live-name", text: tileName(tile) })));
   node.live = { kind: tile.kind, name: tileName(tile), value, detail, chart };
   node.addEventListener("click", () => go(node.live.path || "/today"));
-  node.addEventListener('contextmenu', event => { event.preventDefault(); void editTiles(tile.kind); });
+  node.addEventListener('contextmenu', event => { event.preventDefault(); if (node.closest('.arranging')) return; void editTiles(tile.kind); });
   node.releasePress = pressMotion(node, true);
   return node;
 }
@@ -300,6 +301,9 @@ function tileBoard() {
   for (const name of ['pocket-objects-synced', 'pocket-coros-synced', 'pocket-extras-applied', 'storage']) addEventListener(name, synced);
   document.addEventListener('visibilitychange', synced);
   const frame = h("div", { class: "live-tiles-frame" }, board); frame.refresh = synced; frame.dispose = stop;
+  // Holding a tile arranges the board: drag to reorder, the corner handle to resize, the badge to unpin.
+  frame.arrange = arrangeTiles(board, { list: todayTiles.list, save: todayTiles.save, size: tileSize, changed: synced });
+  const dispose = frame.dispose; frame.dispose = () => { frame.arrange.dispose(); dispose(); };
   return frame;
 }
 async function editTiles(selected = '') {
@@ -346,7 +350,9 @@ function todayView() {
   // Today is the tile board, as on the phone: recovery sits on the movement tile, the next event on the calendar tile and the chosen task on the tasks tile.
   // Adding and editing follow the tiles, so the board starts right under the header.
   const board = tileBoard(); todayBoard = board;
-  add(body, board, h("div", { class: "keys today-tile-keys" }, h("button", { onclick: editTiles }, "+ add tile"), h("button", { onclick: editTiles }, "edit tiles")));
+  const editKey = h("button", { onclick: () => board.arrange.toggle(), title: "Hold a tile to pick it up, drag it to another slot, drag its corner to resize" }, "edit tiles");
+  board.addEventListener('tile-arrange', event => { editKey.textContent = event.detail.on ? "done" : "edit tiles"; editKey.setAttribute("aria-pressed", String(event.detail.on)); });
+  add(body, board, h("div", { class: "keys today-tile-keys" }, h("button", { onclick: editTiles }, "+ add tile"), editKey));
   if (coros.connected()) Promise.allSettled([coros.activities(90), coros.cockpit(28)]).then(() => board.refresh());
   setupBanner(body);
 }

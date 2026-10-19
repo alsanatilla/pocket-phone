@@ -57,3 +57,9 @@ export function moved(list, from, to) {
   next.splice(Math.max(0, Math.min(to, next.length)), 0, item);
   return next;
 }
+
+/** The saved list from an arranged order and sizes: each tile keeps its stored data, and only known kinds survive. */
+export function arranged(list, order, sizes = new Map()) {
+  const by = new Map(list.map(item => [item.kind, item]));
+  return order.filter(kind => by.has(kind)).map(kind => ({ ...by.get(kind), kind, ...(sizes.get(kind) ? { size: sizes.get(kind) } : {}) }));
+}

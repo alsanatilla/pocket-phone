@@ -1,7 +1,7 @@
 ﻿import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { pack, cellBox, dropIndex, snapSize, moved } from '../src/client/tile-layout.js';
+import { pack, cellBox, dropIndex, snapSize, moved, arranged } from '../src/client/tile-layout.js';
 
 // The same cases run against TileLayout.java, so both boards place, move and resize tiles alike.
 const cases = JSON.parse(readFileSync(new URL('./fixtures/tile-layout-cases.json', import.meta.url), 'utf8'));
@@ -31,4 +31,12 @@ test('moving an item keeps every other item in order', () => {
   assert.deepEqual(moved(['a', 'b', 'c', 'd'], 0, 2), ['b', 'c', 'a', 'd']);
   assert.deepEqual(moved(['a', 'b', 'c', 'd'], 3, 0), ['d', 'a', 'b', 'c']);
   assert.deepEqual(moved(['a', 'b'], 0, 9), ['b', 'a']);
+});
+
+test('an arranged board saves its order and sizes without losing what a tile carries', () => {
+  const list = [{ uid: 'tasks', kind: 'tasks', label: 'Today' }, { uid: 'notes', kind: 'notes', size: 'wide' }];
+  assert.deepEqual(arranged(list, ['notes', 'tasks'], new Map([['tasks', 'small']])), [{ uid: 'notes', kind: 'notes', size: 'wide' }, { uid: 'tasks', kind: 'tasks', label: 'Today', size: 'small' }]);
+  // A tile that left the board is not saved back, and an unknown kind is skipped.
+  assert.deepEqual(arranged(list, ['notes'], new Map()), [{ uid: 'notes', kind: 'notes', size: 'wide' }]);
+  assert.deepEqual(arranged(list, ['notes', 'gone'], new Map()), [{ uid: 'notes', kind: 'notes', size: 'wide' }]);
 });
