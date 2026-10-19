@@ -38,6 +38,7 @@ const DEFINITIONS = {
     request_offset: integer('Original request and attached snapshot offset with turn_id; use next_request_offset or request_match_offset.', 0, 200000)
   })],
   update_plan: ['Show or update a short plan for this reply. Changes only the displayed plan; never saves Pocket records.', object({ steps: z.array(object({ text: z.string().min(1).max(160), status: z.enum(['pending', 'in_progress', 'done']) })).min(1).max(6) })],
+  rename_chat: ['Give this conversation a name of its own when the user asks for one, corrects it, or the current name says nothing useful. Renames only the chat being used; never a Pocket record.', object({ title: z.string().min(1).max(64).meta({ description: 'The new chat name, at most 64 characters.' }) })],
   create_record: ['Save a new note, task or appointment in Pocket. The user reviews it first and may edit, approve or decline it; the result says whether it was saved. Appointments need when; task due is YYYY-MM-DD.', object({
     kind: z.enum(['note', 'task', 'appointment']), title: z.string().min(1).max(200), text: z.string().max(6000), due: optional(z.string().max(10)),
     steps: optional(z.array(line).max(12)), when: optional(z.string().max(40)), minutes: integer('Appointment duration in minutes.', 15, 480, 60)

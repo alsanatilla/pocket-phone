@@ -377,6 +377,26 @@ test('a vaulted key for another endpoint does not make the server available', as
     { fetcher: noProvider }), /not set up/);
 });
 
+test('Pip renames the chat it runs in, and the synced conversation carries the name', async () => {
+  const userId = await account(), sent = [];
+  const submitted = await runs.submitRun(userId, { requestId: 'req-rename', chat: header('chat-rename', 'New chat'), device: 'browser-1', text: 'Nenn diesen Chat „Fähre und Zeiten“.' },
+    { fetcher: provider(sent, compatibleMessage({ calls: [{ name: 'rename_chat', input: { title: '  Fähre   und Zeiten ' }, id: 'call_rename' }] }), compatibleMessage({ text: 'Erledigt.' })) });
+  assert.equal(submitted.run.status, 'done', submitted.run.turn.error);
+  assert.ok(sent[0].tools.map(tool => tool.function.name).includes('rename_chat'), 'the tool is offered to the model');
+  const row = submitted.run.turn.activity.find(item => item.name === 'rename_chat');
+  assert.equal(row.state, 'done');
+  assert.equal(JSON.parse(row.result).title, 'Fähre und Zeiten', 'the name is trimmed and its spacing normalised');
+  const chat = await chatOf(userId, 'chat-rename');
+  assert.equal(chat.title, 'Fähre und Zeiten');
+  assert.equal(chat.turns.length, 1, 'the conversation itself is untouched');
+  // An empty or oversized name is refused instead of overwriting the chat's title.
+  const again = await runs.submitRun(userId, { requestId: 'req-rename-bad', chat: header('chat-rename'), device: 'browser-1', text: 'Nenn ihn um.' },
+    { fetcher: provider(sent, compatibleMessage({ calls: [{ name: 'rename_chat', input: { title: '   ' }, id: 'call_bad' }] }), compatibleMessage({ text: 'Das ging nicht.' })) });
+  assert.equal(again.run.status, 'done', again.run.turn.error);
+  assert.equal(again.run.turn.activity.find(item => item.name === 'rename_chat').state, 'failed');
+  assert.equal((await chatOf(userId, 'chat-rename')).title, 'Fähre und Zeiten');
+});
+
 test('a follower reads a finished run once, as the last frame', async () => {
   const userId = await account(), sent = [];
   const submitted = await runs.submitRun(userId, { requestId: 'req-follow', chat: header('chat-follow'), text: 'Sag kurz Hallo.', device: 'browser-1' },

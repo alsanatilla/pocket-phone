@@ -104,6 +104,15 @@ async function writeTurn(userId, uid, turn) {
     return true;
   } catch { return false; }
 }
+/** The chat's own name, in the synced copy every device reads. The later stamp wins the merge; its turns stay. */
+async function writeTitle(userId, uid, title) {
+  try {
+    const chat = await chatObject(userId, uid);
+    if (!chat || chat.deleted) return false;
+    await writeObject(userId, 'chats', { ...chat, title: String(title).slice(0, 64), updated: Math.max(Date.now(), chat.updated + 1) });
+    return true;
+  } catch { return false; }
+}
 function endTurn(turn, status, error) {
   const value = turn || {};
   value.status = status; value.phase = status === 'done' ? 'done' : status === 'stopped' ? 'stopped' : 'failed';
@@ -353,9 +362,14 @@ async function drive(userId, run, leaseId, { fetcher }) {
       onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server' } }); progress(); },
       resume: { reasoning: turn.reasoning || '', activity: turn.activity || [], observations },
       durable: { checkpoint: resumed, settled: resumed ? settlementMap(requests) : null, pause },
-      executeTool: (value, name, input, signal, context) => WRITE_TOOLS.includes(name)
-        ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId: context.eventId, name, input })
-        : runTool(value, name, input, signal, { ...context, source }),
+      executeTool: async (value, name, input, signal, context) => {
+        const answer = WRITE_TOOLS.includes(name)
+          ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId: context.eventId, name, input })
+          : await runTool(value, name, input, signal, { ...context, source });
+        // A name belongs to the chat, not the turn: write it into the synced conversation so every device agrees.
+        if (answer?.kind === 'chat' && answer.title) await writeTitle(userId, chatUid, answer.title);
+        return answer;
+      },
       previewTool: (value, name, input, signal) => previewTool(value, name, input, signal, source) });
     segment = reply.usage || segment;
     Object.assign(turn, reply, { usage: { ...total(segment), runtime: 'pocket-server' } });

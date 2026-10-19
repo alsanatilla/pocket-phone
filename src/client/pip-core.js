@@ -284,6 +284,12 @@ export class ReplyRunner {
       const reply = await (remote ? remote.stream : this.stream)(chat, turn, { key, signal: active.controller.signal, resume: checkpoint, approve: (requests, signal) => this.waitForApproval(active, requests, signal), onUpdate: fields => {
         let checkpointReady = false;
         for (const row of fields.activity || []) if (row.result) { const marker = row.id + "|" + row.result; if (!savedResults.has(marker)) { savedResults.add(marker); checkpointReady = true; } }
+        // Pip may rename this conversation: the name belongs to the chat, not the turn, so it is applied here — for a
+        // run in this tab and for one on the server, whose transport carries the same activity rows.
+        for (const row of fields.activity || []) {
+          if (row.name !== "rename_chat" || row.state !== "done" || !row.result) continue;
+          try { const renamed = JSON.parse(row.result); if (renamed?.kind === "chat" && renamed.title) this.store.update(uid, value => { value.title = String(renamed.title).slice(0, 64); }); } catch { /* a cut result is not a rename */ }
+        }
         update(fields, checkpointReady);
       } });
       update({ ...reply, status: "done" }, true);

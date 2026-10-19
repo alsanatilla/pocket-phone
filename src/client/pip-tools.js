@@ -36,11 +36,11 @@ export const COROS_INDEX = [
 export const COROS_ARGUMENTS = { coros_read: 4000, coros_write: 6000 };
 // The grant each tool needs. Descriptions and input schemas live in pip-sdk-tools.js, which loads with the AI SDK.
 const TOOL_CATEGORIES = { search_notes: "notes", read_note: "notes", search_thoughts: "thoughts", search_tasks: "tasks", read_task: "tasks", search_calendar: "calendar", search_pocket: "pocket",
-  read_chat_history: "universal", update_plan: "universal", create_record: "universal", change_record: "changes", gym_summary: "gym", update_training_preferences: "training",
+  read_chat_history: "universal", update_plan: "universal", rename_chat: "universal", create_record: "universal", change_record: "changes", gym_summary: "gym", update_training_preferences: "training",
   coros_summary: "coros", coros_read: "coros", coros_format: "coros", coros_write: "coros", search_web: "web", read_web_page: "web" };
 const pocketCategories = ["notes", "tasks", "thoughts", "calendar"];
 /** Tools that show or change something instead of reading: never cached, never replayed as observations. The propose_* names are earlier replies' review cards. */
-export const STATE_TOOLS = ["update_plan", "create_record", "change_record", "coros_write", "update_training_preferences", "propose_action", "propose_change", "propose_coros"];
+export const STATE_TOOLS = ["update_plan", "rename_chat", "create_record", "change_record", "coros_write", "update_training_preferences", "propose_action", "propose_change", "propose_coros"];
 /** Tools that write to Pocket or COROS. The AI SDK holds each call until the user approves or declines it. */
 export const WRITE_TOOLS = ["create_record", "change_record", "coros_write", "update_training_preferences"];
 const CHANGE_CATEGORY = { complete_task: "tasks", update_task: "tasks", append_note: "notes", move_appointment: "calendar" };
@@ -279,6 +279,12 @@ export async function execute(value, name, args = {}, signal, context = {}) {
   if (name === "read_chat_history") result = context.chat && context.turn ? readChatHistory(context.chat, context.turn, historyPolicy(value), args) : failure("history_unavailable", "This conversation's history is unavailable.");
   else if (name === "search_web" || name === "read_web_page") result = await web(value, name, args, signal, context);
   else if (name === "update_plan") result = args.steps.some(step => !step.text.trim()) ? failure("invalid_arguments", "Write nonempty plan steps.") : { kind: "plan", plan: args.steps.map(step => ({ text: step.text.trim(), status: step.status })) };
+  else if (name === "rename_chat") {
+    const title = String(args.title || "").replace(/\s+/g, " ").trim();
+    result = !title ? failure("invalid_arguments", "Write a name for this chat.")
+      : title.length > 64 ? failure("invalid_arguments", "Keep the chat name within 64 characters.")
+      : { kind: "chat", title };
+  }
   else if (name === "coros_read") result = await corosRead(args, signal, context);
   else if (name === "coros_format") result = await corosFormat(args, signal, source);
   else if (name === "search_calendar") {
@@ -346,6 +352,7 @@ export function label(name, input = {}) {
   if (name === "read_note") return "read note";
   if (name === "read_task") return "read task";
   if (name === "update_plan") return "update plan";
+  if (name === "rename_chat") return "rename chat";
   if (name === "create_record") return "save " + (input.kind || "record");
   if (name === "change_record") return changeName(input.change);
   if (name === "propose_action") return "prepare " + (input.kind || "action");
@@ -363,6 +370,7 @@ function resultSummary(name, result) {
   if (result.available === false) return result.message || "No cached data";
   if (name === "read_note" || name === "read_task") return result.title || "Record read";
   if (name === "update_plan") return result.plan.filter(step => step.status === "done").length + "/" + result.plan.length + " steps";
+  if (result.kind === "chat") return "now “" + result.title + "”";
   if (result.kind === "action") return result.action.title + " · " + (result.action.status === "saved" ? "saved" : "declined");
   if (name === "propose_action") return result.proposal.title + " · ready to review";
   if (name === "propose_change") return result.before.title + " · ready to review";

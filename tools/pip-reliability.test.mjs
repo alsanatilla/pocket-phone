@@ -235,6 +235,20 @@ test('a reloaded streaming reply can explicitly Continue from its committed obse
   await runner.send(chat.uid, { resume: 'interrupted' }); assert.equal(store.get(chat.uid).turns[0].status, 'done');
 });
 
+test('a chat renamed by Pip takes that name, wherever the reply ran', async t => {
+  const { store, chat } = workspace(t);
+  assert.equal(store.get(chat.uid).title, 'New chat');
+  const renamed = { id: 'rename-1', name: 'rename_chat', title: 'rename chat', state: 'done', started: 1, ended: 2, sources: [],
+    result: JSON.stringify({ kind: 'chat', title: 'Fähre und Zeiten' }) };
+  const runner = new ReplyRunner(store, { key: () => 'fixture', stream: async (_, turn, options) => {
+    options.onUpdate({ activity: [renamed], answer: 'Umbenannt.' });
+    return { answer: 'Umbenannt.', activity: [renamed] };
+  } });
+  await runner.send(chat.uid, { text: 'Nenn diesen Chat „Fähre und Zeiten“.' });
+  assert.equal(store.get(chat.uid).title, 'Fähre und Zeiten');
+  assert.equal(store.get(chat.uid).turns.at(-1).status, 'done');
+});
+
 test('late stream callbacks cannot write after the active account changes', async t => {
   const { disk, store, chat } = workspace(t); disk.setItem('pocket:active-account', 'account-a'); let update, finish;
   const runner = new ReplyRunner(store, { key: () => 'fixture', stream: (_, __, options) => { update = options.onUpdate; return new Promise(resolve => { finish = resolve; }); } });
