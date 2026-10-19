@@ -46,6 +46,21 @@ export const TABLES = [
   `CREATE TABLE IF NOT EXISTS pocket_pip_routine_runs (seq INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, routine_id TEXT NOT NULL, at INTEGER NOT NULL, status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', chat TEXT NOT NULL DEFAULT '', turn TEXT NOT NULL DEFAULT '')`,
   `CREATE INDEX IF NOT EXISTS pocket_pip_routine_runs_owner ON pocket_pip_routine_runs(user_id, at)`,
   `CREATE TABLE IF NOT EXISTS pocket_coros_writes (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, key TEXT NOT NULL, tool TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, PRIMARY KEY(user_id, key))`,
+  // A shared Pip run: one conversation turn executing on the server, its provider messages, its live state and the
+  // decisions it waits for. `request_id` comes from the client, so a retried submit reuses the same run. A running run
+  // belongs to the one request holding `lease_id`, which renews it while it works; a paused run holds no lease.
+  `CREATE TABLE IF NOT EXISTS pocket_pip_runs (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, run_id TEXT NOT NULL, chat_uid TEXT NOT NULL, request_id TEXT NOT NULL, turn_uid TEXT NOT NULL, device TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, turn TEXT NOT NULL, checkpoint TEXT, config TEXT NOT NULL, device_tools TEXT NOT NULL DEFAULT '[]', lease_id TEXT NOT NULL DEFAULT '', lease_until INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY(user_id, run_id))`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS pocket_pip_runs_request ON pocket_pip_runs(user_id, request_id)`,
+  // One unfinished reply per conversation: another device attaches to it instead of starting a second one.
+  `CREATE UNIQUE INDEX IF NOT EXISTS pocket_pip_runs_active ON pocket_pip_runs(user_id, chat_uid) WHERE status IN ('running', 'awaiting', 'stopping')`,
+  `CREATE INDEX IF NOT EXISTS pocket_pip_runs_chat ON pocket_pip_runs(user_id, chat_uid, created)`,
+  `CREATE INDEX IF NOT EXISTS pocket_pip_runs_open ON pocket_pip_runs(status, lease_until, expires_at)`,
+  `CREATE TABLE IF NOT EXISTS pocket_pip_run_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, run_id TEXT NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, created INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS pocket_pip_run_events_run ON pocket_pip_run_events(user_id, run_id, seq)`,
+  // One row per decision the run waits for: an approval of a write, or the result of a device-owned tool. A
+  // conditional UPDATE settles it, so two clients deciding at once settle it once.
+  `CREATE TABLE IF NOT EXISTS pocket_pip_run_requests (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, run_id TEXT NOT NULL, request_id TEXT NOT NULL, kind TEXT NOT NULL, tool TEXT NOT NULL, call_id TEXT NOT NULL, row_id TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT 'pending', response TEXT NOT NULL DEFAULT '', decided_by TEXT NOT NULL DEFAULT '', decided_at INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL, PRIMARY KEY(user_id, run_id, request_id))`,
+  `CREATE INDEX IF NOT EXISTS pocket_pip_run_requests_open ON pocket_pip_run_requests(user_id, run_id, state)`,
 ];
 export function ensureSchema() {
   if (!initializing) initializing = database().batch(TABLES, 'write').catch(error => { initializing = null; throw error; });

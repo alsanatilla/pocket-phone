@@ -11,7 +11,9 @@ import { objectId } from '../shared/objects.js';
 // Pip on its own: routines that run on a schedule with the account's dedicated provider key, read the account's
 // server copy and reply in a synced Pip chat. Training routines have scoped writes and reply in the chat where the user last
 // talked training with Pip; calendar appointments stay on the phone.
-const DAY = 86400000, NEVER = Number.MAX_SAFE_INTEGER, RUN_DEADLINE = 150000, JOB_BUDGET = 240000;
+const DAY = 86400000, NEVER = Number.MAX_SAFE_INTEGER, RUN_DEADLINE = 150000;
+/** How long one scheduled job call may keep starting work, within the function's 300-second limit. */
+export const JOB_BUDGET = 240000;
 export const BACKGROUND_GRANTS = ['notes', 'thoughts', 'tasks', 'gym', 'coros'];
 export { BACKGROUND_OWNER };
 const CHECKIN = 'Morning check-in. Look at my open tasks (overdue, due today and important ones), thoughts I parked more than a week ago, and my COROS readiness and recent training load if available. Tell me briefly what needs attention today and suggest at most three concrete changes, such as moving a task. If nothing needs attention, say so in one line.';
@@ -72,6 +74,19 @@ const parse = raw => { try { return JSON.parse(String(raw)); } catch { return nu
 async function stored(userId) {
   const row = (await sql({ sql: 'SELECT settings, credentials, used_day, used_tokens FROM pocket_pip_background WHERE user_id = ?', args: [userId] })).rows[0];
   return row ? { settings: parse(row.settings), credentials: row.credentials ? String(row.credentials) : '', usedDay: String(row.used_day), usedTokens: Number(row.used_tokens) } : null;
+}
+/** The account's server settings, sealed key and today's usage; shared chat runs use the same opt-in. */
+export const backgroundAccount = stored;
+/** What the account's server key may still spend today. Scheduled routines and shared chat runs share one daily limit. */
+export function tokensLeft(saved, now = Date.now()) {
+  if (!saved?.settings) return 0;
+  return saved.settings.dailyTokens - (saved.usedDay === localDay(now, saved.settings.timezone) ? saved.usedTokens : 0);
+}
+/** Adds spent tokens to today's total in one statement, so runs finishing together never lose each other's usage. */
+export async function chargeTokens(userId, timeZone, tokens, now = Date.now()) {
+  if (!(tokens > 0)) return;
+  const today = localDay(now, timeZone);
+  await sql({ sql: 'UPDATE pocket_pip_background SET used_tokens = CASE WHEN used_day = ? THEN used_tokens + ? ELSE ? END, used_day = ? WHERE user_id = ?', args: [today, tokens, tokens, today, userId] });
 }
 async function routines(userId) {
   const rows = (await sql({ sql: `SELECT payload, next_run, last_run, last_error, last_chat,
@@ -256,7 +271,7 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   await writeObject(userId, 'chats', { ...chat, turns: [turn] }, { appendTurns: true });
   if (training?.complete && turn.status === 'done' && await authorized()) await rememberTraining(userId, routine.id, observation, dailyReview ? today : checkpoint?.reviewDay || '');
   const spent = (turn.usage?.input_tokens || 0) + (turn.usage?.output_tokens || 0);
-  await sql({ sql: 'UPDATE pocket_pip_background SET used_day = ?, used_tokens = ? WHERE user_id = ?', args: [today, used + spent, userId] });
+  await chargeTokens(userId, settings.timezone, spent, now);
   return { status: turn.status, chat: chat.uid, turn: turn.uid, ...(turn.error ? { error: turn.error } : {}) };
 }
 /** Claims a routine so two jobs never run it at once, runs it and schedules its next time. */

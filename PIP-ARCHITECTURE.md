@@ -56,3 +56,28 @@ AI SDK alone does not provide a durable background worker. The run is still brow
 Likewise, introducing AI SDK does not implement a persistent cancelled-request/dismissed-action ledger. Old pending proposals still need a separate product-state change to guarantee that they cannot resurface after "nevermind". That unfinished prototype has been archived outside the application source.
 
 If background execution is added later, use stable chat/request/run/action IDs, authoritative structured messages and decisions, authenticated cancellation, payload-scoped approvals, and idempotent mutations. Server-side provider credentials require an explicit account setting; existing browser-tab keys must not be silently uploaded.
+
+## Shared chat requirement for the proposed server
+
+Requirement clarified on 16 October 2026: **Android and the browser must open the same chat.** Each conversation has one server-owned identity and history, visible from every device linked to that Pocket account. Existing support for multiple conversations can remain; this requirement makes each conversation shared across devices.
+
+- Messages sent from either client enter the same conversation. Both clients display the same answers, live progress, tool activity and action outcomes.
+- Switching devices attaches to the existing run. Opening or reconnecting to a chat must not submit the question again or create a second run.
+- Pending approvals, their edited payloads, declines and cancellation decisions belong to the shared conversation. Either client can act, and the server settles each decision once for all clients.
+- Concurrent submissions from phone and browser are ordered by the server within the conversation. Retries reuse stable request IDs.
+- Clients cache the server conversation for local display. Active run state has one server authority; it is not merged from independently generated device histories. Accounts remain isolated.
+
+This records the target for the shared-server migration. The browser AI SDK loop and native Java loop described above remain the current implementation.
+
+## Server run engine
+
+`src/server/pip-runs.js` and `/api/pip/runs` implement the server side of shared chats with the same AI SDK loop (`pip-stream.js`), the account's encrypted server key and its synced records. No client uses it yet; the browser and Android still run Pip themselves.
+
+- **Execution.** A request runs one stretch of a reply (at most 150 seconds) and the research deadline carries across stretches. A running run belongs to the one request holding its lease; a heartbeat renews it every 2 seconds, and every write that request makes is conditional on it.
+- **Approvals and device tools.** A write, or a tool whose source only a device has (`search_calendar`), pauses the run: its provider messages, budgets and open requests are stored with the requests in one transaction, and no request waits. Any device decides; a conditional update settles each request once. The request that settles the last one continues the run, which first sends the decisions (with edits applied to the stored tool calls), so the SDK validates and runs them before the model is called again. A device's answer is returned through the tool's own execution. Approved writes run once by a stable id.
+- **Stop.** A waiting run stops immediately and its requests can no longer be answered. A running run is marked stopping; its request notices within a heartbeat and ends it, keeping the partial reply. A stop that arrives as the run pauses ends it instead of pausing.
+- **Recovery.** A run whose request died is ended as interrupted once its lease lapses (20 seconds), when anyone views it or by the scheduled job. The job also settles requests nobody answered within 12 hours (a declined change; no device answer) and continues waiting runs whose requests are all settled; `continue` does the same on demand.
+- **Conversation.** Each conversation has at most one unfinished run; a second submit is refused so the device attaches to the running one. The synced chat receives the question, the paused state and the final turn; live progress is read from the run.
+- **Limits and access.** Runs count against the same daily token limit as scheduled routines, across pauses. A run reads what the submitting chat allows within the account's server grants, re-checked when it continues; the provider and model stay as the run started.
+
+Before clients switch to it: the browser and Android must submit, watch, decide and stop through this API, must not rewrite turns a server run owns when they sync, and need the opt-in for using the server key in chats.

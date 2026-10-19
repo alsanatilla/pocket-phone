@@ -127,7 +127,7 @@ public class OrganizerActivityTest {
     }
     @Test public void taskDraftTextAndMetadataSurviveRecreationWithoutOverwritingTheSavedEntry() {
         long id=store().saveTask(0,"Saved",PlannerDates.today(),false,"Saved step");
-        ActivityController<MainActivity> first=today(); MainActivity activity=first.get();root(activity).findViewWithTag("task_open_"+id).performClick();click(activity,"Edit task");
+        ActivityController<MainActivity> first=today(); MainActivity activity=first.get();root(activity).findViewWithTag("workspace_tab_tasks").performClick();root(activity).findViewWithTag("task_open_"+id).performClick();click(activity,"Edit task");
         ((EditText)root(activity).findViewWithTag("capture_editor")).setText("Unsaved title");
         ((EditText)root(activity).findViewWithTag("task_steps_editor")).setText("Unsaved step");root(activity).findViewWithTag("task_important").performClick();
         Bundle state=new Bundle();first.pause().saveInstanceState(state).stop().destroy();

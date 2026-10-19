@@ -38,7 +38,7 @@ export const preferences = {
 };
 export const TODAY_CATALOG = Object.freeze(['brief', 'tasks', 'agenda', 'thoughts', 'notes', 'movement', 'gym', 'pip', 'activity', 'focus', 'clock', 'paper', 'zines', 'dice']);
 export const TODAY_DEFAULTS = Object.freeze(['agenda', 'thoughts', 'tasks', 'activity'].map(kind => Object.freeze({ uid: kind, kind })));
-function tiles(value) { const seen = new Set(); return (Array.isArray(value) ? value : TODAY_DEFAULTS).filter(tile => tile && TODAY_CATALOG.includes(tile.kind) && !seen.has(tile.kind) && seen.add(tile.kind)).slice(0, TODAY_CATALOG.length).map(tile => ({ uid: String(tile.uid || tile.kind).slice(0, 100), kind: tile.kind, ...(typeof tile.label === 'string' && tile.label.trim() ? { label: tile.label.trim().slice(0, 40) } : {}) })); }
+function tiles(value) { const seen = new Set(); return (Array.isArray(value) ? value : TODAY_DEFAULTS).filter(tile => tile && TODAY_CATALOG.includes(tile.kind) && !seen.has(tile.kind) && seen.add(tile.kind)).slice(0, TODAY_CATALOG.length).map(tile => ({ uid: String(tile.uid || tile.kind).slice(0, 100), kind: tile.kind, ...(typeof tile.label === 'string' && tile.label.trim() ? { label: tile.label.trim().slice(0, 40) } : {}), ...(['small', 'square', 'wide'].includes(tile.size) ? { size: tile.size } : {}) })); }
 export const todayTiles = { catalog: TODAY_CATALOG, list: () => tiles(preferences.get('today-tiles')), save: value => preferences.set('today-tiles', tiles(value)) };
 
 function draftKey(key) {
