@@ -1,5 +1,3 @@
-import { providerModel } from './pip-provider.js';
-
 // A conversation names itself once, from what it was about. This is one small reply of its own — no tools, a few
 // dozen tokens, right after the first answer — so a chat never keeps a name like "New chat" or a whole pasted
 // question as its title. A failure here is not part of the reply: an unnamed chat simply keeps the name it had.
@@ -26,6 +24,8 @@ export async function suggestTitle(value, credential, request, answer, { fetcher
   if (!asked) return '';
   try {
     const { streamText } = await import('ai');
+    // Loaded here, not at the top: naming a chat must not pull the SDK into Pocket's first load.
+    const { providerModel } = await import('./pip-provider.js');
     const model = await providerModel(value, credential, { fetcher, signal, clock: () => {}, onRetry: () => {} });
     const prompt = PROMPT + '\n\nRequest: ' + asked + (replied ? '\n\nAnswer: ' + replied : '');
     for (const attempt of attempts(value)) {
