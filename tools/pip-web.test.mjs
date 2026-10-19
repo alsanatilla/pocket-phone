@@ -202,3 +202,10 @@ test('replayed history tells Pip which actions it already took or had declined',
   assert.ok(assistant,'the finished turn is replayed');
   assert.match(assistant.content,/\[Pip actions: note "Car industry turmoil" \(saved by the user\); append_note on "Trip" \(not applied\); task "Call the dealer" \(saved after the user approved it\); complete_task "Old task" \(declined by the user\)\]/);
 });
+
+test('only loopback may use plain http as a provider URL', () => {
+  const base = { provider: 'compatible', model: 'deepseek-v4.1-flash', maxTokens: 1024, thinking: false, webSearch: false };
+  assert.equal(config({ ...base, baseUrl: 'http://127.0.0.1:4321/api/pip/opencode/v1' }).baseUrl, 'http://127.0.0.1:4321/api/pip/opencode/v1');
+  assert.equal(config({ ...base, baseUrl: 'https://pocket-phone.vercel.app/api/pip/opencode/v1' }).baseUrl, 'https://pocket-phone.vercel.app/api/pip/opencode/v1');
+  assert.throws(() => config({ ...base, baseUrl: 'http://example.com/v1' }), /HTTPS/);
+});

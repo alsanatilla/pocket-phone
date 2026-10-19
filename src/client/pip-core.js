@@ -16,7 +16,9 @@ export function config(value = DEFAULT_CONFIG) {
   let url;
   try { url = new URL(value.provider === "anthropic" ? DEFAULT_CONFIG.baseUrl : String(value.baseUrl || "").trim()); }
   catch { throw new Error("Enter an HTTPS API base URL, including /v1 if your provider needs it."); }
-  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) throw new Error("Use an HTTPS API base URL without credentials, a query or a fragment.");
+  // https everywhere, except loopback: a local dev server can serve Pocket's own provider proxy over http.
+  const loopback = ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(url.hostname) && url.protocol === 'http:';
+  if (url.protocol !== "https:" && !loopback || url.username || url.password || url.search || url.hash) throw new Error("Use an HTTPS API base URL without credentials, a query or a fragment.");
   const maxTokens = Number(value.maxTokens);
   if (!Number.isInteger(maxTokens) || maxTokens < 64 || maxTokens > 8192) throw new Error("Choose a reply limit from 64 to 8,192 tokens.");
   return { provider: value.provider, model, baseUrl: url.href.replace(/\/+$/, ""), maxTokens, thinking: Boolean(value.thinking), webSearch: Boolean(value.webSearch) };
