@@ -203,7 +203,7 @@ async function routineChat(userId, routine, settings, now) {
   if (chat) return chat;
   // Keep conversations from the earlier report-only planner when opening its first training chat.
   const legacy = routine.kind === 'training' ? (await sql({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, 'pip-routine-' + routine.id + '-' + month] })).rows[0] : null;
-  return { uid, title: 'Pip · ' + routine.title, created: now, updated: now, draft: '', context: [], turns: legacy ? (parse(legacy.payload)?.turns || []).slice(-20) : [], config };
+  return { uid, title: 'Pip · ' + routine.title, titled: true, created: now, updated: now, draft: '', context: [], turns: legacy ? (parse(legacy.payload)?.turns || []).slice(-20) : [], config };
 }
 export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.now(), force = false, trainingServices, message = null, signal } = {}) {
   if (message) message = trainingMessage(message);

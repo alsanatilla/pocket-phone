@@ -235,18 +235,53 @@ test('a reloaded streaming reply can explicitly Continue from its committed obse
   await runner.send(chat.uid, { resume: 'interrupted' }); assert.equal(store.get(chat.uid).turns[0].status, 'done');
 });
 
-test('a chat renamed by Pip takes that name, wherever the reply ran', async t => {
-  const { store, chat } = workspace(t);
-  assert.equal(store.get(chat.uid).title, 'New chat');
-  const renamed = { id: 'rename-1', name: 'rename_chat', title: 'rename chat', state: 'done', started: 1, ended: 2, sources: [],
-    result: JSON.stringify({ kind: 'chat', title: 'Fähre und Zeiten' }) };
-  const runner = new ReplyRunner(store, { key: () => 'fixture', stream: async (_, turn, options) => {
-    options.onUpdate({ activity: [renamed], answer: 'Umbenannt.' });
-    return { answer: 'Umbenannt.', activity: [renamed] };
-  } });
-  await runner.send(chat.uid, { text: 'Nenn diesen Chat „Fähre und Zeiten“.' });
+test('the first answer names the conversation by itself, in the background', async t => {
+  const { store, chat } = workspace(t), seen = [];
+  const runner = new ReplyRunner(store, { key: () => 'fixture', title: async (value, credential, request, answer) => { seen.push({ request, answer, credential }); return 'Fähre und Zeiten'; },
+    stream: async () => ({ answer: 'Die Fähre fährt um 08:10 von Pier 3.' }) });
+  await runner.send(chat.uid, { text: 'Wann fährt die Fähre?' });
+  await runner.naming;
+  assert.equal(seen.length, 1, 'one small request names the chat');
+  assert.equal(seen[0].request, 'Wann fährt die Fähre?');
+  assert.equal(seen[0].answer, 'Die Fähre fährt um 08:10 von Pier 3.');
+  assert.equal(seen[0].credential, 'fixture');
   assert.equal(store.get(chat.uid).title, 'Fähre und Zeiten');
-  assert.equal(store.get(chat.uid).turns.at(-1).status, 'done');
+  assert.equal(store.get(chat.uid).titled, true);
+});
+
+test('a chat keeps a name it was given, and a later exchange does not rename it', async t => {
+  const { store, chat } = workspace(t), seen = [];
+  const naming = async () => { seen.push('named'); return 'Should not be used'; };
+  // Chosen by the user (or by Training/Daily brief): never renamed.
+  chat.titled = true; store.save(chat);
+  await new ReplyRunner(store, { key: () => 'fixture', title: naming, stream: async () => ({ answer: 'Antwort' }) }).send(chat.uid, { text: 'Frage' });
+  assert.equal(seen.length, 0); assert.equal(store.get(chat.uid).title, 'Frage');
+
+  // A conversation that is already underway is left alone as well.
+  const second = workspace(t), running = second.store.get(second.chat.uid);
+  running.title = 'Frühere Frage';
+  running.turns = [{ uid: 'older', text: 'Frühere Frage', answer: 'Frühere Antwort', status: 'done', created: 1, context: [] }];
+  second.store.save(running);
+  const later = new ReplyRunner(second.store, { key: () => 'fixture', title: naming, stream: async () => ({ answer: 'Antwort' }) });
+  await later.send(second.chat.uid, { text: 'Neue Frage' });
+  assert.equal(seen.length, 0); assert.equal(second.store.get(second.chat.uid).title, 'Frühere Frage');
+});
+
+test('a failed reply does not name the chat', async t => {
+  const { store, chat } = workspace(t), seen = [];
+  const runner = new ReplyRunner(store, { key: () => 'fixture', title: async () => { seen.push('named'); return 'Nope'; },
+    stream: async () => { throw new Error('The provider failed.'); } });
+  await runner.send(chat.uid, { text: 'Frage' });
+  assert.equal(seen.length, 0); assert.equal(store.get(chat.uid).title, 'Frage');
+});
+
+test('a suggested name is cleaned into a title', async () => {
+  const { title } = await import('../src/client/pip-title.js');
+  assert.equal(title('  „Fähre und Zeiten.“  '), 'Fähre und Zeiten');
+  assert.equal(title('Chat title: Fähre und Zeiten'), 'Fähre und Zeiten');
+  assert.equal(title('Fähre und Zeiten\n(zweite Zeile)'), 'Fähre und Zeiten');
+  assert.equal(title(''), '');
+  assert.equal(title('x'.repeat(200)).length, 64);
 });
 
 test('late stream callbacks cannot write after the active account changes', async t => {

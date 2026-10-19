@@ -85,7 +85,7 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
   send(() => post('/api/pip/runs', { action: 'submit', accountId: owner.id, requestId, device, chatUid: chat.uid, text: turn.text,
     attempt: turn.attempt, turnUid: turn.uid, context: turn.context || [], grants: access(chat.config, storage),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    chat: { uid: chat.uid, title: chat.title, created: chat.created, config: chat.config } }));
+    chat: { uid: chat.uid, title: chat.title, titled: Boolean(chat.titled), created: chat.created, config: chat.config } }));
 
   /** What one snapshot means for this reply: progress to show, a settled answer, or a question to answer. */
   const step = async view => {

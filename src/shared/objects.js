@@ -7,7 +7,7 @@ export function sanitizeObject(collection, value) {
   if (value.deleted) return { [uid]: value[uid], updated: value.updated, deleted: true };
   if (collection === 'zines') return { id: value.id, title: value.title, byline: value.byline || '', tone: value.tone, photos: value.photos.map(photo => pick(photo, ['id', 'caption', 'layout'])), created: value.created, updated: value.updated };
   const context = values => (values || []).map(item => pick(item, ['kind', 'uid', 'id', 'title', 'text', 'originalLength', 'href']));
-  return { ...pick(value, ['uid', 'title', 'created', 'updated', 'draft', 'draftUpdated', 'returnedModel', 'usage', 'pinned']),
+  return { ...pick(value, ['uid', 'title', 'titled', 'created', 'updated', 'draft', 'draftUpdated', 'returnedModel', 'usage', 'pinned']),
     config: pick(value.config, ['provider', 'model', 'baseUrl', 'maxTokens', 'thinking', 'webSearch']), context: context(value.context),
     turns: value.turns.map(turn => ({ ...pick(turn, ['uid', 'assistantUid', 'owner', 'text', 'answer', 'reasoning', 'error', 'status', 'created', 'updated', 'attempt', 'usage', 'activity', 'sources', 'phase', 'model']), context: context(turn.context) })) };
 }
@@ -24,7 +24,7 @@ export function validObject(collection, value) {
   if (!object(value) || !stamp(value.updated)) return false;
   if (collection === 'zines') return objectId(value.id) && (value.deleted === true || (typeof value.title === 'string' && value.title.length <= 1000 && Array.isArray(value.photos) && value.photos.length <= 40 && value.photos.every(photo => object(photo) && objectId(photo.id))));
   if (collection === 'chats') return objectId(value.uid) && (value.deleted === true || (
-    typeof value.title === 'string' && value.title.length <= 1000 && typeof value.draft === 'string' && value.draft.length <= 16000 && (value.pinned === undefined || typeof value.pinned === 'boolean') && contexts(value.context) && Array.isArray(value.turns) && value.turns.length <= 2000 && object(value.config) && safeConfig(value.config) &&
+    typeof value.title === 'string' && value.title.length <= 1000 && typeof value.draft === 'string' && value.draft.length <= 16000 && (value.pinned === undefined || typeof value.pinned === 'boolean') && (value.titled === undefined || typeof value.titled === 'boolean') && contexts(value.context) && Array.isArray(value.turns) && value.turns.length <= 2000 && object(value.config) && safeConfig(value.config) &&
     value.turns.every(turn => object(turn) && objectId(turn.uid) && typeof turn.text === 'string' && turn.text.length <= 16000 && typeof turn.answer === 'string' && ['streaming', 'done', 'failed', 'stopped'].includes(turn.status) && contexts(turn.context || []) && (turn.updated === undefined || stamp(turn.updated)))));
   return false;
 }

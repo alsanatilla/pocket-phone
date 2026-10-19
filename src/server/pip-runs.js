@@ -90,7 +90,8 @@ async function conversation(userId, uid, header, value, now) {
   if (stored?.deleted) throw no('This chat was removed.', 404);
   if (stored) return stored;
   const config = (() => { try { return pipConfig(header?.config); } catch { return pipConfig(value); } })();
-  return { uid, title: String(header?.title || 'Pip').slice(0, 64), created: Number.isSafeInteger(header?.created) ? header.created : now,
+  return { uid, title: String(header?.title || 'Pip').slice(0, 64), ...(header?.titled ? { titled: true } : {}),
+    created: Number.isSafeInteger(header?.created) ? header.created : now,
     updated: now, draft: '', context: [], turns: [], config };
 }
 const event = (userId, runId, kind, data = {}, now = Date.now()) =>
@@ -103,15 +104,6 @@ async function writeTurn(userId, uid, turn) {
     const stamp = Math.max(Date.now(), chat.updated + 1, (turn.updated || 0) + 1);
     turn.updated = stamp;
     await writeObject(userId, 'chats', { ...chat, updated: stamp, turns: [turn] }, { appendTurns: true });
-    return true;
-  } catch { return false; }
-}
-/** The chat's own name, in the synced copy every device reads. The later stamp wins the merge; its turns stay. */
-async function writeTitle(userId, uid, title) {
-  try {
-    const chat = await chatObject(userId, uid);
-    if (!chat || chat.deleted) return false;
-    await writeObject(userId, 'chats', { ...chat, title: String(title).slice(0, 64), updated: Math.max(Date.now(), chat.updated + 1) });
     return true;
   } catch { return false; }
 }
@@ -366,14 +358,9 @@ async function drive(userId, run, leaseId, { fetcher }) {
       onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server' } }); progress(); },
       resume: { reasoning: turn.reasoning || '', activity: turn.activity || [], observations },
       durable: { checkpoint: resumed, settled: resumed ? settlementMap(requests) : null, pause },
-      executeTool: async (value, name, input, signal, context) => {
-        const answer = WRITE_TOOLS.includes(name)
-          ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId: context.eventId, name, input })
-          : await runTool(value, name, input, signal, { ...context, source });
-        // A name belongs to the chat, not the turn: write it into the synced conversation so every device agrees.
-        if (answer?.kind === 'chat' && answer.title) await writeTitle(userId, chatUid, answer.title);
-        return answer;
-      },
+      executeTool: (value, name, input, signal, context) => WRITE_TOOLS.includes(name)
+        ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId: context.eventId, name, input })
+        : runTool(value, name, input, signal, { ...context, source }),
       previewTool: (value, name, input, signal) => previewTool(value, name, input, signal, source) });
     segment = reply.usage || segment;
     Object.assign(turn, reply, { usage: { ...total(segment), runtime: 'pocket-server' } });

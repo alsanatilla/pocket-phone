@@ -18,13 +18,14 @@ import { pipScheduled, scheduledState } from './pip-scheduled.js';
 import { routineCaption, sortRoutines } from './pip-routine-model.js';
 import { serverRuns, streamReplyRemote } from './pip-remote.js';
 import { trainingChatRoutine, trainingReply } from './pip-training-chat.js';
+import { suggestTitle } from './pip-title.js';
 import { resolve as resolveCredential, status as credentialStatus, save as saveCredential, forget as forgetCredential } from './pip-credentials.js';
 
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, viewportCleanup = null;
 const runner = new ReplyRunner(store, { key: (value, chat) => trainingChatRoutine(chat.uid) ? 'account-key' : resolveCredential(value),
   remote: { available: chat => trainingChatRoutine(chat.uid) ? false : serverRuns({ chat: chat.uid, config: chat.config }).then(state => state.available), stream: streamReplyRemote },
-  stream: (chat, turn, options) => trainingChatRoutine(chat.uid) ? trainingReply(chat, turn, options) : streamReply(chat, turn, options), onChange: event => {
+  stream: (chat, turn, options) => trainingChatRoutine(chat.uid) ? trainingReply(chat, turn, options) : streamReply(chat, turn, options), title: suggestTitle, onChange: event => {
   const entry = document.getElementById("pip-entry");
   if (entry) {
     entry.classList.toggle('replying', Boolean(runner.active));
@@ -83,13 +84,14 @@ export function withBrief(brief) {
   const chat = store.create();
   return store.update(chat.uid, value => {
     value.title = ('Daily brief · ' + String(brief.day || '')).slice(0,100);
+    value.titled = true;
     value.draft = 'Help me choose one thing for today. Use only the facts below; ask when context is missing. Do not change anything.\n\n' + text;
   }).uid;
 }
 
 export function withMovement(text) {
   const chat = store.create();
-  return store.update(chat.uid, value => { value.title = 'Training'; value.draft = String(text).slice(0,8000); }).uid;
+  return store.update(chat.uid, value => { value.title = 'Training'; value.titled = true; value.draft = String(text).slice(0,8000); }).uid;
 }
 
 /** Travel prepares a separate draft; only the composer's Send starts a provider request. */
@@ -98,6 +100,7 @@ export function withTravel(trip, stop, action = 'find') {
   const chat = store.create();
   return store.update(chat.uid, value => {
     value.title = prepared.title;
+    value.titled = true;
     value.draft = prepared.draft;
     value.context = [prepared.context];
   }).uid;
@@ -169,7 +172,7 @@ async function chatMenu(uid) {
   const choice = await ui.choose(chat.title, ['Rename', chat.pinned ? 'Unpin this chat' : 'Pin this chat', 'Delete']);
   if (choice === 0) {
     const title = await ui.ask('Name this chat', { value: chat.title, limit: 80 });
-    if (title?.trim()) { store.update(uid, value => { value.title = title.trim(); }); render(); }
+    if (title?.trim()) { store.update(uid, value => { value.title = title.trim(); value.titled = true; }); render(); }
   } else if (choice === 1) {
     store.update(uid, value => { value.pinned = !value.pinned; }); render();
   } else if (choice === 2 && await ui.confirm('Delete this chat?', 'delete')) {

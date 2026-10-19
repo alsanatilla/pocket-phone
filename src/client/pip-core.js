@@ -215,7 +215,7 @@ export async function streamReply(chat, turn, options = {}) {
 }
 
 export class ReplyRunner {
-  constructor(store, { key = value => resolveCredential(value), stream = streamReply, remote = null, onChange = () => {} } = {}) { this.store = store; this.key = key; this.stream = stream; this.remote = remote; this.onChange = onChange; this.active = null; }
+  constructor(store, { key = value => resolveCredential(value), stream = streamReply, remote = null, onChange = () => {}, title = null } = {}) { this.store = store; this.key = key; this.stream = stream; this.remote = remote; this.onChange = onChange; this.title = title; this.active = null; }
   async send(uid, { text, context = [], retry = null, resume = null } = {}) {
     if (this.active) throw new Error("Let the current reply finish, or stop it first.");
     const chat = this.store.get(uid);
@@ -280,18 +280,14 @@ export class ReplyRunner {
       if (force || Date.now() - lastSave >= 120) { this.store.update(uid, c => Object.assign(c.turns.find(t => t.uid === turn.uid), turn)); lastSave = Date.now(); }
       this.onChange({ type: "delta", chatId: uid, turn: copy(turn) });
     };
+    let outcome = null;
     try {
       const reply = await (remote ? remote.stream : this.stream)(chat, turn, { key, signal: active.controller.signal, resume: checkpoint, approve: (requests, signal) => this.waitForApproval(active, requests, signal), onUpdate: fields => {
         let checkpointReady = false;
         for (const row of fields.activity || []) if (row.result) { const marker = row.id + "|" + row.result; if (!savedResults.has(marker)) { savedResults.add(marker); checkpointReady = true; } }
-        // Pip may rename this conversation: the name belongs to the chat, not the turn, so it is applied here — for a
-        // run in this tab and for one on the server, whose transport carries the same activity rows.
-        for (const row of fields.activity || []) {
-          if (row.name !== "rename_chat" || row.state !== "done" || !row.result) continue;
-          try { const renamed = JSON.parse(row.result); if (renamed?.kind === "chat" && renamed.title) this.store.update(uid, value => { value.title = String(renamed.title).slice(0, 64); }); } catch { /* a cut result is not a rename */ }
-        }
         update(fields, checkpointReady);
       } });
+      outcome = reply;
       update({ ...reply, status: "done" }, true);
     } catch (error) {
       // A run stopped on the server (this device or another) is stopped, not failed.
@@ -300,6 +296,24 @@ export class ReplyRunner {
     } finally {
       if (this.active === active) { this.active = null; this.onChange({ type: "finished", chatId: uid }); }
     }
+    // After its first answer a chat names itself, so the sidebar never keeps "New chat" or a whole pasted question.
+    // It runs in the background, on its own credential, and never touches the reply the user already has.
+    if (this.title && outcome?.answer && !outcome.error) {
+      const credential = key ?? await Promise.resolve(this.key(chat.config, chat)).catch(() => null);
+      if (credential) this.naming = this.nameChat(uid, chat.config, credential, turn.text, outcome.answer);
+    }
+  }
+  /** One small reply of its own that names a fresh conversation. Failures leave the current name alone. */
+  async nameChat(uid, value, credential, request, answer) {
+    const chat = this.store.get(uid);
+    if (!chat || chat.titled || (chat.turns || []).length > 1) return;
+    try {
+      const name = await this.title(value, credential, request, answer);
+      if (!name) return;
+      this.store.update(uid, current => {
+        if (!current.titled && (current.turns || []).length <= 1) { current.title = name; current.titled = true; }
+      });
+    } catch { /* a name is a convenience, not part of the reply */ }
   }
   // The reply pauses here while the user approves, edits or declines each requested write.
   waitForApproval(active, requests, signal) {
