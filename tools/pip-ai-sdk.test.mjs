@@ -155,7 +155,7 @@ test('OpenRouter SDK preserves free fallback models and encrypted reasoning acro
     sent.push(JSON.parse(options.body));
     return response(sent.length === 1 ? compatibleMessage({ calls: [{ name: 'create_record', input: proposal }], delta: { reasoning: 'Prepare the requested note.', reasoning_details: [encrypted] } }) : compatibleMessage({ text: 'The note is ready.' }));
   }, approve: approveAll() });
-  assert.equal(sent[0].model, 'nvidia/nemotron-3-super-120b-a12b:free'); assert.deepEqual(sent[0].models, ['nvidia/nemotron-3-super-120b-a12b:free', 'inclusionai/ling-3.0-flash-sante:free', 'openrouter/free']);
+  assert.equal(sent[0].model, 'nvidia/nemotron-3-super-120b-a12b:free'); assert.deepEqual(sent[0].models, ['nvidia/nemotron-3-super-120b-a12b:free', 'google/gemma-4-31b-it:free', 'openrouter/free']);
   assert.match(JSON.stringify(sent[1].messages.find(message => message.role === 'assistant')), /PRIVATE ENCRYPTED REASONING/);
   assert.ok(!JSON.stringify(result).includes('PRIVATE ENCRYPTED REASONING')); assert.equal(result.answer, 'The note is ready.');
 });
