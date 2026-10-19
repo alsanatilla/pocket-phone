@@ -23,7 +23,7 @@ import { resolve as resolveCredential, status as credentialStatus, save as saveC
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, viewportCleanup = null;
 const runner = new ReplyRunner(store, { key: (value, chat) => trainingChatRoutine(chat.uid) ? 'account-key' : resolveCredential(value),
-  remote: { available: chat => trainingChatRoutine(chat.uid) ? false : serverRuns({ chat: chat.uid }).then(state => state.available), stream: streamReplyRemote },
+  remote: { available: chat => trainingChatRoutine(chat.uid) ? false : serverRuns({ chat: chat.uid, config: chat.config }).then(state => state.available), stream: streamReplyRemote },
   stream: (chat, turn, options) => trainingChatRoutine(chat.uid) ? trainingReply(chat, turn, options) : streamReply(chat, turn, options), onChange: event => {
   const entry = document.getElementById("pip-entry");
   if (entry) {

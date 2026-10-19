@@ -4,7 +4,8 @@ import { open } from './secrets.js';
 import { writeObject } from './objects.js';
 import { serverRecordSource } from './pip-source.js';
 import { applyApprovedWrite } from './pip-writes.js';
-import { backgroundAccount, chargeTokens, localDay, tokensLeft, JOB_BUDGET } from './pip-background.js';
+import { backgroundAccount, chargeTokens, localDay, tokensLeft, validTimezone, JOB_BUDGET } from './pip-background.js';
+import { readKey } from './pip-keys.js';
 import { config as pipConfig, requestBody, contextCoverage } from '../client/pip-core.js';
 import { execute as runTool, preview as previewTool, WRITE_TOOLS } from '../client/pip-tools.js';
 import { settle } from '../client/pip-activity.js';
@@ -22,6 +23,8 @@ import { objectId, validObject } from '../shared/objects.js';
 // One request runs one stretch of a reply within the function's 300-second limit. A stop from another device takes
 // effect within a heartbeat; the lease outlives several missed ones, so a request that died is noticed within 20 seconds.
 const RUN_DEADLINE = 150000, HEARTBEAT = 2000, LEASE = 20000, PROGRESS = 700, WAIT_TTL = 12 * 3600000, DEVICE_ANSWER = 16000;
+/** A chat run on a vaulted key has no dedicated daily budget; this bounds a runaway day without a settings page. */
+const VAULT_TOKENS = 200000;
 const ACTIVE = ['running', 'awaiting', 'stopping'];
 /** Tools a device may answer instead of the server: sources that can live only on that device. */
 const DEVICE_TOOLS = ['search_calendar'];
@@ -32,26 +35,47 @@ const no = (message, status = 400) => Object.assign(new Error(message), { status
 const allowedId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value);
 const parse = raw => { try { return JSON.parse(String(raw)); } catch { return null; } };
 
-/** The account's server settings and sealed key; the same opt-in as Pip's scheduled routines. */
-async function account(userId) {
+/**
+ * Where a run's key and settings come from. The dedicated “on its own” key covers scheduled routines and shared
+ * runs alike; without it, a signed-in chat may still run here with the key it stored in the account vault,
+ * using the model that chat uses, the access its client asked for, and today's date in the client's timezone.
+ */
+async function account(userId, config = null, grants = [], timezone = '') {
   const saved = await backgroundAccount(userId);
-  return saved?.credentials && saved.settings ? saved : null;
+  if (saved?.credentials && saved.settings) return { ...saved, key: open(userId, saved.credentials).key, source: 'routines' };
+  if (!config) return null;
+  const key = await readKey(userId, { provider: config.provider, baseUrl: config.baseUrl }).catch(() => '');
+  if (!key) return null;
+  return { key, source: 'vault', settings: { ...pipConfig(config), grants: serverGrants({ grants }), dailyTokens: VAULT_TOKENS, timezone: validTimezone(timezone) ? timezone : 'UTC', enabled: true } };
 }
 /** What the server may read for a shared run: the account's server grants, and calendar from its synced copy. */
 export const serverGrants = settings => [...new Set([...(settings.grants || []), 'calendar'])];
+/** The endpoint a chat's key would be stored under, or null when the client did not name a usable one. */
+const chatEndpoint = value => value && ['anthropic', 'compatible'].includes(value.provider) ? { provider: value.provider, baseUrl: String(value.baseUrl || '') } : null;
 /** A run reads only what the submitting chat allows, within what the account allows on the server. */
 function runValue(settings, requested) {
   const allowed = serverGrants(settings), asked = Array.isArray(requested) ? requested : allowed;
   return { ...pipConfig(settings), grants: allowed.filter(grant => asked.includes(grant)) };
 }
-/** What a client needs to know before it submits: whether the server holds a key, what it may read, today's budget. */
-export async function serverRunState(userId, chat = '') {
+/**
+ * What a client needs to know before it submits: whether the server holds a key, what it may read, today's budget.
+ * The tab sends its own chat config along, because a chat that is new on this device has not reached the synced
+ * copy yet — and the account's key may live in the vault for exactly that endpoint.
+ */
+export async function serverRunState(userId, chat = '', asked = null) {
   const saved = await account(userId);
+  let available = Boolean(saved), settings = saved?.settings || null;
+  let target = chatEndpoint(asked);
+  if (!available && !target && chat && objectId(chat)) target = chatEndpoint((await chatObject(userId, chat))?.config);
+  if (!available && target) {
+    const key = await readKey(userId, target).catch(() => '');
+    if (key) { available = true; settings = { ...target, webSearch: Boolean(asked?.webSearch), grants: [], dailyTokens: VAULT_TOKENS, timezone: 'UTC', enabled: true }; }
+  }
   const row = chat && objectId(chat)
     ? (await sql({ sql: 'SELECT * FROM pocket_pip_runs WHERE user_id = ? AND chat_uid = ? ORDER BY created DESC LIMIT 1', args: [userId, chat] })).rows[0]
     : (await sql({ sql: 'SELECT * FROM pocket_pip_runs WHERE user_id = ? ORDER BY created DESC LIMIT 1', args: [userId] })).rows[0];
-  return { available: Boolean(saved), grants: saved ? serverGrants(saved.settings) : [], web: Boolean(saved?.settings?.webSearch),
-    tokensLeft: saved ? Math.max(0, tokensLeft(saved)) : 0, run: row ? await view(userId, await recover(userId, row), 0) : null };
+  return { available, grants: settings ? serverGrants(settings) : [], web: Boolean(settings?.webSearch),
+    tokensLeft: saved ? Math.max(0, tokensLeft(saved)) : (available ? VAULT_TOKENS : 0), run: row ? await view(userId, await recover(userId, row), 0) : null };
 }
 
 const runRow = async (userId, runId) => (await sql({ sql: 'SELECT * FROM pocket_pip_runs WHERE user_id = ? AND run_id = ?', args: [userId, runId] })).rows[0] || null;
@@ -130,10 +154,13 @@ export async function submitRun(userId, body, { fetcher, now = Date.now() } = {}
   if (existing) return view(userId, await recover(userId, existing), 0);
   const text = String(body.text || '').trim();
   if (!text || text.length > 16000) throw no('Write a message, up to 16,000 characters.');
-  const saved = await account(userId);
+  // The key may come from the account's “on its own” settings or from the key vault for this chat's own endpoint.
+  const clientConfig = (() => { try { return pipConfig(header?.config); } catch { return null; } })();
+  const timezone = validTimezone(body.timezone) ? body.timezone : '';
+  const saved = await account(userId, clientConfig, body.grants, timezone);
   if (!saved) throw no('Pip on the server is not set up for this account. Turn it on in “on its own” first.', 409);
-  if (tokensLeft(saved, now) <= 0) throw no('Today’s token limit for Pip on the server is used up.', 429);
-  const value = runValue(saved.settings, body.grants), chat = await conversation(userId, uid, header, value, now);
+  if (saved.source === 'routines' && tokensLeft(saved, now) <= 0) throw no('Today’s token limit for Pip on the server is used up.', 429);
+  const value = { ...runValue(saved.settings, body.grants), timezone: saved.settings.timezone || 'UTC' }, chat = await conversation(userId, uid, header, value, now);
   if (chat.turns.length >= 1990) throw no('This chat is full. Start a new one.', 413);
   const device = String(body.device || '').slice(0, 100);
   // The client's attempt id is kept: a synced server turn then carries the same attempt the tab is running, so the
@@ -307,13 +334,13 @@ async function drive(userId, run, leaseId, { fetcher }) {
     await event(userId, runId, 'awaiting', { requests: (state.pending || []).map(item => ({ id: item.approvalId || item.toolCallId, tool: item.toolName, kind: WRITE_TOOLS.includes(item.toolName) ? 'write' : 'device' })) }, at);
   };
   try {
-    saved = await account(userId);
+    saved = await account(userId, snapshot, snapshot.grants, snapshot.timezone);
     if (!saved) return await end('failed', 'Pip on the server is no longer set up for this account.');
     // The provider and model stay as the reply started, so its reasoning continues; access is what the account allows now.
     const value = { ...snapshot, grants: (snapshot.grants || []).filter(grant => serverGrants(saved.settings).includes(grant)) };
     const chat = await chatObject(userId, chatUid);
     if (!chat || chat.deleted) return await end('stopped', 'This chat was removed.');
-    const { key } = open(userId, saved.credentials), timezone = saved.settings.timezone || 'UTC';
+    const key = saved.key, timezone = value.timezone || saved.settings.timezone || 'UTC';
     const conversationView = { ...chat, config: value }, body = requestBody(conversationView, turn), source = await serverRecordSource(userId);
     body.instructions += '\n\nToday is ' + localDay(Date.now(), timezone) + ' (' + timezone + ').' + NOTE;
     const requests = (await sql({ sql: 'SELECT * FROM pocket_pip_run_requests WHERE user_id = ? AND run_id = ? ORDER BY created', args: [userId, runId] })).rows;
@@ -378,6 +405,39 @@ export async function runView(userId, { runId = '', chat = '', after = 0 } = {})
       args: chat && objectId(chat) ? [userId, chat] : [userId] })).rows[0];
   return view(userId, await recover(userId, row), cursor);
 }
+
+/** How a follower watches: a tick that re-reads the run, a ping so idle proxies stay open, and one connection's life. */
+const STREAM_TICK = 250, STREAM_PING = 15000, STREAM_TTL = 45000;
+const idle = (ms, signal) => new Promise(resolve => {
+  const timer = setTimeout(resolve, ms);
+  signal?.addEventListener?.('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+});
+
+/**
+ * The same view runView returns, pushed as it changes: a tab that follows a run sees the answer grow, its phases and
+ * an approval arrive as they happen, instead of asking again every 700 ms. Frames stop when the run settles, when the
+ * connection is dropped, or after STREAM_TTL — a host that cuts a long connection then costs nothing, because the
+ * follower reconnects with its own event cursor. `null` is a keep-alive, not a change.
+ */
+export async function* runFrames(userId, { runId = '', chat = '', after = 0, ttl = STREAM_TTL, signal = null } = {}) {
+  let cursor = Number.isSafeInteger(Number(after)) && Number(after) > 0 ? Number(after) : 0;
+  const started = Date.now();
+  let seen = '', sent = Date.now();
+  for (;;) {
+    const current = await runView(userId, { runId, chat, after: cursor });
+    const run = current.run;
+    if (!run) { yield current; return; }
+    cursor = Number(current.cursor) || cursor;
+    const mark = JSON.stringify([run.status, run.turn, current.requests]);
+    if (mark !== seen) { seen = mark; sent = Date.now(); yield current; }
+    if (!ACTIVE.includes(String(run.status))) return;
+    if (Date.now() - started >= ttl) return;
+    await idle(STREAM_TICK, signal);
+    if (signal?.aborted) return;
+    if (Date.now() - sent >= STREAM_PING) { sent = Date.now(); yield null; }
+  }
+}
+
 
 async function view(userId, run, cursor = 0) {
   if (!run) return { run: null, requests: [], events: [], cursor };

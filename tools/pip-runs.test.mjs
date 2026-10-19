@@ -12,6 +12,8 @@ process.env.TURSO_AUTH_TOKEN = 'fixture-token'; process.env.POCKET_ENCRYPTION_SE
 const { ensureSchema, execute, database } = await import('../src/server/database.js');
 const { syncDocuments, readDocuments } = await import('../src/server/workspace.js');
 const { saveBackground, backgroundState } = await import('../src/server/pip-background.js');
+const { seal } = await import('../src/server/secrets.js');
+const { endpoint } = await import('../src/server/pip-keys.js');
 const runs = await import('../src/server/pip-runs.js');
 await ensureSchema();
 test.after(() => { database().close(); try { rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); } catch {} });
@@ -29,7 +31,9 @@ async function account(settings = SETTINGS, key = 'fixture-key-123456') {
   return id;
 }
 const CONFIG = { provider: 'anthropic', model: 'claude-sonnet-5-5', baseUrl: 'https://api.anthropic.com/v1', maxTokens: 4096, thinking: false, webSearch: false };
-const header = (uid, title = 'Pip run') => ({ uid, title, created: Date.now(), config: CONFIG });
+/** A chat whose own settings point at the fixture's compatible endpoint, so a vaulted key can run it. */
+const VAULT_CONFIG = { provider: 'compatible', model: 'fixture-model', baseUrl: 'https://model.example/v1', maxTokens: 2048, thinking: false, webSearch: false };
+const header = (uid, title = 'Pip run', config = CONFIG) => ({ uid, title, created: Date.now(), config });
 const chatOf = async (userId, uid) => JSON.parse(String((await execute({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, uid] })).rows[0].payload));
 const notesOf = async userId => (await readDocuments(userId))['notes.json'].value.notes.filter(note => note.uid.startsWith('pip-'));
 const toolMessages = request => request.messages.filter(message => message.role === 'tool').map(message => String(message.content)).join('\n');
@@ -332,4 +336,69 @@ test('the server refuses a run until the account opts in', async () => {
   await assert.rejects(() => runs.submitRun(id, { requestId: 'req-none', chat: header('chat-none'), text: 'Hello', device: 'browser-1' }, { fetcher: noProvider }), /not set up/);
   const state = await runs.serverRunState(id, 'chat-none');
   assert.equal(state.available, false); assert.equal(state.run, null);
+});
+
+/** A signed-in account whose only key for that chat's endpoint lives in the account vault — no “on its own” key. */
+async function vaultAccount(config = VAULT_CONFIG, key = 'fixture-key-123456') {
+  const id = 'user-' + ++users, now = Date.now();
+  await execute({ sql: 'INSERT INTO pocket_user (id, name, email, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)', args: [id, 'Fixture', id + '@example.com', now, now] });
+  await syncDocuments(id, { 'notes.json': { v: 1, notes: [{ uid: 'note-car', text: '# Car research\n\nThe blue car costs 21,000 euros.', pinned: false, created: now, updated: now, deleted: false }] } });
+  const target = endpoint(config.provider, config.baseUrl);
+  await execute({ sql: 'INSERT INTO pocket_pip_keys (user_id, endpoint, provider, sealed, hint, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    args: [id, target, config.provider, seal(id, { provider: config.provider, endpoint: target, key }), key.slice(-4), now] });
+  return id;
+}
+
+test('a chat runs on the server with the key this account stored in its vault', async () => {
+  const userId = await vaultAccount(), sent = [];
+  const state = await runs.serverRunState(userId, 'chat-vault', VAULT_CONFIG);
+  assert.equal(state.available, true, 'a vaulted key for the chat’s endpoint makes the server available');
+  const submitted = await runs.submitRun(userId, { requestId: 'req-vault', chat: header('chat-vault', 'Vault chat', VAULT_CONFIG), device: 'phone-1',
+    text: 'What do my notes say about the blue car?', grants: ['notes'], timezone: 'Europe/Berlin' },
+    { fetcher: provider(sent, compatibleMessage({ calls: [{ name: 'search_notes', input: { query: 'blue car' }, id: 'call_notes' }] }), compatibleMessage({ text: 'Your note says the blue car costs 21,000 euros.' })) });
+  assert.equal(submitted.run.status, 'done', 'vault run failed: ' + submitted.run.turn.error);
+  assert.equal(submitted.run.turn.answer, 'Your note says the blue car costs 21,000 euros.');
+  assert.equal(submitted.run.turn.usage.runtime, 'pocket-server', 'a vault run is still a server reply');
+  // The model the chat uses is the one the reply ran on, and the request went out with that chat's key.
+  assert.equal(submitted.run.turn.model, VAULT_CONFIG.model);
+  assert.equal(sent[0].model, VAULT_CONFIG.model);
+  // Access is what the client asked for, nothing more: notes, and no task tool.
+  const offered = sent[0].tools.map(tool => tool.function.name);
+  assert.ok(offered.includes('search_notes')); assert.ok(!offered.includes('search_tasks'), 'grants are the chat’s own: ' + offered.join(','));
+  // Today's date in the chat's timezone reached the instructions.
+  assert.match(sent[0].messages[0].content, /Europe\/Berlin/);
+});
+
+test('a vaulted key for another endpoint does not make the server available', async () => {
+  const userId = await vaultAccount(VAULT_CONFIG), elsewhere = { ...VAULT_CONFIG, baseUrl: 'https://other.example/v1' };
+  const state = await runs.serverRunState(userId, 'chat-elsewhere', elsewhere);
+  assert.equal(state.available, false);
+  await assert.rejects(() => runs.submitRun(userId, { requestId: 'req-elsewhere', chat: header('chat-elsewhere', 'Elsewhere', elsewhere), text: 'Hello', device: 'browser-1' },
+    { fetcher: noProvider }), /not set up/);
+});
+
+test('a follower reads a finished run once, as the last frame', async () => {
+  const userId = await account(), sent = [];
+  const submitted = await runs.submitRun(userId, { requestId: 'req-follow', chat: header('chat-follow'), text: 'Sag kurz Hallo.', device: 'browser-1' },
+    { fetcher: provider(sent, compatibleMessage({ text: 'Hallo.' })) });
+  const frames = [];
+  for await (const frame of runs.runFrames(userId, { runId: submitted.run.runId })) frames.push(frame);
+  assert.equal(frames.length, 1, 'a settled run is sent once and ends the connection');
+  assert.equal(frames[0].run.status, 'done');
+  assert.equal(frames[0].run.turn.answer, 'Hallo.');
+  assert.equal(frames[0].cursor, submitted.cursor);
+});
+
+test('a follower of a waiting run keeps the connection and settles on its own time limit', async () => {
+  const userId = await account(), { submitted } = await waiting(userId, 'chat-hold');
+  const started = Date.now(), frames = [];
+  for await (const frame of runs.runFrames(userId, { runId: submitted.run.runId, ttl: 400 })) frames.push(frame);
+  assert.equal(frames.length, 1, 'an unchanged waiting run is not sent twice');
+  assert.equal(frames[0].run.status, 'awaiting');
+  assert.ok(Date.now() - started >= 250, 'the connection is held open, not closed at once');
+  // A new connection sees the same waiting run, so a follower that reconnects misses nothing.
+  const again = [];
+  for await (const frame of runs.runFrames(userId, { runId: submitted.run.runId, ttl: 260 })) again.push(frame);
+  assert.equal(again[0].run.status, 'awaiting');
+  assert.equal(again[0].requests[0].state, 'pending');
 });
