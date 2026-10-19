@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChatStore, DEFAULT_CONFIG, config, streamReply } from '../src/client/pip-core.js';
 import { saveAccess } from '../src/client/pip-tools.js';
+import { opencodeSession } from '../src/shared/pip-opencode.js';
 import { notes } from '../src/client/store.js';
 import { anthropicMessage, compatibleMessage, event, response, messageText } from './pip-provider-fixtures.mjs';
 
@@ -209,4 +210,19 @@ test('text that only mentions a tool call stays the answer', async t => {
   const text = 'Models write <tool_call> blocks; this sentence is not one.';
   const result = await streamReply(chat, turn(), { key: 'fixture', fetcher: async () => response(compatibleMessage({ text })) });
   assert.equal(result.answer, text);
+});
+
+test('OpenCode Go requests carry a routing session; another compatible endpoint does not', async t => {
+  const key = 'oc_sk_fixture_key_0000000000000000000001', seen = [];
+  const chat = workspace(t, { provider: 'compatible', model: 'deepseek-v4.1-flash', baseUrl: 'https://opencode.ai/inference/go/openai/v1' });
+  await streamReply(chat, turn(), { key, fetcher: async (url, options) => { seen.push({ url: String(url), headers: options.headers }); return response(compatibleMessage({ text: 'OK' })); } });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].url, 'https://opencode.ai/inference/go/openai/v1/chat/completions');
+  assert.match(seen[0].headers['x-opencode-session'], /^pocket-[0-9a-f]{40}$/);
+  assert.equal(seen[0].headers['x-opencode-session'], opencodeSession(key));
+  assert.equal(seen[0].headers.authorization, 'Bearer ' + key);
+  // Every other compatible endpoint is left exactly as the SDK built it.
+  const other = workspace(t, { provider: 'compatible', model: 'fixture', baseUrl: 'https://model.example/v1' });
+  await streamReply(other, turn(), { key, fetcher: async (url, options) => { seen.push({ url: String(url), headers: options.headers }); return response(compatibleMessage({ text: 'OK' })); } });
+  assert.equal(seen[1].headers['x-opencode-session'], undefined);
 });

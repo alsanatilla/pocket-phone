@@ -1,5 +1,6 @@
 import { APICallError, generateId, wrapLanguageModel } from 'ai';
 import { CONTEXT_OVERFLOW } from './pip-limits.js';
+import { opencodeSession } from '../shared/pip-opencode.js';
 const httpError = code => code === 401 || code === 403 ? 'The provider rejected your key or access. Check API settings.'
   : code === 429 ? 'The provider is busy or your quota is exhausted. Retry when you’re ready.'
   : code >= 500 ? 'The provider is temporarily unavailable. Retry when you’re ready.'
@@ -53,13 +54,24 @@ async function errorText(response, signal) {
 }
 
 // AI SDK owns framing/parsing. This boundary enforces browser privacy and bounds.
+/** Request headers plus OpenCode Go's routing session, taken from the key that is already being sent. */
+function withSession(headers) {
+  const plain = headers instanceof Headers ? Object.fromEntries(headers.entries()) : { ...(headers || {}) };
+  const authorization = Object.entries(plain).find(([name]) => name.toLowerCase() === 'authorization')?.[1] || '';
+  return { ...plain, 'x-opencode-session': opencodeSession(String(authorization).replace(/^Bearer\s+/i, '')) };
+}
 function guardedFetch(value, fetcher, signal, clock, onRetry) {
   const endpoint = value.baseUrl + (value.provider === 'anthropic' ? '/messages' : '/chat/completions');
+  // OpenCode Go speaks the OpenAI protocol but routes each request by a session header. A browser cannot reach it
+  // at all (no CORS), so the browser goes through Pocket's own /api/pip/opencode proxy; a server or a phone
+  // calling the endpoint directly needs the header here.
+  const direct = value.provider === 'compatible' && /^https:\/\/opencode\.ai\/inference\//.test(value.baseUrl);
   return async (url, options) => {
     if (String(url) !== endpoint) throw publicError('The provider requested an unexpected endpoint. Check API settings.');
     if (signal.aborted) throw new DOMException('Stopped', 'AbortError');
     clock();
-    const response = await fetcher(url, { ...options, signal, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer' });
+    const headers = direct ? withSession(options?.headers) : options?.headers;
+    const response = await fetcher(url, { ...options, headers, signal, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer' });
     if (signal.aborted) { void response.body?.cancel().catch(() => {}); throw new DOMException('Stopped', 'AbortError'); }
     if (!response.ok) {
       const raw = await errorText(response, signal); if (signal.aborted) throw new DOMException('Stopped', 'AbortError');
