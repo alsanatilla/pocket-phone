@@ -1,16 +1,15 @@
 {
-  "component": "Pocket Movement workspace",
-  "version_name": "0.21.0",
-  "version_code": 52,
+  "component": "Pocket Pip server runs",
+  "version_name": "0.22.0",
+  "version_code": 53,
   "application_id": "org.textphone.launcher",
   "min_sdk": 24,
   "compile_and_target_sdk": 35,
-  "checked_at_utc": "2026-10-13T21:26:30.049Z",
-  "build": "Android assembleRom and Astro production build passed.",
+  "checked_at_utc": "2026-10-19T11:14:34.000Z",
+  "build": "Android assembleRom and Astro production build passed on the release tree.",
   "commands": [
-    "node --test tools/movement-workspace.test.mjs",
-    "node tools/movement-browser.mjs",
-    ":app:testDebugUnitTest --tests org.textphone.launcher.MovementWorkspaceTest --tests org.textphone.launcher.MovementActivityTest",
+    "node --test tools/pip-*.test.mjs tools/workflow.test.mjs",
+    "Astro dev server on a throwaway libSQL file with a simulated provider: Pocket's client transport in Node (this release and the previous transport) and an isolated Edge Pip tab",
     ":app:assembleRom -x :app:lintVitalRom -x :app:lintVitalAnalyzeRom",
     "npm run build",
     "aapt dump badging app-rom-unsigned.apk",
@@ -19,29 +18,29 @@
   ],
   "apk": {
     "file": "app/build/outputs/apk/rom/app-rom-unsigned.apk",
-    "release_asset": "pocket-phone-0.21.0-unsigned.apk",
+    "release_asset": "pocket-phone-0.22.0-unsigned.apk",
     "bytes": 11220025,
-    "sha256": "efe519829a927cecb1317c86a17e2872263f8f23343ad898e8b5f9133e890384",
+    "sha256": "9f146ea2a2c327737c6f264020bb878d7ea3625ed9494cab292bc4e8eb63b394",
     "signed": false,
     "installable_update": false,
     "signing": "Requires the existing Pocket release certificate; handled by the signing agent"
   },
   "focused_verification": [
     {
-      "suite": "MovementActivityTest",
-      "cases": 11,
+      "suite": "pip-runs.test.mjs",
+      "cases": 27,
       "failures": 0,
       "errors": 0
     },
     {
-      "suite": "MovementWorkspaceTest",
-      "cases": 5,
+      "suite": "pip-remote.test.mjs",
+      "cases": 6,
       "failures": 0,
       "errors": 0
     },
     {
-      "suite": "movement-workspace.test.mjs",
-      "cases": 5,
+      "suite": "tools/pip-*.test.mjs and tools/workflow.test.mjs together",
+      "cases": 148,
       "failures": 0,
       "errors": 0
     }
@@ -50,23 +49,24 @@
     "changed": true,
     "framework": "Astro 7.3.6",
     "build": "passed",
-    "browser": "isolated Edge, fictional data, no provider calls",
+    "browser": "isolated Edge, fictional account, simulated provider, throwaway libSQL file",
     "flows": [
-      "Create session, reload, Calendar, prefilled Gym log, finish, Movement history",
-      "Filter and link COROS recording without counting it twice, route/charts, browser Back",
-      "320/360/768/1280px layouts and 7/28/90-day missing-data coverage",
-      "Unsent Pip training context, offline planning, incoming workspace edits while a dialog stays open"
+      "Signed-in Pip tab: the notes lookup showed 1.1 s into a 3.4 s server reply, the answer at 3.4 s, marked on Pocket's server",
+      "Client transport against the dev server: lookup shown at 0.9 s of 3.3 s; the previous transport showed nothing until 3.26 s",
+      "Approval on the server: after approving, the save showed queued at 1.0 s and done at 1.5 s, answer at 3.9 s; each approved note saved once"
     ],
     "page_errors": 0
   },
-  "full_test_suite": "Skipped as requested; focused checks only",
+  "full_test_suite": "Skipped; focused checks only",
   "lint": "Skipped",
   "physical_handset_checked": false,
-  "live_coros_account_used": false,
+  "live_provider_used": false,
   "known_limits": [
     "Unsigned APK must be signed before installation or update.",
-    "No physical handset was attached; native UI checks use Robolectric API 24/28/35.",
-    "Health-history coverage follows the saved COROS snapshot; missing dates are shown as gaps.",
-    "Movement shows Pocket Calendar sessions and existing Pip training tasks. It does not import the COROS watch calendar."
+    "Android code is unchanged since 0.21.0; no physical handset was attached.",
+    "Streaming was checked on the local Astro dev server, not on Vercel. A host that cannot stream falls back to asking every 700 ms.",
+    "A server run reaches a watching tab through the database at most every 700 ms, so text arrives in steps rather than token by token.",
+    "The phone does not follow a server run live or settle its approvals; it receives the reply through account sync.",
+    "A tab showing an approval card does not notice that another browser settled it until its own card is answered."
   ]
 }

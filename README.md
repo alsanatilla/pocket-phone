@@ -49,7 +49,7 @@ Use JDK 17 and Android SDK 35. Set the SDK path in an untracked local.properties
 
 The normal output is app/build/outputs/apk/rom/app-rom-unsigned.apk. This is a launcher/app build, not a full ROM image; Android owns Recents and system Home gestures.
 
-[GitHub Releases](https://github.com/alsanatilla/pocket-phone/releases) includes the unsigned APK, complete source, checksums and build status. Another release agent handles signing. The existing certificate is needed to update an installed Pocket app while retaining its local data. See the [0.21.0 release](https://github.com/alsanatilla/pocket-phone/releases/tag/v0.21.0).
+[GitHub Releases](https://github.com/alsanatilla/pocket-phone/releases) includes the unsigned APK, complete source, checksums and build status. Another release agent handles signing. The existing certificate is needed to update an installed Pocket app while retaining its local data. See the [0.22.0 release](https://github.com/alsanatilla/pocket-phone/releases/tag/v0.22.0).
 
 The Astro production build and Android APK build passed. Focused checks cover agent budgets, parallel reads, permission-aware resume, proposal approval and persistence, native chat UI and phone/browser codecs. Browser flows exercise streamed research, editable proposals, Continue/Restart and two-way account sync on a throwaway local database, with layouts at 320–1280 px. Model/search traffic was simulated. The full suite and lint were skipped as requested; actual checks and limits are recorded in [BUILD-STATUS.json](BUILD-STATUS.json). Handset behavior remains unverified.
 

@@ -2,6 +2,15 @@
 
 Each release labels its signing status and supplies an APK, source snapshot, checksums and actual build results. Signed updates retain Pocket's package ID and release certificate. Old downloads remain available. These are launcher/app builds for the current Nothing OS.
 
+## 0.22.0 — Pip on Pocket's server
+
+- A signed-in browser chat now runs on Pocket's server when the account holds a key for that chat's endpoint, either in the account vault or as the dedicated **on its own** key. The reply keeps going after the tab closes. Other signed-in browsers see the same answer, tool activity and changes waiting for approval; the first to decide settles each one. The phone receives the reply through account sync. The chat's model, access and timezone travel with each message. Replies that ran there say **on Pocket's server**. Guest chats and accounts without a stored key still run in the tab.
+- The answer, each tool call and its result appear in the tab while the server works, including after an approval. Stop ends the run on the server, so its answer cannot sync back over the stop. A refused message, such as one sent while another reply is still running, shows the server's reason.
+- Signed-in provider and web search keys are stored encrypted in the account vault, scoped to their endpoint, instead of the tab session. Paper's **read with Claude** uses the stored Anthropic key through Pocket's relay. API settings show the provider, model and whether a key is saved. OpenCode Go works directly or through the relay: Pocket names itself and sends the session header that endpoint routes by.
+- Pip can rename the chat it runs in, and the name syncs to every device. Scheduled routines get their own screen with run history. Each routine's chat appears in the Pip list with a warning when a run failed. Any chat can be pinned to the top from its menu.
+- The free fallback chain replaces a model that no longer answers with Gemma 4. A tab left open across a Pocket update now asks for a reload instead of failing to load the provider adapter.
+- Astro production build and Android ROM build passed. 148 Pip and workflow checks pass, including 27 server-run engine checks and 6 client transport checks. A dev-server run on a throwaway database with a simulated provider showed the Pip tab's notes lookup 1.1 s into a 3.4 s reply. An approved note was saved once, and its progress showed after the approval. No real provider, production account or handset was used. Android code is unchanged since 0.21.0. Full test suite and lint are skipped. See BUILD-STATUS.json for build results and signing status.
+
 ## 0.21.0 — Movement: readiness, plan and history
 
 - Web and Android share a compact overview, separate activity archive and 7/28/90-day trends. Readiness cards open their underlying instruments; missing readings remain empty and dated. Routes, linked activity charts, splits and full COROS metrics remain available.
