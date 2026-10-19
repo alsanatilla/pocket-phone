@@ -10,8 +10,9 @@ import { serverRunState, submitRun, decideRun, continueRun, stopRun, runView } f
 export const GET: APIRoute = async ({ request, url }) => {
   try {
     const user = await signedIn(request); await ensureSchema();
-    const run = url.searchParams.get('run') || '', chat = url.searchParams.get('chat') || '';
-    if (run) return json({ accountId: user.id, ...await runView(user.id, { runId: run, after: Number(url.searchParams.get('after') || 0) }) });
+    const run = url.searchParams.get('run') || '', chat = url.searchParams.get('chat') || '', requestId = url.searchParams.get('request') || '';
+    // A submitting tab asks by its own request id, which it knows before its submit answers.
+    if (run || requestId) return json({ accountId: user.id, ...await runView(user.id, { runId: run, request: requestId, after: Number(url.searchParams.get('after') || 0) }) });
     const provider = url.searchParams.get('provider') || '', baseUrl = url.searchParams.get('baseUrl') || '';
     const asked = provider ? { provider, baseUrl, webSearch: url.searchParams.get('webSearch') === '1' } : null;
     return json({ accountId: user.id, ...await serverRunState(user.id, chat, asked) });

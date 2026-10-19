@@ -129,11 +129,92 @@ test('a remote reply reads the run from live frames, and asks again only when st
     { uid: 'turn-3', text: 'Speichere die Notiz.', attempt: 'attempt-3' }, { approve, onUpdate: update => updates.push(update), storage: localStorage });
   assert.equal(reply.answer, 'Die Notiz ist gespeichert.');
   // The frames carried the phases, and the approval was settled on the run the frames named.
-  assert.deepEqual(updates.map(update => update.phase), ['requesting', 'writing', 'waiting for your approval', 'done']);
+  assert.deepEqual(updates.map(update => update.phase), ['writing', 'waiting for your approval', 'done']);
   assert.equal(decisions.length, 1); assert.equal(decisions[0].rowId, 'row-1');
   assert.equal(calls.filter(call => call.body?.action === 'decide').length, 1);
   // The frames were the only watch: no poll of the run while the stream was open.
-  assert.equal(calls.filter(call => call.method === 'GET' && call.path.includes('run=') && !call.path.includes('stream')).length, 0);
+  assert.equal(calls.filter(call => call.method === 'GET' && call.path.startsWith('/api/pip/runs?')).length, 0);
   const streamed = calls.find(call => call.path.includes('/api/pip/runs/stream'));
-  assert.match(streamed.path, /run=run-1/); assert.match(streamed.path, /after=0/);
+  assert.match(streamed.path, /request=attempt-3/); assert.match(streamed.path, /after=0/);
+});
+
+/** A fixture chat on a vaulted Anthropic key. */
+const fixtureChat = () => ({ uid: 'chat-1', title: 'Fixture', created: 1, config: { provider: 'anthropic', model: 'claude-sonnet-5-5', baseUrl: 'https://api.anthropic.com/v1', maxTokens: 4096, thinking: false, webSearch: false } });
+const lookup = state => ({ id: 'row-search', kind: 'tool', name: 'search_notes', title: 'search notes · “blue car”', input: '{"query":"blue car"}', state, summary: '', sources: [], started: 1, ended: state === 'done' ? 2 : 0 });
+
+test('the tab shows the run’s tool calls while its submit is still running the reply on the server', async () => {
+  calls.length = 0;
+  // Like the real server: the submit answers only when its stretch of the reply has ended.
+  let finish; const finished = new Promise(resolve => { finish = resolve; });
+  let submitted = false;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url), method = options.method || 'GET', body = options.body ? JSON.parse(options.body) : null;
+    calls.push({ path, method, body });
+    const json = value => new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (path.includes('/api/status')) return json({ configured: true });
+    if (path.includes('/api/auth/get-session')) return json({ user: { id: 'u1' } });
+    if (path.includes('/api/pip/runs/stream')) return sse([
+      { ...view('running', { answer: '', activity: [lookup('running')], sources: [], usage: {}, phase: 'search notes · “blue car”' }), cursor: 1 },
+      { ...view('running', { answer: 'Your note', activity: [lookup('done')], sources: [], usage: {}, phase: 'writing' }), cursor: 2 },
+      { ...view('done', { answer: 'Your note says 21,000 euros.', activity: [lookup('done')], sources: [], usage: {}, phase: 'done' }), cursor: 3 }
+    ]);
+    if (method === 'POST' && body?.action === 'submit') { await finished; submitted = true; return json(view('done', { answer: 'Your note says 21,000 euros.', activity: [lookup('done')], sources: [], usage: {}, phase: 'done' })); }
+    return json(view('running', { answer: '', activity: [], sources: [], usage: {} }));
+  };
+  const updates = [];
+  const replying = streamReplyRemote(fixtureChat(), { uid: 'turn-4', text: 'What do my notes say about the blue car?', attempt: 'attempt-4' },
+    { onUpdate: update => updates.push({ ...update, submitted }), storage: localStorage });
+  const reply = await Promise.race([replying, new Promise((_, reject) => setTimeout(() => reject(new Error('the tab waited for the submit before showing the run')), 2000))]);
+  finish();
+  assert.equal(reply.answer, 'Your note says 21,000 euros.');
+  // The lookup was shown running, then done, before the submit had answered.
+  const running = updates.find(update => update.activity.some(row => row.name === 'search_notes' && row.state === 'running'));
+  assert.ok(running, 'the running lookup reached the tab'); assert.equal(running.submitted, false);
+  assert.equal(running.phase, 'search notes · “blue car”');
+  // The tab followed the run by its own request id, before it knew the run's id.
+  const streamed = calls.find(call => call.path.includes('/api/pip/runs/stream'));
+  assert.match(streamed.path, /request=attempt-4/);
+  assert.equal(calls.filter(call => call.body?.action === 'submit').length, 1);
+});
+
+test('a refused submit ends the reply with the server’s reason', async () => {
+  calls.length = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url), method = options.method || 'GET', body = options.body ? JSON.parse(options.body) : null;
+    calls.push({ path, method, body });
+    const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+    if (path.includes('/api/status')) return json({ configured: true });
+    if (path.includes('/api/auth/get-session')) return json({ user: { id: 'u1' } });
+    // The server holds a follower open while it waits for a run this request id never creates.
+    if (path.includes('/api/pip/runs/stream')) return new Response(new ReadableStream({ start(controller) {
+      options.signal?.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')), { once: true });
+    } }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    if (method === 'POST') return json({ error: 'Let the current reply finish, or stop it first.' }, 409);
+    return json({ run: null, requests: [], events: [], cursor: 0 });
+  };
+  await assert.rejects(() => streamReplyRemote(fixtureChat(), { uid: 'turn-5', text: 'Hallo', attempt: 'attempt-5' }, { storage: localStorage }), /current reply finish/);
+});
+
+test('stopping the tab stops the run on the server, so its answer does not sync back over the stop', async () => {
+  calls.length = 0;
+  const controller = new AbortController();
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url), method = options.method || 'GET', body = options.body ? JSON.parse(options.body) : null;
+    calls.push({ path, method, body });
+    const json = value => new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (path.includes('/api/status')) return json({ configured: true });
+    if (path.includes('/api/auth/get-session')) return json({ user: { id: 'u1' } });
+    if (path.includes('/api/pip/runs/stream')) return new Response(new ReadableStream({ start(stream) {
+      stream.enqueue(new TextEncoder().encode('data: ' + JSON.stringify({ ...view('running', { answer: 'Looking', activity: [lookup('running')], sources: [], usage: {}, phase: 'writing' }), cursor: 1 }) + '\n\n'));
+      options.signal?.addEventListener('abort', () => stream.error(new DOMException('Aborted', 'AbortError')), { once: true });
+    } }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    if (method === 'POST' && body?.action === 'submit') return new Promise(() => {});
+    if (method === 'POST') return json(view('stopping', {}));
+    return json(view('running', {}));
+  };
+  const replying = streamReplyRemote(fixtureChat(), { uid: 'turn-6', text: 'Research the blue car.', attempt: 'attempt-6' },
+    { signal: controller.signal, onUpdate: update => { if (update.answer === 'Looking') controller.abort(); }, storage: localStorage });
+  await assert.rejects(() => replying, error => error.name === 'AbortError');
+  const stop = calls.find(call => call.body?.action === 'stop');
+  assert.ok(stop, 'the run was stopped on the server'); assert.equal(stop.body.runId, 'run-1');
 });

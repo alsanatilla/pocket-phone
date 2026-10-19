@@ -42,7 +42,8 @@ async function* frames(body) {
   const reader = body.getReader(), decoder = new TextDecoder();
   let buffer = '';
   for (;;) {
-    const { value, done } = await reader.read();
+    // A dropped or cut connection ends the frames; the follower asks again from its cursor.
+    const { value, done } = await reader.read().catch(() => ({ done: true }));
     if (done) return;
     buffer += decoder.decode(value, { stream: true });
     let at;
@@ -56,45 +57,72 @@ async function* frames(body) {
   }
 }
 
-/** One run's answer: submit, watch, decide, stop. `turn.attempt` is the request id, so a retry reuses the run. */
+/**
+ * One run's answer: submit, watch, decide, stop. `turn.attempt` is the request id, so a retry reuses the run.
+ *
+ * A POST that runs part of the reply (the submit, the decision that settles a wait, a continue) answers only when that
+ * stretch has finished or paused, so the tab does not wait for it. It follows the run by its own request id, which it
+ * knows before the run exists, and the answer, each tool call and an approval show while the server works on them.
+ */
 export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {}, approve = null, storage = globalThis.localStorage } = {}) {
   const owner = account();
   if (!owner) throw new Error('Sign in to Pocket to run this reply on the server.');
-  const device = deviceId(storage);
+  const device = deviceId(storage), requestId = turn.attempt || crypto.randomUUID();
+  let runId = '', cursor = 0, changed = Date.now(), seen = '', failure = null, sending = 0, unwatch = () => {};
+  /** Requests this tab has decided: a frame read before a decision landed still shows it pending. */
+  const decided = new Set();
+  const look = () => request('/api/pip/runs?request=' + encodeURIComponent(requestId) + '&after=' + cursor);
+  /** Sends a POST without waiting for the stretch it runs. A failure cuts the watch short so the loop can look at it. */
+  const send = task => {
+    sending++;
+    task().catch(error => { failure ||= error; unwatch(); }).finally(() => { sending--; });
+  };
+  /** After a failed POST: the run never started, or it still waits for what that POST was to settle. */
+  const refused = view => !view.run || view.run.status === 'awaiting';
+
   // The chat's own access and timezone travel with the request: a run on a vaulted key has no server settings of its
   // own, so what this chat may read and where the user's day starts come from the tab they typed in.
-  const body = requestId => ({ action: 'submit', accountId: owner.id, requestId, device, chatUid: chat.uid, text: turn.text,
+  send(() => post('/api/pip/runs', { action: 'submit', accountId: owner.id, requestId, device, chatUid: chat.uid, text: turn.text,
     attempt: turn.attempt, turnUid: turn.uid, context: turn.context || [], grants: access(chat.config, storage),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    chat: { uid: chat.uid, title: chat.title, created: chat.created, config: chat.config } });
-  let current = await post('/api/pip/runs', body(turn.attempt || crypto.randomUUID()));
-  let runId = current.run?.runId || '', cursor = 0, changed = Date.now();
+    chat: { uid: chat.uid, title: chat.title, created: chat.created, config: chat.config } }));
 
   /** What one snapshot means for this reply: progress to show, a settled answer, or a question to answer. */
   const step = async view => {
     const run = view.run;
-    if (!run) throw new Error('This reply is no longer available on the server.');
-    runId = run.runId || runId;
+    // Until the submit has created the run there is nothing to show yet.
+    if (!run) { if (runId) throw new Error('This reply is no longer available on the server.'); return null; }
+    runId = run.runId;
     // Live progress: the run's own turn carries the answer so far, its tool activity and its phase. The runtime
     // marker is what the chat shows as “on the server”, so a reply can be told apart from a tab-run one.
-    if (run.turn) onUpdate({ answer: run.turn.answer || '', reasoning: run.turn.reasoning || '', activity: run.turn.activity || [],
-      sources: run.turn.sources || [], usage: { ...(run.turn.usage || {}), runtime: 'pocket-server' }, model: run.turn.model || turn.model, phase: run.turn.phase || 'requesting' });
+    const mark = JSON.stringify([run.status, run.turn, view.requests]);
+    if (mark !== seen) {
+      seen = mark; changed = Date.now();
+      if (run.turn) onUpdate({ answer: run.turn.answer || '', reasoning: run.turn.reasoning || '', activity: run.turn.activity || [],
+        sources: run.turn.sources || [], usage: { ...(run.turn.usage || {}), runtime: 'pocket-server' }, model: run.turn.model || turn.model, phase: run.turn.phase || 'requesting' });
+    }
     if (run.status === 'done') return { ...run.turn, phase: 'done' };
     if (run.status === 'failed') throw new Error(run.turn?.error || 'The server reply failed.');
     if (run.status === 'stopped') throw Object.assign(new Error(run.turn?.error || 'Stopped. Continue or retry when you’re ready.'), { name: 'RunStopped' });
     if (run.status === 'awaiting') {
-      const requests = (view.requests || []).filter(item => item.state === 'pending');
-      if (!requests.length) { await post('/api/pip/runs', { action: 'continue', accountId: owner.id, runId: run.runId }); }
-      else {
+      const open = (view.requests || []).filter(item => item.state === 'pending'), asking = open.filter(item => !decided.has(item.id));
+      // Every request is settled but the request that would continue the run ended first: continue it from here.
+      if (!open.length) { if (!sending) send(() => post('/api/pip/runs', { action: 'continue', accountId: owner.id, runId: run.runId })); }
+      else if (asking.length) {
         if (!approve) throw new Error('This reply is waiting for your approval, but approval is unavailable here.');
         // The same review cards the tab uses: the row id ties each request to its activity line.
-        const decisions = await approve(requests.map(item => ({ approvalId: item.id, toolCallId: item.id, rowId: item.row,
+        const decisions = await approve(asking.map(item => ({ approvalId: item.id, toolCallId: item.id, rowId: item.row,
           toolName: item.tool, input: item.payload?.device?.input || {} })), signal);
-        for (const item of requests) {
-          const decision = decisions.get(item.id) || {};
-          await post('/api/pip/runs', { action: 'decide', accountId: owner.id, runId: run.runId, requestId: item.id, device,
-            approved: decision.approved === true, ...(decision.approved && decision.input ? { input: decision.input } : {}) });
-        }
+        changed = Date.now();
+        for (const item of asking) decided.add(item.id);
+        // One at a time: the decision that settles the last request continues the run inside its own POST.
+        send(async () => {
+          for (const item of asking) {
+            const decision = decisions.get(item.id) || {};
+            await post('/api/pip/runs', { action: 'decide', accountId: owner.id, runId: run.runId, requestId: item.id, device,
+              approved: decision.approved === true, ...(decision.approved && decision.input ? { input: decision.input } : {}) });
+          }
+        });
       }
     }
     return null;
@@ -106,33 +134,42 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
    * not retried in a tight loop.
    */
   const follow = async () => {
-    const opened = Date.now();
-    const response = await fetch('/api/pip/runs/stream?run=' + encodeURIComponent(runId) + '&after=' + cursor,
-      { credentials: 'same-origin', headers: { accept: 'text/event-stream' }, signal });
-    const type = String(response.headers.get('content-type') || '');
-    if (!response.ok || !response.body || !type.includes('text/event-stream')) return { live: false };
-    for await (const view of frames(response.body)) {
-      if (Number.isSafeInteger(view.cursor) && view.cursor) cursor = view.cursor;
-      changed = Date.now();
-      const done = await step(view);
-      if (done) return { live: true, done };
-    }
-    const spent = Date.now() - opened;
-    if (spent < POLL) await wait(signal, POLL - spent);
-    return { live: true };
+    const opened = Date.now(), watch = new AbortController(), cut = () => watch.abort();
+    signal?.addEventListener('abort', cut, { once: true }); unwatch = cut;
+    try {
+      const response = await fetch('/api/pip/runs/stream?request=' + encodeURIComponent(requestId) + '&after=' + cursor,
+        { credentials: 'same-origin', headers: { accept: 'text/event-stream' }, signal: watch.signal }).catch(() => null);
+      const type = String(response?.headers.get('content-type') || '');
+      if (!response?.ok || !response.body || !type.includes('text/event-stream')) return { live: watch.signal.aborted };
+      for await (const view of frames(response.body)) {
+        if (Number.isSafeInteger(view.cursor) && view.cursor) cursor = view.cursor;
+        const done = await step(view);
+        if (done) return { live: true, done };
+        if (watch.signal.aborted) break;
+      }
+      if (!watch.signal.aborted && Date.now() - opened < POLL) await wait(signal, POLL - (Date.now() - opened));
+      return { live: true };
+    } finally { signal?.removeEventListener('abort', cut); unwatch = () => {}; watch.abort(); }
   };
 
-  for (;;) {
-    const done = await step(current);
-    if (done) return done;
-    if (signal?.aborted) {
-      await post('/api/pip/runs', { action: 'stop', accountId: owner.id, runId, device }).catch(() => {});
-      throw new DOMException('Stopped', 'AbortError');
+  try {
+    for (;;) {
+      if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
+      if (Date.now() - changed > WAIT) throw new Error('The server reply is taking too long. It keeps running; open the chat again to see it.');
+      const followed = failure ? { live: true } : await follow();
+      if (followed.done) return followed.done;
+      if (signal?.aborted) continue;
+      if (!followed.live) await wait(signal, POLL);
+      const view = await look();
+      if (failure) { const error = failure; failure = null; if (refused(view)) throw error; }
+      const done = await step(view);
+      if (done) return done;
     }
-    if (Date.now() - changed > WAIT) throw new Error('The server reply is taking too long. It keeps running; open the chat again to see it.');
-    const followed = await follow().catch(error => { if (error?.name === 'AbortError') throw error; return { live: false }; });
-    if (followed.done) return followed.done;
-    if (!followed.live) await wait(signal, POLL);
-    current = await request('/api/pip/runs?run=' + encodeURIComponent(runId) + '&after=' + cursor);
+  } catch (error) {
+    if (!signal?.aborted) throw error;
+    // Stop the run itself, not only this tab's view of it: a run left going would sync its answer back over the stop.
+    const id = runId || (await look().catch(() => null))?.run?.runId;
+    if (id) await post('/api/pip/runs', { action: 'stop', accountId: owner.id, runId: id, device }).catch(() => {});
+    throw new DOMException('Stopped', 'AbortError');
   }
 }

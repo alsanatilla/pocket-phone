@@ -422,3 +422,28 @@ test('a follower of a waiting run keeps the connection and settles on its own ti
   assert.equal(again[0].run.status, 'awaiting');
   assert.equal(again[0].requests[0].state, 'pending');
 });
+
+test('a follower that asks by request id sees the run\'s lookups while the submitting request still runs it', async () => {
+  const userId = await account(), sent = [];
+  let release; const held = new Promise(resolve => { release = resolve; });
+  // The first round looks something up; the second holds its answer, so the submit is still running while the follower reads.
+  const replies = [compatibleMessage({ calls: [{ name: 'search_notes', input: { query: 'blue car' }, id: 'call_notes' }] })];
+  const fetcher = async (url, options) => {
+    sent.push(JSON.parse(options.body));
+    if (replies.length) return response(replies.shift());
+    await held;
+    return response(compatibleMessage({ text: 'Your note says the blue car costs 21,000 euros.' }));
+  };
+  const submitting = runs.submitRun(userId, { requestId: 'req-live-tools', chat: header('chat-live-tools'), text: 'What do my notes say about the blue car?', device: 'browser-1' }, { fetcher });
+  // The follower can start before the submit has created the run: it waits for it instead of reporting it missing.
+  let seen = null;
+  for await (const frame of runs.runFrames(userId, { request: 'req-live-tools', ttl: 5000 })) {
+    if (frame.run?.turn?.activity?.some(row => row.name === 'search_notes' && row.state === 'done')) { seen = frame; break; }
+  }
+  assert.ok(seen, 'the lookup reached the follower before the reply finished');
+  assert.equal(seen.run.status, 'running');
+  release();
+  const finished = await submitting;
+  assert.equal(finished.run.status, 'done', finished.run.turn.error);
+  assert.equal(finished.run.turn.answer, 'Your note says the blue car costs 21,000 euros.');
+});

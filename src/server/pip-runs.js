@@ -79,6 +79,8 @@ export async function serverRunState(userId, chat = '', asked = null) {
 }
 
 const runRow = async (userId, runId) => (await sql({ sql: 'SELECT * FROM pocket_pip_runs WHERE user_id = ? AND run_id = ?', args: [userId, runId] })).rows[0] || null;
+/** The run a client's request id started. The client knows this id before its submit answers. */
+const requestRow = async (userId, requestId) => (await sql({ sql: 'SELECT * FROM pocket_pip_runs WHERE user_id = ? AND request_id = ?', args: [userId, requestId] })).rows[0] || null;
 const chatObject = async (userId, uid) => {
   const row = (await sql({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, uid] })).rows[0];
   return row ? parse(row.payload) : null;
@@ -159,7 +161,7 @@ export async function submitRun(userId, body, { fetcher, now = Date.now() } = {}
   const requestId = String(body.requestId || ''), header = body.chat && typeof body.chat === 'object' ? body.chat : {}, uid = String(header.uid || body.chatUid || '');
   if (!allowedId(requestId)) throw no('A Pip run needs a request id.');
   if (!objectId(uid)) throw no('Open a Pip chat first.');
-  const existing = (await sql({ sql: 'SELECT * FROM pocket_pip_runs WHERE user_id = ? AND request_id = ?', args: [userId, requestId] })).rows[0];
+  const existing = await requestRow(userId, requestId);
   if (existing) return view(userId, await recover(userId, existing), 0);
   const text = String(body.text || '').trim();
   if (!text || text.length > 16000) throw no('Write a message, up to 16,000 characters.');
@@ -196,7 +198,7 @@ export async function submitRun(userId, body, { fetcher, now = Date.now() } = {}
     if (/UNIQUE constraint failed/i.test(String(error?.message))) throw no('Let the current reply finish, or stop it first.', 409);
     throw error;
   }
-  if (!inserted) return view(userId, await recover(userId, (await sql({ sql: 'SELECT * FROM pocket_pip_runs WHERE user_id = ? AND request_id = ?', args: [userId, requestId] })).rows[0]), 0);
+  if (!inserted) return view(userId, await recover(userId, await requestRow(userId, requestId)), 0);
   await event(userId, runId, 'started', { chat: uid, turn: turn.uid, device }, now);
   // Both devices see the question before the answer starts.
   try { await writeObject(userId, 'chats', { ...chat, updated: Math.max(now, chat.updated + 1), turns: [turn] }, { appendTurns: true }); }
@@ -288,7 +290,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
   const runId = String(run.run_id), chatUid = String(run.chat_uid), turn = parse(run.turn), snapshot = parse(run.config), deviceTools = parse(run.device_tools) || [];
   const owned = 'user_id = ? AND run_id = ? AND lease_id = ?', ownedArgs = [userId, runId, leaseId];
   const controller = new AbortController();
-  let stopRequested = false, leaseLost = false, paused = false, lastWrite = 0, writing = Promise.resolve(), beating = Promise.resolve(), saved = null, segment = {};
+  let stopRequested = false, leaseLost = false, paused = false, lastWrite = 0, trailing = null, writing = Promise.resolve(), beating = Promise.resolve(), saved = null, segment = {};
   // The heartbeat keeps the lease while this request works, and notices a stop from another device.
   const beat = async () => {
     const row = (await sql({ sql: `UPDATE pocket_pip_runs SET lease_until = ? WHERE ${owned} RETURNING status`, args: [Date.now() + LEASE, ...ownedArgs] })).rows[0];
@@ -296,10 +298,12 @@ async function drive(userId, run, leaseId, { fetcher }) {
     else if (String(row.status) === 'stopping') { stopRequested = true; controller.abort(); }
   };
   const timer = setInterval(() => { beating = beat().catch(() => { /* The next beat retries; the lease outlives a missed one. */ }); }, HEARTBEAT);
-  const quiet = async () => { clearInterval(timer); await beating; await writing; };
-  // Live progress for watching devices: at most every PROGRESS ms, one write at a time, never failing the reply.
+  const quiet = async () => { clearInterval(timer); clearTimeout(trailing); trailing = null; await beating; await writing; };
+  // Live progress for watching devices: at most every PROGRESS ms, one write at a time, never failing the reply. An
+  // update inside that window is written when the window ends, so a tool that starts and then works quietly still shows.
   const progress = () => {
-    if (Date.now() - lastWrite < PROGRESS) return;
+    const early = PROGRESS - (Date.now() - lastWrite);
+    if (early > 0) { trailing ||= setTimeout(() => { trailing = null; progress(); }, early); return; }
     lastWrite = Date.now();
     writing = writing.then(() => sql({ sql: `UPDATE pocket_pip_runs SET turn = ?, updated = ? WHERE ${owned}`, args: [JSON.stringify(turn), Date.now(), ...ownedArgs] })).catch(() => {});
   };
@@ -412,9 +416,10 @@ export async function sweepRuns({ fetcher, now = Date.now(), deadline = Date.now
 }
 
 /** What a client shows: the run, what it waits for, and the events since its cursor. */
-export async function runView(userId, { runId = '', chat = '', after = 0 } = {}) {
+export async function runView(userId, { runId = '', request = '', chat = '', after = 0 } = {}) {
   const cursor = Number.isSafeInteger(Number(after)) && Number(after) > 0 ? Number(after) : 0;
   const row = runId && allowedId(runId) ? await runRow(userId, runId)
+    : request && allowedId(request) ? await requestRow(userId, request)
     : (await sql({ sql: `SELECT * FROM pocket_pip_runs WHERE user_id = ? ${chat && objectId(chat) ? 'AND chat_uid = ?' : ''} AND status IN ('running', 'awaiting', 'stopping') ORDER BY created DESC LIMIT 1`,
       args: chat && objectId(chat) ? [userId, chat] : [userId] })).rows[0];
   return view(userId, await recover(userId, row), cursor);
@@ -432,19 +437,24 @@ const idle = (ms, signal) => new Promise(resolve => {
  * an approval arrive as they happen, instead of asking again every 700 ms. Frames stop when the run settles, when the
  * connection is dropped, or after STREAM_TTL — a host that cuts a long connection then costs nothing, because the
  * follower reconnects with its own event cursor. `null` is a keep-alive, not a change.
+ *
+ * The submitting tab follows by its own request id while its submit is still running the reply, so it may ask before
+ * that run exists: it then waits for the run instead of being told there is none.
  */
-export async function* runFrames(userId, { runId = '', chat = '', after = 0, ttl = STREAM_TTL, signal = null } = {}) {
+export async function* runFrames(userId, { runId = '', request = '', chat = '', after = 0, ttl = STREAM_TTL, signal = null } = {}) {
   let cursor = Number.isSafeInteger(Number(after)) && Number(after) > 0 ? Number(after) : 0;
-  const started = Date.now();
+  const started = Date.now(), expected = Boolean(request && !runId);
   let seen = '', sent = Date.now();
   for (;;) {
-    const current = await runView(userId, { runId, chat, after: cursor });
+    const current = await runView(userId, { runId, request, chat, after: cursor });
     const run = current.run;
-    if (!run) { yield current; return; }
-    cursor = Number(current.cursor) || cursor;
-    const mark = JSON.stringify([run.status, run.turn, current.requests]);
-    if (mark !== seen) { seen = mark; sent = Date.now(); yield current; }
-    if (!ACTIVE.includes(String(run.status))) return;
+    if (!run && !expected) { yield current; return; }
+    if (run) {
+      cursor = Number(current.cursor) || cursor;
+      const mark = JSON.stringify([run.status, run.turn, current.requests]);
+      if (mark !== seen) { seen = mark; sent = Date.now(); yield current; }
+      if (!ACTIVE.includes(String(run.status))) return;
+    }
     if (Date.now() - started >= ttl) return;
     await idle(STREAM_TICK, signal);
     if (signal?.aborted) return;
