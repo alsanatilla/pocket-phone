@@ -3,7 +3,9 @@
 import { storage, tabStorage } from './workspace-storage.js';
 import * as cloud from './cloud.js';
 import * as coros from './coros.js';
-import { DEFAULT_CONFIG, settings, saveSettings, apiKey, setKey } from './pip-core.js';
+import { DEFAULT_CONFIG, settings, saveSettings, apiKey } from './pip-core.js';
+import { activeAccount } from './workspace-storage.js';
+import { cached, save as saveCredential } from './pip-credentials.js';
 
 const SKIPPED = 'pocket:setup-skipped', HIDDEN = 'pocket:setup-hidden', PHONE = 'pocket:setup-phone', PIP = 'pocket:setup-pip', RETURN = 'pocket:setup-return';
 const PHONE_AGENT = /Pocket Android|okhttp|Dalvik/i;
@@ -17,7 +19,7 @@ const STEPS = [
 
 const skipped = () => { try { const list = JSON.parse(storage.getItem(SKIPPED) || '[]'); return Array.isArray(list) ? list : []; } catch { return []; } };
 function skip(id, on = true) { const list = skipped().filter(item => item !== id); if (on) list.push(id); storage.setItem(SKIPPED, JSON.stringify(list)); }
-const pipKey = () => { try { return Boolean(apiKey(settings())); } catch { return false; } };
+const pipKey = () => { try { const value = settings(); return Boolean(apiKey(value)) || Boolean(activeAccount() && cached(value)?.saved); } catch { return false; } };
 
 function stateOf(id) {
   let done = false, blocked = false;
@@ -133,18 +135,21 @@ function panel(id, state, api, creating, redraw) {
   add(tabs, [['openrouter', 'free models', 'OpenRouter'], ['anthropic', 'Claude', 'Anthropic']].map(([value, title, sub]) =>
     h('button', { type: 'button', role: 'radio', 'data-value': value, onclick: () => pick(value) }, title, h('span', { class: 'sub', text: sub }))));
   pick(choice);
-  const save = event => {
+  const save = async event => {
     event.preventDefault();
     try {
       const value = choice === 'anthropic' ? { ...DEFAULT_CONFIG } : { ...OPENROUTER };
       if (!key.value.trim()) throw new Error('Paste your API key.');
-      setKey(value, key.value); saveSettings(value); storage.setItem(PIP, '1'); skip('pip', false);
+      await saveCredential(value, key.value);
+      saveSettings(value); storage.setItem(PIP, '1'); skip('pip', false);
       key.value = ''; expanded = ''; redraw(); say('Pip is ready.');
     } catch (error) { say(error.message); }
   };
   add(pane, tabs, h('form', { class: 'account-create', onsubmit: save },
     h('label', { class: 'account-field' }, h('span', { text: 'API KEY' }), key), where,
-    h('p', { class: 'meta muted', text: 'The key stays in this browser tab and goes only to the provider. The phone keeps its own encrypted copy.' }),
+    h('p', { class: 'meta muted', text: activeAccount()
+      ? 'The key is stored encrypted on your Pocket account. Pocket’s server adds it to each request; it never comes back to this browser.'
+      : 'The key stays in this browser tab and goes only to the provider. Sign in to store it encrypted on your account.' }),
     h('button', { type: 'submit', class: 'account-primary' }, state === 'done' ? 'replace key' : 'save key')),
     h('button', { class: 'account-switch', onclick: () => go('/pip') }, 'another provider'),
     state === 'done' ? null : state === 'skipped' ? reopen('ask again') : later('later'));

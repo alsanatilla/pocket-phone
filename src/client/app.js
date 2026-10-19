@@ -9,7 +9,8 @@ import { validDocument } from '../shared/workspace.js';
 import { SEARCH_KINDS, documentRows, chatRows, localSearch } from '../shared/search.js';
 import { markdownNode } from '../shared/markdown.js';
 import { noteProseLines } from '../shared/note-lines.js';
-import { ChatStore } from './pip-core.js';
+import { ChatStore, settings as pipSettings } from './pip-core.js';
+import { status as credentialStatus } from './pip-credentials.js';
 import * as reader from "./reader.js";
 import * as pip from "./pip.js";
 import { mascot } from './pip-pixels.js';
@@ -618,7 +619,9 @@ const activeReads = new Set();
 async function pageDialog(page) {
   const reading = activeReads.has(page.uid);
   const body = reading || reader.hasKey() ? paperView(page)
-    : h("div", {}, paperView(page), h("p", { class: "small muted", text: "Reading here uses your own Claude API key, kept in this tab only and sent straight to Anthropic. About 1–2¢ per page." }));
+    : h("div", {}, paperView(page), h("p", { class: "small muted", text: cloud.connected()
+      ? "Reading here uses your own Claude API key, stored encrypted on your account and added by Pocket's server. About 1–2¢ per page."
+      : "Reading here uses your own Claude API key, kept in this tab only and sent straight to Anthropic. About 1–2¢ per page." }));
   const actions = reading ? [["close", null]] : [["read with Claude", "read"], ["remove", "remove"], ["close", null]];
   const choice = await dialog("Journal page", body, actions);
   if (choice === "read") readPage(page);
@@ -650,9 +653,9 @@ async function readPage(page) {
 /** Asks for the Claude key and keeps it for this tab; returns the key, or null if it was not set. */
 async function askKey() {
   const value = await ask("Claude API key", { placeholder: "sk-ant-…", ok: "save", password: true,
-    hint: "Key · this tab" });
+    hint: cloud.connected() ? "Key · stored encrypted on your account" : "Key · this tab only" });
   if (value == null) return null;
-  try { reader.setKey(value); return value; } catch (error) { say(error.message); return null; }
+  try { await reader.setKey(value); return value; } catch (error) { say(error.message); return null; }
 }
 /** Under a note's title: the date and a plain-text snippet, then its thoughts marked like the preview, by state. */
 function summary(n) {
@@ -1061,10 +1064,12 @@ async function importDrive() {
 /** Sets or forgets the Claude key kept for this tab. */
 async function keySettings() {
   if (reader.hasKey()) {
-    if (await confirmBox("Forget the Claude key in this tab?", "forget")) { reader.clearKey(); route(); say("Key forgotten."); }
+    if (await confirmBox(cloud.connected() ? "Forget the Claude key stored on your account?" : "Forget the Claude key in this tab?", "forget")) {
+      await reader.clearKey(); route(); say("Key forgotten.");
+    }
     return;
   }
-  if (await askKey()) { route(); say("Key set for this tab."); }
+  if (await askKey()) { route(); say(cloud.connected() ? "Key saved to your account." : "Key set for this tab."); }
 }
 const setupApi = { h, add, go, say, route, workspaceTitle, normalCode, linkPhone, signInForm: signedOutAccount };
 // ── Routing and keys ──
@@ -1114,7 +1119,9 @@ addEventListener("keydown", event => {
 // A COROS sign-in comes back to this page with ?code=…; finish it before drawing the Movement tab.
 if (coros.returning()) coros.finish().then(() => { setup.resume(); route(); say("COROS connected."); }, error => { setup.resume(); route(); say(error.message); });
 else route();
-cloud.init().then(() => {
+cloud.init().then(async () => {
+  await reader.loadKeyStatus();
+  try { await credentialStatus(pipSettings()); } catch { /* Not signed in, or nothing saved yet. */ }
   const invite = globalThis.sessionStorage.getItem(INVITE_RESUME);
   if (cloud.connected() && /^[A-Za-z0-9_-]{30,100}$/.test(invite || '') && /^#\/(account|sync|setup)(\/|$)/.test(location.hash)) history.replaceState(null, '', '#/travel/join/' + invite);
   if (!document.activeElement?.matches('input, textarea, select')) { if (location.hash === '#/brief') briefView?.refresh(); else route(); }

@@ -41,6 +41,24 @@ test('SDK carries Anthropic signed reasoning and exact tool IDs into the next mo
   assert.match(result.activity[0].applied_href, /^\/notes\/pip-/); assert.equal(notes.list().length, 1);
 });
 
+test('a stored account key is relayed, and the browser never sends the key itself', async t => {
+  const chat = workspace(t, { provider: 'compatible', model: 'deepseek/deepseek-v4.1-flash', baseUrl: 'https://openrouter.ai/api/v1' });
+  let call;
+  const result = await streamReply(chat, turn(), {
+    key: { relay: true },
+    fetcher: async (url, options) => {
+      call = { url, headers: options.headers, body: JSON.parse(options.body) };
+      return response(compatibleMessage({ text: 'Relayed answer.' }));
+    },
+  });
+  assert.equal(call.url, '/api/pip/relay');
+  assert.equal(call.headers['x-pocket-provider'], 'compatible');
+  assert.equal(call.headers['x-pocket-endpoint'], encodeURIComponent('https://openrouter.ai/api/v1'));
+  assert.equal(call.headers.authorization, undefined);
+  assert.equal(call.body.model, 'deepseek/deepseek-v4.1-flash');
+  assert.equal(result.answer, 'Relayed answer.');
+});
+
 test('compatible SDK continuations match out-of-order tool results by their original IDs', async t => {
   const chat = workspace(t, { provider: 'compatible', model: 'fixture', baseUrl: 'https://model.example/v1' }), sent = [];
   const result = await streamReply(chat, turn(), { key: 'fixture', executeTool: async (_, name, input) => {

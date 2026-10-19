@@ -4,7 +4,7 @@ Decision date: 9 October 2026. Scope: browser Pip first.
 
 ## Chosen architecture
 
-Use **Vercel AI SDK 7 `ToolLoopAgent`** with Pocket's existing Astro UI, browser storage, account sync, and tab-only provider keys. The user selected AI SDK after reviewing repository research. No additional agent framework or workflow service is introduced in this migration.
+Use **Vercel AI SDK 7 `ToolLoopAgent`** with Pocket's existing Astro UI, browser storage, account sync, and provider keys sealed in the account (tab-only for guests). The user selected AI SDK after reviewing repository research. No additional agent framework or workflow service is introduced in this migration.
 
 | Responsibility | Owner |
 | --- | --- |
@@ -55,4 +55,4 @@ AI SDK alone does not provide a durable background worker. The run is still brow
 
 Likewise, introducing AI SDK does not implement a persistent cancelled-request/dismissed-action ledger. Old pending proposals still need a separate product-state change to guarantee that they cannot resurface after "nevermind". That unfinished prototype has been archived outside the application source.
 
-If background execution is added later, use stable chat/request/run/action IDs, authoritative structured messages and decisions, authenticated cancellation, payload-scoped approvals, and idempotent mutations. Server-side provider credentials require an explicit account setting; existing browser-tab keys must not be silently uploaded.
+If background execution is added later, use stable chat/request/run/action IDs, authoritative structured messages and decisions, authenticated cancellation, payload-scoped approvals, and idempotent mutations. Provider credentials now live in `pocket_pip_keys`, sealed with the server key and scoped to one endpoint; `/api/pip/relay` decrypts them per request, so an existing browser-tab key is uploaded only when the user saves it while signed in.

@@ -96,7 +96,7 @@ Shared rules live in src/shared/workspace.js and mirror the Android stores.
 
 ## Paper, Movement and zines
 
-Paper photos upload through the authenticated API. Pages can wait for the phone to transcribe them, or **read with Claude** can use the browser tab’s Anthropic key. Provider requests remain direct; the database does not receive API keys. Network failures leave a page waiting. Source-linked note lines retain their positions on the original handwriting.
+Paper photos upload through the authenticated API. Pages can wait for the phone to transcribe them, or **read with Claude** can use the Anthropic key stored encrypted on the account; Pocket's relay adds it to the request. Guests use a tab-only key and call Anthropic directly. Network failures leave a page waiting. Source-linked note lines retain their positions on the original handwriting.
 
 Signed in, the COROS connection belongs to the Pocket account: its authorization is encrypted on the server and the last readings are stored there, so phone and browser show the same data and keep it when a refresh fails. Readings refresh at most every 15 minutes while Pocket is open, hourly from the phone when it has a network, and once a day from a scheduled job (`.github/workflows/coros-refresh.yml`, which needs the `POCKET_COROS_CRON_SECRET` repository secret) even when both apps are closed. If COROS revokes or expires the authorization, the saved readings stay and Movement offers reconnect. Guests keep the previous per-device connection. Recovery, Strain and Conditioning are Pocket estimates implemented in Scores.java and src/client/scores.js. See Movement for their inputs.
 

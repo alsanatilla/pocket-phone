@@ -1,7 +1,7 @@
-import { storage as localStorage, tabStorage as sessionStorage } from './workspace-storage.js';
+import { storage as localStorage, activeAccount } from './workspace-storage.js';
 // Component structure informed by beautifului.dev: conversation navigation,
 // reply + expandable details, context cards, composer. Pocket owns the visuals.
-import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings, apiKey, setKey, keyName, identity, contextCoverage, streamReply } from "./pip-core.js";
+import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings, apiKey, identity, contextCoverage, streamReply } from "./pip-core.js";
 import { notes, tasks, parking, taskDay, noteTitle, receipt, KIND } from "./store.js";
 import { modelName, starters } from './pip-presentation.js';
 import { enter, pressMotion } from './ui-motion.js';
@@ -15,10 +15,11 @@ import { travelDraft } from '../shared/travel-context.js';
 import { CONTEXT_OVERFLOW, POCKET_UPDATED } from './pip-limits.js';
 import { pipAway, openTraining } from './pip-away.js';
 import { trainingChatRoutine, trainingReply } from './pip-training-chat.js';
+import { resolve as resolveCredential, status as credentialStatus, save as saveCredential, forget as forgetCredential } from './pip-credentials.js';
 
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, viewportCleanup = null;
-const runner = new ReplyRunner(store, { key: (value, chat) => trainingChatRoutine(chat.uid) ? 'account-key' : apiKey(value),
+const runner = new ReplyRunner(store, { key: (value, chat) => trainingChatRoutine(chat.uid) ? 'account-key' : resolveCredential(value),
   stream: (chat, turn, options) => trainingChatRoutine(chat.uid) ? trainingReply(chat, turn, options) : streamReply(chat, turn, options), onChange: event => {
   const entry = document.getElementById("pip-entry");
   if (entry) {
@@ -531,7 +532,7 @@ function emptyChat(chat) {
     const pick = button(suggestion.label, async () => {
       if (runner.active) return;
       store.update(chat.uid, value => { value.draft = suggestion.prompt; });
-      if (!training && !apiKey(chat.config)) { render(); await apiSettings(chat.config); return; }
+      if (!training && !(await resolveCredential(chat.config))) { render(); await apiSettings(chat.config); return; }
       await runner.send(chat.uid, { text: suggestion.prompt, context: store.get(chat.uid).context });
     }, { class: 'pip-starter', disabled: Boolean(runner.active) });
     pressMotion(pick);
@@ -596,7 +597,11 @@ async function apiSettings(current, recovery = null) {
   const model = ui.h("input", { "aria-label": "Model ID", placeholder: "provider model ID", maxlength: 120 }); model.value = current.model;
   const endpoint = ui.h("input", { "aria-label": "API base URL", placeholder: "https://your-provider.example/v1", type: "url" }); endpoint.value = current.baseUrl;
   const key = ui.h("input", { "aria-label": "API key", type: "password", autocomplete: "off", placeholder: "paste your key" });
-  const crawl = ui.h("input", { "aria-label": "Firecrawl key", type: "password", autocomplete: "off", placeholder: firecrawlKey() ? "set · leave blank to keep" : "optional · fc-…" });
+  const signedIn = () => Boolean(activeAccount());
+  const FIRE = { provider: "firecrawl", baseUrl: "https://api.firecrawl.dev/v2" };
+  let crawlVault = await credentialStatus(FIRE);
+  const crawlSaved = () => signedIn() ? Boolean(crawlVault.saved) : Boolean(firecrawlKey());
+  const crawl = ui.h("input", { "aria-label": "Firecrawl key", type: "password", autocomplete: "off" });
   const thinking = ui.h("button", { type: "button", class: "set-switch", role: "switch", "aria-checked": String(Boolean(current.thinking)), "aria-label": "Provider reasoning summary" });
   thinking.onclick = () => { if (!thinking.disabled) thinking.setAttribute("aria-checked", thinking.getAttribute("aria-checked") === "true" ? "false" : "true"); };
 
@@ -611,49 +616,89 @@ async function apiSettings(current, recovery = null) {
   // The glance line: who, which model, whether this endpoint already has a key.
   const pillProvider = ui.h("span", { class: "status-pill" }), pillModel = ui.h("span", { class: "status-pill" }), pillKey = ui.h("span", { class: "status-pill" });
   const status = ui.h("div", { class: "status-pills", "aria-live": "polite" }, pillProvider, pillModel, pillKey);
-  const scope = ui.h("span", { class: "set-hint" }), crawlState = ui.h("span", { class: "state", text: firecrawlKey() ? "set" : "not set" });
+  const scope = ui.h("span", { class: "set-hint" }), crawlState = ui.h("span", { class: "state", text: crawlSaved() ? "set" : "not set" });
   const note = caption(""); note.classList.add("accent");
   const error = caption(""); error.classList.add("warn");
   const field = (label, control, hint) => ui.h("div", { class: "set-field" }, ui.h("span", { class: "set-name", text: label }), control, hint ? ui.h("span", { class: "set-hint", text: hint }) : null);
   const group = (label, ...children) => ui.h("section", { class: "set-group" }, ui.h("h3", { class: "set-label", text: label }), ...children);
+  const crawlForget = button("forget", async () => {
+    if (signedIn()) { await forgetCredential(FIRE); crawlVault = { saved: false }; }
+    else setFirecrawlKey("");
+    crawl.value = "";
+    refreshCrawl();
+    note.textContent = "Firecrawl key forgotten.";
+  }, { class: "set-forget" });
+  const refreshCrawl = () => {
+    crawl.placeholder = crawlSaved() ? "saved · leave blank to keep" : "optional · fc-…";
+    crawlState.textContent = crawl.value.trim() ? "new key" : crawlSaved() ? signedIn() ? "account" : "set" : "not set";
+    crawlForget.hidden = !crawlSaved();
+  };
+  refreshCrawl();
   const endpointValue = () => provider.value === "anthropic" ? DEFAULT_CONFIG.baseUrl : endpoint.value;
-  const savedKey = () => Boolean(apiKey({ provider: provider.value, baseUrl: endpointValue() }));
+  const formValue = () => ({ provider: provider.value, baseUrl: endpointValue() });
+  const formId = () => provider.value + "|" + endpointValue();
+  const tabKey = () => Boolean(apiKey(formValue()));
+  let vault = await credentialStatus(current), vaultId = formId();
 
-  const forget = button("forget", () => {
-    const value = { provider: provider.value, baseUrl: endpointValue() };
+  const forget = button("forget", async () => {
+    const value = formValue();
     if (runner.active) runner.stop();
-    sessionStorage.removeItem(keyName(value));
-    key.value = ""; refresh();
+    await forgetCredential(value);
+    key.value = "";
+    vault = { mode: signedIn() ? "account" : "tab", saved: false };
+    vaultId = formId(); refresh();
     note.textContent = "Key forgotten for this endpoint.";
   }, { class: "set-forget" });
 
-  const endpointField = field("API base URL", endpoint, "Include /v1 if your provider needs it. Requests go straight from this tab.");
+  const endpointField = field("API base URL", endpoint, "Include /v1 if your provider needs it. While you are signed in, Pocket's server makes the request.");
   const keyField = ui.h("div", { class: "set-field" }, ui.h("div", { class: "set-head" }, ui.h("span", { class: "set-name", text: "API key" }), forget), key, scope);
 
+  const saved = () => vaultId === formId() ? Boolean(vault?.saved) : signedIn() ? false : tabKey();
   const refresh = () => {
     const compatible = provider.value !== "anthropic";
     endpointField.hidden = !compatible;
     thinking.disabled = !(provider.value === "anthropic" || hostOf(endpoint.value) === "openrouter.ai");
     pillProvider.textContent = !compatible ? "Anthropic" : hostOf(endpoint.value) === "openrouter.ai" ? "OpenRouter" : "Compatible API";
     pillModel.textContent = modelName(model.value);
-    const saved = savedKey(), fresh = Boolean(key.value.trim());
-    pillKey.textContent = fresh ? "new key" : saved ? "key saved" : "no key";
-    pillKey.classList.toggle("on", fresh || saved);
-    forget.hidden = !saved;
-    key.placeholder = saved ? "saved · leave blank to keep" : "paste your key";
-    scope.textContent = compatible
-      ? "Stored in this tab for this endpoint. The browser calls it directly, so it must allow CORS."
-      : "Stored in this tab; shared with Paper.";
+    const fresh = Boolean(key.value.trim()), ready = saved();
+    pillKey.textContent = fresh ? "new key" : signedIn() && ready ? "account key" : tabKey() ? "tab key" : "no key";
+    pillKey.classList.toggle("on", fresh || ready || tabKey());
+    forget.hidden = !(ready || tabKey());
+    key.placeholder = ready ? "saved · leave blank to keep" : tabKey() ? "tab key · leave blank to keep" : "paste your key";
+    scope.textContent = signedIn()
+      ? vault?.unreachable ? "The key vault could not be reached. A key in this tab still works, but it will not survive the tab."
+        : !ready && tabKey() ? "A key is still in this tab from before. Paste it again to store it encrypted on your account."
+        : "Encrypted on your Pocket account. The server adds it to each request; it never comes back to this browser."
+      : "This tab only. Sign in to store it encrypted on your account.";
   };
-  provider.onchange = () => { model.value = provider.value === "anthropic" ? DEFAULT_CONFIG.model : ""; endpoint.value = provider.value === "anthropic" ? DEFAULT_CONFIG.baseUrl : ""; key.value = ""; refresh(); };
-  for (const control of [model, endpoint, key]) control.oninput = refresh;
-  crawl.oninput = () => { crawlState.textContent = crawl.value.trim() ? "new key" : firecrawlKey() ? "set" : "not set"; };
+  let vaultTimer = 0;
+  const reloadVault = async () => {
+    const id = formId(), answer = await credentialStatus(formValue());
+    if (id !== formId()) return;
+    vault = answer; vaultId = id; refresh();
+  };
+  const queueVault = () => {
+    clearTimeout(vaultTimer);
+    vault = { mode: signedIn() ? "account" : "tab", saved: false }; vaultId = "";
+    refresh();
+    vaultTimer = setTimeout(reloadVault, 300);
+  };
+  provider.onchange = () => { model.value = provider.value === "anthropic" ? DEFAULT_CONFIG.model : ""; endpoint.value = provider.value === "anthropic" ? DEFAULT_CONFIG.baseUrl : ""; key.value = ""; refresh(); queueVault(); };
+  model.oninput = refresh; key.oninput = refresh;
+  endpoint.oninput = () => { refresh(); queueVault(); };
+  crawl.oninput = refreshCrawl;
   refresh();
 
-  const save = button("save settings", () => {
+  const save = button("save settings", async () => {
     try {
       const value = config({ provider: provider.value, model: model.value, baseUrl: endpoint.value, maxTokens: tokens, thinking: thinking.getAttribute("aria-checked") === "true", webSearch: current.webSearch && provider.value === current.provider });
-      if (runner.active) runner.stop(); if (key.value.trim()) setKey(value, key.value); if (crawl.value.trim()) setFirecrawlKey(crawl.value); saveSettings(value);
+      if (runner.active) runner.stop();
+      if (key.value.trim()) await saveCredential(value, key.value);
+      if (crawl.value.trim()) {
+        if (signedIn()) { await saveCredential(FIRE, crawl.value); setFirecrawlKey(""); crawlVault = { saved: true }; }
+        else setFirecrawlKey(crawl.value);
+      } else if (signedIn() && crawlSaved()) setFirecrawlKey("");
+      saveSettings(value);
       const chat = mounted ? store.get(mounted.uid) : null;
       if (!chat) { const next = store.create(value); ui.closeDialog(); ui.go("/pip/" + next.uid); return; }
       if (identity(value) !== identity(chat.config) && chat.turns.length) {
@@ -675,7 +720,10 @@ async function apiSettings(current, recovery = null) {
       ui.h("summary", {},
         ui.h("span", { class: "set-summary" }, ui.h("span", { class: "caret", "aria-hidden": "true", text: "▸" }), ui.h("span", { text: "web search key" })),
         crawlState),
-      ui.h("div", { class: "set-details-body" }, field("Firecrawl", crawl, "Optional. Raises the free search limit; without it Pip uses the shared low-volume key.")))),
+      ui.h("div", { class: "set-details-body" },
+        ui.h("div", { class: "set-head" }, ui.h("span", { class: "set-name", text: "Firecrawl" }), crawlForget),
+        crawl,
+        ui.h("span", { class: "set-hint", text: "Optional. Raises the free search limit; without it Pip uses the shared low-volume key." })))),
     group("reply",
       ui.h("div", { class: "set-field" }, ui.h("span", { class: "set-name", text: "Reply limit · tokens" }), ui.h("div", { class: "limit-choices" }, ...limits)),
       ui.h("div", { class: "set-toggle" },

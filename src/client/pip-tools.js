@@ -77,7 +77,10 @@ function pageText(text, args) {
 async function web(value, name, args, signal, context) {
   if (!webTools(value)) return failure("access_disabled", "Web search is off.");
   const key = context.source.firecrawlKey(), headers = { "content-type": "application/json", ...(key ? { authorization: "Bearer " + key } : {}) };
-  const post = (path, body) => fetch(FIRECRAWL + path, { method: "POST", headers, body: JSON.stringify(body), signal, credentials: "omit", referrerPolicy: "no-referrer" });
+  // A signed-in key is added by Pocket; the browser never holds it. Guests call Firecrawl directly.
+  const post = (path, body) => context.source.firecrawlRelay?.()
+    ? fetch("/api/pip/firecrawl", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path, body }), signal, credentials: "same-origin", redirect: "error" })
+    : fetch(FIRECRAWL + path, { method: "POST", headers, body: JSON.stringify(body), signal, credentials: "omit", referrerPolicy: "no-referrer" });
   const refused = status => failure("web_unavailable", status === 401 || status === 402 || status === 429 ? "Web search is unavailable right now (Firecrawl " + status + "). A Firecrawl key in API settings raises the limit." : "Web search failed (Firecrawl " + status + ").");
   if (name === "search_web") {
     const query = typeof args.query === "string" ? args.query.trim() : "", limit = args.limit ?? 5;
@@ -190,7 +193,7 @@ export function recordSource(read, place = {}) {
     ...place
   };
 }
-const BROWSER = recordSource(load, { appointments: () => agenda.all(), appointment: id => agenda.get(id), coros: corosFetch, firecrawlKey: () => firecrawlKey(),
+const BROWSER = recordSource(load, { appointments: () => agenda.all(), appointment: id => agenda.get(id), coros: corosFetch, firecrawlKey: () => firecrawlKey(), firecrawlRelay: () => Boolean(activeAccount()),
   corosCache: () => ({ cockpit: cached("pocket:coros-cockpit"), activities: cached("pocket:coros-activities") }) });
 /** A page that still fits the 8,000-character result limit after JSON escaping (COROS formats are full of quotes). */
 function fitted(text, args, fields) {

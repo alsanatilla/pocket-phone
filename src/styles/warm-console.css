@@ -286,6 +286,7 @@ input[type=checkbox] { accent-color: var(--accent); }
 .set-details summary .state { font-size: 12px; color: var(--muted); }
 .set-details[open] summary .state { color: var(--accent); }
 .set-details-body { padding-top: 2px; }
+.set-details-body input { width: 100%; font-size: 15px; padding: 8px 0; }
 .limit-choices { display: flex; gap: 6px; margin-top: 4px; }
 .limit-choice {
   flex: 1; min-height: 44px; padding: 0 4px;

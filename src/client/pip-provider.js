@@ -60,7 +60,43 @@ async function errorText(response, signal) {
   return text.slice(0, 4096);
 }
 
-// AI SDK owns framing/parsing. This boundary enforces browser privacy and bounds.
+// AI SDK owns framing/parsing. This boundary enforces bounds and turns failures into fixed messages.
+async function streamResponse(response, endpoint, signal, clock, onRetry) {
+  if (signal.aborted) { void response.body?.cancel().catch(() => {}); throw new DOMException('Stopped', 'AbortError'); }
+  if (!response.ok) {
+    const raw = await errorText(response, signal); if (signal.aborted) throw new DOMException('Stopped', 'AbortError');
+    let data; try { data = JSON.parse(raw); } catch { data = raw; }
+    const overflow = response.status === 413 || [400, 422].includes(response.status) && contextOverflow(data);
+    const retry = !overflow && [429, 502, 503].includes(response.status);
+    if (retry) onRetry();
+    const responseHeaders = Object.fromEntries(['retry-after', 'retry-after-ms'].flatMap(name => response.headers.has(name) ? [[name, response.headers.get(name)]] : []));
+    throw new APICallError({ message: overflow ? CONTEXT_OVERFLOW : httpError(response.status), url: endpoint, requestBodyValues: {}, statusCode: response.status, responseHeaders, isRetryable: retry });
+  }
+  if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {
+    void response.body?.cancel().catch(() => {});
+    throw publicError('This endpoint did not return a chat stream. Check its browser and streaming support.');
+  }
+  const reader = response.body.getReader(); let bytes = 0, released = false;
+  const release = () => { if (!released) { released = true; signal.removeEventListener('abort', abort); reader.releaseLock(); } };
+  const abort = () => { void reader.cancel().catch(() => {}); };
+  signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort();
+  const body = new ReadableStream({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read();
+        if (signal.aborted) throw new DOMException('Stopped', 'AbortError');
+        if (chunk.done) { release(); controller.close(); return; }
+        bytes += chunk.value.byteLength;
+        if (bytes > 4000000) throw publicError('The provider’s stream is too large. Stop and try a shorter request.');
+        clock(); controller.enqueue(chunk.value);
+      } catch (error) { await reader.cancel().catch(() => {}); release(); controller.error(error); }
+    },
+    async cancel() { await reader.cancel().catch(() => {}); release(); }
+  });
+  return new Response(body, { status: response.status, headers: response.headers });
+}
+
+// A tab key calls the provider directly. This boundary enforces browser privacy and bounds.
 function guardedFetch(value, fetcher, signal, clock, onRetry) {
   const endpoint = value.baseUrl + (value.provider === 'anthropic' ? '/messages' : '/chat/completions');
   return async (url, options) => {
@@ -68,38 +104,29 @@ function guardedFetch(value, fetcher, signal, clock, onRetry) {
     if (signal.aborted) throw new DOMException('Stopped', 'AbortError');
     clock();
     const response = await fetcher(url, { ...options, signal, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer' });
-    if (signal.aborted) { void response.body?.cancel().catch(() => {}); throw new DOMException('Stopped', 'AbortError'); }
-    if (!response.ok) {
-      const raw = await errorText(response, signal); if (signal.aborted) throw new DOMException('Stopped', 'AbortError');
-      let data; try { data = JSON.parse(raw); } catch { data = raw; }
-      const overflow = response.status === 413 || [400, 422].includes(response.status) && contextOverflow(data);
-      const retry = !overflow && [429, 502, 503].includes(response.status);
-      if (retry) onRetry();
-      const responseHeaders = Object.fromEntries(['retry-after', 'retry-after-ms'].flatMap(name => response.headers.has(name) ? [[name, response.headers.get(name)]] : []));
-      throw new APICallError({ message: overflow ? CONTEXT_OVERFLOW : httpError(response.status), url: endpoint, requestBodyValues: {}, statusCode: response.status, responseHeaders, isRetryable: retry });
-    }
-    if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {
-      void response.body?.cancel().catch(() => {});
-      throw publicError('This endpoint did not return a chat stream. Check its browser and streaming support.');
-    }
-    const reader = response.body.getReader(); let bytes = 0, released = false;
-    const release = () => { if (!released) { released = true; signal.removeEventListener('abort', abort); reader.releaseLock(); } };
-    const abort = () => { void reader.cancel().catch(() => {}); };
-    signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort();
-    const body = new ReadableStream({
-      async pull(controller) {
-        try {
-          const chunk = await reader.read();
-          if (signal.aborted) throw new DOMException('Stopped', 'AbortError');
-          if (chunk.done) { release(); controller.close(); return; }
-          bytes += chunk.value.byteLength;
-          if (bytes > 4000000) throw publicError('The provider’s stream is too large. Stop and try a shorter request.');
-          clock(); controller.enqueue(chunk.value);
-        } catch (error) { await reader.cancel().catch(() => {}); release(); controller.error(error); }
+    return streamResponse(response, endpoint, signal, clock, onRetry);
+  };
+}
+
+// A stored account key is added by Pocket's relay. The browser sends the same request and never sees the key.
+function relayFetch(value, fetcher, signal, clock, onRetry) {
+  const endpoint = value.baseUrl + (value.provider === 'anthropic' ? '/messages' : '/chat/completions');
+  return async (url, options) => {
+    if (signal.aborted) throw new DOMException('Stopped', 'AbortError');
+    clock();
+    const response = await fetcher('/api/pip/relay', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-pocket-provider': value.provider,
+        'x-pocket-endpoint': encodeURIComponent(value.baseUrl || ''),
       },
-      async cancel() { await reader.cancel().catch(() => {}); release(); }
+      body: options.body,
+      credentials: 'same-origin',
+      redirect: 'error',
+      signal,
     });
-    return new Response(body, { status: response.status, headers: response.headers });
+    return streamResponse(response, endpoint, signal, clock, onRetry);
   };
 }
 
@@ -159,8 +186,13 @@ export const textToolCalls = {
   }
 };
 
-export async function providerModel(value, key, { fetcher, signal, clock, onRetry }) {
-  const options = { apiKey: key, baseURL: value.baseUrl, fetch: guardedFetch(value, fetcher, signal, clock, onRetry) };
+export async function providerModel(value, credential, { fetcher, signal, clock, onRetry }) {
+  const relay = Boolean(credential && typeof credential === 'object' && credential.relay);
+  const key = relay ? 'pocket-relay' : typeof credential === 'string' ? credential : String(credential?.key || '');
+  const options = {
+    apiKey: key, baseURL: value.baseUrl,
+    fetch: relay ? relayFetch(value, fetcher, signal, clock, onRetry) : guardedFetch(value, fetcher, signal, clock, onRetry),
+  };
   if (value.provider === 'anthropic') {
     const { createAnthropic } = await loadAdapter(() => import('@ai-sdk/anthropic'));
     return createAnthropic({ ...options, headers: { 'anthropic-dangerous-direct-browser-access': 'true' } })(value.model);

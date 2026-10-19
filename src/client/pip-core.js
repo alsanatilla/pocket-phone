@@ -1,4 +1,4 @@
-import { storage as localStorage, tabStorage as sessionStorage, activeAccount } from './workspace-storage.js';
+import { storage as localStorage, activeAccount } from './workspace-storage.js';
 // Replies save locally before direct API transport; signed-in conversations sync separately.
 import { changed } from './persistence-events.js';
 import { access, accessFingerprint, toolNames, historyPolicy, STATE_TOOLS } from "./pip-tools.js";
@@ -22,13 +22,9 @@ export function config(value = DEFAULT_CONFIG) {
   return { provider: value.provider, model, baseUrl: url.href.replace(/\/+$/, ""), maxTokens, thinking: Boolean(value.thinking), webSearch: Boolean(value.webSearch) };
 }
 export const identity = value => [value.provider, value.baseUrl, value.model].join("|");
-export const keyName = value => value.provider === "anthropic" ? "pocket:claude-key" : "pocket:pip-key:" + value.baseUrl;
-export const apiKey = (value, storage = sessionStorage) => storage.getItem(keyName(value)) || "";
-export function setKey(value, key, storage = sessionStorage) {
-  const text = String(key || "").trim();
-  if (!/^[\x21-\x7e]{8,512}$/.test(text) || value.provider === "anthropic" && (!text.startsWith("sk-ant-") || text.length < 30)) throw new Error("Enter a valid API key for this provider.");
-  storage.setItem(keyName(value), text);
-}
+// Key storage lives in one place: account vault for signed-in tabs, tab storage for guests.
+export { keyName, apiKey, setKey } from './pip-credentials.js';
+import { resolve as resolveCredential } from './pip-credentials.js';
 export function settings(storage = localStorage) {
   const raw = storage.getItem(SETTINGS);
   if (!raw) return copy(DEFAULT_CONFIG);
@@ -218,13 +214,15 @@ export async function streamReply(chat, turn, options = {}) {
 }
 
 export class ReplyRunner {
-  constructor(store, { key = value => apiKey(value), stream = streamReply, onChange = () => {} } = {}) { this.store = store; this.key = key; this.stream = stream; this.onChange = onChange; this.active = null; }
+  constructor(store, { key = value => resolveCredential(value), stream = streamReply, onChange = () => {} } = {}) { this.store = store; this.key = key; this.stream = stream; this.onChange = onChange; this.active = null; }
   async send(uid, { text, context = [], retry = null, resume = null } = {}) {
     if (this.active) throw new Error("Let the current reply finish, or stop it first.");
     const chat = this.store.get(uid);
     if (!chat) throw new Error("This chat was removed.");
-    const key = this.key(chat.config, chat);
-    if (!key) throw new Error("Add an API key for this chat in API settings. It stays in this tab.");
+    // The account vault resolves asynchronously; a supplied or tab key stays synchronous.
+    const pending = this.key(chat.config, chat);
+    const key = pending && typeof pending.then === "function" ? await pending : pending;
+    if (!key) throw new Error("Add an API key for this chat in API settings.");
     let turn, checkpoint = null;
     if (retry || resume) {
       if (retry && resume) throw new Error("Choose Retry or Continue.");

@@ -1,11 +1,13 @@
-import { tabStorage as sessionStorage } from './workspace-storage.js';
+import { activeAccount, tabStorage as sessionStorage } from './workspace-storage.js';
+import { cached, status as credentialStatus, save as saveCredential, forget as forgetCredential } from './pip-credentials.js';
 // Reads one journal page with Claude and turns the answer into a note, like JournalReader.java.
-// The key is typed for this tab only and goes straight to Anthropic: the web page has no server of its own.
+// A signed-in key is encrypted on the account and added by Pocket's relay; guests keep the tab key.
 import { journal, notes, parkThought, thought, receipt, KIND, NOTE_LIMIT } from "./store.js";
 
 export const MODEL = "claude-sonnet-5-5";
 const INPUT_PRICE = 2.0, OUTPUT_PRICE = 10.0, MAX_TOKENS = 8000;
 const API = "https://api.anthropic.com/v1/messages", KEY = "pocket:claude-key";
+const PROVIDER = { provider: "anthropic", baseUrl: "https://api.anthropic.com/v1" };
 const TIME = /(\d{1,2})[:.](\d{2})/, TODO_TITLE = /\b(todos?|to-?dos?|aufgaben|tasks?|erledigen)\b/i;
 export const PROMPT = "Transcribe this photo of a handwritten journal page. Write exactly what is on the paper; do not correct, translate or complete anything.\n\n"
   + "Rules:\n"
@@ -24,15 +26,22 @@ export const PROMPT = "Transcribe this photo of a handwritten journal page. Writ
 export class Later extends Error { }
 
 const key = () => sessionStorage.getItem(KEY) || "";
-export const hasKey = () => Boolean(key());
+const stored = () => activeAccount() ? cached(PROVIDER) : null;
+export const hasKey = () => Boolean(key()) || Boolean(stored()?.saved);
 /** The last characters of the key, for showing that one is set without showing the key itself. */
-export const hint = () => { const value = key(); return value ? "…" + value.slice(-4) : ""; };
-export function setKey(value) {
+export const hint = () => stored()?.saved ? stored().hint || "" : key() ? "…" + key().slice(-4) : "";
+/** Loads the account's key state before the first rendered route. */
+export async function loadKeyStatus() { if (activeAccount()) await credentialStatus(PROVIDER); }
+export async function setKey(value) {
   const text = String(value || "").trim();
   if (!text.startsWith("sk-ant-") || text.length < 30) throw new Error("That doesn't look like a Claude API key (sk-ant-…).");
-  sessionStorage.setItem(KEY, text);
+  if (activeAccount()) await saveCredential(PROVIDER, text);
+  else sessionStorage.setItem(KEY, text);
 }
-export function clearKey() { sessionStorage.removeItem(KEY); }
+export async function clearKey() {
+  if (activeAccount()) await forgetCredential(PROVIDER);
+  else sessionStorage.removeItem(KEY);
+}
 
 /** The page photo as the JPEG Claude reads: long edge 1568 px, the same as JournalStore.forReading. */
 async function forReading(blob) {
@@ -54,20 +63,26 @@ async function forReading(blob) {
 
 /** Sends the photo and the prompt, and returns Claude's parsed answer with what it cost in cents. */
 export async function read(blob) {
+  const relay = activeAccount() && (await credentialStatus(PROVIDER)).saved;
   const apiKey = key();
-  if (!apiKey) throw new Error("Add your Claude API key first.");
+  if (!relay && !apiKey) throw new Error("Add your Claude API key first.");
   const data = await forReading(blob);
   let response;
   try {
-    response = await fetch(API, {
+    response = await fetch(relay ? "/api/pip/relay" : API, {
       method: "POST",
-      headers: {
+      headers: relay ? {
+        "content-type": "application/json", "x-pocket-provider": "anthropic",
+        "x-pocket-endpoint": encodeURIComponent(PROVIDER.baseUrl),
+        // If a safety check declines the page, the server retries on a fallback model instead of failing.
+        "anthropic-beta": "server-side-fallback-2026-07-01",
+      } : {
         "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json",
         // Browsers may call Anthropic directly; the key goes only there. See CLOUD.md.
         "anthropic-dangerous-direct-browser-access": "true",
-        // If a safety check declines the page, the server retries on a fallback model instead of failing.
         "anthropic-beta": "server-side-fallback-2026-07-01",
       },
+      credentials: relay ? "same-origin" : "omit",
       body: JSON.stringify({
         model: MODEL, max_tokens: MAX_TOKENS, output_config: { effort: "low" }, fallbacks: "default",
         messages: [{ role: "user", content: [
@@ -77,7 +92,11 @@ export async function read(blob) {
       }),
     });
   } catch { throw new Later("Offline; try again once the connection is back."); }
-  if (response.status === 401) throw new Error("Claude rejected the API key. Check it and try again.");
+  if (response.status === 401) {
+    const detail = relay ? await response.text().catch(() => "") : "";
+    if (relay && /sign in/i.test(detail)) throw new Error("Sign in to Pocket to read pages.");
+    throw new Error("Claude rejected the API key. Check it and try again.");
+  }
   if (response.status === 429) throw new Later("Claude is busy; try again in a moment.");
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
