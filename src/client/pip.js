@@ -16,12 +16,14 @@ import { CONTEXT_OVERFLOW, POCKET_UPDATED } from './pip-limits.js';
 import { pipAway, openTraining } from './pip-away.js';
 import { pipScheduled, scheduledState } from './pip-scheduled.js';
 import { routineCaption, sortRoutines } from './pip-routine-model.js';
+import { serverRuns, streamReplyRemote } from './pip-remote.js';
 import { trainingChatRoutine, trainingReply } from './pip-training-chat.js';
 import { resolve as resolveCredential, status as credentialStatus, save as saveCredential, forget as forgetCredential } from './pip-credentials.js';
 
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, viewportCleanup = null;
 const runner = new ReplyRunner(store, { key: (value, chat) => trainingChatRoutine(chat.uid) ? 'account-key' : resolveCredential(value),
+  remote: { available: chat => trainingChatRoutine(chat.uid) ? false : serverRuns({ chat: chat.uid }).then(state => state.available), stream: streamReplyRemote },
   stream: (chat, turn, options) => trainingChatRoutine(chat.uid) ? trainingReply(chat, turn, options) : streamReply(chat, turn, options), onChange: event => {
   const entry = document.getElementById("pip-entry");
   if (entry) {
@@ -267,8 +269,10 @@ function updateReply(turn) {
   if (parts.sourceSignature !== citations) { parts.sources.hidden = !turn.sources?.length; parts.sourceTitle.textContent = "△ sources [" + (turn.sources?.length || 0) + "]"; parts.sourceList.replaceChildren(...(turn.sources || []).map((item, index) => sourceLink(item, "[" + (index + 1) + "] " + item.title))); parts.sourceSignature = citations; }
   const inputTokens = turn.usage?.last_input_tokens, outputTokens = turn.usage?.last_output_tokens;
   const actualInput = typeof inputTokens === "number" && Number.isFinite(inputTokens) && inputTokens >= 0;
-  parts.usageLine.hidden = !actualInput;
-  parts.usageLine.textContent = actualInput ? "last request · " + inputTokens.toLocaleString() + " input tokens" + (typeof outputTokens === "number" && Number.isFinite(outputTokens) && outputTokens >= 0 ? " · " + outputTokens.toLocaleString() + " output tokens" : "") : "";
+  const server = turn.usage?.runtime === 'pocket-server';
+  const counts = actualInput ? (typeof outputTokens === "number" && Number.isFinite(outputTokens) && outputTokens >= 0 ? inputTokens.toLocaleString() + " input · " + outputTokens.toLocaleString() + " output tokens" : inputTokens.toLocaleString() + " input tokens") : "";
+  parts.usageLine.hidden = !server && !actualInput;
+  parts.usageLine.textContent = server ? "on Pocket's server" + (counts ? " · " + counts : "") : counts;
   const replay = turn.usage?.history_replay;
   parts.contextLine.hidden = !replay || !Number.isInteger(replay.replayed) || !Number.isInteger(replay.total);
   parts.contextLine.textContent = parts.contextLine.hidden ? '' : 'history used · ' + replay.replayed + '/' + replay.total + ' earlier turns' + (replay.clipped_ids?.length ? ' · ' + replay.clipped_ids.length + ' excerpts' : '');

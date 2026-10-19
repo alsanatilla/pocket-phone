@@ -375,7 +375,7 @@ export async function runView(userId, { runId = '', chat = '', after = 0 } = {})
 async function view(userId, run, cursor = 0) {
   if (!run) return { run: null, requests: [], events: [], cursor };
   const requests = (await sql({ sql: 'SELECT * FROM pocket_pip_run_requests WHERE user_id = ? AND run_id = ? ORDER BY created', args: [userId, String(run.run_id)] })).rows
-    .map(row => ({ id: String(row.request_id), kind: String(row.kind), tool: String(row.tool), state: String(row.state), payload: parse(row.payload), response: row.response ? parse(row.response) : null, by: String(row.decided_by || ''), at: Number(row.decided_at) || 0 }));
+    .map(row => ({ id: String(row.request_id), row: String(row.row_id), kind: String(row.kind), tool: String(row.tool), state: String(row.state), payload: parse(row.payload), response: row.response ? parse(row.response) : null, by: String(row.decided_by || ''), at: Number(row.decided_at) || 0 }));
   const events = (await sql({ sql: 'SELECT seq, kind, data, created FROM pocket_pip_run_events WHERE user_id = ? AND run_id = ? AND seq > ? ORDER BY seq LIMIT 200', args: [userId, String(run.run_id), cursor] })).rows
     .map(row => ({ seq: Number(row.seq), kind: String(row.kind), data: parse(row.data), at: Number(row.created) }));
   return { run: {

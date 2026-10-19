@@ -215,15 +215,17 @@ export async function streamReply(chat, turn, options = {}) {
 }
 
 export class ReplyRunner {
-  constructor(store, { key = value => resolveCredential(value), stream = streamReply, onChange = () => {} } = {}) { this.store = store; this.key = key; this.stream = stream; this.onChange = onChange; this.active = null; }
+  constructor(store, { key = value => resolveCredential(value), stream = streamReply, remote = null, onChange = () => {} } = {}) { this.store = store; this.key = key; this.stream = stream; this.remote = remote; this.onChange = onChange; this.active = null; }
   async send(uid, { text, context = [], retry = null, resume = null } = {}) {
     if (this.active) throw new Error("Let the current reply finish, or stop it first.");
     const chat = this.store.get(uid);
     if (!chat) throw new Error("This chat was removed.");
+    // A signed-in account with its own server key runs the reply on Pocket's server; otherwise this tab does.
+    const remote = this.remote && await this.remote.available(chat).catch(() => false) ? this.remote : null;
     // The account vault resolves asynchronously; a supplied or tab key stays synchronous.
-    const pending = this.key(chat.config, chat);
+    const pending = remote ? null : this.key(chat.config, chat);
     const key = pending && typeof pending.then === "function" ? await pending : pending;
-    if (!key) throw new Error("Add an API key for this chat in API settings.");
+    if (!remote && !key) throw new Error("Add an API key for this chat in API settings.");
     let turn, checkpoint = null;
     if (retry || resume) {
       if (retry && resume) throw new Error("Choose Retry or Continue.");
@@ -279,14 +281,16 @@ export class ReplyRunner {
       this.onChange({ type: "delta", chatId: uid, turn: copy(turn) });
     };
     try {
-      const reply = await this.stream(chat, turn, { key, signal: active.controller.signal, resume: checkpoint, approve: (requests, signal) => this.waitForApproval(active, requests, signal), onUpdate: fields => {
+      const reply = await (remote ? remote.stream : this.stream)(chat, turn, { key, signal: active.controller.signal, resume: checkpoint, approve: (requests, signal) => this.waitForApproval(active, requests, signal), onUpdate: fields => {
         let checkpointReady = false;
         for (const row of fields.activity || []) if (row.result) { const marker = row.id + "|" + row.result; if (!savedResults.has(marker)) { savedResults.add(marker); checkpointReady = true; } }
         update(fields, checkpointReady);
       } });
       update({ ...reply, status: "done" }, true);
     } catch (error) {
-      if (this.active === active && !active.controller.signal.aborted) update({ status: "failed", activity: settle(turn.activity, "failed", error.message), error: error.message || "The reply could not be completed." }, true);
+      // A run stopped on the server (this device or another) is stopped, not failed.
+      const stopped = error?.name === "RunStopped" ? "stopped" : "failed";
+      if (this.active === active && !active.controller.signal.aborted) update({ status: stopped, activity: settle(turn.activity, stopped, error.message), error: error.message || "The reply could not be completed." }, true);
     } finally {
       if (this.active === active) { this.active = null; this.onChange({ type: "finished", chatId: uid }); }
     }
