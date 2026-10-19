@@ -8,6 +8,7 @@ local.properties
 .externalNativeBuild/
 .DS_Store
 .playwright-mcp/
+.preview/
 node_modules/
 dist/
 .astro/

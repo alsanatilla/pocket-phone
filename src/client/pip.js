@@ -589,35 +589,101 @@ async function attachSource(uid) {
   }); render();
 }
 
+const hostOf = value => { try { return new URL(value).hostname; } catch { return ""; } };
+
 async function apiSettings(current, recovery = null) {
   const provider = ui.h("select", { "aria-label": "API provider" }, ui.h("option", { value: "anthropic", text: "Anthropic" }), ui.h("option", { value: "compatible", text: "Compatible chat API" })); provider.value = current.provider;
   const model = ui.h("input", { "aria-label": "Model ID", placeholder: "provider model ID", maxlength: 120 }); model.value = current.model;
   const endpoint = ui.h("input", { "aria-label": "API base URL", placeholder: "https://your-provider.example/v1", type: "url" }); endpoint.value = current.baseUrl;
-  const key = ui.h("input", { "aria-label": "API key", type: "password", autocomplete: "off", placeholder: "API key · leave blank to keep" });
-  const limit = ui.h("input", { "aria-label": "Reply token limit", type: "number", min:64, max:8192 }); limit.value = current.maxTokens;
-  const thinking = ui.h("input", { type: "checkbox", "aria-label": "Provider reasoning summary" }); thinking.checked = current.thinking;
+  const key = ui.h("input", { "aria-label": "API key", type: "password", autocomplete: "off", placeholder: "paste your key" });
   const crawl = ui.h("input", { "aria-label": "Firecrawl key", type: "password", autocomplete: "off", placeholder: firecrawlKey() ? "set · leave blank to keep" : "optional · fc-…" });
-  const destination = caption(""), error = caption(""); error.classList.add("warn");
-  const refresh = () => { endpoint.disabled = provider.value === "anthropic"; thinking.disabled = provider.value !== "anthropic"; destination.textContent = provider.value === "anthropic" ? "Key · this tab · shared with Paper" : "Key · this endpoint and tab · CORS required"; };
-  provider.onchange = () => { model.value = provider.value === "anthropic" ? DEFAULT_CONFIG.model : ""; endpoint.value = provider.value === "anthropic" ? DEFAULT_CONFIG.baseUrl : ""; key.value = ""; refresh(); }; refresh();
-  const form = ui.h("div", { class:"pip-settings" },
-    ui.h("label", {}, "Provider", provider), ui.h("label", {}, "Model", model), ui.h("label", {}, "API base URL", endpoint), ui.h("label", {}, "Key", key), destination,
-    ui.h("label", {}, "Firecrawl key · web search for this API", crawl), ui.h("label", {}, "Reply limit (tokens)", limit), ui.h("label", { class:"check-label" }, thinking, "Reasoning summary"), error,
-    button("forget this endpoint’s key", () => { const value=config({provider:provider.value,model:model.value,baseUrl:endpoint.value,maxTokens:limit.value,thinking:thinking.checked}); if (runner.active) runner.stop(); sessionStorage.removeItem(keyName(value)); destination.textContent="Key forgotten for this endpoint."; }, {class:"row-button"}),
-    button("save settings", () => {
-      try {
-        const value=config({provider:provider.value,model:model.value,baseUrl:endpoint.value,maxTokens:limit.value,thinking:thinking.checked,webSearch:current.webSearch && provider.value===current.provider});
-        if (runner.active) runner.stop(); if (key.value.trim()) setKey(value,key.value); if (crawl.value.trim()) setFirecrawlKey(crawl.value); saveSettings(value);
-        const chat=mounted ? store.get(mounted.uid) : null;
-        if (!chat) { const next=store.create(value); ui.closeDialog(); ui.go("/pip/"+next.uid); return; }
-        if (identity(value) !== identity(chat.config) && chat.turns.length) {
-          const next=store.create(value);
-          if (recovery) store.update(next.uid, c => { c.draft = recovery.text; c.context = structuredClone(recovery.context); });
-          ui.closeDialog(); ui.go("/pip/"+next.uid); ui.say("New model, new chat. The previous conversation is kept.");
-        } else { store.update(chat.uid,c=>{c.config=value;}); ui.closeDialog(); render(); }
-      } catch (failure) { error.textContent=failure.message; }
-    }, {class:"row-button accent"}));
-  await ui.dialog("pip · API settings", form, [["cancel",null]]);
+  const thinking = ui.h("button", { type: "button", class: "set-switch", role: "switch", "aria-checked": String(Boolean(current.thinking)), "aria-label": "Provider reasoning summary" });
+  thinking.onclick = () => { if (!thinking.disabled) thinking.setAttribute("aria-checked", thinking.getAttribute("aria-checked") === "true" ? "false" : "true"); };
+
+  // Reply limit: three common sizes plus the current value if it was custom.
+  let tokens = Number(current.maxTokens);
+  const sizes = [...new Set([1024, 2048, 4096, 8192, tokens])].sort((a, b) => a - b);
+  const limits = sizes.map(size => {
+    const choice = button(size.toLocaleString("en-US"), () => { tokens = size; limits.forEach(item => item.setAttribute("aria-pressed", String(item === choice))); }, { class: "limit-choice", "aria-pressed": String(size === tokens), "aria-label": size.toLocaleString("en-US") + " token reply limit" });
+    return choice;
+  });
+
+  // The glance line: who, which model, whether this endpoint already has a key.
+  const pillProvider = ui.h("span", { class: "status-pill" }), pillModel = ui.h("span", { class: "status-pill" }), pillKey = ui.h("span", { class: "status-pill" });
+  const status = ui.h("div", { class: "status-pills", "aria-live": "polite" }, pillProvider, pillModel, pillKey);
+  const scope = ui.h("span", { class: "set-hint" }), crawlState = ui.h("span", { class: "state", text: firecrawlKey() ? "set" : "not set" });
+  const note = caption(""); note.classList.add("accent");
+  const error = caption(""); error.classList.add("warn");
+  const field = (label, control, hint) => ui.h("div", { class: "set-field" }, ui.h("span", { class: "set-name", text: label }), control, hint ? ui.h("span", { class: "set-hint", text: hint }) : null);
+  const group = (label, ...children) => ui.h("section", { class: "set-group" }, ui.h("h3", { class: "set-label", text: label }), ...children);
+  const endpointValue = () => provider.value === "anthropic" ? DEFAULT_CONFIG.baseUrl : endpoint.value;
+  const savedKey = () => Boolean(apiKey({ provider: provider.value, baseUrl: endpointValue() }));
+
+  const forget = button("forget", () => {
+    const value = { provider: provider.value, baseUrl: endpointValue() };
+    if (runner.active) runner.stop();
+    sessionStorage.removeItem(keyName(value));
+    key.value = ""; refresh();
+    note.textContent = "Key forgotten for this endpoint.";
+  }, { class: "set-forget" });
+
+  const endpointField = field("API base URL", endpoint, "Include /v1 if your provider needs it. Requests go straight from this tab.");
+  const keyField = ui.h("div", { class: "set-field" }, ui.h("div", { class: "set-head" }, ui.h("span", { class: "set-name", text: "API key" }), forget), key, scope);
+
+  const refresh = () => {
+    const compatible = provider.value !== "anthropic";
+    endpointField.hidden = !compatible;
+    thinking.disabled = !(provider.value === "anthropic" || hostOf(endpoint.value) === "openrouter.ai");
+    pillProvider.textContent = !compatible ? "Anthropic" : hostOf(endpoint.value) === "openrouter.ai" ? "OpenRouter" : "Compatible API";
+    pillModel.textContent = modelName(model.value);
+    const saved = savedKey(), fresh = Boolean(key.value.trim());
+    pillKey.textContent = fresh ? "new key" : saved ? "key saved" : "no key";
+    pillKey.classList.toggle("on", fresh || saved);
+    forget.hidden = !saved;
+    key.placeholder = saved ? "saved · leave blank to keep" : "paste your key";
+    scope.textContent = compatible
+      ? "Stored in this tab for this endpoint. The browser calls it directly, so it must allow CORS."
+      : "Stored in this tab; shared with Paper.";
+  };
+  provider.onchange = () => { model.value = provider.value === "anthropic" ? DEFAULT_CONFIG.model : ""; endpoint.value = provider.value === "anthropic" ? DEFAULT_CONFIG.baseUrl : ""; key.value = ""; refresh(); };
+  for (const control of [model, endpoint, key]) control.oninput = refresh;
+  crawl.oninput = () => { crawlState.textContent = crawl.value.trim() ? "new key" : firecrawlKey() ? "set" : "not set"; };
+  refresh();
+
+  const save = button("save settings", () => {
+    try {
+      const value = config({ provider: provider.value, model: model.value, baseUrl: endpoint.value, maxTokens: tokens, thinking: thinking.getAttribute("aria-checked") === "true", webSearch: current.webSearch && provider.value === current.provider });
+      if (runner.active) runner.stop(); if (key.value.trim()) setKey(value, key.value); if (crawl.value.trim()) setFirecrawlKey(crawl.value); saveSettings(value);
+      const chat = mounted ? store.get(mounted.uid) : null;
+      if (!chat) { const next = store.create(value); ui.closeDialog(); ui.go("/pip/" + next.uid); return; }
+      if (identity(value) !== identity(chat.config) && chat.turns.length) {
+        const next = store.create(value);
+        if (recovery) store.update(next.uid, c => { c.draft = recovery.text; c.context = structuredClone(recovery.context); });
+        ui.closeDialog(); ui.go("/pip/" + next.uid); ui.say("New model, new chat. The previous conversation is kept.");
+      } else { store.update(chat.uid, c => { c.config = value; }); ui.closeDialog(); render(); }
+    } catch (failure) { error.textContent = failure.message; }
+  }, { class: "set-save" });
+
+  const form = ui.h("div", { class: "pip-config" },
+    status,
+    group("connection",
+      field("Provider", provider),
+      field("Model", model),
+      endpointField),
+    group("access", keyField),
+    group("search", ui.h("details", { class: "set-details" },
+      ui.h("summary", {},
+        ui.h("span", { class: "set-summary" }, ui.h("span", { class: "caret", "aria-hidden": "true", text: "▸" }), ui.h("span", { text: "web search key" })),
+        crawlState),
+      ui.h("div", { class: "set-details-body" }, field("Firecrawl", crawl, "Optional. Raises the free search limit; without it Pip uses the shared low-volume key.")))),
+    group("reply",
+      ui.h("div", { class: "set-field" }, ui.h("span", { class: "set-name", text: "Reply limit · tokens" }), ui.h("div", { class: "limit-choices" }, ...limits)),
+      ui.h("div", { class: "set-toggle" },
+        ui.h("div", {}, ui.h("span", { class: "set-name", text: "Reasoning summary" }), ui.h("span", { class: "set-hint", text: "Include the model's reasoning summary with each reply." })),
+        thinking)),
+    error, note,
+    ui.h("div", { class: "set-actions" }, button("cancel", () => ui.closeDialog(), { class: "set-cancel" }), save));
+  await ui.dialog("pip · API settings", form, []);
 }
 
 addEventListener("pagehide", () => { try { runner.stop(); } catch {} leave(); });
