@@ -9,11 +9,11 @@ export const SCALE = 2;
 
 export const STATE_COLORS = Object.freeze({
   patrol: '#e9dcb4', suspicious: '#ecc981', investigate: '#ecc981', alert: '#f0705e', search: '#efa58e',
-  lockdown: '#c1aed5', returning: '#a5bfdc', down: '#6b6b6b',
+  lockdown: '#c1aed5', returning: '#a5bfdc', down: '#6b6b6b', dead: '#b34a3b',
 });
 export const STATE_NAMES = Object.freeze({
   patrol: 'patrol', suspicious: 'suspicious', investigate: 'investigating', alert: 'alert', search: 'searching',
-  lockdown: 'lockdown', returning: 'returning', down: 'unconscious',
+  lockdown: 'lockdown', returning: 'returning', down: 'unconscious', dead: 'dead',
 });
 
 const hash = (a, b) => { const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return v - Math.floor(v); };
@@ -240,6 +240,14 @@ function drawPlayer(ctx, p, time) {
   ctx.fillStyle = '#1b2526'; ctx.beginPath(); ctx.arc(1.4, 0, 2.7, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#ecc981'; ctx.fillRect(-.6, -.6, 3, 1.2);
   ctx.fillStyle = '#f0e9dd'; ctx.fillRect(3.4, -.6, 1, 1.2);
+  // The pistol is visible only while it is out; the knife is always on the belt.
+  if (time - (p.shotAt ?? -99) < .4) {
+    ctx.fillStyle = '#2b3336'; ctx.fillRect(3.6, .9, 5.2, 1.5);
+    ctx.fillStyle = '#ecc981'; ctx.fillRect(8.5, 1.1, 1.6, 1.1);
+  } else {
+    ctx.strokeStyle = '#d8d2c4'; ctx.lineWidth = .7;
+    ctx.beginPath(); ctx.moveTo(3.1, 2.1); ctx.lineTo(6.4, 1.1); ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -247,6 +255,15 @@ function drawGuard(ctx, g, time, selected) {
   ctx.save();
   ctx.translate(g.x, g.y);
   ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(.8, 1.8, 6.6, 5.6, 0, 0, Math.PI * 2); ctx.fill();
+  if (g.dead) {
+    const fall = Math.min(1, Math.max(0, (time - (g.deadAt || 0)) / .32));
+    ctx.rotate(g.facing + 1.15 + (1 - fall) * .7);
+    ctx.fillStyle = '#3d3229'; ctx.beginPath(); ctx.ellipse(0, 0, 7.4, 3.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2f2821'; ctx.beginPath(); ctx.arc(6.8, .2, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#7d2a21'; ctx.fillRect(-3.5, -1.6, 2.2, 3.2);
+    ctx.restore();
+    return;
+  }
   if (g.down) {
     ctx.rotate(g.facing + 1.2);
     ctx.fillStyle = '#4a5233'; ctx.beginPath(); ctx.ellipse(0, 0, 7, 3.6, 0, 0, Math.PI * 2); ctx.fill();
@@ -297,6 +314,44 @@ function drawIndicator(ctx, g, time) {
   ctx.lineWidth = 2.4; ctx.strokeStyle = 'rgba(8,8,10,.85)'; ctx.strokeText(mark, 0, 0);
   ctx.fillStyle = color; ctx.fillText(mark, 0, 0);
   ctx.restore();
+}
+
+function drawBlood(ctx, sim) {
+  for (const stain of sim.blood) {
+    const grow = stain.pool ? Math.min(1, stain.age / .5) : 1;
+    const r = Math.max(.5, stain.r * (.35 + .65 * grow));
+    ctx.fillStyle = stain.pool ? 'rgba(94,22,19,.52)' : 'rgba(122,32,26,.55)';
+    ctx.beginPath(); ctx.arc(stain.x, stain.y, r, 0, Math.PI * 2); ctx.fill();
+    if (stain.pool) {
+      ctx.fillStyle = 'rgba(60,14,13,.45)';
+      ctx.beginPath(); ctx.arc(stain.x + .8, stain.y + .6, r * .55, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+}
+
+function drawCombat(ctx, sim) {
+  for (const tracer of sim.tracers) {
+    const k = Math.min(1, tracer.age / tracer.life);
+    const alpha = 1 - k;
+    ctx.strokeStyle = `rgba(255,226,160,${alpha * .85})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(tracer.x0, tracer.y0); ctx.lineTo(tracer.x1, tracer.y1); ctx.stroke();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = `rgba(255,238,190,${alpha * .9})`;
+    ctx.beginPath(); ctx.arc(tracer.x0, tracer.y0, 2.8 * alpha, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = `rgba(240,112,94,${alpha * .5})`;
+    ctx.beginPath(); ctx.arc(tracer.x1, tracer.y1, 1.8 * alpha, 0, Math.PI * 2); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  for (const slash of sim.slashes) {
+    const k = Math.min(1, slash.age / slash.life);
+    ctx.strokeStyle = `rgba(240,233,221,${(1 - k) * .9})`;
+    ctx.lineWidth = 1.1;
+    ctx.beginPath(); ctx.arc(slash.x, slash.y, 8 + k * 7, slash.angle - .95, slash.angle + .95); ctx.stroke();
+    ctx.strokeStyle = `rgba(240,112,94,${(1 - k) * .55})`;
+    ctx.lineWidth = .7;
+    ctx.beginPath(); ctx.arc(slash.x, slash.y, 10 + k * 7, slash.angle - .7, slash.angle + .7); ctx.stroke();
+  }
 }
 
 function drawDoors(ctx, sim) {
@@ -376,7 +431,8 @@ export function drawWorld(ctx, sim, view, opts = {}) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = '#07080a'; ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  const sx = Math.round(cam.x * SCALE) / SCALE, sy = Math.round(cam.y * SCALE) / SCALE;
+  const sx = Math.round(Math.max(0, Math.min(WORLD_W - VIEW_W, cam.x + (opts.shake?.x || 0))) * SCALE) / SCALE;
+  const sy = Math.round(Math.max(0, Math.min(WORLD_H - VIEW_H, cam.y + (opts.shake?.y || 0))) * SCALE) / SCALE;
   ctx.setTransform(SCALE, 0, 0, SCALE, -sx * SCALE, -sy * SCALE);
   ctx.drawImage(staticLayer(), 0, 0, WORLD_W * SCALE, WORLD_H * SCALE, 0, 0, WORLD_W, WORLD_H);
   drawDoors(ctx, sim);
@@ -386,6 +442,8 @@ export function drawWorld(ctx, sim, view, opts = {}) {
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(darknessLayer(), 0, 0, COLS, ROWS, 0, 0, WORLD_W, WORLD_H);
   ctx.imageSmoothingEnabled = false;
+  // Blood stays legible in unlit rooms; it is the loudest visual signal in the game.
+  drawBlood(ctx, sim);
 
   // Vision cones read as light beams cutting through the dark.
   const onScreen = (x, y, pad = 140) => x > cam.x - pad && x < cam.x + VIEW_W + pad && y > cam.y - pad && y < cam.y + VIEW_H + pad;
@@ -420,6 +478,7 @@ export function drawWorld(ctx, sim, view, opts = {}) {
   for (const g of sim.guards) if (!g.down && onScreen(g.x, g.y, 20)) drawGuard(ctx, g, time, opts.selected === g.id);
   for (const g of sim.guards) if (g.carried) drawGuard(ctx, g, time, false);
   drawPlayer(ctx, sim.player, time);
+  drawCombat(ctx, sim);
   if (sim.player.locker) {
     ctx.strokeStyle = `rgba(236,201,129,${.5 + .3 * Math.sin(time * 4)})`; ctx.lineWidth = .8;
     ctx.strokeRect(toTile(sim.player.x) * TILE + 1.5, toTile(sim.player.y) * TILE + 1.5, TILE - 3, TILE - 3);
@@ -581,7 +640,7 @@ function drawIntel(ctx, sim, opts) {
       } else { ctx.beginPath(); ctx.arc(task.x, task.y, 3.5, 0, Math.PI * 2); ctx.stroke(); }
     }
     if (g.down && !net.missing.has(g.id) && !net.found.has(g.id)) continue;
-    const role = g.down ? 'down' : task ? (task.label || task.role) : g.lastAction;
+    const role = g.dead ? 'dead' : g.down ? 'down' : task ? (task.label || task.role) : g.lastAction;
     label(ctx, `${g.name} · ${String(role).slice(0, 30)}`, g.x, g.y + 12, STATE_COLORS[g.state] || '#e9dcb4', selected ? 'rgba(40,36,28,.92)' : 'rgba(8,9,11,.78)');
   }
   if (plan?.roles) for (const role of plan.roles) if (role.exit && (role.role === 'block' || role.role === 'intercept')) {

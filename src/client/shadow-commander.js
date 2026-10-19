@@ -47,7 +47,7 @@ const LAB_NAMES = { duct: 'the air duct', keycard: 'the keycard door', north: 't
 export function emptyDossier() {
   return {
     v: 1, attempts: 0, captures: 0, extractions: 0, entries: {}, labEntries: {}, escapes: {}, vanish: {}, found: {},
-    afterDetect: { hid: 0, fled: 0 }, distractions: 0, takedowns: 0, alerts: 0, running: 0, predictions: { hit: 0, miss: 0 }, history: [],
+    afterDetect: { hid: 0, fled: 0 }, distractions: 0, takedowns: 0, kills: 0, alerts: 0, running: 0, predictions: { hit: 0, miss: 0 }, history: [],
   };
 }
 
@@ -60,7 +60,7 @@ export function readDossier(value) {
     attempts: Number(value.attempts) || 0, captures: Number(value.captures) || 0, extractions: Number(value.extractions) || 0,
     entries: map(value.entries), labEntries: map(value.labEntries), escapes: map(value.escapes), vanish: map(value.vanish), found: map(value.found),
     afterDetect: { hid: Number(value.afterDetect?.hid) || 0, fled: Number(value.afterDetect?.fled) || 0 },
-    distractions: Number(value.distractions) || 0, takedowns: Number(value.takedowns) || 0, alerts: Number(value.alerts) || 0, running: Number(value.running) || 0,
+    distractions: Number(value.distractions) || 0, takedowns: Number(value.takedowns) || 0, kills: Number(value.kills) || 0, alerts: Number(value.alerts) || 0, running: Number(value.running) || 0,
     predictions: { hit: Number(value.predictions?.hit) || 0, miss: Number(value.predictions?.miss) || 0 },
     history: Array.isArray(value.history) ? value.history.slice(0, 8) : [],
   };
@@ -92,6 +92,7 @@ export function recordMission(dossier, report) {
   const blend = (old, value) => d.attempts === 1 ? value : round((old * .6 + value * .4) * 100) / 100;
   d.distractions = blend(d.distractions, report.distractions || 0);
   d.takedowns = blend(d.takedowns, report.takedownsKnown || 0);
+  d.kills = blend(d.kills, report.killsKnown || 0);
   d.alerts = blend(d.alerts, report.alerts || 0);
   d.running = blend(d.running, report.running || 0);
   d.history.unshift({ at: Date.now(), outcome: report.outcome, entry: report.entry, labEntry: report.labEntry, alerts: report.alerts, time: report.time, difficulty: report.difficulty });
@@ -122,6 +123,7 @@ export function dossierInsights(dossier) {
   if (after >= .8) lines.push(d.afterDetect.hid > d.afterDetect.fled ? 'Tends to go to ground close by when spotted.' : 'Tends to run far when spotted.');
   if (d.distractions >= 1.5) lines.push(`Uses distractions (${d.distractions.toFixed(1)} per attempt): noises may be decoys.`);
   if (d.takedowns >= .8) lines.push(`Knocks out guards (${d.takedowns.toFixed(1)} discovered per attempt).`);
+  if (d.kills >= .5) lines.push(`Leaves bodies: ${d.kills.toFixed(1)} killed guards found per attempt. Patrols will pair up.`);
   if (d.running >= .35) lines.push('Moves fast and loud.');
   else if (d.attempts >= 2 && d.running < .12) lines.push('Moves slowly and quietly.');
   const p = d.predictions.hit + d.predictions.miss;
@@ -278,6 +280,8 @@ export function buildSituation(sim, kind, event = null) {
   }
 
   const failures = new Set([...net.found, ...net.missing]).size;
+  const knownKills = [...net.found].map(id => sim.guards.find(g => g.id === id)).filter(g => g && g.dead);
+  const armed = knownKills.length > 0 || net.evidence.some(item => item.kind === 'corpse' || /gunshot/i.test(item.label || ''));
   const evidence = net.evidence.slice(0, 5).map(item => ({ kind: item.kind, zone: item.zone, ago: whole(t - item.at), label: item.label, count: item.count || 1, cleared: item.cleared != null }));
   const objectiveGuard = known.find(g => g.objective);
   const originGuardField = origin ? distanceField(toTile(origin.x), toTile(origin.y), guardWalk) : null;
@@ -289,13 +293,15 @@ export function buildSituation(sim, kind, event = null) {
       sightings: net.sightings.slice(0, 4).map(item => ({ zone: item.zone, ago: whole(t - item.at) })),
       reach: lkp ? whole(reach) : null,
       carryingData: net.breach, keycardMissing: net.keycardMissing,
+      armed,
     },
     event: event && kind === 'anomaly' ? { kind: event.kind, label: event.label, zone: origin.zone, x: event.x, y: event.y, ago: whole(t - (event.at ?? t)), count: event.count || 1, loud: event.loud ? round(event.loud) : 0, guard: event.guard } : event?.kind === 'stand_down' ? { kind: 'stand_down' } : null,
     evidence,
     force: {
-      active: known.length, free: freeGuards.length, failures,
+      active: known.length, free: freeGuards.length, failures, killed: knownKills.length,
       missing: [...net.missing].map(id => sim.guards.find(g => g.id === id)?.name).filter(Boolean),
       found: [...net.found].map(id => sim.guards.find(g => g.id === id)?.name).filter(Boolean),
+      dead: knownKills.map(g => g.name),
     },
     guards: known.map(g => {
       const at = g.known || g;
@@ -308,7 +314,7 @@ export function buildSituation(sim, kind, event = null) {
       attempts: dossier.attempts, captures: dossier.captures, extractions: dossier.extractions,
       entries: dossier.entries, labEntries: dossier.labEntries, escapes: dossier.escapes, vanish: dossier.vanish, found: dossier.found,
       afterDetect: { hid: round(dossier.afterDetect.hid), fled: round(dossier.afterDetect.fled) },
-      distractionsPerAttempt: dossier.distractions, takedownsPerAttempt: dossier.takedowns, alertsPerAttempt: dossier.alerts,
+      distractionsPerAttempt: dossier.distractions, takedownsPerAttempt: dossier.takedowns, killsPerAttempt: dossier.kills, alertsPerAttempt: dossier.alerts,
       runningShare: dossier.running, predictionAccuracy: dossier.predictions.hit + dossier.predictions.miss > 0 ? round(dossier.predictions.hit / (dossier.predictions.hit + dossier.predictions.miss)) : null,
     },
     plan: net.plan ? { strategy: net.plan.strategy, summary: net.plan.summary, age: whole(t - (net.decision?.t ?? t)), status: net.planStatus || 'issued', predicted: net.prediction?.zone ? ZONE_BY_ID[net.prediction.zone]?.name : null } : null,
@@ -365,6 +371,7 @@ export function localAnswers(kind, situation, random = Math.random) {
   if (!questions) return null;
   const c = situation.candidates, td = situation.tendencies, influence = situation.rules?.influence ?? .5;
   const lkp = situation.intruder.lastSeen, breached = situation.objective.breached;
+  const lethal = Number(td.killsPerAttempt) || 0;
   const after = td.afterDetect.hid + td.afterDetect.fled;
   const hidShare = after > 0 ? td.afterDetect.hid / (after + .5) : .35;
   const answers = {};
@@ -381,12 +388,12 @@ export function localAnswers(kind, situation, random = Math.random) {
     answers.watch = choose(Object.fromEntries(c.posts.map(item => [item.id, (item.id === 'server_door' ? .05 : .2) + influence * 1.8 * item.tendency / postTotal + (item.near ? .8 : 0) + random() * .3])), random, .3, .05);
     const failures = situation.force.failures;
     answers.pattern = choose({
-      standard: .5 - failures * .2,
-      paired: .2 + Math.min(1, td.takedownsPerAttempt * .3) * influence + failures * .55,
+      standard: .5 - failures * .2 - lethal * .35,
+      paired: .2 + Math.min(1, td.takedownsPerAttempt * .3) * influence + failures * .55 + lethal * .7,
       staggered: .2 + Math.min(.8, td.distractionsPerAttempt * .15) * influence + random() * .15,
-      tight: .15 + (td.extractions ? .35 * influence : 0) + (breached ? .5 : 0),
+      tight: .15 + (td.extractions ? .35 * influence : 0) + (breached ? .5 : 0) + lethal * .2,
     }, random, .25, .08);
-    const level = situation.event?.kind === 'stand_down' ? 2.3 : 1 + Math.min(1, td.attempts * .25) * influence + Math.min(.8, failures * .4);
+    const level = situation.event?.kind === 'stand_down' ? 2.3 : 1 + Math.min(1, td.attempts * .25) * influence + Math.min(.8, failures * .4) + Math.min(.6, lethal * .3);
     answers.level = score(level);
     answers.probe = noul(.2 + Math.min(.5, (td.found.locker || 0) * .25 + Object.entries(td.vanish).filter(([id]) => id.endsWith(':locker')).reduce((sum, [, n]) => sum + n, 0) * .15) * influence * 1.4);
     return answers;
@@ -406,9 +413,9 @@ export function localAnswers(kind, situation, random = Math.random) {
     const objectiveNear = breached || lkpServer <= 1;
     const free = situation.force.free;
     answers.response = choose({
-      swarm: (free <= 2 ? .8 : .25) + (situation.difficulty === 'normal' ? .25 : 0),
-      pincer: free >= 3 && best ? .55 + answers.heading.confidence * .6 + (situation.difficulty !== 'normal' ? .15 : 0) : .05,
-      contain: .35 + (c.exits.length <= 3 ? .25 : 0) + (answers.heading.choice === 'hide' ? .4 : 0),
+      swarm: (free <= 2 ? .8 : .25) + (situation.difficulty === 'normal' ? .25 : 0) + lethal * .15,
+      pincer: free >= 3 && best ? .55 + answers.heading.confidence * .6 + (situation.difficulty !== 'normal' ? .15 : 0) + lethal * .25 : .05,
+      contain: .35 + (c.exits.length <= 3 ? .25 : 0) + (answers.heading.choice === 'hide' ? .4 : 0) + lethal * .3,
       protect: objectiveNear ? .95 : .2,
     }, random, .25, .12);
     const ahead = best && best.guardDist != null && best.dist != null && best.guardDist < best.dist + 6;
@@ -466,11 +473,11 @@ export function localAnswers(kind, situation, random = Math.random) {
 
   if (kind === 'anomaly') {
     const event = situation.event || { kind: 'noise', loud: 2 };
-    const serious = { body: .97, missing: .92, breach: .99, keycard: .9, cameras: .85, glimpse: .82 }[event.kind];
+    const serious = { body: .97, corpse: 1, missing: .92, breach: .99, keycard: .9, cameras: .85, glimpse: .82 }[event.kind];
     const nearCritical = ['server', 'lab', 'lab_back', 'helipad', 'security'].includes(event.zone);
     const decoyBias = Math.min(.5, td.distractionsPerAttempt * .12) * influence;
     answers.worth = noul(serious ?? (.38 + (event.loud || 0) / 12 + (nearCritical ? .2 : 0) + (situation.phase !== 'calm' ? .12 : 0) + decoyBias * .3 + (event.count > 1 ? .15 : 0)));
-    const threat = { body: 3, breach: 3, missing: 2.4, keycard: 2.4, cameras: 1.8, glimpse: 2 }[event.kind] ?? Math.min(2.2, .7 + (event.loud || 0) / 6 + (event.count > 1 ? .4 : 0));
+    const threat = { body: 3, corpse: 3, breach: 3, missing: 2.4, keycard: 2.4, cameras: 1.8, glimpse: 2 }[event.kind] ?? Math.min(2.2, .7 + (event.loud || 0) / 6 + (event.count > 1 ? .4 : 0));
     answers.threat = score(threat);
     const farFromObjective = (TO_SERVER[event.zone] ?? 6) >= 3;
     answers.decoy = noul(['noise', 'glimpse'].includes(event.kind) ? .18 + decoyBias + (farFromObjective ? .15 : 0) : .08);

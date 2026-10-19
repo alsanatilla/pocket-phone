@@ -13,6 +13,7 @@ export const SHADOW_GAME = Object.freeze({
   role: 'You command the security force of a guarded research facility. One intruder is inside or approaching. You choose how the guards respond; game code moves them.',
   goal: 'Capture the intruder before they steal the lab data and reach the helipad. Protect the server room and the extraction routes.',
   knowledge: 'You only know what guards, cameras and radios have reported. Positions are reports with an age, not live tracking. Predictions can be wrong; fresh evidence beats an old plan.',
+  bodies: 'A guard found unconscious can be revived by a colleague. A guard found dead cannot. A corpse or a gunshot is stronger evidence than a noise, and the intruder may be armed.',
   dossier: 'tendencies summarises what security has learned about this intruder over earlier attempts. Recent attempts weigh more. The intruder can change habits.',
   coordinates: 'Distances are in tiles. The facility is 64x44 tiles; north is up.',
 });

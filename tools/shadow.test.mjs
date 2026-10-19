@@ -353,3 +353,78 @@ test('a delayed Jev answer cannot replace newer movement evidence in the same ro
   assert.equal(decision.source, 'local');
   assert.match(decision.status, /superseded by newer evidence/);
 });
+
+test('the knife kills silently, leaves blood and feeds the pistol from the body', () => {
+  const sim = new ShadowSim({ seed: 41, mode: 'commander' });
+  quiet(sim);
+  const guard = sim.guards[0];
+  Object.assign(guard, at(24, 22), { facing: 0, route: [{ ...at(24, 22), hold: 999, face: 0 }], routeIndex: 0 });
+  Object.assign(sim.player, at(23, 22));
+  const ammo = sim.player.ammo;
+  sim.knife();
+  assert.equal(sim.player.action?.kind, 'kill');
+  stepFor(sim, .6);
+  assert.equal(guard.dead, true);
+  assert.equal(guard.down, true);
+  assert.equal(sim.metrics.kills, 1);
+  assert.equal(sim.metrics.takedowns, 0, 'a kill is not counted as a nonlethal takedown');
+  assert.equal(sim.player.ammo, ammo + 1, 'the guard had a magazine');
+  assert.ok(sim.blood.length > 0, 'the kill leaves blood');
+  assert.ok(sim.events.some(event => event.type === 'kill'), 'the UI receives a kill event');
+});
+
+test('the pistol is loud, one shot kills and the shot creates a sound event', () => {
+  const sim = new ShadowSim({ seed: 42, mode: 'commander' });
+  quiet(sim);
+  const guard = sim.guards[0];
+  Object.assign(guard, at(27, 22), { facing: Math.PI, route: [{ ...at(27, 22), hold: 999, face: Math.PI }], routeIndex: 0 });
+  Object.assign(sim.player, at(24, 22));
+  sim.player.ammo = 3;
+  sim.shoot(at(27, 22));
+  assert.equal(guard.dead, true);
+  assert.equal(sim.metrics.kills, 1);
+  assert.equal(sim.metrics.shots, 1);
+  assert.equal(sim.player.ammo, 2);
+  assert.ok(sim.tracers.length > 0);
+  assert.ok(sim.rings.some(ring => ring.kind === 'gunshot'), 'guards can hear the shot');
+  assert.ok(sim.blood.length > 0);
+});
+
+test('a dead guard cannot be revived by a colleague', () => {
+  const sim = new ShadowSim({ seed: 43, mode: 'commander' });
+  quiet(sim);
+  const [rescuer, body] = sim.guards;
+  Object.assign(rescuer, at(24, 22), { facing: 0, state: 'investigate', task: { role: 'revive', ...at(26, 22), target: body.id, label: 'check body' } });
+  Object.assign(body, at(26, 22), { down: true, dead: true, hidden: false, bodyClaimed: rescuer.id });
+  sim.revive(rescuer, 1 / 60);
+  assert.equal(body.down, true, 'a corpse stays down');
+  assert.equal(body.dead, true);
+  assert.equal(rescuer.task?.role, 'investigate', 'the rescuer confirms the death instead of reviving');
+});
+
+test('the dossier records lethal habits and the commander plans for them', () => {
+  const d = recordMission(emptyDossier(), {
+    outcome: 'extracted', entry: 'gate', labEntry: 'keycard', data: true, alerts: 0, sightings: 0,
+    takedownsKnown: 1, killsKnown: 2, distractions: 0, running: 0, predictionsHit: 0, predictionsMiss: 0,
+    escapes: [], vanish: [], foundIn: [], afterDetect: [], time: 120, difficulty: 'normal', interceptions: 0,
+    searches: 0, reacquired: 0, recoveries: 0, cameras: false,
+  });
+  assert.equal(d.kills, 2);
+  assert.match(dossierInsights(d).join(' '), /Leaves bodies/);
+  const sim = new ShadowSim({ seed: 44, mode: 'commander', dossier: d });
+  const situation = buildSituation(sim, 'posture');
+  assert.equal(situation.tendencies.killsPerAttempt, 2);
+  assert.equal(localAnswers('posture', situation, () => .5).pattern.type, 'choice');
+});
+
+test('a colleague who finds a corpse reports a death, not a body to revive', () => {
+  const sim = new ShadowSim({ seed: 45, mode: 'commander' });
+  quiet(sim);
+  const [watcher, body] = sim.guards;
+  Object.assign(watcher, at(24, 22), { facing: 0, state: 'patrol', sees: false, bodyMeter: 0, bodyTarget: null });
+  Object.assign(body, at(27, 22), { down: true, dead: true, hidden: false, carried: false, bodyClaimed: null });
+  for (let i = 0; i < 90 && watcher.task?.role !== 'investigate'; i++) sim.perceiveBodies(watcher, 1 / 60);
+  assert.equal(watcher.task?.role, 'investigate');
+  assert.ok(sim.queue.some(message => message.kind === 'corpse'), 'the radio report names a corpse');
+  assert.match(watcher.lastAction, /dead/);
+});

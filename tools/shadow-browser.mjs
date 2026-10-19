@@ -76,6 +76,49 @@ try {
   await page.waitForFunction(() => document.querySelector('.shadow-canvas').shadowDebug.sim.decisions.some(d => d.source === 'jev'), null, { timeout: 12000 });
   console.log('PASS: relay answers (mock Jev) replace local decisions');
 
+  // Lethal combat: the knife is a keyboard action, leaves a body and blood.
+  await page.evaluate(() => {
+    const d = document.querySelector('.shadow-canvas').shadowDebug;
+    if (d.state.intel) d.intel();
+    d.sim.noCapture = true;
+    const g = d.sim.guards.find(item => !item.down && !item.objective);
+    g.x = 24 * 16 + 8; g.y = 22 * 16 + 8; g.facing = 0; g.state = 'patrol'; g.task = null; g.path = []; g.sees = false; g.meter = 0;
+    g.route = [{ x: g.x, y: g.y, hold: 999, face: 0 }]; g.routeIndex = 0;
+    d.sim.player.x = 23 * 16 + 8; d.sim.player.y = 22 * 16 + 8; d.sim.player.crouch = false; d.sim.player.action = null;
+    d.view.snap = true;
+  });
+  await page.keyboard.press('x');
+  await page.waitForFunction(() => document.querySelector('.shadow-canvas').shadowDebug.sim.metrics.kills > 0, null, { timeout: 5000 });
+  await page.waitForTimeout(400);
+  const melee = await page.evaluate(() => {
+    const d = document.querySelector('.shadow-canvas').shadowDebug;
+    return { kills: d.sim.metrics.kills, blood: d.sim.blood.length, ammo: d.sim.player.ammo };
+  });
+  assert.equal(melee.kills, 1);
+  assert.ok(melee.blood > 0, 'the knife leaves blood');
+  await page.screenshot({ path: `${report}/combat.png` });
+  console.log('PASS: keyboard knife kill, blood and ammo pickup');
+
+  // The pistol is a separate key and a loud action.
+  await page.evaluate(() => {
+    const d = document.querySelector('.shadow-canvas').shadowDebug;
+    const g = d.sim.guards.find(item => !item.down && !item.objective);
+    g.x = 27 * 16 + 8; g.y = 22 * 16 + 8; g.facing = Math.PI; g.state = 'patrol'; g.task = null; g.path = []; g.sees = false; g.meter = 0;
+    g.route = [{ x: g.x, y: g.y, hold: 999, face: Math.PI }]; g.routeIndex = 0;
+    d.sim.player.x = 24 * 16 + 8; d.sim.player.y = 22 * 16 + 8; d.sim.player.facing = 0; d.sim.player.action = null; d.sim.player.ammo = 3;
+    d.view.snap = true;
+  });
+  await page.keyboard.press('g');
+  await page.waitForFunction(() => document.querySelector('.shadow-canvas').shadowDebug.sim.metrics.shots > 0, null, { timeout: 3000 });
+  const shot = await page.evaluate(() => {
+    const d = document.querySelector('.shadow-canvas').shadowDebug;
+    return { shots: d.sim.metrics.shots, ammo: d.sim.player.ammo, noises: d.sim.metrics.noises };
+  });
+  assert.equal(shot.shots, 1);
+  assert.equal(shot.ammo, 2);
+  assert.ok(shot.noises > 0, 'the pistol makes a loud noise');
+  console.log('PASS: keyboard pistol shot and gunshot noise');
+
   for (const width of [390, 820]) {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(300);

@@ -64,6 +64,9 @@ function createSound(enabled) {
     alarm() { tone(440, 0, .32, 'sawtooth', .025, -120); },
     clink() { tone(1900, 0, .05, 'triangle', .04); tone(2400, .05, .04, 'triangle', .025); },
     thud() { tone(120, 0, .18, 'sine', .09, -60); },
+    knife() { tone(2600, 0, .05, 'triangle', .045, -1800); tone(420, .03, .1, 'sawtooth', .03, -180); },
+    gun() { tone(120, 0, .2, 'sawtooth', .13, -80); tone(1500, 0, .035, 'square', .07, -1100); tone(2200, .01, .025, 'triangle', .04, -900); },
+    kill() { tone(100, 0, .14, 'sine', .1, -50); tone(320, .02, .08, 'triangle', .05, -120); },
     pickup() { tone(660, 0, .07, 'triangle', .05); tone(990, .07, .1, 'triangle', .05); },
     success() { [523, 659, 784, 1046].forEach((f, i) => tone(f, i * .12, .2, 'triangle', .05)); },
     fail() { [392, 330, 262].forEach((f, i) => tone(f, i * .16, .26, 'sawtooth', .035)); },
@@ -192,7 +195,7 @@ export function mountShadow(body, api = {}) {
         h('div', { class: 'shadow-brief-copy' },
           h('p', { class: 'shadow-kicker', text: 'tactical infiltration · versus jev' }),
           h('h2', { class: 'shadow-title', text: 'it studies you too' }),
-          h('p', { class: 'shadow-lede', text: 'Slip into a guarded research facility, copy the data from the lab server and reach the helipad. Jev commands the security force: it reads every radio report, guesses where you went and remembers how you played last time.' }),
+          h('p', { class: 'shadow-lede', text: 'Slip into a guarded research facility, copy the data from the lab server and reach the helipad. Jev commands the security force: it reads every radio report, guesses where you went and remembers how you played last time. Go quiet with takedowns, or take the knife and pistol and make it loud.' }),
           h('div', { class: 'shadow-difficulty', role: 'radiogroup', 'aria-label': 'Difficulty' }, ['normal', 'hard', 'extreme'].map(choice)),
           h('button', { type: 'button', class: 'primary shadow-begin', onclick: begin }, 'begin infiltration'),
           h('p', { class: 'small muted shadow-commander-line', text: 'commander · checking for Jev…' })),
@@ -214,6 +217,7 @@ export function mountShadow(body, api = {}) {
         h('section', { class: 'shadow-panel' },
           h('h3', { text: 'controls' }),
           h('ul', { class: 'shadow-controls' },
+            h('li', { text: 'X knife kill · G pistol · E nonlethal / interact' }),
             h('li', { text: 'WASD / arrows move · Shift run · C crouch' }),
             h('li', { text: 'E or Space: take down, drag, hide, use · hold to download' }),
             h('li', { text: 'Q knock on a wall · F throw a pebble (toward the mouse)' }),
@@ -254,6 +258,7 @@ export function mountShadow(body, api = {}) {
         h('li', { text: 'It only knows what guards and cameras reported, and reports take time to travel by radio. Take a guard down before they finish calling it in and nobody hears.' }),
         h('li', { text: 'Between attempts security keeps a dossier: how you got in, where it lost you, where it found you. Recent attempts weigh more, so changing your habits works.' }),
         h('li', { text: 'Game code moves the guards: paths, sight, hearing and reactions stay instant. If Jev is slow or unavailable the local model answers the same questions at once. With an OpenRouter key saved in Pip, Jev 1.14 is billed to your OpenRouter account.' }),
+        h('li', { text: 'Nonlethal takedowns keep the alarm quiet. The knife is silent and gives you a pistol round; the pistol is loud, one-shot and brings guards running. A dead guard cannot be revived, and a body found later changes how security patrols.' }),
         h('li', { text: 'Guards cannot see through walls. Low crates hide a crouched body. Tall grass hides you unless someone is right on top of you. Lockers and ducts hide you completely, unless a guard decides to check.' })));
   }
 
@@ -315,7 +320,7 @@ export function mountShadow(body, api = {}) {
     const node = h('div', { class: 'shadow-live' },
       h('div', { class: 'shadow-layout' },
         h('div', { class: 'shadow-main' }, refs.stage, touch,
-          h('p', { class: 'shadow-keys', text: 'WASD move · Shift run · C crouch · E act (hold to download) · Q knock · F throw · Tab intel · P pause' })),
+          h('p', { class: 'shadow-keys', text: 'X knife · G pistol · WASD move · Shift run · C crouch · E act (hold to download) · Q knock · F throw · Tab intel · P pause' })),
         h('aside', { class: 'shadow-side' },
           h('section', { class: 'shadow-panel shadow-command' },
             h('h3', {}, h('span', { text: 'command' }), h('span', { class: 'shadow-tag', text: 'jev · system one' })),
@@ -332,8 +337,8 @@ export function mountShadow(body, api = {}) {
     const button = (label, action, extra = '') => h('button', { type: 'button', class: 'shadow-touch-key ' + extra, 'data-action': action }, label);
     return h('div', { class: 'shadow-touch', role: 'group', 'aria-label': 'Touch controls' }, stick,
       h('div', { class: 'shadow-touch-keys' },
-        button('act', 'act', 'primary-key'), button('crouch', 'crouch'), button('run', 'run'),
-        button('knock', 'knock'), button('throw', 'throw'), button('intel', 'intel')));
+        button('act', 'act', 'primary-key'), button('crouch', 'crouch'), button('run', 'run'), button('intel', 'intel'),
+        button('knife', 'knife', 'danger-key'), button('pistol', 'shoot', 'danger-key'), button('knock', 'knock'), button('throw', 'throw')));
   }
 
   function startLoop(sim, view, startPaused = false) {
@@ -342,9 +347,14 @@ export function mountShadow(body, api = {}) {
     const controller = new AbortController(), signal = controller.signal;
     const camView = { x: 0, y: 0, snap: true };
     const keys = { up: false, down: false, left: false, right: false, run: false };
-    const edges = { crouch: false, interact: false, knock: false, throw: false };
+    const edges = { crouch: false, interact: false, knife: false, shoot: false, knock: false, throw: false };
     const touch = { x: 0, y: 0, run: false, act: false };
-    const state = { intel: false, selected: null, paused: startPaused, aim: null, aimAt: -99, held: false, toastUntil: 0, lastPaint: 0, alarmAt: 0, ended: false };
+    const state = { intel: false, selected: null, paused: startPaused, aim: null, aimAt: -99, held: false, toastUntil: 0, lastPaint: 0, alarmAt: 0, ended: false, shake: 0, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches };
+    if (matchMedia('(prefers-reduced-motion: reduce)').addEventListener) {
+      const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
+      const onMotion = event => { state.reduceMotion = event.matches; };
+      motionQuery.addEventListener('change', onMotion, { signal });
+    }
     live = { sim, controller, raf: 0, state, soundButton: refs.soundButton };
     let acc = 0, last = performance.now();
 
@@ -367,6 +377,8 @@ export function mountShadow(body, api = {}) {
       const k = event.key;
       if (k === 'c' || k === 'C' || k === 'Control') { if (!event.repeat) edges.crouch = true; event.preventDefault(); }
       else if (k === 'e' || k === 'E' || k === ' ' || k === 'Spacebar') { if (!event.repeat) edges.interact = true; state.held = true; event.preventDefault(); }
+      else if (k === 'x' || k === 'X') { if (!event.repeat) edges.knife = true; event.preventDefault(); }
+      else if (k === 'g' || k === 'G') { if (!event.repeat) edges.shoot = true; event.preventDefault(); }
       else if (k === 'q' || k === 'Q') { if (!event.repeat) edges.knock = true; event.preventDefault(); }
       else if (k === 'f' || k === 'F') { if (!event.repeat) edges.throw = true; event.preventDefault(); }
       else if (k === 'Tab' && !event.shiftKey && event.target === refs.stage) { toggleIntel(); event.preventDefault(); }
@@ -428,6 +440,8 @@ export function mountShadow(body, api = {}) {
         event.preventDefault(); button.classList.add('held');
         if (action === 'act') { edges.interact = true; touch.act = true; }
         else if (action === 'crouch') edges.crouch = true;
+        else if (action === 'knife') edges.knife = true;
+        else if (action === 'shoot') edges.shoot = true;
         else if (action === 'run') { touch.run = !touch.run; button.classList.toggle('on', touch.run); }
         else if (action === 'knock') edges.knock = true;
         else if (action === 'throw') edges.throw = true;
@@ -463,9 +477,9 @@ export function mountShadow(body, api = {}) {
       const aiming = state.aim && sim.t - state.aimAt < 4;
       const value = {
         move, run: keys.run || touch.run, crouch: edges.crouch, interact: edges.interact, interactHeld: state.held || touch.act,
-        knock: edges.knock, throw: edges.throw, aim: aiming ? state.aim : null,
+        knife: edges.knife, shoot: edges.shoot, knock: edges.knock, throw: edges.throw, aim: aiming ? state.aim : null,
       };
-      edges.crouch = edges.interact = edges.knock = edges.throw = false;
+      edges.crouch = edges.interact = edges.knife = edges.shoot = edges.knock = edges.throw = false;
       return value;
     }
 
@@ -481,6 +495,14 @@ export function mountShadow(body, api = {}) {
         else if (event.type === 'hint') toast(event.text, 'muted');
         else if (event.type === 'spotted') sound.spot();
         else if (event.type === 'alarm') { sound.alarm(); refs.stage.classList.remove('flash'); void refs.stage.offsetWidth; refs.stage.classList.add('flash'); }
+        else if (event.type === 'shot') { sound.gun(); state.shake = Math.min(1, state.shake + .7); }
+        else if (event.type === 'knife') sound.knife();
+        else if (event.type === 'kill') {
+          sound.kill();
+          state.shake = Math.min(1, state.shake + .55);
+          refs.stage.classList.remove('killflash'); void refs.stage.offsetWidth; refs.stage.classList.add('killflash');
+          toast(`${event.how === 'gun' ? 'shot' : 'knife'} kill · ×${event.chain} · +${event.points}`, 'kill');
+        }
         else if (event.type === 'takedown') sound.thud();
         else if (event.type === 'objective') refs.objective.textContent = event.text;
         else if (event.type === 'misread' && state.intel) toast(`prediction failed: ${zoneName(event.zone)}, not ${zoneName(event.predicted)}`, 'intel');
@@ -501,8 +523,10 @@ export function mountShadow(body, api = {}) {
       }
       handleEvents();
       camera(sim, camView, dt);
+      state.shake = state.reduceMotion ? 0 : Math.max(0, state.shake - dt * 2.6);
+      const shake = state.shake > .01 ? { x: (Math.random() * 2 - 1) * state.shake * 5, y: (Math.random() * 2 - 1) * state.shake * 4 } : null;
       const jammed = !sim.rules.scannerInAlert && (sim.net.phase === 'alert' || sim.net.phase === 'search');
-      drawWorld(ctx, sim, camView, { intel: state.intel, selected: state.selected, aim: state.aim, aiming: state.aim && sim.t - state.aimAt < 4, jammed });
+      drawWorld(ctx, sim, camView, { intel: state.intel, selected: state.selected, aim: state.aim, aiming: state.aim && sim.t - state.aimAt < 4, jammed, shake });
       paintHud();
       if (now - state.lastPaint > 250) { state.lastPaint = now; paintSide(); }
       if (!state.paused && !document.hidden && sim.net.phase === 'alert' && now - state.alarmAt > 1400) { state.alarmAt = now; sound.alarm(); }
@@ -521,17 +545,21 @@ export function mountShadow(body, api = {}) {
       const stance = p.locker ? 'locker' : p.hidden === 'duct' ? 'in duct' : p.hidden === 'grass' ? 'in grass' : p.carrying ? 'drag' : p.crouch ? 'crouch' : p.running ? 'run' : 'stand';
       refs.stance.classList.toggle('hidden', Boolean(p.locker || p.hidden));
       if (refs.stance.textContent !== stance) refs.stance.textContent = stance;
-      refs.exposure.style.width = percent(p.locker ? 0 : p.visibility);
+      refs.exposure.style.transform = `scaleX(${p.locker ? 0 : p.visibility})`;
       refs.exposure.parentElement.classList.toggle('high', p.visibility > .6);
       p.noiseShown = Math.max((p.noiseShown || 0) * .96, p.moving ? Math.min(1, p.noise / 6) : 0);
-      refs.noise.style.width = percent(p.noiseShown);
+      refs.noise.style.transform = `scaleX(${p.noiseShown})`;
       const prompt = sim.prompt();
       if (refs.prompt.textContent !== prompt) { refs.prompt.textContent = prompt; refs.prompt.classList.toggle('on', Boolean(prompt)); }
-      const items = `${p.pebbles}|${p.keycard}|${p.data}|${sim.net.camerasOff}`;
+      const chain = sim.t - sim.metrics.lastKillAt <= 6 ? sim.metrics.killChain : 0;
+      const items = `${p.pebbles}|${p.ammo}|${sim.metrics.kills}|${chain}|${p.keycard}|${p.data}|${sim.net.camerasOff}`;
       if (refs.items.dataset.state !== items) {
         refs.items.dataset.state = items;
         refs.items.replaceChildren(...[
           h('span', { class: 'shadow-item', title: 'Pebbles (F)' }, h('b', { text: '●' }), `×${p.pebbles}`),
+          h('span', { class: 'shadow-item' + (p.ammo ? '' : ' empty'), title: 'Pistol rounds (G)' }, h('b', { text: '▮' }), `×${p.ammo}`),
+          sim.metrics.kills ? h('span', { class: 'shadow-item kill', title: 'Guards killed' }, h('b', { text: '✕' }), `×${sim.metrics.kills}`) : null,
+          chain > 1 ? h('span', { class: 'shadow-item chain', title: 'Kill chain' }, h('b', { text: '»' }), `×${chain}`) : null,
           p.keycard ? h('span', { class: 'shadow-item on', title: 'Lab keycard' }, h('b', { text: '▭' }), 'keycard') : null,
           p.data ? h('span', { class: 'shadow-item data', title: 'Lab data' }, h('b', { text: '◆' }), 'data') : null,
           sim.net.camerasOff ? h('span', { class: 'shadow-item', title: 'Cameras offline' }, h('b', { text: '◌' }), 'cams off') : null,
@@ -580,10 +608,10 @@ export function mountShadow(body, api = {}) {
       const prediction = net.prediction?.zone ? `${zoneName(net.prediction.zone)}${net.prediction.cluster ? ' · ' + net.prediction.cluster.split(':')[1] + 's' : ''} · ${net.prediction.resolved || 'open'}` : 'none';
       const rows = sim.guards.map(g => {
         const knownDown = net.found.has(g.id) && g.down, missing = net.missing.has(g.id);
-        const role = g.down ? (missing ? 'missing' : knownDown ? 'found down' : 'no reply yet') : g.task ? (g.task.label || g.task.role) : 'patrol route';
+        const role = g.dead ? (missing ? 'missing' : knownDown ? 'body found' : 'no reply yet') : g.down ? (missing ? 'missing' : knownDown ? 'found down' : 'no reply yet') : g.task ? (g.task.label || g.task.role) : 'patrol route';
         return h('li', {}, h('button', {
           type: 'button', class: 'shadow-guard-row' + (state.selected === g.id ? ' on' : ''), onclick: () => { state.selected = state.selected === g.id ? null : g.id; paintSide(true); },
-        }, h('i', { class: 'dot', style: `background:${STATE_COLORS[g.down ? 'down' : g.sees ? 'alert' : g.state]}` }), h('strong', { text: g.name }), h('span', { text: role })));
+        }, h('i', { class: 'dot', style: `background:${STATE_COLORS[g.dead ? 'dead' : g.down ? 'down' : g.sees ? 'alert' : g.state]}` }), h('strong', { text: g.name }), h('span', { text: role })));
       });
       const selected = sim.guards.find(g => g.id === state.selected);
       refs.intel.replaceChildren(
@@ -605,14 +633,14 @@ export function mountShadow(body, api = {}) {
       const confidence = decision && question ? decision.plan?.confidence?.[question] : null;
       const suspected = task?.zone ? zoneName(task.zone) : task?.cluster ? task.cluster.replace(':', ' · ') : g.knowledge ? zoneName(zoneOfPoint(g.knowledge)) : '—';
       const rows = [
-        ['state', g.down ? 'unconscious' : STATE_NAMES[g.sees ? 'alert' : g.state]],
+        ['state', g.dead ? 'dead' : g.down ? 'unconscious' : STATE_NAMES[g.sees ? 'alert' : g.state]],
         ['assigned role', task ? task.role : 'patrol'],
         ['objective', task?.label || (g.down ? '—' : 'patrol route')],
         ['latest decision', decision ? `#${decision.id} ${decision.kind} · ${decision.source}` : task?.source === 'reflex' ? 'own reaction' : 'standing orders'],
         ['knows', knowledge],
         ['suspects', suspected],
         ['confidence', confidence != null ? percent(confidence) : '—'],
-        ['next action', g.down ? (net.missing.has(g.id) ? 'missing · presumed down' : 'down · security unaware') : g.lastAction],
+        ['next action', g.dead ? (net.found.has(g.id) ? 'body found · dead' : net.missing.has(g.id) ? 'missing · possibly dead' : 'dead · security unaware') : g.down ? (net.missing.has(g.id) ? 'missing · presumed down' : 'down · security unaware') : g.lastAction],
       ];
       return h('dl', { class: 'shadow-detail' }, rows.flatMap(([term, value]) => [h('dt', { text: term }), h('dd', { text: value })]));
     }
@@ -667,7 +695,7 @@ export function mountShadow(body, api = {}) {
     const id = sim.rules.id;
     const newBest = sim.status === 'extracted' && (!best[id] || score.points > best[id].points);
     if (newBest) { best[id] = { points: score.points, rank: score.rank, time: Math.round(sim.t), at: Date.now() }; write(BEST_KEY, best); }
-    lastResult = { status: sim.status, rank: score.rank, points: score.points, difficulty: id, time: Math.round(sim.t), at: Date.now(), alerts: sim.metrics.alerts };
+    lastResult = { status: sim.status, rank: score.rank, points: score.points, difficulty: id, time: Math.round(sim.t), at: Date.now(), alerts: sim.metrics.alerts, kills: sim.metrics.kills, shots: sim.metrics.shots };
     write(LAST_KEY, lastResult);
     if (sim.status === 'extracted') sound.success(); else sound.fail();
     stop();
@@ -683,10 +711,11 @@ export function mountShadow(body, api = {}) {
     const jevShare = m.decisions ? Math.round(m.jevDecisions / m.decisions * 100) : 0;
     const stats = [
       ['time', clock(sim.t)], ['alerts', String(m.alerts)], ['sightings', String(m.sightings)], ['takedowns', String(m.takedowns)],
-      ['intercepted', String(m.interceptions)], ['searches escaped', `${m.recoveries}/${m.searches}`], ['distractions', String(m.distractions)], ['score', score.points.toLocaleString()],
+      ['kills', String(m.kills)], ['shots', String(m.shots)], ['intercepted', String(m.interceptions)], ['searches escaped', `${m.recoveries}/${m.searches}`],
+      ['distractions', String(m.distractions)], ['score', score.points.toLocaleString()],
     ];
     const title = extracted ? `extracted · ${score.rank.toLowerCase()}` : sim.status === 'captured' ? 'captured' : 'mission aborted';
-    const line = extracted ? (m.alerts ? `Out with the data after ${m.alerts} alert${m.alerts === 1 ? '' : 's'}. Security will remember the routes it saw.` : 'In and out without an alarm. Security only has what the forensics team finds.')
+    const line = extracted ? (m.alerts ? `Out with the data after ${m.alerts} alert${m.alerts === 1 ? '' : 's'}. Security will remember the routes it saw.` : m.kills ? `In and out without an alarm, leaving ${m.kills} behind. Security has bodies to identify.` : 'In and out without an alarm. Security only has what the forensics team finds.')
       : sim.status === 'captured' ? `Caught in the ${zoneName(zoneOfPoint(sim.player))}. ${sim.player.data ? 'The data was in your hands.' : 'The server was still locked.'}` : 'You pulled out. Security keeps what it learned.';
     const node = h('div', { class: 'shadow-debrief' },
       h('p', { class: 'shadow-kicker', text: `${sim.rules.name.toLowerCase()} · ${extracted ? 'mission complete' : 'mission failed'}` }),

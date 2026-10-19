@@ -82,6 +82,7 @@ export class ShadowSim {
       x: START.x, y: START.y, facing: -Math.PI / 2, crouch: false, running: false, moving: false, speed: 0,
       hidden: null, locker: null, carrying: null, keycard: false, data: false, pebbles: this.rules.pebbles,
       step: 0, action: null, anim: 0, visibility: 0, noise: 0, caught: 0, cameraOff: false,
+      ammo: 3, maxAmmo: 6, shotAt: -99, recoil: 0,
     };
     this.doors = new Map();
     for (let ty = 0; ty < ROWS; ty++) for (let tx = 0; tx < COLS; tx++) {
@@ -96,6 +97,9 @@ export class ShadowSim {
     this.lockers = new Map(HIDING.filter(spot => spot.type === 'locker').map(spot => [index(spot.x, spot.y), { ...spot, body: null, player: false }]));
     this.pebbles = [];
     this.rings = [];
+    this.blood = [];
+    this.tracers = [];
+    this.slashes = [];
     this.events = [];
     this.radio = [];
     this.queue = [];
@@ -110,7 +114,8 @@ export class ShadowSim {
     };
     this.metrics = {
       alerts: 0, sightings: 0, cameraSightings: 0, interceptions: 0, searches: 0, reacquired: 0, reacquireTimes: [],
-      recoveries: 0, takedowns: 0, bodiesFound: 0, missingNoticed: 0, noises: 0, distractions: 0, predictionsHit: 0,
+      recoveries: 0, takedowns: 0, kills: 0, shots: 0, killPoints: 0, killChain: 0, bestChain: 0, lastKillAt: -99,
+      cameraShots: 0, corpsesFound: 0, bodiesFound: 0, missingNoticed: 0, noises: 0, distractions: 0, predictionsHit: 0,
       predictionsMiss: 0, alertTime: 0, decisions: 0, jevDecisions: 0, jevFailures: 0, foundHiding: 0, lockerChecks: 0,
       escapes: [], vanish: [], foundIn: [], afterDetect: [], runningTime: 0, movingTime: 0,
     };
@@ -136,7 +141,7 @@ export class ShadowSim {
         reserve: !slot.core, keycard: slot.id === 'g7',
         x: 0, y: 0, facing: 0, look: 0, state: 'patrol', meter: 0, sees: false, lastSeen: null, lostFor: 0,
         reportIn: 0, reported: false, nextUpdate: 0, reaction: 0, cue: null, task: null, pendingTask: null,
-        path: [], pathGoal: null, pathAge: 0, scan: null, down: false, grabbed: false, carried: false, hidden: false,
+        path: [], pathGoal: null, pathAge: 0, scan: null, down: false, dead: false, deadAt: 0, deathAngle: 0, grabbed: false, carried: false, hidden: false,
         groggy: 0, bodyMeter: 0, bodyTarget: null, indicator: '', indicatorAt: -9, knowledge: null, ackDue: null,
         known: null, lastAction: 'patrolling', moving: false, anim: random() * 10, speedMul: 1, stuck: 0,
         lockerCheck: null, lastLockerCheck: 0, waitOrders: 0,
@@ -212,6 +217,7 @@ export class ShadowSim {
     this.updatePlayer(dt, input);
     this.updateDoors(dt);
     this.updatePebbles(dt);
+    this.updateEffects(dt);
     this.updateCameras(dt);
     for (const guard of this.guards) this.perceive(guard, dt);
     for (const guard of this.guards) this.think(guard, dt);
@@ -241,6 +247,8 @@ export class ShadowSim {
     }
     if (p.action) { this.updateAction(dt, input); return; }
     if (input.interact) this.interact();
+    if (input.knife) this.knife();
+    if (input.shoot) this.shoot(input.aim);
     if (input.knock) this.knock();
     if (input.throw) this.throwPebble(input.aim);
     if (p.action) return;
@@ -341,6 +349,125 @@ export class ShadowSim {
     this.pebbles = this.pebbles.filter(pebble => !pebble.done || pebble.t < pebble.dur + .4);
   }
 
+  updateEffects(dt) {
+    this.player.recoil = Math.max(0, this.player.recoil - dt);
+    for (const stain of this.blood) stain.age += dt;
+    for (const tracer of this.tracers) tracer.age += dt;
+    this.tracers = this.tracers.filter(tracer => tracer.age < tracer.life);
+    for (const slash of this.slashes) slash.age += dt;
+    this.slashes = this.slashes.filter(slash => slash.age < slash.life);
+  }
+
+  /** A guard the knife can reach: unaware from behind, or already on the floor. */
+  knifeTarget() {
+    const p = this.player;
+    let best = null, bestD = 23;
+    for (const g of this.guards) {
+      if (g.dead || g.grabbed || g.hidden || g.carried) continue;
+      const d = dist(g, p);
+      if (d >= bestD) continue;
+      if (!g.down) {
+        const off = Math.abs(wrapAngle(angleTo(g.x, g.y, p.x, p.y) - g.facing));
+        const aware = g.sees || g.meter > .8;
+        if (aware || off < this.rules.fov / 2 + .3) continue;
+        if (!walkableLine(p.x, p.y, g.x, g.y, this.playerPassable, PLAYER_R)) continue;
+      }
+      best = g; bestD = d;
+    }
+    return best;
+  }
+
+  /** The knife is silent; the pistol is not. Both end a guard permanently. */
+  knife() {
+    const p = this.player;
+    if (p.carrying) { this.emit('hint', { text: 'hands full' }); return; }
+    if (p.action) return;
+    const target = this.knifeTarget();
+    if (!target) { this.emit('hint', { text: 'no one within knife reach' }); return; }
+    p.action = { kind: 'kill', t: 0, need: .42, target: target.id };
+    if (!target.down) target.grabbed = true;
+    this.emit('knife', { guard: target.id });
+  }
+
+  shoot(aim) {
+    const p = this.player;
+    if (p.carrying) { this.emit('hint', { text: 'hands full' }); return; }
+    if (p.action) return;
+    if (p.ammo <= 0) { this.emit('hint', { text: 'pistol empty — use the knife' }); return; }
+    let angle = p.facing;
+    if (aim && Number.isFinite(aim.x) && Number.isFinite(aim.y)) angle = angleTo(p.x, p.y, aim.x, aim.y);
+    p.facing = angle; p.ammo--; p.shotAt = this.t; p.recoil = .18;
+    this.metrics.shots++;
+    const range = 9.5 * TILE;
+    let end = { x: p.x + Math.cos(angle) * range, y: p.y + Math.sin(angle) * range };
+    let struck = null;
+    const steps = Math.ceil(range / 3);
+    for (let i = 1; i <= steps; i++) {
+      const x = p.x + Math.cos(angle) * range * i / steps;
+      const y = p.y + Math.sin(angle) * range * i / steps;
+      const tx = toTile(x), ty = toTile(y);
+      end = { x, y };
+      const guard = this.guards.find(g => !g.dead && !g.hidden && Math.hypot(g.x - x, g.y - y) < 7);
+      if (guard) { struck = { kind: 'guard', guard }; break; }
+      // A camera sits on a wall, so it is checked before the wall stops the round.
+      const camera = this.cameras.find(item => item.on && Math.hypot(item.x - x, item.y - y) < 8);
+      if (camera) { struck = { kind: 'camera', camera }; break; }
+      const kind = kindAt(tx, ty);
+      if (kind.sight === 'block' || (kind.sight === 'door' && !this.doorOpen(tx, ty))) break;
+    }
+    this.tracers.push({ x0: p.x + Math.cos(angle) * 6, y0: p.y + Math.sin(angle) * 6, x1: end.x, y1: end.y, age: 0, life: .16, hit: struck?.kind || 'wall' });
+    this.noise(p.x, p.y, 14, 'a gunshot', 'gunshot');
+    this.emit('shot', { x: p.x, y: p.y, angle, hit: struck?.kind || 'wall' });
+    if (struck?.kind === 'guard') this.killGuard(struck.guard, 'gun');
+    else if (struck?.kind === 'camera') {
+      const camera = struck.camera;
+      camera.on = false; camera.track = 0; camera.meter = 0;
+      this.metrics.cameraShots++;
+      this.emit('toast', { text: 'camera destroyed' });
+      if (this.cameras.every(item => !item.on)) {
+        this.net.camerasOff = true;
+        this.mission.panelAt = this.mission.panelAt ?? this.t;
+      }
+    }
+  }
+
+  killGuard(g, how = 'knife') {
+    if (g.dead) return;
+    const p = this.player;
+    g.dead = true; g.down = true; g.grabbed = false; g.sees = false; g.meter = 0; g.state = 'dead';
+    g.task = null; g.pendingTask = null; g.path = []; g.bodyClaimed = null; g.deadAt = this.t; g.deathAngle = p.facing;
+    for (const other of this.guards) {
+      if (other.bodyTarget === g.id) other.bodyTarget = null;
+      if (other.bodyClaimed === g.id) other.bodyClaimed = null;
+    }
+    g.indicator = ''; g.lastAction = how === 'gun' ? 'shot' : 'knifed';
+    if (g.keycard && !p.keycard) { p.keycard = true; g.keycard = false; this.emit('toast', { text: `${g.name}’s keycard` }); }
+    if (how === 'knife') {
+      p.ammo = Math.min(p.maxAmmo, p.ammo + 1);
+      this.slashes.push({ x: g.x, y: g.y, angle: p.facing, age: 0, life: .24 });
+      this.noise(g.x, g.y, 1.8, 'a muffled struggle', 'scuffle');
+    }
+    this.metrics.kills++;
+    const chain = this.t - this.metrics.lastKillAt <= 6 ? this.metrics.killChain + 1 : 1;
+    this.metrics.lastKillAt = this.t; this.metrics.killChain = chain;
+    this.metrics.bestChain = Math.max(this.metrics.bestChain, chain);
+    const points = 120 * chain;
+    this.metrics.killPoints += points;
+    this.spawnBlood(g.x, g.y, p.facing, how);
+    this.emit('kill', { guard: g.id, how, chain, points });
+  }
+
+  spawnBlood(x, y, angle, how) {
+    const count = how === 'gun' ? 14 : 9;
+    for (let i = 0; i < count; i++) {
+      const spread = angle + (this.random() * 2 - 1) * (how === 'gun' ? 1.5 : 2.2);
+      const reach = this.random() * (how === 'gun' ? 21 : 12);
+      this.blood.push({ x: x + Math.cos(spread) * reach, y: y + Math.sin(spread) * reach, r: .7 + this.random() * 1.7, age: 0, pool: false });
+    }
+    this.blood.push({ x, y, r: how === 'gun' ? 5.2 : 4.2, age: 0, pool: true });
+    if (this.blood.length > 150) this.blood.splice(0, this.blood.length - 150);
+  }
+
   interact() {
     const p = this.player;
     if (p.carrying) { this.dropBody(); return; }
@@ -388,6 +515,18 @@ export class ShadowSim {
   updateAction(dt, input) {
     const p = this.player, action = p.action;
     p.moving = false; p.speed = 0;
+    if (action.kind === 'kill') {
+      const g = this.guards.find(item => item.id === action.target);
+      if (!g || g.dead) { p.action = null; return; }
+      action.t += dt;
+      p.facing = angleTo(p.x, p.y, g.x, g.y);
+      if (action.t >= action.need) {
+        g.grabbed = false;
+        this.killGuard(g, 'knife');
+        p.action = null;
+      }
+      return;
+    }
     if (action.kind === 'takedown') {
       const g = this.guards.find(item => item.id === action.target);
       if (!g || g.down) { p.action = null; return; }
@@ -418,6 +557,7 @@ export class ShadowSim {
   }
 
   knockOut(g) {
+    if (g.dead) return;
     g.down = true; g.grabbed = false; g.sees = false; g.meter = 0; g.state = 'down'; g.task = null; g.pendingTask = null; g.path = [];
     g.bodyClaimed = null;
     for (const other of this.guards) {
@@ -577,7 +717,7 @@ export class ShadowSim {
       return;
     }
     g.state = 'suspicious';
-    g.reaction = this.rules.reaction + this.random() * .35;
+    g.reaction = heard.kind === 'gunshot' ? .22 + this.random() * .12 : this.rules.reaction + this.random() * .35;
     g.cue = { x: heard.x, y: heard.y, label: heard.label, loud: heard.loud, until: this.t + 8 };
     g.indicator = '?'; g.indicatorAt = this.t;
     g.lastAction = 'heard ' + heard.label;
@@ -681,13 +821,16 @@ export class ShadowSim {
     if (g.bodyMeter < .5 || g.bodyTarget === target.id) return;
     g.bodyTarget = target.id;
     target.bodyClaimed = g.id;
+    const dead = Boolean(target.dead);
     g.state = 'investigate';
-    g.task = { role: 'revive', x: target.x, y: target.y, target: target.id, label: 'check on ' + target.name, source: 'reflex', issued: this.t };
+    g.task = dead
+      ? { role: 'investigate', x: target.x, y: target.y, label: 'check the body of ' + target.name, source: 'reflex', issued: this.t }
+      : { role: 'revive', x: target.x, y: target.y, target: target.id, label: 'check on ' + target.name, source: 'reflex', issued: this.t };
     g.indicator = '!'; g.indicatorAt = this.t;
-    g.lastAction = 'saw ' + target.name + ' down';
+    g.lastAction = 'saw ' + target.name + (dead ? ' dead' : ' down');
     g.path = [];
-    this.say(g.name, `${target.name} is down! ${ZONE_BY_ID[zoneAt(target.x, target.y)]?.name || ''}.`, 'alert');
-    this.reportEvidence(g, { kind: 'body', x: target.x, y: target.y, label: target.name + ' found unconscious', guard: target.id }, true);
+    this.say(g.name, dead ? `${target.name} is dead! ${ZONE_BY_ID[zoneAt(target.x, target.y)]?.name || ''}.` : `${target.name} is down! ${ZONE_BY_ID[zoneAt(target.x, target.y)]?.name || ''}.`, 'alert');
+    this.reportEvidence(g, { kind: dead ? 'corpse' : 'body', x: target.x, y: target.y, label: target.name + (dead ? ' found dead' : ' found unconscious'), guard: target.id }, true);
   }
 
   /* ── guard behaviour ───────────────────────────────────────────────────── */
@@ -897,11 +1040,14 @@ export class ShadowSim {
       const body = this.guards.find(item => item.id === locker.body);
       locker.body = null;
       if (body) {
+        const dead = Boolean(body.dead);
         body.hidden = false; body.x = check.approach.x; body.y = check.approach.y;
-        g.task = { role: 'revive', x: body.x, y: body.y, target: body.id, label: 'check on ' + body.name, source: 'reflex', issued: this.t };
+        g.task = dead
+          ? { role: 'investigate', x: body.x, y: body.y, label: 'check the body of ' + body.name, source: 'reflex', issued: this.t }
+          : { role: 'revive', x: body.x, y: body.y, target: body.id, label: 'check on ' + body.name, source: 'reflex', issued: this.t };
         g.state = 'investigate';
-        this.say(g.name, `${body.name} was stuffed in a locker!`, 'alert');
-        this.reportEvidence(g, { kind: 'body', x: body.x, y: body.y, label: body.name + ' found in a locker', guard: body.id }, true);
+        this.say(g.name, dead ? `${body.name} is dead in a locker!` : `${body.name} was stuffed in a locker!`, 'alert');
+        this.reportEvidence(g, { kind: dead ? 'corpse' : 'body', x: body.x, y: body.y, label: body.name + (dead ? ' found dead in a locker' : ' found in a locker'), guard: body.id }, true);
       }
     }
   }
@@ -1025,6 +1171,12 @@ export class ShadowSim {
   revive(g, dt) {
     const task = g.task, body = this.guards.find(other => other.id === task.target);
     if (!body || !body.down) { this.goHome(g); return; }
+    if (body.dead) {
+      // A corpse cannot be revived. The guard confirms the death and returns.
+      g.task = { role: 'investigate', x: body.x, y: body.y, label: 'check the body of ' + body.name, source: 'reflex', issued: this.t };
+      g.state = 'investigate'; g.path = []; g.scan = null;
+      return;
+    }
     // A dragged body does not act as a tracking beacon. Follow the last
     // observed location until the guard can actually see it again.
     const visible = !body.hidden && !body.carried && dist(g, body) <= this.rules.range * TILE
@@ -1265,8 +1417,9 @@ export class ShadowSim {
     else { net.evidence.unshift(item); net.evidence.length = Math.min(net.evidence.length, 12); }
     net.lastEvidenceAt = this.t;
     if (item.kind === 'body') { this.metrics.bodiesFound++; if (item.guard) { net.found.add(item.guard); net.missing.delete(item.guard); } }
+    if (item.kind === 'corpse') { this.metrics.bodiesFound++; this.metrics.corpsesFound = (this.metrics.corpsesFound || 0) + 1; if (item.guard) { net.found.add(item.guard); net.missing.delete(item.guard); } }
     if (net.prediction && (item.kind === 'noise' || item.kind === 'glimpse')) this.notePrediction(zone, null, true);
-    const serious = ['body', 'missing', 'breach', 'keycard', 'cameras'].includes(item.kind);
+    const serious = ['body', 'corpse', 'missing', 'breach', 'keycard', 'cameras'].includes(item.kind);
     if (this.mode === 'baseline') { this.baselineEvidence(item, message); return; }
     if (net.phase === 'alert') return;
     if (net.phase === 'search') {
@@ -1573,27 +1726,30 @@ export class ShadowSim {
   prompt() {
     const p = this.player;
     if (this.status !== 'playing') return '';
-    if (p.locker) return 'E · leave the locker';
+    if (p.locker) return 'E - leave the locker';
     if (p.action) {
-      if (p.action.kind === 'takedown') return 'taking down…';
+      if (p.action.kind === 'takedown') return 'taking down...';
+      if (p.action.kind === 'kill') return 'knife...';
       const left = Math.max(0, p.action.need - p.action.t).toFixed(1);
-      return p.action.kind === 'hack' ? `hold E · downloading ${left}s` : `hold E · cutting the feeds ${left}s`;
+      return p.action.kind === 'hack' ? `hold E - downloading ${left}s` : `hold E - cutting the feeds ${left}s`;
     }
     if (p.carrying) {
       const locker = this.lockerNear(p, 22);
-      return locker && !locker.body && !locker.player ? 'E · stow the body in the locker' : 'E · drop the body';
+      return locker && !locker.body && !locker.player ? 'E - stow the body in the locker' : 'E - drop the body';
     }
     const target = this.takedownTarget();
-    if (target) return `E · take down ${target.name}`;
-    const body = this.guards.find(g => g.down && !g.hidden && !g.carried && dist(g, p) < 18);
-    if (body) return `E · drag ${body.name}${body.keycard ? ' · has a keycard' : ''}`;
-    if (!p.data && dist(p, { x: TERMINAL.x * TILE, y: TERMINAL.y * TILE + 10 }) < 26) return 'hold E · download the data';
-    if (!this.net.camerasOff && dist(p, { x: PANEL.x * TILE + 8, y: PANEL.y * TILE + 8 }) < 24) return 'hold E · disable the cameras';
-    if (this.keycardOnDesk && dist(p, { x: KEYCARD.x * TILE, y: KEYCARD.y * TILE }) < 22) return 'E · take the lab keycard';
+    const downed = this.guards.find(g => g.down && !g.dead && !g.hidden && !g.carried && dist(g, p) < 18);
+    if (target) return `E - take down ${target.name} · X - knife`;
+    if (downed) return `E - drag ${downed.name}${downed.keycard ? ' · has a keycard' : ''} · X - finish`;
+    const dead = this.guards.find(g => g.dead && !g.hidden && !g.carried && dist(g, p) < 18);
+    if (dead) return `E - drag ${dead.name}${dead.keycard ? ' · has a keycard' : ''}`;
+    if (!p.data && dist(p, { x: TERMINAL.x * TILE, y: TERMINAL.y * TILE + 10 }) < 26) return 'hold E - download the data';
+    if (!this.net.camerasOff && dist(p, { x: PANEL.x * TILE + 8, y: PANEL.y * TILE + 8 }) < 24) return 'hold E - disable the cameras';
+    if (this.keycardOnDesk && dist(p, { x: KEYCARD.x * TILE, y: KEYCARD.y * TILE }) < 22) return 'E - take the lab keycard';
     const locker = this.lockerNear(p, 20);
-    if (locker && !locker.body && !locker.player) return 'E · hide in the locker';
+    if (locker && !locker.body && !locker.player) return 'E - hide in the locker';
     const door = [...this.doors.values()].find(d => d.locked && !p.keycard && Math.hypot(d.tx * TILE + 8 - p.x, d.ty * TILE + 8 - p.y) < 24);
-    if (door) return 'locked · needs a lab keycard';
+    if (door) return 'locked - needs a lab keycard';
     return '';
   }
 
@@ -1628,10 +1784,13 @@ export class ShadowSim {
   /** What security can establish after the mission, for the dossier. Forensic traces, not live knowledge. */
   report() {
     const m = this.metrics;
+    const known = this.guards.filter(g => g.down && this.net.found.has(g.id));
+    const knownKills = known.filter(g => g.dead).length;
     return {
       outcome: this.status, difficulty: this.rules.id, time: Math.round(this.t), entry: this.mission.entry, labEntry: this.mission.labEntry,
-      data: this.player.data, alerts: m.alerts, sightings: m.sightings, takedowns: this.guards.filter(g => g.down || this.net.found.has(g.id)).length,
-      takedownsKnown: this.net.found.size + this.net.missing.size, distractions: m.distractions, escapes: m.escapes.slice(), vanish: m.vanish.slice(),
+      data: this.player.data, alerts: m.alerts, sightings: m.sightings, takedowns: this.guards.filter(g => g.down && !g.dead || this.net.found.has(g.id) && !g.dead).length,
+      takedownsKnown: this.net.found.size + this.net.missing.size - knownKills, kills: m.kills, killsKnown: knownKills, shots: m.shots,
+      distractions: m.distractions, escapes: m.escapes.slice(), vanish: m.vanish.slice(),
       foundIn: m.foundIn.slice(), afterDetect: m.afterDetect.slice(), running: m.movingTime ? m.runningTime / m.movingTime : 0,
       predictionsHit: m.predictionsHit, predictionsMiss: m.predictionsMiss, interceptions: m.interceptions, searches: m.searches,
       reacquired: m.reacquired, recoveries: m.recoveries, cameras: this.mission.panelAt != null,
@@ -1641,15 +1800,20 @@ export class ShadowSim {
   /** Mission score for the debrief. */
   score() {
     const m = this.metrics, extracted = this.status === 'extracted';
-    const takedowns = this.metrics.takedowns;
+    const takedowns = m.takedowns, kills = m.kills;
     let points = extracted ? 2000 : this.player.data ? 600 : 0;
     points -= m.alerts * 250 + Math.max(0, m.sightings - m.alerts) * 15 + takedowns * 40;
+    points += m.killPoints;
     if (extracted) points += Math.max(0, 900 - this.t) * 2;
     if (extracted && !m.alerts) points += 800;
-    if (extracted && !m.alerts && !takedowns) points += 400;
+    if (extracted && !m.alerts && !takedowns && !kills) points += 400;
     points = Math.max(0, Math.round(points));
     const rank = !extracted ? (this.player.data ? 'Courier' : 'Captured')
-      : !m.alerts && !takedowns ? 'Phantom' : !m.alerts ? 'Ghost' : m.alerts <= 1 ? 'Shade' : m.alerts <= 3 ? 'Jackal' : 'Hound';
+      : !m.alerts && !takedowns && !kills ? 'Phantom'
+        : !m.alerts && !kills ? 'Ghost'
+          : !m.alerts ? 'Cleaner'
+            : kills >= 4 ? 'Butcher'
+              : m.alerts <= 1 ? 'Shade' : m.alerts <= 3 ? 'Jackal' : 'Hound';
     return { points, rank };
   }
 }
