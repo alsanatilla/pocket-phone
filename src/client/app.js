@@ -32,6 +32,7 @@ import { chosenName, NAME_LIMIT } from '../shared/profile-name.js';
 import { agenda, clock as clockStore, mountAgenda, mountClock, startClockRuntime, focusTask, planTask, remindTask } from "./planner.js";
 import { mountBrief, readBrief, briefEnabled } from './daily-brief.js';
 import { mountGirder, girderSummary } from './girder.js';
+import { mountShadow, shadowSummary } from './shadow.js';
 import * as setup from './setup.js';
 import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
 
@@ -83,7 +84,7 @@ function view(tool, actions = []) {
   zines.leave(); pip.leave(); travel.leave(); movement.leave(); shell(); closeDialog(); say("");
   content.querySelectorAll('.pixel-backdrop').forEach(canvas=>canvas.dispose?.());
   const pipEntry = document.getElementById("pip-entry"); pipEntry.classList.toggle("selected", tool === "pip"); pipEntry.setAttribute("aria-current", tool === "pip" ? "page" : "false");
-  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync", "calendar", "clock", "travel", "account", "brief", "setup", "girder"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
+  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync", "calendar", "clock", "travel", "account", "brief", "setup", "girder", "shadow"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
   const activeTab = document.querySelector(".tab.active"), tabs = activeTab?.parentElement;
   if (tabs) tabs.scrollLeft = activeTab.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - activeTab.clientWidth) / 2;
   document.title = "pocket · " + (tool === "sync" ? "account" : tool);
@@ -173,7 +174,7 @@ function taskRow(task, refresh = route, showSteps = false) {
     h('button', { class: 'task-check', 'aria-label': (task.done ? 'Reopen ' : 'Complete ') + task.text, 'aria-pressed': String(Boolean(task.done)), onclick: guard(() => { tasks.complete(task.uid); refresh(); }) }, h('span')), main);
 }
 // Each area has its own header artwork, so a page is recognisable before it is read.
-const SCENE = { calendar: "tiles", clock: "rings", travel: "travel", today: "sky", thoughts: "stars", tasks: "road", notes: "waves", search: "rings", apps: "tiles", gym: "iron", girder: "iron" };
+const SCENE = { calendar: "tiles", clock: "rings", travel: "travel", today: "sky", thoughts: "stars", tasks: "road", notes: "waves", search: "rings", apps: "tiles", gym: "iron", girder: "iron", shadow: "stars" };
 // Every area header has the same size; the page's actions sit in its top right corner.
 function workspaceTitle(body, title, meta = "", scene = SCENE[title] || SCENE[body.className.match(/tool-(\w+)/)?.[1]] || "sky") {
   const actions = body.previousElementSibling?.classList.contains("toolbar") ? body.previousElementSibling : null;
@@ -244,6 +245,7 @@ function tileReading(kind) {
     case "zines": return reading("zines", "Photo books", "", "/zines");
     case "dice": return reading("roll", "Dice · coin · pick", "", "/dice");
     case "girder": { const game = girderSummary(); return reading(game.value, game.detail, game.status, "/girder", { alert: game.alert }); }
+    case "shadow": { const game = shadowSummary(); return reading(game.value, game.detail, game.status, "/shadow", { alert: game.alert }); }
     default: return reading("", "");
   }
 }
@@ -491,7 +493,7 @@ const APP_GROUPS = [
   ['Day', [['today', 'today'], ['calendar', 'calendar'], ['clock', 'clock'], ['daily brief', 'brief'], ['travel', 'travel']]],
   ['Keep', [['thoughts', 'thoughts'], ['tasks', 'tasks'], ['notes', 'notes'], ['zines', 'zines'], ['Pip', 'pip']]],
   ['Movement', [['movement', 'movement'], ['gym', 'gym']]],
-  ['Extras', [['girder run', 'girder'], ['dice', 'dice'], ['activity', 'receipt'], ['set up Pocket', 'setup'], ['account & devices', 'sync']]],
+  ['Extras', [['shadow protocol', 'shadow'], ['girder run', 'girder'], ['dice', 'dice'], ['activity', 'receipt'], ['set up Pocket', 'setup'], ['account & devices', 'sync']]],
 ];
 const APP_GLYPHS = {
   today: 'M2 3h12v11H2zM2 6h12M5 1v3M11 1v3M5 9h2M9 9h2', calendar: 'M2 3h12v11H2zM2 6h12M5 1v3M11 1v3M5 9h2M9 9h2M5 12h2',
@@ -502,6 +504,7 @@ const APP_GLYPHS = {
   focus: 'M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4M6 6h4v4H6z', paper: 'M3 2h10v12H3zM5 5h6M5 8h6M5 11h4',
   setup: 'M8 2v3M8 11v3M2 8h3M11 8h3M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2M6 6h4v4H6z', sync: 'M6 2h4v4H6zM3 14v-4l2-2h6l2 2v4',
   girder: 'M2 3h12v2H2zM2 11h12v2H2zM5 5v6M11 5v6M4 7h3M9 7h3M4 9h3M9 9h3',
+  shadow: 'M8 8L14 5v6zM8 8L2 3M8 8L2 13M2 3v10M7 7h2v2H7z',
 };
 function appGlyph(name) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), path = document.createElementNS(svg.namespaceURI, 'path');
@@ -1087,6 +1090,7 @@ function route() {
   else if (name === "travel") travel.mount(view("travel"), { tripId: arg || "", sub: sub || "", leaf: leaf || "", extra: deep || "" }, plannerApi);
   else if (name === "setup") setup.mount(view("setup"), setupApi, arg === "new", arg || "");
   else if (name === "girder") { const body = view("girder"); workspaceTitle(body, "girder run", "a barrel-dodging roguelike", "iron"); mountGirder(body, { confirm: confirmBox, go }); }
+  else if (name === "shadow") { const body = view("shadow"); workspaceTitle(body, "shadow protocol", "stealth against a commander that learns", "stars"); mountShadow(body, { confirm: confirmBox, go }); }
   else if (name === "brief") { const body=view('brief'); workspaceTitle(body,'daily brief'); briefView=mountBrief(body,briefApi); }
   else if (name === "gym") gymView.mount(view("gym"), arg, { h, add, say, section, rowButton, keys, split, go, ask, choose, confirm: confirmBox, title: workspaceTitle });
   else if (name === "thoughts" || name === "parking") parkingView(arg); else if (name === "tasks") tasksView(arg); else if (name === "apps") appsView(); else if (name === "search") searchView(); else if (name === "today") todayView(); else { history.replaceState(null, "", "#/today"); todayView(); }
@@ -1098,7 +1102,7 @@ onStatus(() => {
   const finished = lastState === "syncing" && status.state === "idle"; lastState = status.state;
   if (finished && todayBoard) { todayBoard.refresh(); return; }
   // Merged edits from the phone appear without a reload, unless the user is typing or a dialog is open.
-  if (finished && status.changed && !searchOpening && !["#/zines", "#/movement", "#/pip", "#/travel", "#/account", "#/sync", "#/setup"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea, select")) {
+  if (finished && status.changed && !searchOpening && !["#/zines", "#/movement", "#/pip", "#/travel", "#/account", "#/sync", "#/setup", "#/shadow"].some(path => location.hash.startsWith(path)) && dialogHost.hidden && !document.activeElement?.matches("input, textarea, select")) {
     if (location.hash === '#/brief') { briefView?.refresh(); return; }
     const text = notice?.textContent; route(); say(text);
   }

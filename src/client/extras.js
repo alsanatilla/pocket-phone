@@ -36,7 +36,7 @@ export const preferences = {
   set(uid, value) { if (!PREFS.has(uid)) throw new Error('Unknown preference.'); if(uid==='daily-brief'&&(!value||typeof value!=='object'||Array.isArray(value)||typeof value.enabled!=='boolean'||Object.keys(value).some(key=>key!=='enabled')))throw new Error('Check the brief setting.'); return put('preferences.json', uid, value); },
   clear(uid) { if (!PREFS.has(uid)) throw new Error('Unknown preference.'); return put('preferences.json', uid, null, {}, true); },
 };
-export const TODAY_CATALOG = Object.freeze(['brief', 'tasks', 'agenda', 'thoughts', 'notes', 'movement', 'gym', 'pip', 'activity', 'focus', 'clock', 'paper', 'zines', 'dice', 'girder']);
+export const TODAY_CATALOG = Object.freeze(['brief', 'tasks', 'agenda', 'thoughts', 'notes', 'movement', 'gym', 'pip', 'activity', 'focus', 'clock', 'paper', 'zines', 'dice', 'girder', 'shadow']);
 export const TODAY_DEFAULTS = Object.freeze(['movement', 'agenda', 'thoughts', 'tasks', 'activity'].map(kind => Object.freeze({ uid: kind, kind })));
 // Tile sizes match the phone: a small tile is one cell, a square two by two, a wide one the full row.
 export const TILE_SIZES = Object.freeze(['small', 'square', 'wide']);
