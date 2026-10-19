@@ -11,6 +11,8 @@ export function arrangeTiles(board, { list, save, size, changed = () => {} }) {
   let moved = false, resizing = false, suppress = false;
 
   const announce = () => board.dispatchEvent(new CustomEvent('tile-arrange', { detail: { on: mode }, bubbles: true }));
+  /** Reduced motion: the board still changes order and size, it just does not travel there. */
+  const calm = () => document.documentElement.classList.contains('reduce-motion') || matchMedia('(prefers-reduced-motion: reduce)').matches;
   const nodes = () => [...board.querySelectorAll('.live-tile')];
   const nodeOf = value => board.querySelector(`[data-tile="${value}"]`);
   const read = () => { const value = list(); order = value.map(item => item.kind); sizes = new Map(value.map(item => [item.kind, size(item)])); };
@@ -22,6 +24,7 @@ export function arrangeTiles(board, { list, save, size, changed = () => {} }) {
   const boxes = () => nodes().map(node => [node, node.getBoundingClientRect()]);
   /** The tiles that are not moving slide from where they were, so a reorder or resize reads as movement. */
   const flip = before => {
+    if (calm()) return;
     for (const [node, box] of before) {
       if (node === tile || !node.isConnected) continue;
       const now = node.getBoundingClientRect(), dx = box.left - now.left, dy = box.top - now.top;
@@ -35,7 +38,24 @@ export function arrangeTiles(board, { list, save, size, changed = () => {} }) {
   const follow = event => {
     tile.style.transform = 'none';
     const slot = tile.getBoundingClientRect();
-    tile.style.transform = `translate(${event.clientX - offset.x - slot.left}px, ${event.clientY - offset.y - slot.top}px) scale(1.04)`;
+    tile.style.transform = `translate(${event.clientX - offset.x - slot.left}px, ${event.clientY - offset.y - slot.top}px)`;
+  };
+  /**
+   * A size change is a grid-span change, which cannot be transitioned: the card would jump. Draw it at its old
+   * footprint and let it grow into the new one, counter-scaling its content so the text stays its own size.
+   */
+  const grow = (box, node) => {
+    const now = node.getBoundingClientRect(), sx = box.width / now.width, sy = box.height / now.height;
+    if (calm() || !Number.isFinite(sx) || !Number.isFinite(sy) || (Math.abs(sx - 1) < .001 && Math.abs(sy - 1) < .001)) return;
+    node.classList.add('growing');
+    node.style.transition = 'none';
+    node.style.transform = `translate(${box.left - now.left}px, ${box.top - now.top}px) scale(${sx}, ${sy})`;
+    for (const child of node.children) { child.style.transition = 'none'; child.style.transform = `scale(${1 / sx}, ${1 / sy})`; }
+    requestAnimationFrame(() => {
+      node.style.transition = ''; node.style.transform = '';
+      for (const child of node.children) { child.style.transition = ''; child.style.transform = ''; }
+      setTimeout(() => node.classList.remove('growing'), 220);
+    });
   };
   const pick = (node, event) => {
     tile = node; kind = node.dataset.tile; resizing = false; moved = false;
@@ -54,7 +74,11 @@ export function arrangeTiles(board, { list, save, size, changed = () => {} }) {
       const [cols, rows] = SPAN[sizes.get(kind)] || SPAN.square;
       const width = cols * unit + (cols - 1) * gap, height = rows * (rowUnit || unit) + (rows - 1) * gap;
       const next = snapSize((width + dx + gap) / (unit + gap), (height + dy + gap) / ((rowUnit || unit) + gap));
-      if (next !== sizes.get(kind)) { const before = boxes(); sizes.set(kind, next); tile.dataset.size = next; flip(before); }
+      if (next !== sizes.get(kind)) {
+        const before = boxes(), was = tile.getBoundingClientRect();
+        sizes.set(kind, next); tile.dataset.size = next;
+        grow(was, tile); flip(before);
+      }
       return;
     }
     // Where the tile's centre now is, from the pointer: independent of the grid reflowing under it.
@@ -68,11 +92,16 @@ export function arrangeTiles(board, { list, save, size, changed = () => {} }) {
   const remember = () => { save(arranged(list(), order, sizes)); changed(); };
   const release = () => {
     clearTimeout(hold); hold = 0;
-    if (tile) {
-      tile.style.transform = ''; tile.classList.remove('dragging');
-      if (moved) { suppress = true; remember(); }
+    const node = tile, dirty = moved;
+    if (node) {
+      node.classList.remove('dragging', 'resizing');
+      // Let go: the tile glides from the finger to its slot instead of teleporting into it.
+      requestAnimationFrame(() => { node.style.transition = ''; node.style.transform = ''; });
+      if (dirty) suppress = true;
     }
     tile = null; resizing = false; offset = null; grab = null;
+    // Save once the glide has started, so the repaint it triggers cannot cut it short.
+    if (dirty) requestAnimationFrame(remember);
   };
   const start = (node = null, event = null) => {
     if (mode) return;

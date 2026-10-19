@@ -275,18 +275,24 @@ function paintTile(node, roll) {
 /** Today's live tiles: dense four-column packing like the phone, refreshed on the minute and whenever synced data lands. */
 function tileBoard() {
   const owner = activeAccount(), board = h("section", { class: "live-tiles", "aria-label": "Today tiles" });
-  let timer = 0, layout = '', stopped = false;
+  let timer = 0, layout = '', layoutKey = '', stopped = false;
   const disposeTiles = () => board.querySelectorAll('.live-tile').forEach(node => { node.releasePress?.(); node.getAnimations({ subtree: true }).forEach(a => a.cancel()); node.querySelectorAll('.pip-mascot').forEach(c => c.dispose?.()); });
   const paint = roll => {
     if (owner !== activeAccount()) { disposeTiles(); board.replaceChildren(); return; }
     const appearance = preferences.get('appearance') || {};
     board.style.setProperty('--accent', ['#ecc981', '#adbf9c', '#a5bfdc', '#f0e9dd'][appearance.accent] || '#ecc981');
     document.documentElement.classList.toggle('reduce-motion', Boolean(appearance.reduceMotion));
-    const list = todayTiles.list(), key = JSON.stringify(list);
-    if (key !== layout) {
+    const list = todayTiles.list(), kinds = list.map(tile => tile.kind + (tile.label || '')).sort().join(','), key = JSON.stringify(list);
+    // Rebuild only when the tiles themselves changed. A new order or size is applied to the nodes in place, so a
+    // tile that is still growing or gliding home is not replaced under its animation.
+    if (kinds !== layout) {
       const focus = board.contains(document.activeElement) ? document.activeElement.dataset.tile : null;
-      disposeTiles(); board.replaceChildren(...list.map(liveTile)); layout = key; roll = false;
+      disposeTiles(); board.replaceChildren(...list.map(liveTile)); layout = kinds; layoutKey = key; roll = false;
       if (focus) board.querySelector(`[data-tile="${focus}"]`)?.focus({ preventScroll: true });
+    } else if (key !== layoutKey) {
+      board.append(...list.map(tile => board.querySelector(`[data-tile="${tile.kind}"]`)).filter(Boolean));
+      for (const tile of list) { const node = board.querySelector(`[data-tile="${tile.kind}"]`); if (node) node.dataset.size = tileSize(tile); }
+      layoutKey = key;
     }
     board.querySelectorAll('.live-tile').forEach(node => paintTile(node, roll));
   };
