@@ -4,10 +4,9 @@ import { arranged, dropIndex, snapSize } from './tile-layout.js';
 // resize it, tap its badge to unpin it, or tap the empty board to stop. The gestures match the phone's board and
 // the packing maths is the same (tile-layout.js / TileLayout.java).
 const HOLD = 350, BADGE = 34, HANDLE = 34;
-const SPAN = { small: [1, 1], square: [2, 2], wide: [4, 2] };
 
 export function arrangeTiles(board, { list, save, size, changed = () => {} }) {
-  let mode = false, hold = 0, tile = null, kind = '', order = [], sizes = new Map(), grab = null, offset = null;
+  let mode = false, hold = 0, tile = null, kind = '', order = [], sizes = new Map(), grab = null, offset = null, resize = null;
   let moved = false, resizing = false, suppress = false;
 
   const announce = () => board.dispatchEvent(new CustomEvent('tile-arrange', { detail: { on: mode }, bubbles: true }));
@@ -41,46 +40,42 @@ export function arrangeTiles(board, { list, save, size, changed = () => {} }) {
     tile.style.transform = `translate(${event.clientX - offset.x - slot.left}px, ${event.clientY - offset.y - slot.top}px)`;
   };
   /**
-   * A size change is a grid-span change, which cannot be transitioned: the card would jump. Draw it at its old
-   * footprint and let it grow into the new one, counter-scaling its content so the text stays its own size.
+   * A size change is a grid-span change, which cannot be transitioned. Instead of animating towards the snapped
+   * size, the card follows the pointer exactly, like a window dragged at its corner: its layout box snaps
+   * underneath, and the difference is drawn as a scale so the edge stays under the cursor. The content is
+   * counter-scaled, so text keeps its own size while the box grows.
    */
-  const grow = (box, node) => {
-    const now = node.getBoundingClientRect(), sx = box.width / now.width, sy = box.height / now.height;
-    if (calm() || !Number.isFinite(sx) || !Number.isFinite(sy) || (Math.abs(sx - 1) < .001 && Math.abs(sy - 1) < .001)) return;
-    node.classList.add('growing');
-    node.style.transition = 'none';
-    node.style.transform = `translate(${box.left - now.left}px, ${box.top - now.top}px) scale(${sx}, ${sy})`;
-    for (const child of node.children) { child.style.transition = 'none'; child.style.transform = `scale(${1 / sx}, ${1 / sy})`; }
-    requestAnimationFrame(() => {
-      node.style.transition = ''; node.style.transform = '';
-      for (const child of node.children) { child.style.transition = ''; child.style.transform = ''; }
-      setTimeout(() => node.classList.remove('growing'), 220);
-    });
+  const followSize = event => {
+    const { unit, rowUnit, gap } = metrics(), row = rowUnit || unit;
+    const want = {
+      width: Math.max(unit, Math.min(4 * unit + 3 * gap, resize.width + event.clientX - grab.x)),
+      height: Math.max(row, Math.min(2 * row + gap, resize.height + event.clientY - grab.y))
+    };
+    const next = snapSize((want.width + gap) / (unit + gap), (want.height + gap) / (row + gap));
+    if (next !== sizes.get(kind)) { const before = boxes(); sizes.set(kind, next); tile.dataset.size = next; flip(before); }
+    tile.style.transform = 'none';
+    const box = tile.getBoundingClientRect();
+    tile.style.transform = `translate(${resize.left - box.left}px, ${resize.top - box.top}px) scale(${want.width / box.width}, ${want.height / box.height})`;
+    for (const child of tile.children) child.style.transform = `scale(${box.width / want.width}, ${box.height / want.height})`;
   };
   const pick = (node, event) => {
     tile = node; kind = node.dataset.tile; resizing = false; moved = false;
     grab = { x: event.clientX, y: event.clientY };
     const box = node.getBoundingClientRect();
     offset = { x: event.clientX - box.left, y: event.clientY - box.top };
-    if (offset.x > box.width - HANDLE && offset.y > box.height - HANDLE) resizing = true;
-    else node.classList.add('dragging');
+    if (offset.x > box.width - HANDLE && offset.y > box.height - HANDLE) {
+      // The card being resized sits at full size, so the pointer can follow its corner exactly.
+      resizing = true; node.classList.add('resizing');
+      const start = node.getBoundingClientRect();
+      resize = { left: start.left, top: start.top, width: start.width, height: start.height };
+    } else node.classList.add('dragging');
     board.setPointerCapture?.(event.pointerId);
   };
   const drag = event => {
     const { unit, rowUnit, gap, columns, box } = metrics();
     const dx = event.clientX - grab.x, dy = event.clientY - grab.y;
     moved = moved || Math.hypot(dx, dy) > 4;
-    if (resizing) {
-      const [cols, rows] = SPAN[sizes.get(kind)] || SPAN.square;
-      const width = cols * unit + (cols - 1) * gap, height = rows * (rowUnit || unit) + (rows - 1) * gap;
-      const next = snapSize((width + dx + gap) / (unit + gap), (height + dy + gap) / ((rowUnit || unit) + gap));
-      if (next !== sizes.get(kind)) {
-        const before = boxes(), was = tile.getBoundingClientRect();
-        sizes.set(kind, next); tile.dataset.size = next;
-        grow(was, tile); flip(before);
-      }
-      return;
-    }
+    if (resizing) { followSize(event); return; }
     // Where the tile's centre now is, from the pointer: independent of the grid reflowing under it.
     const center = { x: event.clientX - box.left - offset.x + tile.offsetWidth / 2, y: event.clientY - box.top - offset.y + tile.offsetHeight / 2 };
     const at = order.indexOf(kind), others = order.filter(value => value !== kind);
@@ -95,12 +90,15 @@ export function arrangeTiles(board, { list, save, size, changed = () => {} }) {
     const node = tile, dirty = moved;
     if (node) {
       node.classList.remove('dragging', 'resizing');
-      // Let go: the tile glides from the finger to its slot instead of teleporting into it.
-      requestAnimationFrame(() => { node.style.transition = ''; node.style.transform = ''; });
+      // Let go: the card settles from the pointer's size into its snapped slot, and the content with it.
+      if (!calm()) node.classList.add('settling');
+      requestAnimationFrame(() => { node.style.transition = ''; node.style.transform = '';
+        for (const child of node.children) { child.style.transition = ''; child.style.transform = ''; } });
+      setTimeout(() => node.classList.remove('settling'), 240);
       if (dirty) suppress = true;
     }
-    tile = null; resizing = false; offset = null; grab = null;
-    // Save once the glide has started, so the repaint it triggers cannot cut it short.
+    tile = null; resizing = false; offset = null; grab = null; resize = null;
+    // Save once the settle has started, so the repaint it triggers cannot cut it short.
     if (dirty) requestAnimationFrame(remember);
   };
   const start = (node = null, event = null) => {

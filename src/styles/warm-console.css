@@ -99,12 +99,13 @@ input[type=checkbox] { accent-color: var(--accent); }
 }
 .live-tiles.arranging .live-tile::after { content: ''; position: absolute; right: 5px; bottom: 5px; width: 15px; height: 15px; border-right: 3px solid var(--ink); border-bottom: 3px solid var(--ink); }
 .live-tiles.arranging .live-tile.dragging { scale: 1.04; z-index: 3; cursor: grabbing; transition: none; animation: none; box-shadow: 0 14px 34px rgba(0, 0, 0, .45); }
-/* A tile growing into a new size animates its box from the old footprint (JS measures it); the jiggle would fight it. */
-.live-tiles.arranging .live-tile.resizing { animation: none; }
-.live-tiles.arranging .live-tile.growing, .live-tiles.arranging .live-tile.growing > * { transform-origin: top left; }
-.live-tiles.arranging .live-tile.growing > * { transition: transform 200ms var(--ease-out); }
+/* The card being resized sits at full size and follows the pointer like a window's corner; its content is
+   counter-scaled so the text keeps its own size, and letting go settles it into the snapped slot. */
+.live-tiles.arranging .live-tile.resizing { scale: 1; animation: none; transition: none; }
+.live-tiles.arranging .live-tile.resizing > * { transition: none; }
+.live-tiles.arranging .live-tile.settling, .live-tiles.arranging .live-tile.settling > * { transition: transform 200ms var(--ease-out); }
 .reduce-motion .live-tiles.arranging .live-tile { animation: none; transition: none; }
-.reduce-motion .live-tiles.arranging .live-tile.growing > * { transition: none; }
+.reduce-motion .live-tiles.arranging .live-tile.settling, .reduce-motion .live-tiles.arranging .live-tile.settling > * { transition: none; }
 .tile-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 12px; margin: 6px 0; }
 .tile-row > span:first-child { min-width: 80px; flex: 1; }
 .tile-row-keys { display: flex; align-items: center; gap: 2px; }
