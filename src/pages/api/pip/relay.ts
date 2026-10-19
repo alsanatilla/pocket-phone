@@ -3,6 +3,7 @@ import { signedIn } from '../../../server/auth.js';
 import { ensureSchema } from '../../../server/database.js';
 import { failure, sameOrigin } from '../../../server/http.js';
 import { publicTarget, readKey, upstream } from '../../../server/pip-keys.js';
+import { OPENCODE_UA, opencodeSession } from '../../../shared/pip-opencode.js';
 
 // The browser runs the agent; this hop only replaces the provider credential.
 // The key is decrypted per request and never leaves the server.
@@ -41,6 +42,12 @@ export const POST: APIRoute = async ({ request }) => {
         const value = request.headers.get(name);
         if (value) headers[name] = value;
       }
+    }
+    // OpenCode Go routes by a session header and asks a client to name itself; a browser tab cannot reach the
+    // endpoint at all, so this hop supplies both from the key it just decrypted.
+    if (/^https:\/\/opencode\.ai\/inference\//.test(baseUrl)) {
+      headers['user-agent'] = OPENCODE_UA;
+      headers['x-opencode-session'] = opencodeSession(key);
     }
 
     let response: Response;

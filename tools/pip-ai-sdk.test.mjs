@@ -59,6 +59,28 @@ test('a stored account key is relayed, and the browser never sends the key itsel
   assert.equal(result.answer, 'Relayed answer.');
 });
 
+test('a direct OpenCode Go call names Pocket and carries the routing session, without the key in it', async t => {
+  const chat = workspace(t, { provider: 'compatible', model: 'glm-5.3', baseUrl: 'https://opencode.ai/inference/go/openai/v1' });
+  let call;
+  const result = await streamReply(chat, turn(), {
+    key: 'oc_sk_fixture_key',
+    fetcher: async (url, options) => {
+      call = { url, headers: options.headers };
+      return response(compatibleMessage({ text: 'Answered by OpenCode Go.' }));
+    },
+  });
+  assert.equal(call.url, 'https://opencode.ai/inference/go/openai/v1/chat/completions');
+  assert.equal(call.headers['user-agent'], 'pocket-pip/1.0 (+https://pocket-phone.vercel.app)');
+  assert.match(call.headers['x-opencode-session'], /^pocket-[0-9a-f]{40}$/);
+  assert.ok(!call.headers['x-opencode-session'].includes('oc_sk_fixture_key'), 'the session id is not the key');
+  assert.equal(call.headers.authorization, 'Bearer oc_sk_fixture_key');
+  assert.equal(result.answer, 'Answered by OpenCode Go.');
+  // Any other endpoint is left exactly as the client sent it.
+  const { opencodeSession } = await import('../src/shared/pip-opencode.js');
+  assert.equal(opencodeSession('oc_sk_fixture_key'), opencodeSession('oc_sk_fixture_key'));
+  assert.notEqual(opencodeSession('oc_sk_fixture_key'), opencodeSession('oc_sk_another_key'));
+});
+
 test('compatible SDK continuations match out-of-order tool results by their original IDs', async t => {
   const chat = workspace(t, { provider: 'compatible', model: 'fixture', baseUrl: 'https://model.example/v1' }), sent = [];
   const result = await streamReply(chat, turn(), { key: 'fixture', executeTool: async (_, name, input) => {
