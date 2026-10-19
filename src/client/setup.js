@@ -64,10 +64,11 @@ async function checkPhone(redraw) {
 
 // A step the person opened themselves; otherwise the first open step is shown.
 let expanded = '';
-export function mount(body, api, creating = false) {
+export function mount(body, api, creating = false, focus = '') {
   const { h, add, go, workspaceTitle } = api;
   const redraw = () => { if (location.hash.startsWith('#/setup')) api.route(); };
   if (creating && cloud.connected()) history.replaceState(null, '', location.pathname + '#/setup');
+  if (STEPS.some(step => step.id === focus)) expanded = focus;
   const { done, total, open } = progress();
   workspaceTitle(body, 'set up', done === total ? 'all connected' : done + ' of ' + total + ' connected');
   const list = h('div', { class: 'setup' });

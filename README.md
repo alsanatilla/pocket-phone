@@ -16,6 +16,8 @@ Choose your name when creating an account, or change it in **Apps → Account & 
 
 Pip uses matching Pocket visuals on phone and web, with an upper-corner pixel glow and a small console-inspired mascot. Actual tool/search activity has queries, status, results and citations. Read-only Pocket access and Anthropic search start off and can be enabled from the composer. Keeping a reply as a Note, Thought or Task remains an explicit action. See [PIP.md](PIP.md).
 
+**Girder Run** is a web-only arcade roguelike: climb eight generated girder towers, dodge barrels and fireballs, draft relics and reach the door at the top. Jev 1.14, TypeSafe's decision model on OpenRouter, reads the live player coordinates, hearts, hammer and relic capabilities through OpenRouter's Decisions API, then chooses the next throw from typed answers. A signed-in account reuses the OpenRouter key saved in Pip through Pocket's relay; a guest with a tab key calls OpenRouter directly. Without either, the same local model takes over instantly. Runs and the best depth stay local to the browser.
+
 Shared headers, typography, rows, controls and Back conventions connect the apps. See [DESIGN.md](DESIGN.md), [CAMERA.md](CAMERA.md), [APP-STATUS.md](APP-STATUS.md) and [release notes](RELEASES.md).
 
 **Today** starts with three COROS-derived stat bars, then the next appointment, chosen/due actions, ready thoughts and customizable tiles. Add, remove and reorder tiles directly; their layout syncs. Thoughts only become tasks when you choose that action. **Pip’s daily brief** stays available from Apps and as an optional tile. It works offline without an AI key and links back to its sources; **think with Pip** prepares a fresh unsent conversation.
