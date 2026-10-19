@@ -93,6 +93,43 @@ test('failed chat save prevents the paid request and keeps its draft',async()=>{
   const runner=new ReplyRunner(store,{key:()=> 'key',stream:async()=>{called++;}});memory.setItem=()=>{throw new Error('Storage is full');};
   await assert.rejects(runner.send(chat.uid,{text:'Keep my draft',context:[source]}),/Storage is full/);assert.equal(called,0);assert.equal(runner.active,null);assert.equal(store.get(chat.uid).draft,'Keep my draft');assert.equal(store.get(chat.uid).context.length,1);
 });
+for (const mode of ['send', 'resume', 'retry']) test(`a training chat can ${mode} when the ordinary server route is synchronously unavailable`, async () => {
+  const { store, chat } = ready(), seen = [];
+  chat.uid = 'pip-training-fixture-2026-10';
+  if (mode !== 'send') chat.turns = [{ uid: 'unfinished', text: 'Review my latest workout', context: [], answer: 'Partial review', status: 'failed' }];
+  store.save(chat);
+  const runner = new ReplyRunner(store, {
+    key: () => 'account-key',
+    remote: { available: () => false, stream: async () => { assert.fail('Training must use its dedicated transport'); } },
+    stream: async (current, turn, options) => {
+      seen.push(turn.uid);
+      assert.equal(current.uid, chat.uid); assert.equal(options.key, 'account-key');
+      assert.equal(Boolean(options.resume), mode === 'resume');
+      return { answer: 'Workout reviewed.' };
+    }
+  });
+  await runner.send(chat.uid, mode === 'send' ? { text: 'Review my latest workout' } : { [mode]: 'unfinished' });
+  const saved = store.get(chat.uid);
+  assert.equal(seen.length, 1); assert.equal(saved.turns.length, 1);
+  assert.equal(saved.turns[0].status, 'done'); assert.equal(saved.turns[0].answer, 'Workout reviewed.');
+  if (mode !== 'send') assert.equal(saved.turns[0].uid, 'unfinished');
+  assert.equal(runner.active, null);
+});
+
+for (const available of [true, false, 'rejected']) test(`an asynchronous server-availability check (${available}) selects the right reply transport`, async () => {
+  const { store, chat } = ready(), used = [];
+  const runner = new ReplyRunner(store, {
+    key: () => 'fixture-key',
+    remote: {
+      available: async () => { if (available === 'rejected') throw new Error('Offline'); return available; },
+      stream: async () => { used.push('remote'); return { answer: 'Server reply' }; }
+    },
+    stream: async () => { used.push('tab'); return { answer: 'Tab reply' }; }
+  });
+  await runner.send(chat.uid, { text: 'Hello' });
+  assert.deepEqual(used, [available === true ? 'remote' : 'tab']);
+  assert.equal(store.get(chat.uid).turns[0].status, 'done');
+});
 test('switching chats and editing a new draft leaves the reply in its original chat',async()=>{
   const {store,chat}=ready(), other=store.create({...DEFAULT_CONFIG,model:'another-model'});let finish, update;
   const runner=new ReplyRunner(store,{key:()=> 'key',stream:(_,__,options)=>{update=options.onUpdate;return new Promise(resolve=>{finish=resolve;});}});

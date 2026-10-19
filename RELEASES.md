@@ -4,6 +4,7 @@ Each release labels its signing status and supplies an APK, source snapshot, che
 
 ## Web updates after 0.22.0
 
+- Training chats can send, Continue and Restart again. Their immediate opt-out from ordinary server runs is accepted alongside asynchronous availability checks, fixing the `this.remote.available(...).catch is not a function` error before a training request starts.
 - **Notify me on this device** (Pip → **on its own**) turns on browser notifications for the signed-in account. Pip notifies when a server reply finishes or fails, when a reply waits for your OK, and when a scheduled routine writes in its chat. Tapping a notification opens that chat. A reply a tab is following stays with that tab, which shows the notice itself while hidden. **send a test** checks a device.
 - Each message is encrypted for its browser and signed with a key derived from Pocket's server secret, so nothing new needs configuring. Only the major browsers' push services are accepted. Signing out removes the browser's subscription. The Android app does not receive these yet.
 - A new chat now names itself after its first answer, with one small background request. This replaces the rename tool from 0.22.0. A name you chose is never overwritten, and a failed naming request leaves the current name.

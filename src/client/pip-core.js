@@ -221,7 +221,8 @@ export class ReplyRunner {
     const chat = this.store.get(uid);
     if (!chat) throw new Error("This chat was removed.");
     // A signed-in account with its own server key runs the reply on Pocket's server; otherwise this tab does.
-    const remote = this.remote && await this.remote.available(chat).catch(() => false) ? this.remote : null;
+    // Training chats opt out synchronously; ordinary chats check their account's key asynchronously.
+    const remote = this.remote && await Promise.resolve(this.remote.available(chat)).catch(() => false) ? this.remote : null;
     // The account vault resolves asynchronously; a supplied or tab key stays synchronous.
     const pending = remote ? null : this.key(chat.config, chat);
     const key = pending && typeof pending.then === "function" ? await pending : pending;
