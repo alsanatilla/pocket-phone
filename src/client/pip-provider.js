@@ -1,5 +1,5 @@
 import { APICallError, generateId, wrapLanguageModel } from 'ai';
-import { CONTEXT_OVERFLOW } from './pip-limits.js';
+import { CONTEXT_OVERFLOW, POCKET_UPDATED } from './pip-limits.js';
 const httpError = code => code === 401 || code === 403 ? 'The provider rejected your key or access. Check API settings.'
   : code === 429 ? 'The provider is busy or your quota is exhausted. Retry when you’re ready.'
   : code >= 500 ? 'The provider is temporarily unavailable. Retry when you’re ready.'
@@ -32,6 +32,13 @@ export function providerError(error) {
   return new Error('The provider interrupted this reply. Check its settings or retry.');
 }
 const publicError = message => Object.assign(new Error(message), { name: 'PocketProviderError' });
+
+// Adapters load on first use. In a tab left open across a deploy, that hashed chunk no longer exists.
+const CHUNK_ERROR = /dynamically imported module|Importing a module script failed/i;
+async function loadAdapter(load) {
+  try { return await load(); }
+  catch (error) { if (CHUNK_ERROR.test(String(error?.message || error))) throw publicError(POCKET_UPDATED); throw error; }
+}
 
 const FREE_CHAIN = ['nvidia/nemotron-3-super-120b-a12b:free', 'inclusionai/ling-3.0-flash-sante:free', 'openrouter/free'];
 export function freeFallbacks(value) {
@@ -154,19 +161,19 @@ export const textToolCalls = {
 export async function providerModel(value, key, { fetcher, signal, clock, onRetry }) {
   const options = { apiKey: key, baseURL: value.baseUrl, fetch: guardedFetch(value, fetcher, signal, clock, onRetry) };
   if (value.provider === 'anthropic') {
-    const { createAnthropic } = await import('@ai-sdk/anthropic');
+    const { createAnthropic } = await loadAdapter(() => import('@ai-sdk/anthropic'));
     return createAnthropic({ ...options, headers: { 'anthropic-dangerous-direct-browser-access': 'true' } })(value.model);
   }
   const host = new URL(value.baseUrl).hostname;
   let model;
   if (host === 'openrouter.ai') {
-    const { createOpenRouter } = await import('@openrouter/ai-sdk-provider');
+    const { createOpenRouter } = await loadAdapter(() => import('@openrouter/ai-sdk-provider'));
     model = createOpenRouter(options).chat(freeFallbacks(value)?.[0] || value.model);
   } else if (host === 'api.openai.com') {
-    const { createOpenAI } = await import('@ai-sdk/openai');
+    const { createOpenAI } = await loadAdapter(() => import('@ai-sdk/openai'));
     model = createOpenAI(options).chat(value.model);
   } else {
-    const { createOpenAICompatible } = await import('@ai-sdk/openai-compatible');
+    const { createOpenAICompatible } = await loadAdapter(() => import('@ai-sdk/openai-compatible'));
     model = createOpenAICompatible({ ...options, name: 'pocket-compatible' }).chatModel(value.model);
   }
   return wrapLanguageModel({ model, middleware: textToolCalls });

@@ -12,7 +12,7 @@ import { activity, settle, mark, elapsed, activityTitle, phaseLabel } from "./pi
 import { applyProposal, applyChange, applyCoros } from './pip-actions.js';
 import { corosAction, corosCourse, corosDated, corosDate, corosProblem, corosTitle, courseLines, sportName } from '../shared/coros-course.js';
 import { travelDraft } from '../shared/travel-context.js';
-import { CONTEXT_OVERFLOW } from './pip-limits.js';
+import { CONTEXT_OVERFLOW, POCKET_UPDATED } from './pip-limits.js';
 import { pipAway, openTraining } from './pip-away.js';
 import { trainingChatRoutine, trainingReply } from './pip-training-chat.js';
 
@@ -250,7 +250,9 @@ function updateReply(turn) {
   const resumable = !active && turn.status !== "done" && parts.chat.turns.at(-1)?.uid === turn.uid;
   const contextTooLong = turn.error === CONTEXT_OVERFLOW;
   parts.resumeHelp.hidden = !resumable;
-  parts.resumeHelp.textContent = contextTooLong ? 'Start a new chat with this question, or choose a model with more context.' : 'Continue keeps completed lookups. Restart starts new research.';
+  parts.resumeHelp.textContent = contextTooLong ? 'Start a new chat with this question, or choose a model with more context.'
+    : turn.error === POCKET_UPDATED ? 'Reload to pick up the current Pocket build, then restart this reply.'
+    : 'Continue keeps completed lookups. Restart starts new research.';
   if (!active) {
     const text = () => selectedAnswer(parts.answer, turn.answer);
     parts.actions.replaceChildren(...(turn.answer ? [
@@ -274,7 +276,8 @@ function updateReply(turn) {
         ui.go('/pip/' + next.uid);
       }, { disabled: Boolean(runner.active), title: 'Open a new chat with this question ready to review and send' }),
       button('model settings', () => apiSettings(parts.chat.config, { text: turn.text, context: turn.context || [] }), { disabled: Boolean(runner.active), title: 'Choose a model with a larger context window' })
-    ] : [button("continue", () => runner.send(parts.chat.uid, { resume: turn.uid }), {disabled:Boolean(runner.active), title: "Continue this reply using its completed lookups"}), button("restart", () => runner.send(parts.chat.uid, { retry: turn.uid }), { disabled: Boolean(runner.active), title: "Start this request again with fresh research" })] : []));
+    ] : turn.error === POCKET_UPDATED ? [button('reload', () => location.reload(), { title: 'Load the current Pocket build, then restart this reply' })]
+      : [button("continue", () => runner.send(parts.chat.uid, { resume: turn.uid }), {disabled:Boolean(runner.active), title: "Continue this reply using its completed lookups"}), button("restart", () => runner.send(parts.chat.uid, { retry: turn.uid }), { disabled: Boolean(runner.active), title: "Start this request again with fresh research" })] : []));
   } else parts.actions.replaceChildren();
   if (follow) thread.scrollTop = thread.scrollHeight;
 }
