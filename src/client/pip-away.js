@@ -6,10 +6,42 @@ import { syncNow } from './sync.js';
 const GRANTS = [['notes', 'Notes'], ['thoughts', 'Thoughts'], ['tasks', 'Tasks'], ['gym', 'Gym'], ['coros', 'COROS']];
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'], WEEK = [1, 2, 3, 4, 5, 6, 0];
 const START = { provider: 'compatible', model: 'openrouter/free', baseUrl: 'https://openrouter.ai/api/v1', maxTokens: 8192, webSearch: false, grants: ['notes', 'thoughts', 'tasks'], dailyTokens: 200000, enabled: true };
-const API = '/api/pip/background';
+export const API = '/api/pip/background';
 const timezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const dayList = days => days.length === 7 ? 'every day' : days.join() === '1,2,3,4,5' ? 'weekdays' : WEEK.filter(day => days.includes(day)).map(day => DAYS[day]).join(' ');
 const when = at => new Date(at).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+
+/** The routine editor. `onSaved` receives the account's fresh state after a save, delete or refresh. */
+export async function routineEditor(ui, routine = { kind: 'prompt', title: '', prompt: '', time: '08:00', days: [1, 2, 3, 4, 5], enabled: true }, { onSaved = () => {} } = {}) {
+  const caption = text => ui.h('p', { class: 'meta muted', text });
+  const button = (text, run, props = {}) => ui.h('button', { onclick: async () => { try { await run(); } catch (error) { ui.say(error.message); } }, ...props }, text);
+  const training = routine.kind === 'training';
+  const title = ui.h('input', { 'aria-label': 'Routine name', maxlength: 80, value: routine.title });
+  const prompt = ui.h('textarea', { 'aria-label': 'What Pip should do', rows: 5, maxlength: 4000 }); prompt.value = routine.prompt || '';
+  const time = ui.h('input', { type: 'time', 'aria-label': 'Time', value: routine.time });
+  const days = WEEK.map(day => ({ day, ...check(ui, DAYS[day], routine.days.includes(day)) })), on = check(ui, 'on', routine.enabled), problem = caption(''); problem.classList.add('warn');
+  const trainingDays = WEEK.map(day => ({ day, ...check(ui, DAYS[day], (routine.trainingDays || []).includes(day)) }));
+  const save = async () => {
+    try {
+      await onSaved(await post(API, { action: 'routine', routine: { ...routine, title: title.value, prompt: prompt.value, time: time.value, days: days.filter(item => item.input.checked).map(item => item.day), enabled: on.input.checked,
+        ...(training ? { trainingDays: trainingDays.filter(item => item.input.checked).map(item => item.day) } : {}) } }));
+    } catch (failure) { problem.textContent = failure.message; }
+  };
+  await ui.dialog(routine.id ? routine.title : training ? 'training planner' : routine.kind === 'checkin' ? 'morning check-in' : 'scheduled prompt', ui.h('div', { class: 'pip-settings' },
+    ui.h('label', {}, 'name', title), training ? caption('Talk to Pip about your goals, available days and how each workout felt in any chat. Pip remembers it and replies in the chat where you last talked training.') : routine.kind === 'prompt' ? ui.h('label', {}, 'what Pip should do', prompt) : caption('Overdue and due tasks, old parked thoughts, COROS readiness and load, with up to three suggestions.'),
+    training && routine.prompt ? caption('remembered · ' + routine.prompt) : null,
+    training ? caption('Reviews how your latest workouts went, then adjusts just the next one or two sessions within three days, starting tomorrow. Checks for completed COROS and synced Gym workouts about every 30 minutes, and reviews recovery at the daily check below. Unchanged data does not start another AI review.') : null,
+    training ? caption('Running, cycling and trail workouts go to COROS; gym and recovery sessions become dated Pocket tasks. Pip reviews actual workout details, updates its own upcoming sessions and explains what changed. Manual workouts stay intact.') : null,
+    training ? caption('Requires Gym, COROS and Tasks access. COROS must be connected in Movement. Missing live data stops changes. COROS cannot remove a workout; Pip will flag a session to skip when needed.') : null,
+    training ? caption('available training days') : null,
+    training ? ui.h('div', { class: 'pip-days', 'aria-label': 'Available training days' }, trainingDays.map(item => item.view)) : null,
+    ui.h('label', {}, (training ? 'daily recovery check · ' : 'time · ') + timezone(), time),
+    training ? caption('daily recovery check on · new workouts are checked every day') : null,
+    ui.h('div', { class: 'pip-days', 'aria-label': 'Routine days' }, days.map(item => item.view)), on.view, problem,
+    button(training ? 'save automatic training planner' : 'save routine', save, { class: 'row-button accent' }),
+    routine.id ? button('delete routine', async () => onSaved(await post(API, { action: 'delete-routine', id: routine.id }))) : null,
+    button('back', async () => onSaved(await request(API)))), [['close', null]]);
+}
 
 export async function openTraining(ui, openChat) {
   if (!connected()) { ui.say('Sign in to Pocket to talk about training.'); ui.go('/account'); return; }

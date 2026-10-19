@@ -9,10 +9,13 @@ import { config as pipConfig, requestBody, contextCoverage } from '../client/pip
 import { execute as runTool, recordSource, WRITE_TOOLS } from '../client/pip-tools.js';
 import { trainingRuntime, trainingObservation, trainingCheckpoint, trainingChanged, rememberTraining, TRAINING_GRANTS, TRAINING_CHECK_INTERVAL } from './pip-training.js';
 import { trainingChatRoutine } from '../shared/pip-training-chat.js';
+import { sweepRuns } from './pip-runs.js';
 
 // Pip on its own: routines that run on a schedule with the account's dedicated provider key, read the account's
 // server copy and reply in a synced Pip chat. Training routines have scoped writes; calendar appointments stay on the phone.
-const DAY = 86400000, NEVER = Number.MAX_SAFE_INTEGER, RUN_DEADLINE = 150000, JOB_BUDGET = 240000;
+const DAY = 86400000, NEVER = Number.MAX_SAFE_INTEGER, RUN_DEADLINE = 150000;
+/** How long one scheduled job call may keep starting work, within the function's 300-second limit. */
+export const JOB_BUDGET = 240000;
 export const BACKGROUND_GRANTS = ['notes', 'thoughts', 'tasks', 'gym', 'coros'];
 export const BACKGROUND_OWNER = 'pip-routine';
 const CHECKIN = 'Morning check-in. Look at my open tasks (overdue, due today and important ones), thoughts I parked more than a week ago, and my COROS readiness and recent training load if available. Tell me briefly what needs attention today and suggest at most three concrete changes, such as moving a task. If nothing needs attention, say so in one line.';
@@ -80,14 +83,50 @@ async function stored(userId) {
   const row = (await sql({ sql: 'SELECT settings, credentials, used_day, used_tokens FROM pocket_pip_background WHERE user_id = ?', args: [userId] })).rows[0];
   return row ? { settings: parse(row.settings), credentials: row.credentials ? String(row.credentials) : '', usedDay: String(row.used_day), usedTokens: Number(row.used_tokens) } : null;
 }
+/** The account's server key and settings, as a shared chat run needs them. */
+export const backgroundAccount = stored;
+/** What the account's server key may still spend today. Scheduled routines and shared chat runs share one daily limit. */
+export function tokensLeft(saved, now = Date.now()) {
+  if (!saved?.settings) return 0;
+  return saved.settings.dailyTokens - (saved.usedDay === localDay(now, saved.settings.timezone) ? saved.usedTokens : 0);
+}
+/** Adds spent tokens to today's total in one statement, so runs finishing together never lose each other's usage. */
+export async function chargeTokens(userId, timeZone, tokens, now = Date.now()) {
+  if (!(tokens > 0)) return;
+  const today = localDay(now, timeZone);
+  await sql({ sql: 'UPDATE pocket_pip_background SET used_tokens = CASE WHEN used_day = ? THEN used_tokens + ? ELSE ? END, used_day = ? WHERE user_id = ?', args: [today, tokens, tokens, today, userId] });
+}
 async function routines(userId) {
-  const rows = (await sql({ sql: 'SELECT payload, next_run, last_run, last_error, last_chat FROM pocket_pip_routines WHERE user_id = ? ORDER BY rowid', args: [userId] })).rows;
-  return rows.map(row => ({ ...parse(row.payload), nextRun: Number(row.next_run) === NEVER ? 0 : Number(row.next_run), lastRun: Number(row.last_run), lastError: String(row.last_error), lastChat: String(row.last_chat) }));
+  const rows = (await sql({ sql: `SELECT payload, next_run, last_run, last_error, last_chat,
+    (SELECT status FROM pocket_pip_routine_runs r WHERE r.user_id = pocket_pip_routines.user_id AND r.routine_id = pocket_pip_routines.id ORDER BY r.seq DESC LIMIT 1) AS last_status
+    FROM pocket_pip_routines WHERE user_id = ? ORDER BY rowid`, args: [userId] })).rows;
+  return rows.map(row => ({ ...parse(row.payload), nextRun: Number(row.next_run) === NEVER ? 0 : Number(row.next_run), lastRun: Number(row.last_run),
+    lastError: String(row.last_error), lastChat: String(row.last_chat), lastStatus: String(row.last_status || '') }));
+}
+const RUN_STATUS = ['done', 'failed', 'limit', 'off', 'skipped', 'unchanged'], RUN_KEEP = 20;
+/** Records what a scheduled run did, so a failure stays visible after the routine row moves on. Training
+ * check-ins that find nothing new are recorded too, but left out of the overview a person reads. */
+export async function recordRun(userId, routineId, result, now = Date.now()) {
+  const status = RUN_STATUS.includes(result?.status) ? result.status : 'failed';
+  await sql({ sql: 'INSERT INTO pocket_pip_routine_runs (user_id, routine_id, at, status, error, chat, turn) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    args: [userId, String(routineId), now, status, String(result?.error || '').slice(0, 500), String(result?.chat || ''), String(result?.turn || '')] });
+  await sql({ sql: `DELETE FROM pocket_pip_routine_runs WHERE user_id = ? AND routine_id = ? AND seq NOT IN (
+    SELECT seq FROM pocket_pip_routine_runs WHERE user_id = ? AND routine_id = ? ORDER BY seq DESC LIMIT ${RUN_KEEP})`, args: [userId, String(routineId), userId, String(routineId)] });
+}
+/** The recent runs of every routine, newest first, with the routine's name. Quiet training checks are left out. */
+export async function routineRuns(userId, limit = 30) {
+  const rows = (await sql({ sql: `SELECT r.routine_id, r.at, r.status, r.error, r.chat, r.turn, p.payload
+    FROM pocket_pip_routine_runs r LEFT JOIN pocket_pip_routines p ON p.user_id = r.user_id AND p.id = r.routine_id
+    WHERE r.user_id = ? AND r.status != 'unchanged' ORDER BY r.seq DESC LIMIT ?`, args: [userId, Math.min(Math.max(Number(limit) || 30, 1), 100)] })).rows;
+  return rows.map(row => { const routine = parse(row.payload) || {};
+    return { routine: String(row.routine_id), title: String(routine.title || 'Removed routine'), kind: String(routine.kind || ''), at: Number(row.at),
+      status: String(row.status), error: String(row.error || ''), chat: String(row.chat || ''), turn: String(row.turn || '') }; });
 }
 /** What the browser shows. The key itself never leaves the server. */
 export async function backgroundState(userId) {
   const saved = await stored(userId), today = saved?.settings ? localDay(Date.now(), saved.settings.timezone) : '';
-  return { settings: saved?.settings || null, hasKey: Boolean(saved?.credentials), usedToday: saved && saved.usedDay === today ? saved.usedTokens : 0, routines: await routines(userId) };
+  return { settings: saved?.settings || null, hasKey: Boolean(saved?.credentials), usedToday: saved && saved.usedDay === today ? saved.usedTokens : 0, routines: await routines(userId),
+    runs: await routineRuns(userId) };
 }
 const schedule = (routine, settings, active, after = Date.now()) => active && settings?.enabled && routine.enabled
   ? Math.min(nextRun(routine, settings.timezone, after), routine.kind === 'training' ? after + TRAINING_CHECK_INTERVAL : NEVER) : NEVER;
@@ -280,9 +319,12 @@ export async function runClaimed(userId, id, { force = false, fetcher, now = Dat
   const current = (await routines(userId)).find(item => item.id === id);
   await sql({ sql: 'UPDATE pocket_pip_routines SET lock_until = 0, last_run = ?, last_error = ?, last_chat = ?, next_run = ? WHERE user_id = ? AND id = ?',
     args: [now, result.error || '', result.chat || current?.lastChat || '', current ? schedule(current, saved?.settings, Boolean(saved?.credentials)) : NEVER, userId, id] });
+  await recordRun(userId, id, result, now);
   return result;
 }
 export async function runPipJob({ fetcher, now = Date.now() } = {}) {
+  // A shared chat run nobody answered does not wait forever: its requests are settled and it finishes.
+  const swept = await sweepRuns({ fetcher, now });
   const due = (await sql({ sql: 'SELECT user_id, id FROM pocket_pip_routines WHERE next_run <= ? AND lock_until <= ? ORDER BY next_run LIMIT 10', args: [now, now] })).rows;
   const deadline = Date.now() + JOB_BUDGET; let ran = 0;
   for (const row of due) {
@@ -290,5 +332,5 @@ export async function runPipJob({ fetcher, now = Date.now() } = {}) {
     if (ran && Date.now() + RUN_DEADLINE > deadline) break;
     try { await runClaimed(String(row.user_id), String(row.id), { fetcher, now: Date.now() }); ran++; } catch (error) { if (error.status !== 409) throw error; }
   }
-  return { due: due.length, ran, more: ran < due.length || due.length === 10 };
+  return { due: due.length, ran, more: ran < due.length || due.length === 10, expired: swept.length };
 }

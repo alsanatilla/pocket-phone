@@ -8,16 +8,32 @@ export { RESEARCH_LIMITS, CONTEXT_OVERFLOW } from './pip-limits.js';
 export { freeFallbacks } from './pip-provider.js';
 const TOOL_ROUND_TOKENS = 2048;
 const stopped = () => new DOMException('Stopped', 'AbortError');
-
+/** A durable run stops at a decision point instead of waiting for one; it continues in a later request. */
+export class RunPaused extends Error { constructor() { super('This reply is waiting for a decision.'); this.name = 'RunPaused'; } }
+/** Whether an error is the durable-run pause sentinel rather than a failure. */
+const pausedRun = error => error?.name === 'RunPaused';
 // The AI SDK owns provider parsing, tool definitions and input validation, tool execution, the user's
 // approval of writes and model continuation. Pocket owns user permissions, bounded research and the
 // recorded outcomes. approve(requests, signal) resolves to Map(toolCallId → { approved, input? }).
-export async function streamChat(chat, turn, { value, body, key, signal, onUpdate = () => {}, fetcher = fetch, executeTool = execute, previewTool = preview, approve = null, timeoutMs = 90000, deadlineMs = RESEARCH_LIMITS.deadlineMs, resume = null, coverage = null } = {}) {
+// `deviceTools` are answered by the client that owns their source rather than by the server.
+// A durable run passes `durable`: { checkpoint, settled, pause }. checkpoint is the last pause's provider
+// messages, budgets and outstanding requests; settled is what a client decided; pause(state) stores the run
+// before the request ends and returns. The run then throws RunPaused and continues in a later request.
+export async function streamChat(chat, turn, { value, body, key, signal, onUpdate = () => {}, fetcher = fetch, executeTool = execute, previewTool = preview, approve = null, timeoutMs = 90000, deadlineMs = RESEARCH_LIMITS.deadlineMs, resume = null, coverage = null, deviceTools = [], durable = null } = {}) {
   const controller = new AbortController(), abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort();
-  let timeout, absolute, timedOut = false, deadlineReached = false, deadlineLeft = Math.min(deadlineMs, RESEARCH_LIMITS.deadlineMs), deadlineFrom = 0;
+  // A continued run keeps the provider messages, the budgets and the requests it already recorded. Its research
+  // time carries over too: each request may run for at most deadlineMs, but all of them share one research deadline.
+  const restored = durable?.checkpoint || null, base = restored ? structuredClone(restored.messages) : null;
+  const researchLeft = Math.max(1, restored?.counters?.researchLeft ?? RESEARCH_LIMITS.deadlineMs);
+  let timeout, absolute, timedOut = false, deadlineReached = false, deadlineLeft = Math.min(deadlineMs, RESEARCH_LIMITS.deadlineMs, researchLeft), deadlineFrom = 0;
+  const requestBudget = deadlineLeft;
   let calls = 0, searches = 0, toolData = 0, tokens = value.maxTokens;
   let finalReason = '', finalRounds = 0, finalCalls = 0, round = 0, currentRound = 0, allowance = 0, final = false, canPrepare = false, lastFinish = '', fatal = null;
+  if (restored?.counters) { const saved = restored.counters;
+    calls = saved.calls || 0; searches = saved.searches || 0; toolData = saved.toolData || 0; tokens = saved.tokens ?? value.maxTokens;
+    round = saved.round || 0; currentRound = saved.currentRound || 0; finalReason = saved.finalReason || '';
+    finalRounds = saved.finalRounds || 0; finalCalls = saved.finalCalls || 0; final = Boolean(saved.final); canPrepare = Boolean(saved.canPrepare); }
   const deadline = () => { deadlineFrom = Date.now(); absolute = setTimeout(() => { deadlineReached = true; controller.abort(); }, deadlineLeft); };
   const clock = () => { clearTimeout(timeout); timeout = setTimeout(() => { timedOut = true; controller.abort(); }, Math.min(timeoutMs, 90000)); };
   // Time spent waiting for the user's approval counts against neither the idle limit nor the research deadline.
@@ -26,8 +42,16 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   const result = { answer: '', reasoning: resume?.reasoning || '', activity: activity(resume?.activity || turn.activity || []), sources: [], phase: 'requesting', usage: { runtime: 'ai-sdk', request_identity: checkpointIdentity(value), read_access: access(value).join('|'), web_access: value.webSearch, notes_restricted: resume?.notes_restricted || false, ...(coverage ? { history_replay: coverage } : {}) }, model: value.model };
   const offered = new Set(body.tools || []);
   const cache = new Map(), inFlight = new Map(), failures = new Map(), saved = new Map(), inputs = new Map(), executed = new Set();
-  const previews = new Map(), refusals = new Map(), rows = new Map(), declined = new Set(), pending = [];
+  const previews = new Map(Object.entries(restored?.previews || {})), refusals = new Map(), rows = new Map(Object.entries(restored?.rows || {})), declined = new Set(),
+    pending = (restored?.pending || []).map(item => ({ ...item }));
+  // A device tool's result, by tool call id: the device answered it, and the SDK runs it to record that answer.
+  const deviceAnswers = new Map();
   const context = { cache, chat, turn }, completed = [], responses = [];
+  // What a pause stores: the provider messages, the remaining budgets, and the requests no client has settled yet.
+  const checkpoint = extra => ({ messages: [...(base || body.messages), ...responses],
+    counters: { calls, searches, toolData, tokens, round, currentRound, finalReason, finalRounds, finalCalls, final, canPrepare, researchLeft: Math.max(1, researchLeft - (requestBudget - deadlineLeft)) },
+    pending: pending.map(item => ({ ...item })), previews: Object.fromEntries(previews), rows: Object.fromEntries(rows), ...extra });
+  const halt = async extra => { await durable.pause(checkpoint(extra)); throw new RunPaused(); };
   const check = () => { if (controller.signal.aborted) throw stopped(); if (fatal) throw fatal; };
   const publish = () => { check(); if (result.answer.length > 64000 || result.reasoning.length > 24000) throw new Error('This reply is too large. Try a shorter request.'); result.activity = activity(result.activity); onUpdate(structuredClone(result)); };
   const prefix = (turn.attempt || crypto.randomUUID()) + ':', activityId = id => prefix + currentRound + ':' + String(id).slice(0, 145);
@@ -84,7 +108,10 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
         else if (cached?.permissions === signature && cached.result) answer = { ...structuredClone(cached.result), cached: true };
         else {
           let running = reuse && inFlight.get(lookup), duplicate = Boolean(running);
-          if (!running) { running = executeTool(value, name, input, controller.signal, { ...context, eventId: id }); if (reuse) inFlight.set(lookup, running); }
+          if (!running) {
+            running = deviceAnswers.has(toolCallId) ? Promise.resolve(structuredClone(deviceAnswers.get(toolCallId))) : executeTool(value, name, input, controller.signal, { ...context, eventId: id });
+            if (reuse) inFlight.set(lookup, running);
+          }
           try { answer = await running; } finally { if (reuse) inFlight.delete(lookup); }
           if (duplicate && answer && !answer.error) answer = { ...answer, cached: true };
           if (reuse && answer && !answer.error) cache.set(lookup, { permissions: signature, result: structuredClone(answer) });
@@ -107,25 +134,29 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   };
 
   // SDK tool approval for writes: refuse what cannot run, otherwise ask the user with a preview of the change.
+  // A device tool is gated the same way so the run waits for the device that owns its source; when the device
+  // answers, the call is approved and runTool counts and records it like any other read.
   const approval = name => async (input, { toolCallId }) => {
     check();
     const id = activityId(toolCallId); rows.set(toolCallId, id);
     const refuse = (error, message, extra = {}) => { refusals.set(toolCallId, { error, message, ...extra }); return { type: 'denied', reason: message }; };
     if (!allowed(name)) { finalReason ||= 'Unavailable tool requested'; return refuse('tool_unavailable', 'This tool is not offered or its access was switched off.'); }
     if (final && !canPrepare) { fatal = toolsAfterLimit(name); throw fatal; }
+    if (deviceTools.includes(name)) { previews.set(toolCallId, { action: { tool: name, kind: 'device', title: label(name, input) }, device: { tool: name, input } }); return 'user-approval'; }
     if (final ? finalCalls >= RESEARCH_LIMITS.finalCalls : calls >= RESEARCH_LIMITS.calls) { finalReason ||= 'Preparation call limit reached'; return refuse(budgetError.error, budgetError.message); }
     const done = saved.get(cacheKey(name, input));
     if (done) return refuse('existing_proposal', 'This was already saved. Refer to it instead of saving it again.', { existing: { kind: 'existing_proposal', ...done, status: 'applied_by_user', message: 'This was already saved. Refer to it instead of saving it again.' } });
     calls++; if (final) finalCalls++;
     let ready;
-    try { ready = await previewTool(value, name, input, controller.signal); } catch { check(); ready = { error: 'data_unavailable', message: 'The current record could not be read.' }; }
+    try { ready = await previewTool(value, name, input, controller.signal); }
+    catch { check(); ready = { error: 'data_unavailable', message: 'The current record could not be read.' }; }
     check();
     if (ready.error) return refuse(ready.error, ready.message);
     previews.set(toolCallId, ready);
     return 'user-approval';
   };
   const tools = sdkTools([...offered], runTool);
-  const toolApproval = Object.fromEntries(WRITE_TOOLS.filter(name => tools[name]).map(name => [name, approval(name)]));
+  const toolApproval = Object.fromEntries([...WRITE_TOOLS, ...deviceTools].filter(name => tools[name]).map(name => [name, approval(name)]));
   const instructions = body.instructions;
   const prepareStep = ({ messages }) => {
     check(); if (tokens < 1) return finishFromObservations('The configured reply token limit was reached. Continue when you’re ready.');
@@ -191,24 +222,34 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     }
     publish();
   };
-  // The user's decisions go back to the SDK as tool-approval-response messages. An edit replaces the
-  // call's input, which the SDK validates again before it runs the approved tool.
+  // The user's decisions go back to the SDK as tool-approval-response messages, in the last message, where the
+  // SDK reads them. An edit replaces the call's input, which the SDK validates again before it runs the approved
+  // tool. A durable run stores the pause instead and, in a later request, reads what clients settled; the calls
+  // it answers are then in the restored conversation. A device's answer approves its call, and the SDK runs it
+  // so that answer becomes the tool result.
   const decide = async () => {
-    if (!approve) throw new Error('Pip needs your approval to save this, but approval is unavailable here.');
-    result.phase = 'waiting for your approval'; publish(); pause();
-    const decisions = await approve(pending.map(item => ({ ...item })), controller.signal);
-    check(); deadline(); clock();
-    for (const message of responses) for (const part of Array.isArray(message.content) ? message.content : []) {
+    let decisions;
+    if (durable) {
+      if (!durable.settled) { result.phase = 'waiting for your approval'; publish(); pause(); await halt(); }
+      decisions = durable.settled; durable.settled = null; pause(); deadline(); clock();
+    } else {
+      if (!approve) throw new Error('Pip needs your approval to save this, but approval is unavailable here.');
+      result.phase = 'waiting for your approval'; publish(); pause();
+      decisions = await approve(pending.map(item => ({ ...item })), controller.signal);
+      check(); deadline(); clock();
+    }
+    for (const message of [...(base || []), ...responses]) for (const part of Array.isArray(message.content) ? message.content : []) {
       const edited = part.type === 'tool-call' && decisions.get(part.toolCallId)?.input;
       if (edited) part.input = structuredClone(edited);
     }
     responses.push({ role: 'tool', content: pending.map(item => {
-      const approved = decisions.get(item.toolCallId)?.approved === true;
+      const decision = decisions.get(item.toolCallId) || {}, answered = decision.answer !== undefined, approved = answered || decision.approved === true;
+      if (answered) deviceAnswers.set(item.toolCallId, decision.answer);
       if (!approved) {
         declined.add(item.toolCallId);
         const ready = previews.get(item.toolCallId);
         record(item.rowId, { state: 'done', summary: 'declined', ended: Date.now(), result: JSON.stringify({ kind: 'action', action: { ...ready?.action, status: 'declined' } }) });
-      } else record(item.rowId, { state: 'queued', summary: 'approved', input: JSON.stringify(decisions.get(item.toolCallId).input || item.input) });
+      } else record(item.rowId, { state: 'queued', summary: answered ? 'answered by your device' : 'approved', input: JSON.stringify(decision.input || item.input) });
       return { type: 'tool-approval-response', approvalId: item.approvalId, approved, ...(approved ? {} : { reason: 'The user declined this change.' }) };
     }) });
     pending.length = 0;
@@ -218,10 +259,12 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     const model = await providerModel(value, key, { fetcher, signal: controller.signal, clock, onRetry: () => { result.phase = 'provider busy · retrying'; publish(); } });
     const guarded = callback => args => { try { return callback(args); } catch (error) { fatal = error; throw error; } };
     const agent = new ToolLoopAgent({ model, instructions, tools, toolApproval, providerOptions: providerOptions(value), maxRetries: 2, streamRetries: 0, stopWhen: [isStepCount(RESEARCH_LIMITS.continuations + 3), () => round >= RESEARCH_LIMITS.continuations + 3 || tokens <= 0], prepareStep: guarded(prepareStep), onStepEnd: guarded(onStepEnd), onError: () => {} });
+    // A continued run first answers what it paused for: the restored conversation ends with those calls.
+    if (restored && pending.length) await decide();
     // Each SDK call continues from the committed messages: after the user's approval decisions, or after a
     // truncated text-only step, which has no tool result to continue from and is synthesized again.
     for (;;) {
-      const stream = await agent.stream({ messages: [...body.messages, ...responses], abortSignal: controller.signal });
+      const stream = await agent.stream({ messages: [...(base || body.messages), ...responses], abortSignal: controller.signal });
       let finished = false;
       for await (const part of stream.stream) {
         check(); clock();
@@ -242,6 +285,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       result.activity = settle(result.activity, 'failed'); result.phase = 'done'; publish(); return result;
     }
   } catch (error) {
+    if (pausedRun(error)) throw error;
     if (!signal?.aborted && (timedOut || deadlineReached)) return finishFromObservations(deadlineReached ? 'The five-minute research deadline was reached. Continue when you’re ready.' : 'The provider stopped responding for 90 seconds. Continue when you’re ready.');
     if (signal?.aborted || controller.signal.aborted) throw stopped();
     result.activity = settle(result.activity, 'failed', error.message); result.phase = 'failed'; onUpdate(structuredClone(result)); throw error;

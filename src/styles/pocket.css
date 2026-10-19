@@ -867,3 +867,24 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 .history-list { max-height: 60vh; overflow-y: auto; }
 .history-text { white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.6 var(--mono); max-height: 55vh; overflow-y: auto; margin: 0; color: var(--text); }
 .quiet-row { color: var(--muted); font-size: 14px; }
+
+/* Each routine's own chat, above the chats: pinned and listed with how its next run looks. */
+.pip-routine-list { margin: 6px 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.pip-routine-heading { font-size: 13px; margin: 0; }
+.pip-routine-row { display: block; font-size: 14px; min-height: 44px; padding: 6px 0; }
+.pip-routine-row .sub { display: block; font-size: 13px; }
+.pip-routine-row .pip-routine-name { overflow-wrap: anywhere; }
+.pip-chat-actions .pinned { color: var(--accent); }
+/* Scheduled runs: every routine, when it runs next and how the last runs went. */
+.pip-schedule { flex: 1; min-height: 160px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 12px 4px 24px 0; }
+.pip-schedule h2 { font-size: 15px; font-weight: normal; color: var(--muted); margin: 22px 0 4px; }
+.pip-schedule > .pip-routine:first-of-type { border-top: 0; }
+.pip-routine.paused strong, .pip-routine.paused p { color: var(--muted); }
+.pip-run { border-top: 1px solid var(--line); padding: 8px 0; }
+.pip-run-status.done { color: var(--accent); }
+.pip-run-status.failed, .pip-run-status.limit, .pip-attention { color: var(--warning); }
+.pip-attention { border: 1px solid var(--warning); padding: 8px 10px; margin: 8px 0; }
+.pip-attention strong { display: block; }
+.pip-attention ul { margin: 6px 0 0; padding-left: 18px; }
+.pip-schedule .pip-attention, .pip-schedule .pip-run-status { font-size: 13px; }
+.pip-schedule .pip-run-head { overflow-wrap: anywhere; }
