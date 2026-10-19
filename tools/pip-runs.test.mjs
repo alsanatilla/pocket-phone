@@ -33,6 +33,21 @@ const header = (uid, title = 'Pip run') => ({ uid, title, created: Date.now(), c
 const chatOf = async (userId, uid) => JSON.parse(String((await execute({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, uid] })).rows[0].payload));
 const notesOf = async userId => (await readDocuments(userId))['notes.json'].value.notes.filter(note => note.uid.startsWith('pip-'));
 const toolMessages = request => request.messages.filter(message => message.role === 'tool').map(message => String(message.content)).join('\n');
+
+test('a run keeps the turn id and attempt the client sent, and marks itself as a server reply', async () => {
+  const userId = await account(), sent = [];
+  const submitted = await runs.submitRun(userId, { requestId: 'req-ids', chat: header('chat-ids', 'Ids'), device: 'browser-1',
+    attempt: 'attempt-fixed', turnUid: 'turn-fixed', text: 'Sag kurz Hallo.' }, { fetcher: provider(sent, compatibleMessage({ text: 'Hallo.' })) });
+  assert.equal(submitted.run.status, 'done');
+  assert.equal(submitted.run.turn.uid, 'turn-fixed');
+  assert.equal(submitted.run.turn.attempt, 'attempt-fixed');
+  assert.equal(submitted.run.turn.usage.runtime, 'pocket-server');
+  // The synced conversation holds that one turn, so the tab does not end up with a second copy of the question.
+  const stored = await chatOf(userId, 'chat-ids');
+  assert.equal(stored.turns.length, 1);
+  assert.equal(stored.turns[0].uid, 'turn-fixed');
+  assert.equal(stored.turns[0].usage.runtime, 'pocket-server');
+});
 const failure = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
 // What a chat-completions endpoint refuses: a tool call without its result before the next message, a result for

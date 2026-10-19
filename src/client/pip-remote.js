@@ -37,7 +37,7 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
   if (!owner) throw new Error('Sign in to Pocket to run this reply on the server.');
   const device = deviceId(storage);
   const body = requestId => ({ action: 'submit', accountId: owner.id, requestId, device, chatUid: chat.uid, text: turn.text,
-    context: turn.context || [], chat: { uid: chat.uid, title: chat.title, created: chat.created, config: chat.config } });
+    attempt: turn.attempt, turnUid: turn.uid, context: turn.context || [], chat: { uid: chat.uid, title: chat.title, created: chat.created, config: chat.config } });
   let view = await post('/api/pip/runs', body(turn.attempt || crypto.randomUUID()));
   let cursor = 0, waited = 0;
   for (;;) {

@@ -136,8 +136,15 @@ export async function submitRun(userId, body, { fetcher, now = Date.now() } = {}
   const value = runValue(saved.settings, body.grants), chat = await conversation(userId, uid, header, value, now);
   if (chat.turns.length >= 1990) throw no('This chat is full. Start a new one.', 413);
   const device = String(body.device || '').slice(0, 100);
-  const turn = { uid: randomUUID(), text, context: Array.isArray(body.context) ? body.context : [], created: now, updated: now, owner: device || 'pocket-server', attempt: randomUUID(),
-    answer: '', reasoning: '', error: '', status: 'streaming', usage: {}, activity: [], sources: [], phase: 'requesting', model: value.model };
+  // The client's attempt id is kept: a synced server turn then carries the same attempt the tab is running, so the
+  // tab's own progress updates are not mistaken for another run's. The runtime marker travels with the turn, so
+  // every device can show that this reply ran on the server.
+  const attempt = typeof body.attempt === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(body.attempt) ? body.attempt : randomUUID();
+  // The tab's own turn id is kept too, so the turn this run writes is the same turn the tab already shows
+  // instead of a second copy of the same question.
+  const turnUid = typeof body.turnUid === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(body.turnUid) ? body.turnUid : randomUUID();
+  const turn = { uid: turnUid, text, context: Array.isArray(body.context) ? body.context : [], created: now, updated: now, owner: device || 'pocket-server', attempt,
+    answer: '', reasoning: '', error: '', status: 'streaming', usage: { runtime: 'pocket-server' }, activity: [], sources: [], phase: 'requesting', model: value.model };
   if (!validObject('chats', { ...chat, updated: now, turns: [turn] })) throw no('Check the message and its attached sources: up to three, each with a title and up to 8,000 characters.');
   const active = (await sql({ sql: `SELECT * FROM pocket_pip_runs WHERE user_id = ? AND chat_uid = ? AND status IN ('running', 'awaiting', 'stopping')`, args: [userId, uid] })).rows[0];
   if (active && ACTIVE.includes(String((await recover(userId, active))?.status))) throw no('Let the current reply finish, or stop it first.', 409);
@@ -316,7 +323,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
       .map(row => ({ name: row.name, input: row.input || '{}', result: row.result })).slice(-24);
     const { streamChat } = await import('../client/pip-stream.js');
     const reply = await streamChat(conversationView, turn, { value, body, key, fetcher, deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
-      onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: total(segment) }); progress(); },
+      onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server' } }); progress(); },
       resume: { reasoning: turn.reasoning || '', activity: turn.activity || [], observations },
       durable: { checkpoint: resumed, settled: resumed ? settlementMap(requests) : null, pause },
       executeTool: (value, name, input, signal, context) => WRITE_TOOLS.includes(name)
@@ -324,7 +331,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
         : runTool(value, name, input, signal, { ...context, source }),
       previewTool: (value, name, input, signal) => previewTool(value, name, input, signal, source) });
     segment = reply.usage || segment;
-    Object.assign(turn, reply, { usage: total(segment) });
+    Object.assign(turn, reply, { usage: { ...total(segment), runtime: 'pocket-server' } });
     await end('done');
   } catch (error) {
     if (error?.name === 'RunPaused' && paused || leaseLost) return;

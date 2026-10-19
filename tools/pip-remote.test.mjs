@@ -50,6 +50,8 @@ test('a remote reply submits once, shows progress, asks for the approval and ret
   const submits = calls.filter(call => call.body?.action === 'submit');
   assert.equal(submits.length, 1);
   assert.equal(submits[0].body.requestId, 'attempt-1');
+  assert.equal(submits[0].body.attempt, 'attempt-1');
+  assert.equal(submits[0].body.turnUid, 'turn-1');
   assert.equal(submits[0].body.chatUid, 'chat-1');
   assert.equal(submits[0].body.text, 'Speichere die Notiz.');
   assert.equal(submits[0].body.accountId, 'u1');
