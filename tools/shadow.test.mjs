@@ -457,3 +457,34 @@ test('movement eases in and out quickly, and a wall stops momentum on its axis',
   assert.equal(sim.player.vx, 0, 'the east corridor wall zeroes horizontal momentum');
   assert.ok(sim.player.x < 44 * TILE, 'the wall holds');
 });
+
+test('a shot without a mouse snaps to the guard ahead; download progress survives letting go', () => {
+  const sim = new ShadowSim({ seed: 3, mode: 'commander' });
+  quiet(sim);
+  sim.noCapture = true;
+  const guard = sim.guards[0];
+  Object.assign(guard, at(40, 14), { facing: 0, route: [{ ...at(40, 14), hold: 999, face: 0 }], routeIndex: 0 });
+  Object.assign(sim.player, at(34, 14.3), { facing: .25 });
+  sim.shoot(null);
+  assert.equal(guard.dead, true, 'the assisted shot hit the guard 0.25 rad off the facing');
+  const hacker = new ShadowSim({ seed: 4, mode: 'baseline' });
+  quiet(hacker);
+  Object.assign(hacker.player, { x: 31.5 * TILE, y: 5.2 * TILE + 10 });
+  hacker.step(1 / 60, { interact: true, interactHeld: true });
+  stepFor(hacker, 1.5, { interactHeld: true });
+  stepFor(hacker, .1);
+  assert.equal(hacker.player.action, null, 'letting go pauses the download');
+  hacker.step(1 / 60, { interact: true, interactHeld: true });
+  assert.ok(hacker.player.action?.t > 1.3, 'holding E again carries on from where it stopped');
+});
+
+test('holding the aim walks the operative toward the cursor instead of running', () => {
+  const sim = new ShadowSim({ seed: 5, mode: 'baseline' });
+  quiet(sim);
+  Object.assign(sim.player, at(36, 14));
+  const aim = at(36, 20);
+  stepFor(sim, .4, { move: { x: 1, y: 0 }, run: true, aimHold: true, aim });
+  assert.equal(sim.player.running, false, 'no running with the pistol drawn');
+  assert.ok(sim.player.speed < 80, 'walking pace');
+  assert.ok(Math.abs(sim.player.facing - Math.atan2(aim.y - sim.player.y, aim.x - sim.player.x)) < .05, 'faces the cursor while strafing');
+});

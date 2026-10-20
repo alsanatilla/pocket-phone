@@ -81,7 +81,7 @@ export class ShadowSim {
     this.t = 0;
     this.status = 'playing';
     this.player = {
-      x: START.x, y: START.y, facing: -Math.PI / 2, crouch: false, running: false, moving: false, speed: 0, vx: 0, vy: 0,
+      x: START.x, y: START.y, facing: -Math.PI / 2, crouch: false, running: false, moving: false, speed: 0, vx: 0, vy: 0, aiming: false,
       hidden: null, locker: null, carrying: null, keycard: false, data: false, pebbles: this.rules.pebbles,
       step: 0, action: null, anim: 0, visibility: 0, noise: 0, caught: 0, cameraOff: false,
       ammo: 3, maxAmmo: 6, shotAt: -99, recoil: 0,
@@ -107,7 +107,7 @@ export class ShadowSim {
     this.queue = [];
     this.decisions = [];
     this.decisionSerial = 0;
-    this.mission = { entry: null, labEntry: null, breachAt: null, breachKnown: false, panelAt: null, traces: new Set(), seenKeycardGone: false };
+    this.mission = { entry: null, labEntry: null, breachAt: null, breachKnown: false, panelAt: null, traces: new Set(), seenKeycardGone: false, progress: { hack: 0, panel: 0 } };
     this.net = {
       phase: 'calm', phaseSince: 0, level: 1, lastSeen: null, sightings: [], evidence: [], plan: null, decision: null,
       lastDecisionAt: -99, nextSweep: 0, searchUntil: 0, lockdownUntil: 0, calmAt: 0, missing: new Set(), found: new Set(),
@@ -265,10 +265,10 @@ export class ShadowSim {
     }
     if (p.locker) {
       if (input.interact || Math.hypot(input.move?.x || 0, input.move?.y || 0) > .5) this.leaveLocker();
-      p.moving = false; p.speed = 0; p.vx = 0; p.vy = 0; p.visibility = 0;
+      p.moving = false; p.speed = 0; p.vx = 0; p.vy = 0; p.visibility = 0; p.aiming = false;
       return;
     }
-    if (p.action) { this.updateAction(dt, input); return; }
+    if (p.action) { p.aiming = false; this.updateAction(dt, input); return; }
     if (input.interact) this.interact();
     if (input.knife) this.knife();
     if (input.shoot) this.shoot(input.aim);
@@ -280,7 +280,8 @@ export class ShadowSim {
     const length = Math.hypot(mx, my);
     if (length > 1) { mx /= length; my /= length; }
     const wants = length > .2;
-    const running = Boolean(input.run) && !p.crouch && !p.carrying && wants;
+    p.aiming = Boolean(input.aimHold) && !p.carrying;
+    const running = Boolean(input.run) && !p.crouch && !p.carrying && !p.aiming && wants;
     const top = p.carrying ? SPEED.crouch * .9 : p.crouch ? SPEED.crouch : running ? SPEED.run : SPEED.walk;
     const k = 1 - Math.exp(-dt / (wants ? ACCEL_TIME : DECEL_TIME));
     p.vx += ((wants ? mx * top : 0) - p.vx) * k;
@@ -289,7 +290,9 @@ export class ShadowSim {
     p.running = running;
     p.speed = Math.hypot(p.vx, p.vy);
     p.moving = p.speed > 6;
-    if (wants) p.facing = Math.atan2(my, mx);
+    const aim = input.aim && Number.isFinite(input.aim.x) && Number.isFinite(input.aim.y) ? input.aim : null;
+    if (p.aiming && aim) p.facing = angleTo(p.x, p.y, aim.x, aim.y);
+    else if (wants) p.facing = Math.atan2(my, mx);
     if (p.speed > 0) {
       const before = { x: p.x, y: p.y };
       const moved = this.moveBody(p, p.vx * dt, p.vy * dt, PLAYER_R, this.playerPassable, 6);
@@ -428,6 +431,10 @@ export class ShadowSim {
     if (p.ammo <= 0) { this.emit('hint', { text: 'pistol empty — use the knife' }); return; }
     let angle = p.facing;
     if (aim && Number.isFinite(aim.x) && Number.isFinite(aim.y)) angle = angleTo(p.x, p.y, aim.x, aim.y);
+    else {
+      const assist = this.aimAssist(angle);
+      if (assist) angle = angleTo(p.x, p.y, assist.x, assist.y);
+    }
     p.facing = angle; p.ammo--; p.shotAt = this.t; p.recoil = .18;
     this.metrics.shots++;
     const range = 9.5 * TILE;
@@ -461,6 +468,20 @@ export class ShadowSim {
         this.mission.panelAt = this.mission.panelAt ?? this.t;
       }
     }
+  }
+
+  /** The nearest standing guard within 0.6 rad of `angle`, in pistol range and in sight. */
+  aimAssist(angle) {
+    const p = this.player, range = 9.5 * TILE;
+    let best = null, bestScore = Infinity;
+    for (const g of this.guards) {
+      if (g.down || g.dead || g.hidden) continue;
+      const d = dist(g, p), off = Math.abs(wrapAngle(angleTo(p.x, p.y, g.x, g.y) - angle));
+      if (d > range || off > .6 || !lineClear(p.x, p.y, g.x, g.y, this.doorOpen, false)) continue;
+      const score = d + off * 120;
+      if (score < bestScore) { bestScore = score; best = g; }
+    }
+    return best;
   }
 
   killGuard(g, how = 'knife') {
@@ -515,8 +536,8 @@ export class ShadowSim {
       if (body.keycard && !p.keycard) { p.keycard = true; body.keycard = false; this.emit('toast', { text: `${body.name}’s keycard` }); }
       return;
     }
-    if (!p.data && dist(p, { x: TERMINAL.x * TILE, y: TERMINAL.y * TILE + 10 }) < 26) { p.action = { kind: 'hack', t: 0, need: 4 }; return; }
-    if (!this.net.camerasOff && dist(p, { x: PANEL.x * TILE + 8, y: PANEL.y * TILE + 8 }) < 24) { p.action = { kind: 'panel', t: 0, need: 1.6 }; return; }
+    if (!p.data && dist(p, { x: TERMINAL.x * TILE, y: TERMINAL.y * TILE + 10 }) < 26) { p.action = { kind: 'hack', t: this.mission.progress.hack, need: 4 }; return; }
+    if (!this.net.camerasOff && dist(p, { x: PANEL.x * TILE + 8, y: PANEL.y * TILE + 8 }) < 24) { p.action = { kind: 'panel', t: this.mission.progress.panel, need: 1.6 }; return; }
     if (this.keycardOnDesk && dist(p, { x: KEYCARD.x * TILE, y: KEYCARD.y * TILE }) < 22) {
       this.keycardOnDesk = false; p.keycard = true;
       this.emit('toast', { text: 'lab keycard' });
@@ -571,7 +592,13 @@ export class ShadowSim {
       return;
     }
     const moving = Math.hypot(input.move?.x || 0, input.move?.y || 0) > .5;
-    if (!input.interactHeld || moving) { p.action = null; this.emit('hint', { text: action.kind === 'hack' ? 'download interrupted' : 'panel interrupted' }); return; }
+    if (!input.interactHeld || moving) {
+      // Progress is kept: holding E again carries on from here.
+      this.mission.progress[action.kind] = action.t;
+      p.action = null;
+      this.emit('hint', { text: `${action.kind === 'hack' ? 'download' : 'panel'} paused at ${Math.round(action.t / action.need * 100)}% · hold E to continue` });
+      return;
+    }
     action.t += dt;
     if (action.t < action.need) return;
     p.action = null;
@@ -1771,8 +1798,8 @@ export class ShadowSim {
     }
     const target = this.takedownTarget();
     const downed = this.guards.find(g => g.down && !g.dead && !g.hidden && !g.carried && dist(g, p) < 18);
-    if (target) return `E - take down ${target.name} · X - knife`;
-    if (downed) return `E - drag ${downed.name}${downed.keycard ? ' · has a keycard' : ''} · X - finish`;
+    if (target) return `E - take down ${target.name} · click - knife`;
+    if (downed) return `E - drag ${downed.name}${downed.keycard ? ' · has a keycard' : ''} · click - finish`;
     const dead = this.guards.find(g => g.dead && !g.hidden && !g.carried && dist(g, p) < 18);
     if (dead) return `E - drag ${dead.name}${dead.keycard ? ' · has a keycard' : ''}`;
     if (!p.data && dist(p, { x: TERMINAL.x * TILE, y: TERMINAL.y * TILE + 10 }) < 26) return 'hold E - download the data';

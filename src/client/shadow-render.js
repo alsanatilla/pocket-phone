@@ -241,7 +241,7 @@ function drawPlayer(ctx, p, time) {
   ctx.fillStyle = '#ecc981'; ctx.fillRect(-.6, -.6, 3, 1.2);
   ctx.fillStyle = '#f0e9dd'; ctx.fillRect(3.4, -.6, 1, 1.2);
   // The pistol is visible only while it is out; the knife is always on the belt.
-  if (time - (p.shotAt ?? -99) < .4) {
+  if (time - (p.shotAt ?? -99) < .4 || p.aiming) {
     ctx.fillStyle = '#2b3336'; ctx.fillRect(3.6, .9, 5.2, 1.5);
     ctx.fillStyle = '#ecc981'; ctx.fillRect(8.5, 1.1, 1.6, 1.1);
   } else {
@@ -492,14 +492,40 @@ export function drawWorld(ctx, sim, view, opts = {}) {
   }
   if (opts.intel) drawIntel(ctx, sim, opts);
   for (const g of sim.guards) if (!g.down && onScreen(g.x, g.y, 20)) drawIndicator(ctx, g, time);
-  if (opts.aim && opts.aiming) {
-    ctx.strokeStyle = 'rgba(240,233,221,.35)'; ctx.setLineDash([2, 2]); ctx.lineWidth = .7;
-    ctx.beginPath(); ctx.moveTo(sim.player.x, sim.player.y); ctx.lineTo(opts.aim.x, opts.aim.y); ctx.stroke(); ctx.setLineDash([]);
-    ctx.beginPath(); ctx.arc(opts.aim.x, opts.aim.y, 3, 0, Math.PI * 2); ctx.stroke();
-  }
+  if (opts.target) { const g = sim.guards.find(item => item.id === opts.target); if (g) drawTargetMark(ctx, g, time); }
+  if (opts.aim && opts.aiming) drawAim(ctx, sim, opts.aim, opts.aimHold);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   drawEdges(ctx, sim, cam);
   drawScanner(ctx, sim, opts);
+}
+
+/** Corner brackets on the guard a takedown or knife can reach right now. */
+function drawTargetMark(ctx, g, time) {
+  const r = 10 + Math.sin(time * 8) * .8, k = 3.2;
+  ctx.strokeStyle = 'rgba(236,201,129,.9)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    const x = g.x + sx * r, y = g.y + sy * r;
+    ctx.moveTo(x, y - sy * k); ctx.lineTo(x, y); ctx.lineTo(x - sx * k, y);
+  }
+  ctx.stroke();
+}
+
+/** The cursor reticle; with the pistol drawn, a laser to the first wall along the aim. */
+function drawAim(ctx, sim, aim, armed) {
+  const p = sim.player, angle = Math.atan2(aim.y - p.y, aim.x - p.x);
+  if (armed) {
+    const reach = rayLength(sim, p.x, p.y, angle, 9.5 * TILE);
+    ctx.strokeStyle = 'rgba(240,112,94,.55)'; ctx.lineWidth = .7; ctx.setLineDash([3, 2]);
+    ctx.beginPath(); ctx.moveTo(p.x + Math.cos(angle) * 9, p.y + Math.sin(angle) * 9); ctx.lineTo(p.x + Math.cos(angle) * reach, p.y + Math.sin(angle) * reach); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  const r = armed ? 3.2 : 2.6;
+  ctx.strokeStyle = armed ? 'rgba(240,112,94,.95)' : 'rgba(240,233,221,.6)'; ctx.lineWidth = .8;
+  ctx.beginPath(); ctx.arc(aim.x, aim.y, r, 0, Math.PI * 2);
+  ctx.moveTo(aim.x - r - 2.5, aim.y); ctx.lineTo(aim.x - r + .8, aim.y); ctx.moveTo(aim.x + r - .8, aim.y); ctx.lineTo(aim.x + r + 2.5, aim.y);
+  ctx.moveTo(aim.x, aim.y - r - 2.5); ctx.lineTo(aim.x, aim.y - r + .8); ctx.moveTo(aim.x, aim.y + r - .8); ctx.lineTo(aim.x, aim.y + r + 2.5);
+  ctx.stroke();
 }
 
 /** Arrows at the screen edge for guards who are noticing the player off screen. */

@@ -217,11 +217,11 @@ export function mountShadow(body, api = {}) {
         h('section', { class: 'shadow-panel' },
           h('h3', { text: 'controls' }),
           h('ul', { class: 'shadow-controls' },
-            h('li', { text: 'X knife kill · G pistol · E nonlethal / interact' }),
             h('li', { text: 'WASD / arrows move · Shift run · C crouch' }),
-            h('li', { text: 'E or Space: take down, drag, hide, use · hold to download' }),
-            h('li', { text: 'Q knock on a wall · F throw a pebble (toward the mouse)' }),
-            h('li', { text: 'Tab intel overlay · P pause' })))),
+            h('li', { text: 'Mouse aims · left click knifes · hold right click to draw the pistol, left click fires' }),
+            h('li', { text: 'E or Space: take down without killing, drag, hide, use · hold to download' }),
+            h('li', { text: 'Q knock on a wall · F throw a pebble at the cursor' }),
+            h('li', { text: 'No mouse: X knife · G pistol, which snaps to the guard ahead · Tab intel · P pause' })))),
       help());
     root.replaceChildren(node);
     drawSchematic(schematic, heat);
@@ -297,7 +297,7 @@ export function mountShadow(body, api = {}) {
     refs.pause = h('div', { class: 'shadow-pause', hidden: true }, h('strong', { text: 'paused' }),
       h('button', { type: 'button', class: 'shadow-side-button', onclick: () => togglePause() }, 'resume mission'),
       h('span', { text: 'P or Esc to resume' }));
-    refs.stage = h('div', { class: 'shadow-stage', tabindex: '0', 'aria-label': 'Play field. WASD to move.' }, canvas,
+    refs.stage = h('div', { class: 'shadow-stage', tabindex: '0', 'aria-label': 'Play field. WASD to move, mouse to aim.' }, canvas,
       h('div', { class: 'shadow-vignette' }),
       h('div', { class: 'shadow-hud' },
         h('div', { class: 'shadow-hud-objective' }, h('span', { class: 'shadow-label', text: 'objective' }), refs.objective, refs.timer),
@@ -313,14 +313,14 @@ export function mountShadow(body, api = {}) {
     refs.connect = h('button', { type: 'button', class: 'shadow-link', hidden: true, onclick: () => api.go?.('/setup/pip') }, 'connect OpenRouter');
     refs.radio = h('ol', { class: 'shadow-radio', 'aria-live': 'polite' });
     refs.intel = h('section', { class: 'shadow-panel shadow-intel', hidden: true });
-    refs.intelButton = h('button', { type: 'button', class: 'shadow-side-button', 'aria-pressed': 'false', onclick: () => toggleIntel() }, 'intel overlay · tab');
-    refs.soundButton = h('button', { type: 'button', class: 'shadow-side-button', 'aria-pressed': String(settings.sound), onclick: () => toggleSound() }, settings.sound ? 'sound on' : 'sound off');
+    refs.intelButton = h('button', { type: 'button', class: 'shadow-side-button', 'aria-pressed': 'false', onclick: () => { toggleIntel(); refs.stage.focus({ preventScroll: true }); } }, 'intel overlay · tab');
+    refs.soundButton = h('button', { type: 'button', class: 'shadow-side-button', 'aria-pressed': String(settings.sound), onclick: () => { toggleSound(); refs.stage.focus({ preventScroll: true }); } }, settings.sound ? 'sound on' : 'sound off');
     refs.pauseButton = h('button', { type: 'button', class: 'shadow-side-button', 'aria-pressed': 'false', onclick: () => togglePause() }, 'pause mission');
     const touch = touchControls(refs);
     const node = h('div', { class: 'shadow-live' },
       h('div', { class: 'shadow-layout' },
         h('div', { class: 'shadow-main' }, refs.stage, touch,
-          h('p', { class: 'shadow-keys', text: 'X knife · G pistol · WASD move · Shift run · C crouch · E act (hold to download) · Q knock · F throw · Tab intel · P pause' })),
+          h('p', { class: 'shadow-keys', text: 'WASD move · Shift run · C crouch · click knife · hold right click + click to shoot · E act · Q knock · F throw · Tab intel · P pause' })),
         h('aside', { class: 'shadow-side' },
           h('section', { class: 'shadow-panel shadow-command' },
             h('h3', {}, h('span', { text: 'command' }), h('span', { class: 'shadow-tag', text: 'jev · system one' })),
@@ -349,7 +349,7 @@ export function mountShadow(body, api = {}) {
     const keys = { up: false, down: false, left: false, right: false, run: false };
     const edges = { crouch: false, interact: false, knife: false, shoot: false, knock: false, throw: false };
     const touch = { x: 0, y: 0, run: false, act: false };
-    const state = { intel: false, selected: null, paused: startPaused, aim: null, aimAt: -99, held: false, toastUntil: 0, lastPaint: 0, alarmAt: 0, ended: false, shake: 0, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches };
+    const state = { intel: false, selected: null, paused: startPaused, pointer: null, aimHold: false, held: false, toastUntil: 0, lastPaint: 0, alarmAt: 0, ended: false, shake: 0, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches };
     if (matchMedia('(prefers-reduced-motion: reduce)').addEventListener) {
       const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
       const onMotion = event => { state.reduceMotion = event.matches; };
@@ -375,14 +375,18 @@ export function mountShadow(body, api = {}) {
       return null;
     };
     document.addEventListener('keydown', event => {
-      if (!canvas.isConnected || event.ctrlKey && event.key !== 'Control' || event.metaKey || event.altKey) return;
+      if (!canvas.isConnected || event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, dialog')) return;
+      // Pocket's 1-9 app shortcuts would end the mission mid-play; they work again while paused.
+      if (/^[0-9]$/.test(event.key) && !state.paused && sim.status === 'playing') { event.preventDefault(); event.stopPropagation(); return; }
+      // Space and Enter still press a focused button; every other game key goes to the game.
       const onControl = event.target instanceof HTMLElement && event.target.closest('button, a, summary');
-      if (onControl && !['Escape', 'p', 'P'].includes(event.key)) return;
+      if (onControl && [' ', 'Spacebar', 'Enter', 'Tab'].includes(event.key)) return;
+      if (onControl && !['Escape', 'p', 'P'].includes(event.key)) refs.stage.focus({ preventScroll: true });
       const key = keyFor(event);
       if (key) { keys[key] = true; event.preventDefault(); return; }
       const k = event.key;
-      if (k === 'c' || k === 'C' || k === 'Control') { if (!event.repeat) edges.crouch = true; event.preventDefault(); }
+      if (k === 'c' || k === 'C') { if (!event.repeat) edges.crouch = true; event.preventDefault(); }
       else if (k === 'e' || k === 'E' || k === ' ' || k === 'Spacebar') { if (!event.repeat) edges.interact = true; state.held = true; event.preventDefault(); }
       else if (k === 'x' || k === 'X') { if (!event.repeat) edges.knife = true; event.preventDefault(); }
       else if (k === 'g' || k === 'G') { if (!event.repeat) edges.shoot = true; event.preventDefault(); }
@@ -400,7 +404,7 @@ export function mountShadow(body, api = {}) {
     const clearInput = () => {
       Object.keys(keys).forEach(key => { keys[key] = false; });
       Object.keys(edges).forEach(key => { edges[key] = false; });
-      state.held = false; touch.x = touch.y = 0; touch.act = false; touch.run = false;
+      state.held = false; state.aimHold = false; touch.x = touch.y = 0; touch.act = false; touch.run = false;
       view.touch.querySelectorAll('.held, .on').forEach(button => button.classList.remove('held', 'on'));
       const knob = view.touch.querySelector('.shadow-stick-knob');
       if (knob) knob.style.transform = '';
@@ -412,17 +416,35 @@ export function mountShadow(body, api = {}) {
       const rect = canvas.getBoundingClientRect();
       return { x: camView.x + (event.clientX - rect.left) / rect.width * VIEW_W, y: camView.y + (event.clientY - rect.top) / rect.height * VIEW_H };
     };
-    canvas.addEventListener('pointermove', event => { if (event.pointerType === 'mouse') { state.aim = toWorld(event); state.aimAt = sim.t; } }, { signal });
-    canvas.addEventListener('pointerleave', () => { state.aimAt = -99; }, { signal });
+    // The cursor aims while it is over the play field. Its screen point is kept and re-projected
+    // every frame, so a still cursor keeps aiming at the same spot on screen as the camera moves.
+    const pointAt = event => { state.pointer = { clientX: event.clientX, clientY: event.clientY }; };
+    canvas.addEventListener('pointermove', event => { if (event.pointerType === 'mouse') pointAt(event); }, { signal });
+    canvas.addEventListener('pointerleave', () => { state.pointer = null; }, { signal });
+    canvas.addEventListener('contextmenu', event => event.preventDefault(), { signal });
+    let pointerType = 'mouse';
     canvas.addEventListener('pointerdown', event => {
+      pointerType = event.pointerType;
       refs.stage.focus({ preventScroll: true });
-      if (!state.intel) return;
-      const point = toWorld(event);
-      let best = null, bestD = 16;
-      for (const g of sim.guards) { const d = Math.hypot(g.x - point.x, g.y - point.y); if (d < bestD) { best = g; bestD = d; } }
-      state.selected = best?.id || null;
-      paintSide(true);
+      if (event.pointerType === 'mouse') pointAt(event);
     }, { signal });
+    // Mouse buttons use mouse events: a second button pressed while one is held
+    // (left click while aiming) fires no new pointerdown. Taps from touch are ignored.
+    canvas.addEventListener('mousedown', event => {
+      if (pointerType !== 'mouse') return;
+      pointAt(event);
+      if (event.button === 2) { state.aimHold = true; return; }
+      if (event.button !== 0) return;
+      if (state.intel) {
+        // With intel open, clicking a guard inspects him; clicking elsewhere still strikes.
+        const point = toWorld(event);
+        let best = null, bestD = 16;
+        for (const g of sim.guards) { const d = Math.hypot(g.x - point.x, g.y - point.y); if (d < bestD) { best = g; bestD = d; } }
+        if (best && best !== sim.takedownTarget()) { state.selected = best.id; paintSide(true); return; }
+      }
+      if (state.aimHold) edges.shoot = true; else edges.knife = true;
+    }, { signal });
+    addEventListener('mouseup', event => { if (event.button === 2) state.aimHold = false; }, { signal });
 
     // Touch: a stick on the left, keys on the right.
     const stick = view.touch.querySelector('.shadow-stick'), knob = stick.querySelector('.shadow-stick-knob');
@@ -481,10 +503,10 @@ export function mountShadow(body, api = {}) {
 
     function input() {
       const move = { x: (keys.right ? 1 : 0) - (keys.left ? 1 : 0) + touch.x, y: (keys.down ? 1 : 0) - (keys.up ? 1 : 0) + touch.y };
-      const aiming = state.aim && sim.t - state.aimAt < 4;
       const value = {
         move, run: keys.run || touch.run, crouch: edges.crouch, interact: edges.interact, interactHeld: state.held || touch.act,
-        knife: edges.knife, shoot: edges.shoot, knock: edges.knock, throw: edges.throw, aim: aiming ? state.aim : null,
+        knife: edges.knife, shoot: edges.shoot, knock: edges.knock, throw: edges.throw,
+        aim: state.pointer ? toWorld(state.pointer) : null, aimHold: state.aimHold,
       };
       edges.crouch = edges.interact = edges.knife = edges.shoot = edges.knock = edges.throw = false;
       return value;
@@ -532,6 +554,7 @@ export function mountShadow(body, api = {}) {
       const alpha = state.paused ? 1 : Math.min(1, acc / STEP);
       const turn = 22 * dt, toward = shortest(sim.player.facing - drawn.facing);
       drawn.facing = Math.abs(toward) <= turn ? sim.player.facing : drawn.facing + Math.sign(toward) * turn;
+      const reachable = sim.status === 'playing' && !sim.player.action && !sim.player.locker && !sim.player.carrying ? sim.takedownTarget() : null;
       const actual = bodies().map(body => ({ body, x: body.x, y: body.y, facing: body.facing }));
       for (const { body, x, y, facing } of actual) {
         const before = previous.get(body);
@@ -546,7 +569,7 @@ export function mountShadow(body, api = {}) {
         state.shake = state.reduceMotion ? 0 : Math.max(0, state.shake - dt * 2.6);
         const shake = state.shake > .01 ? { x: (Math.random() * 2 - 1) * state.shake * 5, y: (Math.random() * 2 - 1) * state.shake * 4 } : null;
         const jammed = !sim.rules.scannerInAlert && (sim.net.phase === 'alert' || sim.net.phase === 'search');
-        drawWorld(ctx, sim, camView, { intel: state.intel, selected: state.selected, aim: state.aim, aiming: state.aim && sim.t - state.aimAt < 4, jammed, shake });
+        drawWorld(ctx, sim, camView, { intel: state.intel, selected: state.selected, aim: state.pointer ? toWorld(state.pointer) : null, aiming: Boolean(state.pointer), aimHold: state.aimHold, target: reachable?.id || null, jammed, shake });
       } finally {
         for (const { body, x, y, facing } of actual) { body.x = x; body.y = y; body.facing = facing; }
       }
