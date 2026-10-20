@@ -428,3 +428,32 @@ test('a colleague who finds a corpse reports a death, not a body to revive', () 
   assert.ok(sim.queue.some(message => message.kind === 'corpse'), 'the radio report names a corpse');
   assert.match(watcher.lastAction, /dead/);
 });
+
+test('the operative slides around a door frame instead of stopping against it', () => {
+  for (const offset of [0, 3, 4, 6]) {
+    const sim = new ShadowSim({ seed: 1, mode: 'baseline' });
+    quiet(sim);
+    sim.noCapture = true;
+    Object.assign(sim.player, { x: 10 * TILE + 8 + offset, y: 26 * TILE + 8 });
+    let t = 0;
+    while (t < 2 && sim.player.y > 23 * TILE + 8) { sim.step(1 / 60, { move: { x: 0, y: -1 } }); t += 1 / 60; }
+    assert.ok(sim.player.y <= 23 * TILE + 8, `through the warehouse door from ${offset}px off-centre`);
+  }
+});
+
+test('movement eases in and out quickly, and a wall stops momentum on its axis', () => {
+  const sim = new ShadowSim({ seed: 1, mode: 'baseline' });
+  quiet(sim);
+  sim.noCapture = true;
+  Object.assign(sim.player, at(36, 14));
+  sim.step(1 / 60, { move: { x: 1, y: 0 } });
+  assert.ok(sim.player.speed > 0 && sim.player.speed < 76 * .5, 'the first tick is not instant top speed');
+  stepFor(sim, .15, { move: { x: 1, y: 0 } });
+  assert.ok(sim.player.speed > 76 * .95, 'walking speed within about 0.15 s');
+  stepFor(sim, .12);
+  assert.equal(sim.player.speed, 0, 'stopped within about 0.12 s of letting go');
+  Object.assign(sim.player, at(42, 14));
+  stepFor(sim, .6, { move: { x: 1, y: 0 } });
+  assert.equal(sim.player.vx, 0, 'the east corridor wall zeroes horizontal momentum');
+  assert.ok(sim.player.x < 44 * TILE, 'the wall holds');
+});

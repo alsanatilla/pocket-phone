@@ -17,25 +17,27 @@ import { buildSituation, localAnswers, emptyDossier } from './shadow-commander.j
 export const DIFFICULTY = Object.freeze({
   normal: Object.freeze({
     id: 'normal', name: 'Normal', guards: 9, detect: .9, range: 7, fov: 1.5, peripheral: 2.2, report: 1.5, radio: 1.1,
-    replan: 7, gap: 2.4, search: 36, lockdown: 28, influence: .5, coordination: 3, chase: 84, capture: 15,
+    replan: 7, gap: 2.4, search: 36, lockdown: 28, influence: .5, coordination: 3, chase: 94, capture: 15,
     captureTime: .9, pebbles: 6, checkin: 55, breach: 28, panelNotice: 35, turn: 3.6, reaction: .75,
     scannerInAlert: true, probe: .3, hearing: 1,
   }),
   hard: Object.freeze({
     id: 'hard', name: 'Hard', guards: 10, detect: 1.22, range: 7.8, fov: 1.6, peripheral: 2.6, report: 1.15, radio: .8,
-    replan: 5, gap: 1.8, search: 48, lockdown: 38, influence: .8, coordination: 4, chase: 93, capture: 16,
+    replan: 5, gap: 1.8, search: 48, lockdown: 38, influence: .8, coordination: 4, chase: 104, capture: 16,
     captureTime: .62, pebbles: 5, checkin: 42, breach: 18, panelNotice: 22, turn: 4.2, reaction: .58,
     scannerInAlert: false, probe: .5, hearing: 1.15,
   }),
   extreme: Object.freeze({
     id: 'extreme', name: 'Extreme', guards: 11, detect: 1.45, range: 8.4, fov: 1.7, peripheral: 3, report: .85, radio: .55,
-    replan: 3.6, gap: 1.3, search: 62, lockdown: 48, influence: 1, coordination: 6, chase: 99, capture: 17,
+    replan: 3.6, gap: 1.3, search: 62, lockdown: 48, influence: 1, coordination: 6, chase: 111, capture: 17,
     captureTime: .52, pebbles: 4, checkin: 30, breach: 10, panelNotice: 12, turn: 4.8, reaction: .45,
     scannerInAlert: false, probe: .72, hearing: 1.3,
   }),
 });
 
-export const SPEED = Object.freeze({ crouch: 34, walk: 62, run: 108 });
+export const SPEED = Object.freeze({ crouch: 40, walk: 76, run: 134 });
+// Velocity eases toward the stick: quick to start, a little quicker to stop.
+const ACCEL_TIME = .035, DECEL_TIME = .028;
 const PLAYER_R = 5, GUARD_R = 5.5;
 const LEVEL_DETECT = [.9, 1, 1.12, 1.25];
 const STATE_SPEED = { patrol: 36, returning: 40, investigate: 44, suspicious: 0, search: 56, lockdown: 72 };
@@ -79,7 +81,7 @@ export class ShadowSim {
     this.t = 0;
     this.status = 'playing';
     this.player = {
-      x: START.x, y: START.y, facing: -Math.PI / 2, crouch: false, running: false, moving: false, speed: 0,
+      x: START.x, y: START.y, facing: -Math.PI / 2, crouch: false, running: false, moving: false, speed: 0, vx: 0, vy: 0,
       hidden: null, locker: null, carrying: null, keycard: false, data: false, pebbles: this.rules.pebbles,
       step: 0, action: null, anim: 0, visibility: 0, noise: 0, caught: 0, cameraOff: false,
       ammo: 3, maxAmmo: 6, shotAt: -99, recoil: 0,
@@ -202,11 +204,32 @@ export class ShadowSim {
     }
     return false;
   }
-  moveBody(body, dx, dy, r, passable) {
-    let moved = false;
-    if (dx && !this.blocked(body.x + dx, body.y, r, passable)) { body.x += dx; moved = true; }
-    if (dy && !this.blocked(body.x, body.y + dy, r, passable)) { body.y += dy; moved = true; }
-    return moved;
+  /** Moves axis by axis. With `nudge`, a body pushed straight into a corner slides sideways around it. */
+  moveBody(body, dx, dy, r, passable, nudge = 0) {
+    let x = false, y = false;
+    if (dx) {
+      if (!this.blocked(body.x + dx, body.y, r, passable)) { body.x += dx; x = true; }
+      else if (nudge && Math.abs(dy) < Math.abs(dx) * .35) y = this.slideAround(body, dx, 0, r, passable, nudge);
+    }
+    if (dy) {
+      if (!this.blocked(body.x, body.y + dy, r, passable)) { body.y += dy; y = true; }
+      else if (nudge && Math.abs(dx) < Math.abs(dy) * .35) x = this.slideAround(body, 0, dy, r, passable, nudge) || x;
+    }
+    return { x, y };
+  }
+
+  /** Finds the nearest sideways offset (up to `nudge` px) that frees the forward move, and steps toward it. */
+  slideAround(body, dx, dy, r, passable, nudge) {
+    const step = Math.max(Math.abs(dx), Math.abs(dy));
+    for (let k = 1; k <= nudge; k++) for (const side of [-1, 1]) {
+      const ox = dy ? side * k : 0, oy = dx ? side * k : 0;
+      if (this.blocked(body.x + ox, body.y + oy, r, passable)) continue;
+      if (this.blocked(body.x + ox + dx, body.y + oy + dy, r, passable)) continue;
+      const shift = Math.min(k, step);
+      body.x += Math.sign(ox) * shift; body.y += Math.sign(oy) * shift;
+      return true;
+    }
+    return false;
   }
 
   /* ── main step ─────────────────────────────────────────────────────────── */
@@ -242,7 +265,7 @@ export class ShadowSim {
     }
     if (p.locker) {
       if (input.interact || Math.hypot(input.move?.x || 0, input.move?.y || 0) > .5) this.leaveLocker();
-      p.moving = false; p.speed = 0; p.visibility = 0;
+      p.moving = false; p.speed = 0; p.vx = 0; p.vy = 0; p.visibility = 0;
       return;
     }
     if (p.action) { this.updateAction(dt, input); return; }
@@ -256,19 +279,28 @@ export class ShadowSim {
     let mx = input.move?.x || 0, my = input.move?.y || 0;
     const length = Math.hypot(mx, my);
     if (length > 1) { mx /= length; my /= length; }
-    const running = Boolean(input.run) && !p.crouch && !p.carrying && length > .2;
-    const speed = p.carrying ? SPEED.crouch * .9 : p.crouch ? SPEED.crouch : running ? SPEED.run : SPEED.walk;
+    const wants = length > .2;
+    const running = Boolean(input.run) && !p.crouch && !p.carrying && wants;
+    const top = p.carrying ? SPEED.crouch * .9 : p.crouch ? SPEED.crouch : running ? SPEED.run : SPEED.walk;
+    const k = 1 - Math.exp(-dt / (wants ? ACCEL_TIME : DECEL_TIME));
+    p.vx += ((wants ? mx * top : 0) - p.vx) * k;
+    p.vy += ((wants ? my * top : 0) - p.vy) * k;
+    if (!wants && Math.hypot(p.vx, p.vy) < 3) { p.vx = 0; p.vy = 0; }
     p.running = running;
-    p.moving = length > .2;
-    p.speed = p.moving ? speed * Math.min(1, length) : 0;
-    if (p.moving) {
-      p.facing = Math.atan2(my, mx);
+    p.speed = Math.hypot(p.vx, p.vy);
+    p.moving = p.speed > 6;
+    if (wants) p.facing = Math.atan2(my, mx);
+    if (p.speed > 0) {
       const before = { x: p.x, y: p.y };
-      this.moveBody(p, mx * p.speed * dt, my * p.speed * dt, PLAYER_R, this.playerPassable);
-      const moved = Math.hypot(p.x - before.x, p.y - before.y);
-      p.step += moved;
-      this.metrics.movingTime += dt;
-      if (running) this.metrics.runningTime += dt;
+      const moved = this.moveBody(p, p.vx * dt, p.vy * dt, PLAYER_R, this.playerPassable, 6);
+      // A wall stops momentum on that axis; a corner nudge counts as movement.
+      if (!moved.x) p.vx = 0;
+      if (!moved.y) p.vy = 0;
+      p.step += Math.hypot(p.x - before.x, p.y - before.y);
+      if (p.moving) {
+        this.metrics.movingTime += dt;
+        if (running) this.metrics.runningTime += dt;
+      }
       if (p.step >= 18) { p.step = 0; this.footstep(); }
       this.noteTraces();
     }
@@ -514,7 +546,7 @@ export class ShadowSim {
 
   updateAction(dt, input) {
     const p = this.player, action = p.action;
-    p.moving = false; p.speed = 0;
+    p.moving = false; p.speed = 0; p.vx = 0; p.vy = 0;
     if (action.kind === 'kill') {
       const g = this.guards.find(item => item.id === action.target);
       if (!g || g.dead) { p.action = null; return; }
@@ -600,7 +632,7 @@ export class ShadowSim {
     const p = this.player;
     p.locker = { key: index(locker.x, locker.y), from: { x: p.x, y: p.y } };
     locker.player = true;
-    p.x = locker.x * TILE + 8; p.y = locker.y * TILE + 8;
+    p.x = locker.x * TILE + 8; p.y = locker.y * TILE + 8; p.vx = 0; p.vy = 0;
     p.hidden = 'locker'; p.crouch = false;
     // Anyone watching saw which locker it was.
     for (const g of this.guards) {
@@ -617,7 +649,7 @@ export class ShadowSim {
     if (!p.locker) return;
     const locker = this.lockers.get(p.locker.key);
     if (locker) locker.player = false;
-    p.x = p.locker.from.x; p.y = p.locker.from.y;
+    p.x = p.locker.from.x; p.y = p.locker.from.y; p.vx = 0; p.vy = 0;
     p.locker = null; p.hidden = null;
     if (forced) this.emit('toast', { text: 'pulled out of the locker' });
   }
