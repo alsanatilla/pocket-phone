@@ -357,6 +357,13 @@ export function mountShadow(body, api = {}) {
     }
     live = { sim, controller, raf: 0, state, soundButton: refs.soundButton };
     let acc = 0, last = performance.now();
+    // Draw between the last two fixed steps, so motion stays smooth at any refresh rate.
+    const bodies = () => [sim.player, ...sim.guards];
+    let previous = new Map();
+    const snapshot = () => { previous = new Map(bodies().map(body => [body, { x: body.x, y: body.y, facing: body.facing }])); };
+    snapshot();
+    const drawn = { facing: sim.player.facing };
+    const shortest = angle => Math.atan2(Math.sin(angle), Math.cos(angle));
 
     const keyFor = event => {
       const k = event.key;
@@ -467,7 +474,7 @@ export function mountShadow(body, api = {}) {
       refs.pauseButton.textContent = state.paused ? 'resume mission' : 'pause mission';
       refs.pauseButton.setAttribute('aria-pressed', String(state.paused));
       clearInput(); acc = 0;
-      if (!state.paused) { last = performance.now(); refs.stage.focus({ preventScroll: true }); }
+      if (!state.paused) { snapshot(); last = performance.now(); refs.stage.focus({ preventScroll: true }); }
     }
     live.toggleIntel = toggleIntelLocal;
     live.togglePause = togglePauseLocal;
@@ -518,15 +525,31 @@ export function mountShadow(body, api = {}) {
       if (!state.paused && !document.hidden && sim.status === 'playing') {
         acc += dt;
         let steps = 0;
-        while (acc >= STEP && steps < 6) { sim.step(STEP, input()); acc -= STEP; steps++; }
+        while (acc >= STEP && steps < 6) { snapshot(); sim.step(STEP, input()); acc -= STEP; steps++; }
         if (steps === 6) acc = 0;
       }
       handleEvents();
-      camera(sim, camView, dt);
-      state.shake = state.reduceMotion ? 0 : Math.max(0, state.shake - dt * 2.6);
-      const shake = state.shake > .01 ? { x: (Math.random() * 2 - 1) * state.shake * 5, y: (Math.random() * 2 - 1) * state.shake * 4 } : null;
-      const jammed = !sim.rules.scannerInAlert && (sim.net.phase === 'alert' || sim.net.phase === 'search');
-      drawWorld(ctx, sim, camView, { intel: state.intel, selected: state.selected, aim: state.aim, aiming: state.aim && sim.t - state.aimAt < 4, jammed, shake });
+      const alpha = state.paused ? 1 : Math.min(1, acc / STEP);
+      const turn = 22 * dt, toward = shortest(sim.player.facing - drawn.facing);
+      drawn.facing = Math.abs(toward) <= turn ? sim.player.facing : drawn.facing + Math.sign(toward) * turn;
+      const actual = bodies().map(body => ({ body, x: body.x, y: body.y, facing: body.facing }));
+      for (const { body, x, y, facing } of actual) {
+        const before = previous.get(body);
+        if (!before || Math.hypot(x - before.x, y - before.y) > 24) continue;
+        body.x = before.x + (x - before.x) * alpha;
+        body.y = before.y + (y - before.y) * alpha;
+        if (body !== sim.player) body.facing = before.facing + shortest(facing - before.facing) * alpha;
+      }
+      sim.player.facing = drawn.facing;
+      try {
+        camera(sim, camView, dt);
+        state.shake = state.reduceMotion ? 0 : Math.max(0, state.shake - dt * 2.6);
+        const shake = state.shake > .01 ? { x: (Math.random() * 2 - 1) * state.shake * 5, y: (Math.random() * 2 - 1) * state.shake * 4 } : null;
+        const jammed = !sim.rules.scannerInAlert && (sim.net.phase === 'alert' || sim.net.phase === 'search');
+        drawWorld(ctx, sim, camView, { intel: state.intel, selected: state.selected, aim: state.aim, aiming: state.aim && sim.t - state.aimAt < 4, jammed, shake });
+      } finally {
+        for (const { body, x, y, facing } of actual) { body.x = x; body.y = y; body.facing = facing; }
+      }
       paintHud();
       if (now - state.lastPaint > 250) { state.lastPaint = now; paintSide(); }
       if (!state.paused && !document.hidden && sim.net.phase === 'alert' && now - state.alarmAt > 1400) { state.alarmAt = now; sound.alarm(); }
@@ -654,7 +677,7 @@ export function mountShadow(body, api = {}) {
     if (import.meta.env.DEV) {
       canvas.shadowDebug = {
         sim, state, view: camView,
-        teleport(x, y) { sim.player.x = x * TILE + 8; sim.player.y = y * TILE + 8; camView.snap = true; },
+        teleport(x, y) { sim.player.x = x * TILE + 8; sim.player.y = y * TILE + 8; snapshot(); drawn.facing = sim.player.facing; camView.snap = true; },
         step(seconds = 1, value = {}) { for (let t = 0; t < seconds; t += STEP) sim.step(STEP, value); },
         intel: toggleIntelLocal,
       };
