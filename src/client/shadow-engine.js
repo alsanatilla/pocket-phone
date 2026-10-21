@@ -534,6 +534,39 @@ export class ShadowSim {
     this.metrics.killPoints += points;
     this.spawnBlood(g.x, g.y, p.facing, how);
     this.emit('kill', { guard: g.id, how, chain, points });
+    this.witnessKill(g);
+  }
+
+  /** A guard facing a colleague when they go down reacts at once, not half a second later. */
+  witnessKill(victim) {
+    const range = this.rules.range * TILE;
+    for (const witness of this.guards) {
+      if (witness === victim || witness.down || witness.dead || witness.grabbed || witness.sees) continue;
+      if (witness.state === 'alert') continue;
+      const d = dist(witness, victim);
+      if (d > range) continue;
+      const off = Math.abs(wrapAngle(angleTo(witness.x, witness.y, victim.x, victim.y) - witness.facing));
+      if (off > this.rules.fov / 2 + .1 && !(d <= this.rules.peripheral * TILE && off <= 2.1)) continue;
+      if (!lineClear(witness.x, witness.y, victim.x, victim.y, this.doorOpen, false)) continue;
+      // If the witness can see the intruder too, the sighting is the stronger report.
+      if (this.canSee(witness, this.player, range, this.rules.fov / 2, this.rules.peripheral * TILE) > 0) {
+        this.spot(witness);
+        continue;
+      }
+      if (victim.deathReported) continue;
+      victim.deathReported = true;
+      victim.bodyClaimed = witness.id;
+      witness.bodyMeter = .6;
+      witness.bodyTarget = victim.id;
+      witness.indicator = '!'; witness.indicatorAt = this.t;
+      witness.lastAction = 'saw ' + victim.name + ' killed';
+      witness.state = 'investigate';
+      witness.task = { role: 'investigate', x: victim.x, y: victim.y, label: 'check the body of ' + victim.name, source: 'reflex', issued: this.t };
+      witness.path = [];
+      this.say(witness.name, victim.name + ' is down!', 'alert');
+      this.reportEvidence(witness, { kind: 'corpse', x: victim.x, y: victim.y, label: victim.name + ' killed', guard: victim.id }, true);
+      if (this.net.phase === 'calm') this.setPhase('caution');
+    }
   }
 
   spawnBlood(x, y, angle, how) {
@@ -1518,6 +1551,15 @@ export class ShadowSim {
       if ((item.kind === 'noise' || item.kind === 'glimpse' || serious) && this.t - net.lastDecisionAt > 1) { net.lastClue = item; this.decide('sweep', item); }
       return;
     }
+    // A corpse is not a noise to log. It is proof the intruder is nearby and
+    // lethal, so security starts a search from the body instead of sending one
+    // guard to look and going back to patrol.
+    if (item.kind === 'corpse') {
+      net.lastSeen = { x: item.x, y: item.y, at: this.t, zone, heading: null, pace: 'still', from: item.from };
+      const who = String(item.label || '').replace(/ (?:found|killed).*$/, '');
+      this.loseContact(`They found ${who || 'a body'} dead. Search the area.`);
+      return;
+    }
     if (same && !serious) return;
     if (this.t - net.lastDecisionAt < this.rules.gap && !serious) { net.pendingAnomaly = item; return; }
     this.decide('anomaly', item);
@@ -1532,7 +1574,7 @@ export class ShadowSim {
     this.evidence({ kind: 'missing', x: last.x, y: last.y, label: g.name + ' not responding', guard: g.id, at: this.t, urgent: true });
   }
 
-  loseContact() {
+  loseContact(line = 'Lost them.') {
     const net = this.net;
     this.setPhase('search');
     net.searchUntil = this.t + this.rules.search;
@@ -1544,7 +1586,7 @@ export class ShadowSim {
       const near = HIDING_CLUSTERS.map(cluster => ({ cluster, d: Math.hypot(cluster.x * TILE - lkp.x, cluster.y * TILE - lkp.y) })).sort((a, b) => a.d - b.d)[0];
       this.metrics.vanish.push(near && near.d < 6 * TILE ? near.cluster.id : lkp.zone);
     }
-    this.say(this.chief, 'Lost them.', 'caution');
+    this.say(this.chief, line, 'caution');
     if (this.mode === 'commander') this.decide('lost', null);
     else this.baselineLost();
   }
@@ -1587,7 +1629,7 @@ export class ShadowSim {
 
   baselineEvidence(item) {
     const net = this.net;
-    if (['body', 'missing', 'breach', 'keycard', 'cameras'].includes(item.kind)) {
+    if (['body', 'corpse', 'missing', 'breach', 'keycard', 'cameras'].includes(item.kind)) {
       if (net.phase === 'calm') this.setPhase('caution');
       net.level = 2;
       const responders = this.nearestGuards(item, 2);
