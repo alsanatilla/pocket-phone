@@ -6,6 +6,18 @@ import { LIGHT, index, wrapAngle } from './shadow-nav.js';
 export const VIEW_W = 480;
 export const VIEW_H = 300;
 export const SCALE = 2;
+// A stretched view keeps this much floor in sight, whatever the window shape.
+export const VIEW_AREA = VIEW_W * VIEW_H;
+
+/** World units in view and canvas pixels per unit, for a play field of the given CSS size. */
+export function fitView(width, height, dpr = 1) {
+  const aspect = Math.max(.6, Math.min(2.2, width / height));
+  const w = Math.min(WORLD_W, Math.round(Math.sqrt(VIEW_AREA * aspect))), h = Math.min(WORLD_H, Math.round(w / aspect));
+  const cssW = Math.min(width, height * aspect), cssH = cssW / aspect;
+  // Past four canvas pixels per unit the floor layer gets too large to keep; the browser scales the rest.
+  const pixels = Math.max(1, Math.round(Math.min(cssW * Math.min(2, dpr), w * 4)));
+  return { w, h, cssW, cssH, pixelW: pixels, pixelH: Math.round(pixels * h / w), scale: pixels / w, ui: pixels / cssW };
+}
 
 export const STATE_COLORS = Object.freeze({
   patrol: '#e9dcb4', suspicious: '#ecc981', investigate: '#ecc981', alert: '#f0705e', search: '#efa58e',
@@ -153,12 +165,14 @@ function decorations(ctx) {
   for (const [text, x, y] of [['STORAGE', 10, 16.6], ['LAB', 39.5, 4.4], ['BARRACKS', 50, 16.6], ['SECURITY', 27, 19.5], ['CHECKPOINT', 31.5, 26], ['DOCK', 8.5, 7.5]]) ctx.fillText(text, x * TILE, y * TILE);
 }
 
-export function staticLayer() {
-  if (staticCanvas) return staticCanvas;
+/** The floor and furniture, drawn once at the play field's pixel scale so each frame copies it 1:1. */
+export function staticLayer(scale = SCALE) {
+  if (staticCanvas && Math.abs(staticCanvas.scale - scale) < .01) return staticCanvas;
   staticCanvas = document.createElement('canvas');
-  staticCanvas.width = WORLD_W * SCALE; staticCanvas.height = WORLD_H * SCALE;
+  staticCanvas.scale = scale;
+  staticCanvas.width = Math.round(WORLD_W * scale); staticCanvas.height = Math.round(WORLD_H * scale);
   const ctx = staticCanvas.getContext('2d');
-  ctx.scale(SCALE, SCALE);
+  ctx.scale(scale, scale);
   for (let ty = 0; ty < ROWS; ty++) for (let tx = 0; tx < COLS; tx++) floorTile(ctx, MAP[ty][tx], tx * TILE, ty * TILE, tx, ty);
   decorations(ctx);
   for (let ty = 0; ty < ROWS; ty++) for (let tx = 0; tx < COLS; tx++) objectTile(ctx, MAP[ty][tx], tx * TILE, ty * TILE, tx, ty);
@@ -241,7 +255,7 @@ function drawPlayer(ctx, p, time) {
   ctx.fillStyle = '#ecc981'; ctx.fillRect(-.6, -.6, 3, 1.2);
   ctx.fillStyle = '#f0e9dd'; ctx.fillRect(3.4, -.6, 1, 1.2);
   // The pistol is visible only while it is out; the knife is always on the belt.
-  if (time - (p.shotAt ?? -99) < .4) {
+  if (time - (p.shotAt ?? -99) < .4 || p.aiming) {
     ctx.fillStyle = '#2b3336'; ctx.fillRect(3.6, .9, 5.2, 1.5);
     ctx.fillStyle = '#ecc981'; ctx.fillRect(8.5, 1.1, 1.6, 1.1);
   } else {
@@ -419,8 +433,9 @@ function drawHelicopter(ctx, sim, time) {
 export function camera(sim, view, dt) {
   const p = sim.player;
   const lookX = Math.cos(p.facing) * (p.moving ? 26 : 10), lookY = Math.sin(p.facing) * (p.moving ? 18 : 8);
-  const targetX = Math.max(0, Math.min(WORLD_W - VIEW_W, p.x + lookX - VIEW_W / 2));
-  const targetY = Math.max(0, Math.min(WORLD_H - VIEW_H, p.y + lookY - VIEW_H / 2));
+  const vw = view.w || VIEW_W, vh = view.h || VIEW_H;
+  const targetX = Math.max(0, Math.min(WORLD_W - vw, p.x + lookX - vw / 2));
+  const targetY = Math.max(0, Math.min(WORLD_H - vh, p.y + lookY - vh / 2));
   const k = view.snap ? 1 : 1 - Math.pow(.0025, dt);
   view.x += (targetX - view.x) * k; view.y += (targetY - view.y) * k;
   view.snap = false;
@@ -431,10 +446,12 @@ export function drawWorld(ctx, sim, view, opts = {}) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = '#07080a'; ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  const sx = Math.round(Math.max(0, Math.min(WORLD_W - VIEW_W, cam.x + (opts.shake?.x || 0))) * SCALE) / SCALE;
-  const sy = Math.round(Math.max(0, Math.min(WORLD_H - VIEW_H, cam.y + (opts.shake?.y || 0))) * SCALE) / SCALE;
-  ctx.setTransform(SCALE, 0, 0, SCALE, -sx * SCALE, -sy * SCALE);
-  ctx.drawImage(staticLayer(), 0, 0, WORLD_W * SCALE, WORLD_H * SCALE, 0, 0, WORLD_W, WORLD_H);
+  const vw = view.w || VIEW_W, vh = view.h || VIEW_H, scale = view.scale || SCALE;
+  const sx = Math.round(Math.max(0, Math.min(WORLD_W - vw, cam.x + (opts.shake?.x || 0))) * scale) / scale;
+  const sy = Math.round(Math.max(0, Math.min(WORLD_H - vh, cam.y + (opts.shake?.y || 0))) * scale) / scale;
+  ctx.setTransform(scale, 0, 0, scale, -sx * scale, -sy * scale);
+  const floor = staticLayer(scale);
+  ctx.drawImage(floor, 0, 0, floor.width, floor.height, 0, 0, WORLD_W, WORLD_H);
   drawDoors(ctx, sim);
   drawProps(ctx, sim, time);
   for (const g of sim.guards) if (g.down && !g.hidden && !g.carried) drawGuard(ctx, g, time, false);
@@ -446,7 +463,7 @@ export function drawWorld(ctx, sim, view, opts = {}) {
   drawBlood(ctx, sim);
 
   // Vision cones read as light beams cutting through the dark.
-  const onScreen = (x, y, pad = 140) => x > cam.x - pad && x < cam.x + VIEW_W + pad && y > cam.y - pad && y < cam.y + VIEW_H + pad;
+  const onScreen = (x, y, pad = 140) => x > cam.x - pad && x < cam.x + vw + pad && y > cam.y - pad && y < cam.y + vh + pad;
   ctx.globalCompositeOperation = 'screen';
   for (const g of sim.guards) {
     if (g.down || g.grabbed || !onScreen(g.x, g.y)) continue;
@@ -475,6 +492,7 @@ export function drawWorld(ctx, sim, view, opts = {}) {
     ctx.fillStyle = '#d8d2c4'; ctx.fillRect(pebble.x - .9, pebble.y - .9 - (pebble.z || 0), 1.8, 1.8);
   }
   drawHelicopter(ctx, sim, time);
+  drawOrders(ctx, sim, time);
   for (const g of sim.guards) if (!g.down && onScreen(g.x, g.y, 20)) drawGuard(ctx, g, time, opts.selected === g.id);
   for (const g of sim.guards) if (g.carried) drawGuard(ctx, g, time, false);
   drawPlayer(ctx, sim.player, time);
@@ -492,26 +510,80 @@ export function drawWorld(ctx, sim, view, opts = {}) {
   }
   if (opts.intel) drawIntel(ctx, sim, opts);
   for (const g of sim.guards) if (!g.down && onScreen(g.x, g.y, 20)) drawIndicator(ctx, g, time);
-  if (opts.aim && opts.aiming) {
-    ctx.strokeStyle = 'rgba(240,233,221,.35)'; ctx.setLineDash([2, 2]); ctx.lineWidth = .7;
-    ctx.beginPath(); ctx.moveTo(sim.player.x, sim.player.y); ctx.lineTo(opts.aim.x, opts.aim.y); ctx.stroke(); ctx.setLineDash([]);
-    ctx.beginPath(); ctx.arc(opts.aim.x, opts.aim.y, 3, 0, Math.PI * 2); ctx.stroke();
-  }
+  if (opts.target) { const g = sim.guards.find(item => item.id === opts.target); if (g) drawTargetMark(ctx, g, time); }
+  if (opts.aim && opts.aiming) drawAim(ctx, sim, opts.aim, opts.aimHold);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  drawEdges(ctx, sim, cam);
-  drawScanner(ctx, sim, opts);
+  drawEdges(ctx, sim, cam, scale, view.ui || 1);
+  drawScanner(ctx, sim, opts, view.ui || 1);
+}
+
+const ORDER_TAGS = { pursue: 'chase', intercept: 'cut off', block: 'hold', guard: 'guard', search: 'sweep', probe: 'check', investigate: 'check', panel: 'cameras' };
+
+/** Jev's orders, drawn for a moment as a guard receives one: where it sent him, and for what. */
+function drawOrders(ctx, sim, time) {
+  for (const g of sim.guards) {
+    const order = g.order;
+    if (!order || g.down || g.sees) continue;
+    const age = time - order.at;
+    if (age < 0 || age > 2.6) continue;
+    const fade = Math.min(1, age * 6) * Math.min(1, (2.6 - age) / .8);
+    if (Math.hypot(order.x - g.x, order.y - g.y) < 10) continue;
+    // The line runs out from the guard over a quarter second, so it reads as an order being given.
+    const k = Math.min(1, age / .25), ex = g.x + (order.x - g.x) * k, ey = g.y + (order.y - g.y) * k;
+    ctx.strokeStyle = `rgba(193,174,213,${.55 * fade})`; ctx.lineWidth = .8; ctx.setLineDash([4, 3]); ctx.lineDashOffset = -time * 14;
+    ctx.beginPath(); ctx.moveTo(g.x, g.y); ctx.lineTo(ex, ey); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+    if (k < 1) continue;
+    const r = 4 + Math.sin(time * 6) * .5;
+    ctx.strokeStyle = `rgba(193,174,213,${.85 * fade})`; ctx.lineWidth = 1;
+    ctx.beginPath();
+    if (['block', 'guard', 'intercept'].includes(order.role)) { ctx.moveTo(order.x, order.y - r); ctx.lineTo(order.x + r, order.y); ctx.lineTo(order.x, order.y + r); ctx.lineTo(order.x - r, order.y); ctx.closePath(); }
+    else ctx.arc(order.x, order.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = fade;
+    label(ctx, `${g.name.toLowerCase()} · ${ORDER_TAGS[order.role] || order.role}`, order.x, order.y - 9, '#c1aed5');
+    ctx.globalAlpha = 1;
+  }
+}
+
+/** Corner brackets on the guard a takedown or knife can reach right now. */
+function drawTargetMark(ctx, g, time) {
+  const r = 10 + Math.sin(time * 8) * .8, k = 3.2;
+  ctx.strokeStyle = 'rgba(236,201,129,.9)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    const x = g.x + sx * r, y = g.y + sy * r;
+    ctx.moveTo(x, y - sy * k); ctx.lineTo(x, y); ctx.lineTo(x - sx * k, y);
+  }
+  ctx.stroke();
+}
+
+/** The cursor reticle; with the pistol drawn, a laser to the first wall along the aim. */
+function drawAim(ctx, sim, aim, armed) {
+  const p = sim.player, angle = Math.atan2(aim.y - p.y, aim.x - p.x);
+  if (armed) {
+    const reach = rayLength(sim, p.x, p.y, angle, 9.5 * TILE);
+    ctx.strokeStyle = 'rgba(240,112,94,.55)'; ctx.lineWidth = .7; ctx.setLineDash([3, 2]);
+    ctx.beginPath(); ctx.moveTo(p.x + Math.cos(angle) * 9, p.y + Math.sin(angle) * 9); ctx.lineTo(p.x + Math.cos(angle) * reach, p.y + Math.sin(angle) * reach); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  const r = armed ? 3.2 : 2.6;
+  ctx.strokeStyle = armed ? 'rgba(240,112,94,.95)' : 'rgba(240,233,221,.6)'; ctx.lineWidth = .8;
+  ctx.beginPath(); ctx.arc(aim.x, aim.y, r, 0, Math.PI * 2);
+  ctx.moveTo(aim.x - r - 2.5, aim.y); ctx.lineTo(aim.x - r + .8, aim.y); ctx.moveTo(aim.x + r - .8, aim.y); ctx.lineTo(aim.x + r + 2.5, aim.y);
+  ctx.moveTo(aim.x, aim.y - r - 2.5); ctx.lineTo(aim.x, aim.y - r + .8); ctx.moveTo(aim.x, aim.y + r - .8); ctx.lineTo(aim.x, aim.y + r + 2.5);
+  ctx.stroke();
 }
 
 /** Arrows at the screen edge for guards who are noticing the player off screen. */
-function drawEdges(ctx, sim, cam) {
-  const w = ctx.canvas.width, h = ctx.canvas.height;
+function drawEdges(ctx, sim, cam, scale = SCALE, ui = 1) {
+  const w = ctx.canvas.width, h = ctx.canvas.height, m = 18 * ui;
   for (const g of sim.guards) {
     if (g.down || (!g.sees && g.meter < .15)) continue;
-    const sx = (g.x - cam.x) * SCALE, sy = (g.y - cam.y) * SCALE;
+    const sx = (g.x - cam.x) * scale, sy = (g.y - cam.y) * scale;
     if (sx > 0 && sx < w && sy > 0 && sy < h) continue;
-    const cx = Math.max(18, Math.min(w - 18, sx)), cy = Math.max(18, Math.min(h - 18, sy));
+    const cx = Math.max(m, Math.min(w - m, sx)), cy = Math.max(m, Math.min(h - m, sy));
     const angle = Math.atan2(sy - h / 2, sx - w / 2);
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(angle);
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(angle); ctx.scale(ui, ui);
     ctx.fillStyle = g.sees ? '#f0705e' : '#ecc981';
     ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-5, -6); ctx.lineTo(-5, 6); ctx.closePath(); ctx.fill();
     ctx.restore();
@@ -531,20 +603,23 @@ function scannerWalls() {
   return scannerCache;
 }
 
-function drawScanner(ctx, sim, opts) {
-  const w = 176, h = 124, x0 = ctx.canvas.width - w - 14, y0 = 14;
-  const p = sim.player, cell = 5.2, span = 16;
+function drawScanner(ctx, sim, opts, ui = 1) {
+  const compact = Boolean(opts.compact), jammed = Boolean(opts.jammed);
+  const w = jammed ? (compact ? 96 : 120) : compact ? 132 : 176;
+  const h = jammed ? (compact ? 28 : 30) : compact ? 94 : 124;
+  const x0 = ctx.canvas.width / ui - w - (compact ? 8 : 14), y0 = compact ? 8 : 14;
+  const p = sim.player, cell = compact ? 3.9 : 5.2, span = 16;
   ctx.save();
+  ctx.setTransform(ui, 0, 0, ui, 0, 0);
   ctx.fillStyle = 'rgba(6,10,9,.78)'; ctx.fillRect(x0, y0, w, h);
   ctx.strokeStyle = 'rgba(173,191,156,.45)'; ctx.lineWidth = 1; ctx.strokeRect(x0 + .5, y0 + .5, w - 1, h - 1);
   ctx.beginPath(); ctx.rect(x0 + 1, y0 + 1, w - 2, h - 2); ctx.clip();
-  const jammed = opts.jammed;
   if (jammed) {
-    for (let i = 0; i < 260; i++) {
+    for (let i = 0; i < (compact ? 90 : 260); i++) {
       ctx.fillStyle = `rgba(173,191,156,${Math.random() * .35})`;
       ctx.fillRect(x0 + Math.random() * w, y0 + Math.random() * h, 2, 1);
     }
-    ctx.fillStyle = '#f0705e'; ctx.font = 'bold 13px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#f0705e'; ctx.font = `bold ${compact ? 9 : 13}px monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText('JAMMED', x0 + w / 2, y0 + h / 2);
     ctx.restore();
     return;

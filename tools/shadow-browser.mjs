@@ -36,7 +36,19 @@ try {
   await page.keyboard.down('w'); await page.waitForTimeout(900); await page.keyboard.up('w');
   const moved = await page.evaluate(() => document.querySelector('.shadow-canvas').shadowDebug.sim.player.y);
   assert.ok(moved < 41 * 16, 'the player moved with the keyboard');
-  console.log('PASS: keyboard movement');
+  const frame = await page.evaluate(() => {
+    const stage = document.querySelector('.shadow-stage').getBoundingClientRect();
+    return {
+      immersive: document.documentElement.classList.contains('shadow-immersive'),
+      bar: getComputedStyle(document.querySelector('.bar')).display,
+      stage: { width: stage.width, height: stage.height },
+      viewport: { width: innerWidth, height: innerHeight },
+    };
+  });
+  assert.equal(frame.immersive, true, 'the mission takes over the page');
+  assert.equal(frame.bar, 'none', 'Pocket chrome is hidden during play');
+  assert.ok(Math.abs(frame.stage.width - frame.viewport.width) <= 2 && Math.abs(frame.stage.height - frame.viewport.height) <= 2, 'the stage fills the viewport');
+  console.log('PASS: keyboard movement and full-window layout');
 
   // Drop the player into the lit corridors in front of a guard to see an alert.
   await page.evaluate(() => {
@@ -119,14 +131,54 @@ try {
   assert.ok(shot.noises > 0, 'the pistol makes a loud noise');
   console.log('PASS: keyboard pistol shot and gunshot noise');
 
+  // Mouse aim: the same knife lunge, from a pointer click rather than a key.
+  const target = await page.evaluate(() => {
+    const d = document.querySelector('.shadow-canvas').shadowDebug;
+    const g = d.sim.guards.find(item => !item.down && !item.objective);
+    g.x = 24 * 16 + 8; g.y = 22 * 16 + 8; g.facing = Math.PI; g.state = 'patrol'; g.task = null; g.path = []; g.sees = false; g.meter = 0;
+    g.route = [{ x: g.x, y: g.y, hold: 999, face: Math.PI }]; g.routeIndex = 0;
+    d.sim.player.x = 22 * 16 + 8; d.sim.player.y = 22 * 16 + 8; d.sim.player.facing = 0; d.sim.player.action = null;
+    d.view.snap = true;
+    return { x: g.x, y: g.y };
+  });
+  await page.waitForTimeout(300);
+  const point = await page.evaluate(({ x, y }) => {
+    const d = document.querySelector('.shadow-canvas').shadowDebug;
+    const rect = document.querySelector('.shadow-canvas').getBoundingClientRect();
+    return { x: rect.left + (x - d.view.x) / d.view.w * rect.width, y: rect.top + (y - d.view.y) / d.view.h * rect.height };
+  }, target);
+  const killsBefore = await page.evaluate(() => document.querySelector('.shadow-canvas').shadowDebug.sim.metrics.kills);
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.down();
+  await page.mouse.up();
+  await page.waitForFunction(before => document.querySelector('.shadow-canvas').shadowDebug.sim.metrics.kills > before, killsBefore, { timeout: 5000 });
+  console.log('PASS: mouse aim and click knife');
+
   for (const width of [390, 820]) {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(300);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `no horizontal overflow at ${width}`);
+    if (width === 390) {
+      await page.keyboard.press('Tab');
+      await page.waitForSelector('.shadow-intel:not([hidden])');
+      await page.waitForTimeout(250);
+      await page.screenshot({ path: `${report}/intel-390.png`, fullPage: true });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'intel fits a 390 px screen');
+      await page.keyboard.press('Tab');
+    }
     await page.screenshot({ path: `${report}/live-${width}.png`, fullPage: true });
   }
   await page.setViewportSize({ width: 1360, height: 960 });
   console.log('PASS: 390 and 820 px layouts');
+
+  // The pause menu is part of the play field, and aborting asks first.
+  await page.keyboard.press('p');
+  await page.waitForSelector('.shadow-pause:not([hidden])');
+  await page.getByRole('button', { name: 'abort mission' }).click();
+  await page.waitForSelector('.shadow-abort-confirm:not([hidden])');
+  await page.getByRole('button', { name: 'keep playing' }).click();
+  assert.equal(await page.evaluate(() => document.querySelector('.shadow-canvas').shadowDebug.state.paused), false, 'keep playing resumes the mission');
+  console.log('PASS: pause menu and in-game abort confirmation');
 
   // Finish: carry the data to the helipad.
   await page.evaluate(() => {

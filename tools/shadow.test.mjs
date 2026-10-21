@@ -338,20 +338,86 @@ test('Jev changes actual posture even when its summary is unchanged, and credits
   assert.equal(matching.net.planSource, 'jev', 'a validated matching plan is credited consistently in the overlay');
 });
 
-test('a delayed Jev answer cannot replace newer movement evidence in the same room', async () => {
+test('a delayed Jev answer is planned on the newest report in the same room, and dropped once the intruder is elsewhere', async () => {
+  const tick = ms => new Promise(done => setTimeout(done, ms));
   const sim = new ShadowSim({ seed: 38, mode: 'commander' });
   let resolve;
   sim.net.phase = 'alert'; sim.t = 10;
   sim.net.lastSeen = { ...at(36, 14), at: 10, zone: 'corr_e', heading: 0, pace: 'running' };
   sim.remote = () => new Promise(done => { resolve = done; });
   const decision = sim.decide('contact', null);
-  await new Promise(done => setTimeout(done, 0));
+  await tick(0);
   sim.t = 11;
   sim.net.lastSeen = { ...at(41, 14), at: 11, zone: 'corr_e', heading: 0, pace: 'running' };
   resolve(decision.localAnswers);
-  await new Promise(done => setTimeout(done, 5));
-  assert.equal(decision.source, 'local');
-  assert.match(decision.status, /superseded by newer evidence/);
+  await tick(5);
+  assert.equal(decision.source, 'jev', 'a chase no longer throws Jev away');
+  assert.match(decision.status, /newest report/);
+  const pursue = decision.plan.roles.find(role => role.role === 'pursue');
+  assert.ok(pursue.x > at(39, 14).x, 'the pursuer is sent to the newest sighting, not the one Jev was asked about');
+
+  const other = new ShadowSim({ seed: 38, mode: 'commander' });
+  other.net.phase = 'alert'; other.t = 10;
+  other.net.lastSeen = { ...at(36, 14), at: 10, zone: 'corr_e', heading: 0, pace: 'running' };
+  other.remote = () => new Promise(done => { resolve = done; });
+  const stale = other.decide('contact', null);
+  await tick(0);
+  other.t = 11;
+  other.net.lastSeen = { ...at(24, 14), at: 11, zone: 'corr_w', heading: Math.PI, pace: 'running' };
+  resolve(stale.localAnswers);
+  await tick(5);
+  assert.equal(stale.source, 'local');
+  assert.match(stale.status, /another area/);
+});
+
+test('a decision that meets a busy Jev is asked as soon as the line frees up', async () => {
+  const tick = ms => new Promise(done => setTimeout(done, ms));
+  const sim = new ShadowSim({ seed: 39, mode: 'commander' });
+  quiet(sim);
+  const answer = [];
+  let busy = false;
+  sim.remote = (kind, situation) => {
+    if (busy) return Promise.reject(new Error('busy'));
+    busy = true;
+    return new Promise(done => answer.push(() => { busy = false; done(localAnswers(kind, situation, () => .5)); }));
+  };
+  sim.net.phase = 'alert'; sim.t = 10;
+  sim.net.lastSeen = { ...at(36, 14), at: 10, zone: 'corr_e', heading: 0, pace: 'running' };
+  sim.decide('contact', null);
+  await tick(0);
+  const missed = sim.decide('contact', null);
+  await tick(5);
+  assert.match(missed.status, /busy/);
+  answer[0]();
+  await tick(5);
+  assert.equal(answer.length, 2, 'the missed decision is asked once Jev is free');
+  answer[1]();
+  await tick(5);
+  assert.equal(missed.source, 'jev');
+});
+
+test('Jev opens the shift from the dossier, speaks its orders by name, and a guard answers', () => {
+  const dossier = recordMission(emptyDossier(), { outcome: 'extracted', entry: 'culvert', labEntry: 'duct', escapes: [], vanish: [], foundIn: [], afterDetect: [] });
+  const sim = new ShadowSim({ seed: 9, mode: 'commander', dossier });
+  const opening = sim.radio.at(-1);
+  assert.equal(opening.from, 'Jev');
+  assert.match(opening.text, /got out/);
+  assert.match(opening.text, /west culvert/);
+  quiet(sim);
+  sim.net.phase = 'alert';
+  sim.net.lastSeen = { ...at(36, 14), at: sim.t, zone: 'corr_e', heading: 0, pace: 'running' };
+  const decision = sim.decide('contact', null);
+  const line = sim.radio[0];
+  assert.equal(line.from, 'Jev');
+  const ordered = sim.guards.filter(g => g.pendingTask?.decision === decision.id);
+  assert.ok(ordered.length >= 2, 'a contact commits several guards');
+  assert.ok(ordered.filter(g => line.text.includes(g.name + ',') || line.text.includes(g.name + ' and')).length >= 2, `orders name the guards: ${line.text}`);
+  assert.doesNotMatch(line.text, /pursue the intruder|second pursuer|·/, 'orders are spoken, not a log');
+  stepFor(sim, sim.rules.radio + .2);
+  assert.ok(sim.radio.some(item => ordered.some(g => g.name === item.from)), 'one guard acknowledges');
+  assert.ok(ordered.some(g => g.order?.x != null), 'orders are kept for drawing on the map');
+  const baseline = new ShadowSim({ seed: 9, mode: 'baseline' });
+  assert.ok(!baseline.radio.some(item => item.from === 'Jev'), 'the baseline guards have no commander');
 });
 
 test('the knife kills silently, leaves blood and feeds the pistol from the body', () => {
@@ -456,4 +522,53 @@ test('movement eases in and out quickly, and a wall stops momentum on its axis',
   stepFor(sim, .6, { move: { x: 1, y: 0 } });
   assert.equal(sim.player.vx, 0, 'the east corridor wall zeroes horizontal momentum');
   assert.ok(sim.player.x < 44 * TILE, 'the wall holds');
+});
+
+test('a shot without a mouse snaps to the guard ahead; download progress survives letting go', () => {
+  const sim = new ShadowSim({ seed: 3, mode: 'commander' });
+  quiet(sim);
+  sim.noCapture = true;
+  const guard = sim.guards[0];
+  Object.assign(guard, at(40, 14), { facing: 0, route: [{ ...at(40, 14), hold: 999, face: 0 }], routeIndex: 0 });
+  Object.assign(sim.player, at(34, 14.3), { facing: .25 });
+  sim.shoot(null);
+  assert.equal(guard.dead, true, 'the assisted shot hit the guard 0.25 rad off the facing');
+  const hacker = new ShadowSim({ seed: 4, mode: 'baseline' });
+  quiet(hacker);
+  Object.assign(hacker.player, { x: 31.5 * TILE, y: 5.2 * TILE + 10 });
+  hacker.step(1 / 60, { interact: true, interactHeld: true });
+  stepFor(hacker, 1.5, { interactHeld: true });
+  stepFor(hacker, .1);
+  assert.equal(hacker.player.action, null, 'letting go pauses the download');
+  hacker.step(1 / 60, { interact: true, interactHeld: true });
+  assert.ok(hacker.player.action?.t > 1.3, 'holding E again carries on from where it stopped');
+});
+
+test('holding the aim walks the operative toward the cursor instead of running', () => {
+  const sim = new ShadowSim({ seed: 5, mode: 'baseline' });
+  quiet(sim);
+  Object.assign(sim.player, at(36, 14));
+  const aim = at(36, 20);
+  stepFor(sim, .4, { move: { x: 1, y: 0 }, run: true, aimHold: true, aim });
+  assert.equal(sim.player.running, false, 'no running with the pistol drawn');
+  assert.ok(sim.player.speed < 80, 'walking pace');
+  assert.ok(Math.abs(sim.player.facing - Math.atan2(aim.y - sim.player.y, aim.x - sim.player.x)) < .05, 'faces the cursor while strafing');
+});
+
+test('the cursor turns the operative, and a click can lunge at a guard in front', () => {
+  const sim = new ShadowSim({ seed: 51, mode: 'baseline' });
+  quiet(sim);
+  sim.noCapture = true;
+  Object.assign(sim.player, at(30, 14));
+  const aim = at(30, 22);
+  sim.step(1 / 60, { move: { x: -1, y: 0 }, aim, faceAim: true });
+  assert.ok(Math.abs(sim.player.facing - Math.atan2(aim.y - sim.player.y, aim.x - sim.player.x)) < .05, 'faces the cursor while strafing');
+
+  const target = sim.guards[0];
+  Object.assign(target, at(32, 14), { facing: Math.PI, route: [{ ...at(32, 14), hold: 999, face: Math.PI }], routeIndex: 0, sees: false, meter: 0 });
+  Object.assign(sim.player, at(30, 14));
+  sim.knife(at(32, 14));
+  assert.equal(sim.player.action?.kind, 'kill', 'a cursor-directed lunge does not require the guard to face away');
+  stepFor(sim, .5);
+  assert.equal(target.dead, true);
 });
