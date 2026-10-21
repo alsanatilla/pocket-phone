@@ -7,7 +7,7 @@ import { TILE, ZONE_BY_ID } from './shadow-level.js';
 import { ShadowSim, DIFFICULTY } from './shadow-engine.js';
 import { readDossier, recordMission, dossierInsights, jevState, emptyDossier } from './shadow-commander.js';
 import { JEV_ENDPOINT, JEV_MODEL, shadowQuestions, readAnswers, LEVELS } from '../shared/shadow-jev.js';
-import { VIEW_W, VIEW_H, SCALE, STATE_COLORS, STATE_NAMES, camera, drawWorld, drawSchematic, staticLayer } from './shadow-render.js';
+import { VIEW_W, VIEW_H, SCALE, STATE_COLORS, STATE_NAMES, camera, drawWorld, drawSchematic, staticLayer, fitView } from './shadow-render.js';
 
 const DOSSIER_KEY = 'shadow-dossier';
 const BEST_KEY = 'shadow-best';
@@ -154,7 +154,7 @@ export function mountShadow(body, api = {}) {
   const root = h('div', { class: 'shadow-game' });
   body.append(root);
   const confirmBox = api.confirm || (title => Promise.resolve(globalThis.confirm?.(title)));
-  const settings = { difficulty: 'normal', sound: true, ...read(SETTINGS_KEY, {}) };
+  const settings = { difficulty: 'normal', sound: true, fullscreen: true, ...read(SETTINGS_KEY, {}) };
   if (!DIFFICULTY[settings.difficulty]) settings.difficulty = 'normal';
   const sound = createSound(settings.sound);
   const jev = sharedJev || (sharedJev = createJev());
@@ -164,7 +164,26 @@ export function mountShadow(body, api = {}) {
   let lastResult = null;
 
   const saveSettings = () => write(SETTINGS_KEY, settings);
+  // A mission takes the whole window, and the whole screen when the browser allows it.
+  const fullscreenExit = { intended: false };
+  const canFullscreen = () => Boolean(document.fullscreenEnabled && root.requestFullscreen);
+  function setFullscreen(on) {
+    if (on) { if (!document.fullscreenElement && canFullscreen()) root.requestFullscreen({ navigationUI: 'hide' }).catch(() => {}); }
+    else if (document.fullscreenElement === root) {
+      fullscreenExit.intended = true;
+      document.exitFullscreen().catch(() => { fullscreenExit.intended = false; });
+    }
+  }
+  function toggleFullscreen() {
+    settings.fullscreen = document.fullscreenElement !== root;
+    saveSettings();
+    setFullscreen(settings.fullscreen);
+  }
+
   function stop() {
+    document.documentElement.classList.remove('shadow-immersive');
+    document.documentElement.classList.remove('shadow-intel-open');
+    setFullscreen(false);
     if (!live) return;
     cancelAnimationFrame(live.raf);
     live.controller.abort();
@@ -216,12 +235,7 @@ export function mountShadow(body, api = {}) {
             h('li', {}, h('strong', { text: 'east fence' }), ' · a cut section near the parking, through the barracks to the helipad yard and the lab’s north door.'))),
         h('section', { class: 'shadow-panel' },
           h('h3', { text: 'controls' }),
-          h('ul', { class: 'shadow-controls' },
-            h('li', { text: 'WASD / arrows move · Shift run · C crouch' }),
-            h('li', { text: 'Mouse aims · left click knifes · hold right click to draw the pistol, left click fires' }),
-            h('li', { text: 'E or Space: take down without killing, drag, hide, use · hold to download' }),
-            h('li', { text: 'Q knock on a wall · F throw a pebble at the cursor' }),
-            h('li', { text: 'No mouse: X knife · G pistol, which snaps to the guard ahead · Tab intel · P pause' })))),
+          controlsList())),
       help());
     root.replaceChildren(node);
     drawSchematic(schematic, heat);
@@ -250,6 +264,15 @@ export function mountShadow(body, api = {}) {
     briefing();
   }
 
+  function controlsList() {
+    return h('ul', { class: 'shadow-controls' },
+      h('li', { text: 'WASD / arrows move · Shift run · C crouch' }),
+      h('li', { text: 'Mouse aims · left click knifes · hold right click to draw the pistol, left click fires' }),
+      h('li', { text: 'E or Space: take down without killing, drag, hide, use · hold to download' }),
+      h('li', { text: 'Q knock on a wall · F throw a pebble at the cursor' }),
+      h('li', { text: 'No mouse: X knife · G pistol, which snaps to the guard ahead · Tab intel · P pause' }));
+  }
+
   function help() {
     return h('details', { class: 'shadow-help' },
       h('summary', { text: 'how jev plays' }),
@@ -267,6 +290,7 @@ export function mountShadow(body, api = {}) {
   function begin() {
     sound.unlock();
     stop();
+    if (settings.fullscreen && matchMedia('(pointer: fine)').matches) setFullscreen(true);
     jev.refresh();
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
     const sim = new ShadowSim({
@@ -279,6 +303,7 @@ export function mountShadow(body, api = {}) {
 
   function resume(sim, paused) {
     const view = liveView(sim);
+    document.documentElement.classList.add('shadow-immersive');
     root.replaceChildren(view.node);
     startLoop(sim, view, paused);
   }
@@ -294,41 +319,43 @@ export function mountShadow(body, api = {}) {
     refs.items = h('div', { class: 'shadow-items' });
     refs.prompt = h('div', { class: 'shadow-prompt' });
     refs.toast = h('div', { class: 'shadow-toast', role: 'status' });
+    const backToGame = () => refs.stage.focus({ preventScroll: true });
+    const tool = (text, onclick, extra = {}) => h('button', { type: 'button', class: 'shadow-tool', onclick, ...extra }, text);
+    refs.pauseButton = tool('pause · p', () => togglePause(), { 'aria-pressed': 'false', 'data-tool': 'pause' });
+    refs.intelButton = tool('intel · tab', () => { toggleIntel(); backToGame(); }, { 'aria-pressed': 'false', 'data-tool': 'intel' });
+    refs.soundButton = tool(settings.sound ? 'sound on' : 'sound off', () => { toggleSound(); backToGame(); }, { 'aria-pressed': String(settings.sound), 'data-tool': 'sound' });
+    refs.fullButton = tool('fullscreen', () => { toggleFullscreen(); backToGame(); }, { hidden: !canFullscreen(), 'data-tool': 'fullscreen' });
+    refs.tools = h('div', { class: 'shadow-tools' }, refs.pauseButton, refs.intelButton, refs.soundButton, refs.fullButton);
+    refs.jevStatus = h('span', { class: 'shadow-jev-status', text: 'connecting…' });
+    refs.radio = h('ol', { class: 'shadow-comms-lines', 'aria-live': 'polite' });
+    refs.comms = h('section', { class: 'shadow-comms', 'aria-label': 'Security radio' },
+      h('div', { class: 'shadow-comms-head' }, h('b', { text: 'jev' }), h('span', { text: 'security commander' }), refs.jevStatus),
+      refs.radio);
+    refs.intel = h('section', { class: 'shadow-intel', hidden: true });
+    refs.abortConfirm = h('div', { class: 'shadow-abort-confirm', hidden: true },
+      h('p', { text: 'Abort the mission? Security keeps what it saw.' }),
+      h('div', { class: 'shadow-pause-actions' },
+        h('button', { type: 'button', class: 'shadow-menu-button danger', onclick: () => confirmAbort() }, 'abort'),
+        h('button', { type: 'button', class: 'shadow-menu-button', onclick: () => cancelAbort() }, 'keep playing')));
     refs.pause = h('div', { class: 'shadow-pause', hidden: true }, h('strong', { text: 'paused' }),
-      h('button', { type: 'button', class: 'shadow-side-button', onclick: () => togglePause() }, 'resume mission'),
-      h('span', { text: 'P or Esc to resume' }));
+      h('div', { class: 'shadow-pause-actions' },
+        h('button', { type: 'button', class: 'shadow-menu-button primary', onclick: () => togglePause() }, 'resume'),
+        h('button', { type: 'button', class: 'shadow-menu-button', onclick: () => abort() }, 'abort mission')),
+      refs.abortConfirm,
+      controlsList(),
+      h('span', { class: 'shadow-pause-hint', text: 'P or Esc to resume' }));
     refs.stage = h('div', { class: 'shadow-stage', tabindex: '0', 'aria-label': 'Play field. WASD to move, mouse to aim.' }, canvas,
       h('div', { class: 'shadow-vignette' }),
       h('div', { class: 'shadow-hud' },
         h('div', { class: 'shadow-hud-objective' }, h('span', { class: 'shadow-label', text: 'objective' }), refs.objective, refs.timer),
-        refs.phase,
+        refs.phase, refs.comms,
         h('div', { class: 'shadow-hud-status' }, refs.stance,
           h('span', { class: 'shadow-meter', title: 'How visible you are' }, h('span', { class: 'shadow-label', text: 'exposure' }), h('b', {}, refs.exposure)),
           h('span', { class: 'shadow-meter noise', title: 'How far your last sound carried' }, h('span', { class: 'shadow-label', text: 'noise' }), h('b', {}, refs.noise))),
         refs.items, refs.prompt, refs.toast),
-      refs.pause);
-    refs.strategy = h('p', { class: 'shadow-strategy-line', text: 'Security posture pending' });
-    refs.phaseLine = h('p', { class: 'shadow-phase-line small muted' });
-    refs.source = h('p', { class: 'shadow-source' });
-    refs.connect = h('button', { type: 'button', class: 'shadow-link', hidden: true, onclick: () => api.go?.('/setup/pip') }, 'connect OpenRouter');
-    refs.radio = h('ol', { class: 'shadow-radio', 'aria-live': 'polite' });
-    refs.intel = h('section', { class: 'shadow-panel shadow-intel', hidden: true });
-    refs.intelButton = h('button', { type: 'button', class: 'shadow-side-button', 'aria-pressed': 'false', onclick: () => { toggleIntel(); refs.stage.focus({ preventScroll: true }); } }, 'intel overlay · tab');
-    refs.soundButton = h('button', { type: 'button', class: 'shadow-side-button', 'aria-pressed': String(settings.sound), onclick: () => { toggleSound(); refs.stage.focus({ preventScroll: true }); } }, settings.sound ? 'sound on' : 'sound off');
-    refs.pauseButton = h('button', { type: 'button', class: 'shadow-side-button', 'aria-pressed': 'false', onclick: () => togglePause() }, 'pause mission');
+      refs.intel, refs.pause, refs.tools);
     const touch = touchControls(refs);
-    const node = h('div', { class: 'shadow-live' },
-      h('div', { class: 'shadow-layout' },
-        h('div', { class: 'shadow-main' }, refs.stage, touch,
-          h('p', { class: 'shadow-keys', text: 'WASD move · Shift run · C crouch · click knife · hold right click + click to shoot · E act · Q knock · F throw · Tab intel · P pause' })),
-        h('aside', { class: 'shadow-side' },
-          h('section', { class: 'shadow-panel shadow-command' },
-            h('h3', {}, h('span', { text: 'command' }), h('span', { class: 'shadow-tag', text: 'jev · system one' })),
-            refs.strategy, refs.phaseLine, refs.source, refs.connect),
-          refs.intel,
-          h('section', { class: 'shadow-panel' }, h('h3', { text: 'radio' }), refs.radio),
-          h('div', { class: 'shadow-side-actions' }, refs.pauseButton, refs.intelButton, refs.soundButton,
-            h('button', { type: 'button', class: 'shadow-link shadow-abort', onclick: abort }, 'abort mission')))));
+    const node = h('div', { class: 'shadow-live' }, refs.stage, touch);
     return { node, canvas, refs, touch };
   }
 
@@ -355,7 +382,35 @@ export function mountShadow(body, api = {}) {
       const onMotion = event => { state.reduceMotion = event.matches; };
       motionQuery.addEventListener('change', onMotion, { signal });
     }
-    live = { sim, controller, raf: 0, state, soundButton: refs.soundButton };
+    live = { sim, controller, raf: 0, state, soundButton: refs.soundButton, refs };
+    // The view keeps the same amount of floor in sight whatever the window shape; the canvas
+    // matches the screen's pixels so nothing is stretched. Resizes settle before a refit.
+    let fitTimer = 0;
+    const fit = () => {
+      const box = refs.stage.getBoundingClientRect();
+      if (box.width < 40 || box.height < 40) return;
+      const v = fitView(box.width, box.height, globalThis.devicePixelRatio || 1);
+      canvas.style.width = v.cssW + 'px'; canvas.style.height = v.cssH + 'px';
+      if (canvas.width !== v.pixelW || canvas.height !== v.pixelH) { canvas.width = v.pixelW; canvas.height = v.pixelH; }
+      Object.assign(camView, { w: v.w, h: v.h, scale: v.scale, ui: v.ui });
+    };
+    fit();
+    const resizer = new ResizeObserver(() => { clearTimeout(fitTimer); fitTimer = setTimeout(fit, 90); });
+    resizer.observe(refs.stage);
+    signal.addEventListener('abort', () => { resizer.disconnect(); clearTimeout(fitTimer); });
+    let fullscreenActive = document.fullscreenElement === root;
+    let fullscreenSince = performance.now();
+    refs.fullButton.textContent = fullscreenActive ? 'exit fullscreen' : 'fullscreen';
+    document.addEventListener('fullscreenchange', () => {
+      const active = document.fullscreenElement === root;
+      if (active && !fullscreenActive) fullscreenSince = performance.now();
+      // Esc leaves fullscreen before the game sees the key, so a deliberate exit pauses.
+      // A rejected or immediately revoked request must never pause the mission.
+      if (!active && fullscreenActive && !fullscreenExit.intended && performance.now() - fullscreenSince > 600 && !state.paused && sim.status === 'playing') togglePauseLocal();
+      fullscreenActive = active;
+      fullscreenExit.intended = false;
+      refs.fullButton.textContent = active ? 'exit fullscreen' : 'fullscreen';
+    }, { signal });
     let acc = 0, last = performance.now();
     // Draw between the last two fixed steps, so motion stays smooth at any refresh rate.
     const bodies = () => [sim.player, ...sim.guards];
@@ -410,11 +465,10 @@ export function mountShadow(body, api = {}) {
       if (knob) knob.style.transform = '';
     };
     const pauseAway = () => { clearInput(); if (!state.paused && sim.status === 'playing') togglePauseLocal(); };
-    addEventListener('blur', pauseAway, { signal });
     document.addEventListener('visibilitychange', () => { if (document.hidden) pauseAway(); }, { signal });
     const toWorld = event => {
       const rect = canvas.getBoundingClientRect();
-      return { x: camView.x + (event.clientX - rect.left) / rect.width * VIEW_W, y: camView.y + (event.clientY - rect.top) / rect.height * VIEW_H };
+      return { x: camView.x + (event.clientX - rect.left) / rect.width * (camView.w || VIEW_W), y: camView.y + (event.clientY - rect.top) / rect.height * (camView.h || VIEW_H) };
     };
     // The cursor aims while it is over the play field. Its screen point is kept and re-projected
     // every frame, so a still cursor keeps aiming at the same spot on screen as the camera moves.
@@ -485,6 +539,7 @@ export function mountShadow(body, api = {}) {
     function toggleIntelLocal() {
       state.intel = !state.intel;
       refs.intel.hidden = !state.intel;
+      document.documentElement.classList.toggle('shadow-intel-open', state.intel);
       refs.intelButton.setAttribute('aria-pressed', String(state.intel));
       refs.intelButton.classList.toggle('on', state.intel);
       paintSide(true);
@@ -493,7 +548,8 @@ export function mountShadow(body, api = {}) {
       if (sim.status !== 'playing') return;
       state.paused = !state.paused;
       refs.pause.hidden = !state.paused;
-      refs.pauseButton.textContent = state.paused ? 'resume mission' : 'pause mission';
+      refs.abortConfirm.hidden = true;
+      refs.pauseButton.textContent = state.paused ? 'resume · p' : 'pause · p';
       refs.pauseButton.setAttribute('aria-pressed', String(state.paused));
       clearInput(); acc = 0;
       if (!state.paused) { snapshot(); last = performance.now(); refs.stage.focus({ preventScroll: true }); }
@@ -506,7 +562,7 @@ export function mountShadow(body, api = {}) {
       const value = {
         move, run: keys.run || touch.run, crouch: edges.crouch, interact: edges.interact, interactHeld: state.held || touch.act,
         knife: edges.knife, shoot: edges.shoot, knock: edges.knock, throw: edges.throw,
-        aim: state.pointer ? toWorld(state.pointer) : null, aimHold: state.aimHold,
+        aim: state.pointer ? toWorld(state.pointer) : null, aimHold: state.aimHold, faceAim: Boolean(state.pointer),
       };
       edges.crouch = edges.interact = edges.knife = edges.shoot = edges.knock = edges.throw = false;
       return value;
@@ -554,7 +610,9 @@ export function mountShadow(body, api = {}) {
       const alpha = state.paused ? 1 : Math.min(1, acc / STEP);
       const turn = 22 * dt, toward = shortest(sim.player.facing - drawn.facing);
       drawn.facing = Math.abs(toward) <= turn ? sim.player.facing : drawn.facing + Math.sign(toward) * turn;
-      const reachable = sim.status === 'playing' && !sim.player.action && !sim.player.locker && !sim.player.carrying ? sim.takedownTarget() : null;
+      const aimPoint = state.pointer ? toWorld(state.pointer) : null;
+      const reachable = sim.status === 'playing' && !sim.player.action && !sim.player.locker && !sim.player.carrying
+        ? (aimPoint ? sim.knifeTargetAt(aimPoint) : sim.takedownTarget()) : null;
       const actual = bodies().map(body => ({ body, x: body.x, y: body.y, facing: body.facing }));
       for (const { body, x, y, facing } of actual) {
         const before = previous.get(body);
@@ -569,7 +627,7 @@ export function mountShadow(body, api = {}) {
         state.shake = state.reduceMotion ? 0 : Math.max(0, state.shake - dt * 2.6);
         const shake = state.shake > .01 ? { x: (Math.random() * 2 - 1) * state.shake * 5, y: (Math.random() * 2 - 1) * state.shake * 4 } : null;
         const jammed = !sim.rules.scannerInAlert && (sim.net.phase === 'alert' || sim.net.phase === 'search');
-        drawWorld(ctx, sim, camView, { intel: state.intel, selected: state.selected, aim: state.pointer ? toWorld(state.pointer) : null, aiming: Boolean(state.pointer), aimHold: state.aimHold, target: reachable?.id || null, jammed, shake });
+        drawWorld(ctx, sim, camView, { intel: state.intel, selected: state.selected, aim: aimPoint, aiming: Boolean(aimPoint), aimHold: state.aimHold, target: reachable?.id || null, jammed, shake, compact: innerWidth <= 840 });
       } finally {
         for (const { body, x, y, facing } of actual) { body.x = x; body.y = y; body.facing = facing; }
       }
@@ -613,23 +671,26 @@ export function mountShadow(body, api = {}) {
       }
     }
 
-    function paintSide(force = false) {
-      const net = sim.net, decision = net.decision, plan = net.plan;
-      refs.strategy.textContent = plan?.summary || net.posture?.summary || 'Standard patrols';
-      refs.phaseLine.textContent = `phase · ${net.phase} · level ${LEVELS[net.level]?.split(' — ')[0].toLowerCase() || net.level}`;
+    function availability() {
       const js = jev.state, name = js.model.split('/').pop();
-      const availability = js.mode === 'on' ? `${name} ready${js.latency ? ` · ${Math.round(js.latency)} ms` : ''}` : js.mode === 'asking' ? `asking ${name}…`
-        : js.mode === 'degraded' ? `${name} ${js.error || 'unavailable'} · local covering` : js.mode === 'off' ? (js.error ? `${name} off · ${js.error}` : 'local model · no OpenRouter key') : `checking ${name}…`;
-      const last = decision ? `last · ${decision.kind} · ${decision.source === 'jev' ? name : 'local'}` : 'last · none';
-      refs.source.textContent = `${last} · ${availability}`;
-      refs.connect.hidden = !(js.mode === 'off' && !js.access);
-      const radio = sim.radio.slice(0, 7);
-      const radioKey = radio.map(line => line.t + line.text).join('|');
-      if (refs.radio.dataset.key !== radioKey) {
-        refs.radio.dataset.key = radioKey;
-        refs.radio.replaceChildren(...radio.map(line => h('li', { class: line.tone || '' }, h('b', { text: line.from }), ' ', line.text)));
+      return js.mode === 'on' ? `${name} live${js.latency ? ` · ${Math.round(js.latency)} ms` : ''}` : js.mode === 'asking' ? `asking ${name}…`
+        : js.mode === 'degraded' ? `${name} ${js.error || 'unavailable'} · local reflexes cover` : js.mode === 'off' ? (js.error ? `${name} off · ${js.error}` : 'not connected · local reflexes') : `checking ${name}…`;
+    }
+
+    function paintSide(force = false) {
+      const js = jev.state, thinking = js.mode === 'asking' || sim.net.decision?.status === 'asking jev';
+      const status = thinking && js.mode !== 'off' ? 'thinking…' : js.mode === 'on' ? `live${js.latency ? ` · ${Math.round(js.latency)} ms` : ''}`
+        : js.mode === 'degraded' ? 'unreachable · local reflexes' : js.mode === 'off' ? 'not connected · local reflexes' : 'connecting…';
+      if (refs.jevStatus.textContent !== status) refs.jevStatus.textContent = status;
+      refs.jevStatus.dataset.mode = thinking && js.mode !== 'off' ? 'thinking' : js.mode;
+      // The last few calls stay up and fade, newest at the bottom like a radio log.
+      const recent = sim.radio.filter(line => sim.t - line.t < 16).slice(0, 5).reverse();
+      const key = recent.map(line => line.t + line.text).join('|');
+      if (refs.radio.dataset.key !== key) {
+        refs.radio.dataset.key = key;
+        refs.radio.replaceChildren(...recent.map(line => h('li', { class: `${line.tone || ''}${line.from === 'Jev' ? ' jev' : ''}`, 'data-t': String(line.t) }, h('b', { text: line.from }), ' ', line.text)));
       }
-      // Keep a focused guard row stable while navigating the inspector by keyboard.
+      for (const item of refs.radio.children) item.style.opacity = String(Math.max(0, Math.min(1, (16 - (sim.t - Number(item.dataset.t))) / 4)));
       if (force || state.intel && !refs.intel.contains(document.activeElement)) paintIntel();
     }
 
@@ -660,8 +721,10 @@ export function mountShadow(body, api = {}) {
         }, h('i', { class: 'dot', style: `background:${STATE_COLORS[g.dead ? 'dead' : g.down ? 'down' : g.sees ? 'alert' : g.state]}` }), h('strong', { text: g.name }), h('span', { text: role })));
       });
       const selected = sim.guards.find(g => g.id === state.selected);
-      refs.intel.replaceChildren(
+      const intelNodes = [
         h('h3', {}, h('span', { text: 'intel' }), h('span', { class: 'shadow-tag', text: 'live decision data' })),
+        h('p', { class: 'shadow-source', text: `commander · ${availability()}` }),
+        jev.state.mode === 'off' && !jev.state.access ? h('button', { type: 'button', class: 'shadow-link', onclick: () => api.go?.('/setup/pip') }, 'connect OpenRouter for Jev') : null,
         h('div', { class: 'shadow-strategy' },
           h('span', { class: 'shadow-label', text: 'security strategy' }),
           h('strong', { text: plan?.summary || 'Standard patrols' }),
@@ -669,7 +732,9 @@ export function mountShadow(body, api = {}) {
         h('p', { class: 'small shadow-prediction', text: `prediction · ${prediction}${net.planStatus ? ' · ' + net.planStatus : ''}` }),
         answerRows.length ? h('ol', { class: 'shadow-answers' }, answerRows) : null,
         h('ol', { class: 'shadow-guards' }, rows),
-        selected ? guardDetail(selected) : h('p', { class: 'small muted', text: 'Select a guard here or click one on the map.' }));
+        selected ? guardDetail(selected) : h('p', { class: 'small muted', text: 'Select a guard here or click one on the map.' }),
+      ].filter(Boolean);
+      refs.intel.replaceChildren(...intelNodes);
     }
 
     function guardDetail(g) {
@@ -692,7 +757,7 @@ export function mountShadow(body, api = {}) {
     }
 
     refs.pause.hidden = !state.paused;
-    refs.pauseButton.textContent = state.paused ? 'resume mission' : 'pause mission';
+    refs.pauseButton.textContent = state.paused ? 'resume · p' : 'pause · p';
     refs.pauseButton.setAttribute('aria-pressed', String(state.paused));
     refs.stage.focus({ preventScroll: true });
     staticLayer();
@@ -715,14 +780,20 @@ export function mountShadow(body, api = {}) {
     if (button) { button.textContent = settings.sound ? 'sound on' : 'sound off'; button.setAttribute('aria-pressed', String(settings.sound)); }
   }
 
-  async function abort() {
+  function abort() {
     if (!live) return;
-    const wasPaused = live.state.paused;
-    if (!wasPaused) togglePause();
-    let ok = false;
-    try { ok = await confirmBox('Abort the mission? Security still learns from what it saw.', 'abort'); } catch { ok = false; }
+    if (!live.state.paused) togglePause();
+    live.refs.abortConfirm.hidden = false;
+    live.refs.abortConfirm.querySelector('button')?.focus({ preventScroll: true });
+  }
+  function cancelAbort() {
     if (!live) return;
-    if (!ok) { if (!wasPaused) togglePause(); return; }
+    live.refs.abortConfirm.hidden = true;
+    if (live.state.paused) live.togglePause?.();
+    live.refs.stage.focus({ preventScroll: true });
+  }
+  function confirmAbort() {
+    if (!live) return;
     live.sim.status = 'aborted';
     finish(live.sim);
     activeMission = null;

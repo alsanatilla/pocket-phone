@@ -7,6 +7,7 @@ import {
 } from './shadow-level.js';
 import { distanceField, guardWalk, playerWalk, nearestPassable, index, angleTo, wrapAngle } from './shadow-nav.js';
 import { SHADOW_GAME, shadowQuestions } from '../shared/shadow-jev.js';
+import { ENTRY_NAMES, LAB_NAMES } from './shadow-voice.js';
 
 const round = value => Math.round(value * 10) / 10;
 const whole = value => Math.round(value);
@@ -39,8 +40,6 @@ const ENTRY_POSTS = { culvert: ['culvert_mouth'], gate: ['gate', 'corr_south_doo
 const LAB_POSTS = { duct: ['duct_exit', 'duct_grate'], keycard: ['lab_main_door', 'alley_mid'], north: ['lab_north_door', 'lane_west'], east: ['lab_east_door', 'heli_west'] };
 const ENTRY_SECTOR = { culvert: 'warehouse', gate: 'corridors', fence: 'barracks' };
 const LAB_SECTOR = { duct: 'warehouse', keycard: 'corridors', north: 'north', east: 'north' };
-const ENTRY_NAMES = { culvert: 'the west culvert', gate: 'the main gate', fence: 'the cut east fence' };
-const LAB_NAMES = { duct: 'the air duct', keycard: 'the keycard door', north: 'the lab north door', east: 'the lab east door' };
 
 /* ── dossier ───────────────────────────────────────────────────────────────── */
 
