@@ -572,3 +572,39 @@ test('the cursor turns the operative, and a click can lunge at a guard in front'
   stepFor(sim, .5);
   assert.equal(target.dead, true);
 });
+
+test('a discovered corpse turns a single check into a search from the body', () => {
+  const sim = new ShadowSim({ seed: 61, mode: 'commander' });
+  quiet(sim);
+  sim.noCapture = true;
+  const witness = sim.guards[0], body = sim.guards[1];
+  Object.assign(witness, at(24, 22), { facing: 0, state: 'patrol', sees: false, meter: 0, bodyMeter: 0, bodyTarget: null, task: null, route: [{ ...at(24, 22), hold: 999, face: 0 }], routeIndex: 0 });
+  Object.assign(body, at(27, 22), { down: true, dead: true, hidden: false, carried: false, bodyClaimed: null });
+  Object.assign(sim.player, at(18, 8), { hidden: 'duct', crouch: true });
+  for (let i = 0; i < 120 && witness.task?.role !== 'investigate'; i++) sim.perceiveBodies(witness, 1 / 60);
+  assert.equal(witness.task?.role, 'investigate', 'the guard sees the body');
+  for (let i = 0; i < 360 && sim.net.phase !== 'search'; i++) sim.step(1 / 60, {});
+  assert.equal(sim.net.phase, 'search', 'a corpse starts a security search');
+  assert.ok(sim.metrics.searches >= 1);
+  assert.equal(sim.net.plan?.kind, 'lost');
+  assert.ok(sim.net.plan.roles.length >= 1, 'the plan assigns guards from the body location');
+  assert.ok(sim.net.plan.roles.some(role => ['search', 'probe', 'block'].includes(role.role)), 'the response is a search, not only a look');
+  assert.ok(sim.net.lastSeen && Math.abs(sim.net.lastSeen.x - body.x) < 1, 'the search starts where the body was found');
+});
+
+test('a guard who sees a colleague killed calls it in and starts a search', () => {
+  const sim = new ShadowSim({ seed: 62, mode: 'commander' });
+  quiet(sim);
+  sim.noCapture = true;
+  const witness = sim.guards[0], victim = sim.guards[1];
+  Object.assign(witness, at(24, 22), { facing: 0, state: 'patrol', sees: false, meter: 0, bodyMeter: 0, bodyTarget: null, task: null, route: [{ ...at(24, 22), hold: 999, face: 0 }], routeIndex: 0 });
+  Object.assign(victim, at(27, 22), { facing: Math.PI, state: 'patrol', task: null });
+  Object.assign(sim.player, at(18, 8), { hidden: 'duct', crouch: true });
+  sim.killGuard(victim, 'knife');
+  assert.equal(witness.task?.role, 'investigate', 'the witness reacts at the moment of the kill');
+  assert.ok(sim.queue.some(message => message.kind === 'corpse'), 'the witness radios a corpse');
+  stepFor(sim, 5);
+  assert.equal(sim.net.phase, 'search', 'the witnessed kill starts a search');
+  assert.equal(sim.net.plan?.kind, 'lost');
+  assert.ok(sim.net.plan.roles.length >= 1);
+});

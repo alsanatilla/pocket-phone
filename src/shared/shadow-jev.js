@@ -313,7 +313,7 @@ export function planFromAnswers(kind, answers = {}, situation) {
       if (responders === 'pair') role('investigate', event, { zone: event?.zone, label: 'back up the check' });
       plan.summary = `Investigate ${event?.label || 'the report'}`;
     }
-    if (worth && plan.threat >= 3 && event && ['body', 'missing'].includes(event.kind)) role('search', event, { zone: event.zone, label: 'search around ' + (event.label || 'the report') });
+    if (worth && plan.threat >= 3 && event && ['body', 'corpse', 'missing'].includes(event.kind)) role('search', event, { zone: event.zone, label: 'search around ' + (event.label || 'the report') });
     plan.level = plan.threat >= 2 ? 2 : null;
     if (secure && (decoy || responders === 'one_and_cover')) {
       role('guard', secure, { post: secure.id, face: secure.face, label: 'cover ' + secure.name });
