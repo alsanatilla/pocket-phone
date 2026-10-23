@@ -5,7 +5,7 @@ import { failure, sameOrigin, readJson } from '../../../server/http.js';
 import { readKey } from '../../../server/pip-keys.js';
 import { ZONE_BY_ID, POST_BY_ID, PORTALS, HIDING_CLUSTERS, SECTORS } from '../../../client/shadow-level.js';
 import { jevState, localAnswers } from '../../../client/shadow-commander.js';
-import { DECISION_KINDS, JEV_ENDPOINT, JEV_MODEL, readCompleteAnswers, shadowQuestions } from '../../../shared/shadow-jev.js';
+import { DECISION_KINDS, INTENTS, JEV_ENDPOINT, JEV_MODEL, readCompleteAnswers, shadowQuestions } from '../../../shared/shadow-jev.js';
 
 // Jev as the security commander, relayed for signed-in players. The player's
 // own OpenRouter key is read from Pip settings and never reaches the browser.
@@ -69,13 +69,36 @@ function checked(situation: any, kind: string) {
       for (const key of ['weight', 'tendency', 'found', 'hide', 'spots']) if (!Number.isFinite(item[key])) item[key] = 0;
       return item;
     });
+  const plans = (Array.isArray(c.plans) ? c.plans : [])
+    .filter((item: any) => item && typeof item.id === 'string' && item.id.startsWith(kind + ':'))
+    .filter((item: any, index: number, items: any[]) => items.findIndex(other => other.id === item.id) === index)
+    .slice(0, 6)
+    .map((item: any) => ({
+      id: item.id, name: String(item.name || item.id).slice(0, 80), summary: String(item.summary || '').slice(0, 160),
+      why: String(item.why || '').slice(0, 160), risk: String(item.risk || '').slice(0, 160),
+      counter: INTENTS.includes(item.counter) ? item.counter : null,
+      roles: Number.isFinite(item.roles) ? Math.max(0, Math.min(12, Math.round(item.roles))) : 0,
+    }));
   situation.candidates = {
     zones: keep(c.zones, id => Object.hasOwn(ZONE_BY_ID, id)),
     exits: keep(c.exits, id => PORTAL_IDS.has(id)),
     clusters: keep(c.clusters, id => CLUSTER_IDS.has(id)),
     posts: keep(c.posts, id => Object.hasOwn(POST_BY_ID, id)),
     sectors: keep(c.sectors, id => Object.hasOwn(SECTORS, id)),
+    plans,
   };
+  if (situation.beliefs != null) {
+    const source = object(situation.beliefs) ? situation.beliefs : null;
+    const intent = source && object(source.intent) ? source.intent : null;
+    situation.beliefs = source && intent ? {
+      intent: Object.fromEntries(INTENTS.filter(id => Number.isFinite(intent[id])).map(id => [id, Math.max(0, Math.min(1, intent[id]))])),
+      top: INTENTS.includes(source.top) ? source.top : null,
+      confidence: Number.isFinite(source.confidence) ? Math.max(0, Math.min(1, source.confidence)) : null,
+      label: typeof source.label === 'string' ? source.label.slice(0, 80) : null,
+      age: Number.isFinite(source.age) ? Math.max(0, source.age) : 0,
+      source: typeof source.source === 'string' ? source.source.slice(0, 80) : null,
+    } : null;
+  }
   return situation;
 }
 

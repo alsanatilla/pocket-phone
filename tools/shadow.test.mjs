@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { TILE, START, TERMINAL, EXTRACTION, ZONES, POSTS, PORTALS, MAP, kindAt, tileAt, zoneAt } from '../src/client/shadow-level.js';
 import { findPath, playerWalk, guardWalk, lineClear, soundField, index, walkableLine } from '../src/client/shadow-nav.js';
 import { ShadowSim, SPEED, DASH } from '../src/client/shadow-engine.js';
-import { buildSituation, localAnswers, emptyDossier, recordMission, dossierInsights, jevState } from '../src/client/shadow-commander.js';
+import { buildSituation, localAnswers, emptyDossier, recordMission, dossierInsights, jevState, initialMind, readMind, updateMind } from '../src/client/shadow-commander.js';
 import { DECISION_KINDS, shadowQuestions, readAnswers, readCompleteAnswers, planFromAnswers } from '../src/shared/shadow-jev.js';
 import { DOOR_CONTROLS, FLOODLIGHTS } from '../src/shared/shadow-field.js';
 
@@ -125,30 +125,58 @@ test('every decision asks typed Choice, Score and Noul questions whose options a
   }
 });
 
+test('Jev chooses among coherent, map-checked plans and can tune the field', () => {
+  const sim = new ShadowSim({ seed: 2, mode: 'commander', remote: jev });
+  sim.net.lastSeen = { ...at(10, 18), at: sim.t, zone: 'warehouse', heading: 0, pace: 'running' };
+  const event = { kind: 'noise', ...at(10, 18), label: 'a clatter', at: 0, loud: 4 };
+  for (const kind of DECISION_KINDS) {
+    const situation = buildSituation(sim, kind, event);
+    assert.ok(situation.plans.length >= 2, kind + ': several plans are offered');
+    assert.equal(new Set(situation.plans.map(item => item.id)).size, situation.plans.length, kind + ': plan ids are unique');
+    assert.equal(situation.candidates.plans.length, situation.plans.length);
+    for (const candidate of situation.plans) {
+      assert.equal(candidate.plan.kind, kind);
+      assert.ok(candidate.name && candidate.summary && candidate.why && candidate.risk, candidate.id + ' explains its trade-off');
+      for (const role of candidate.plan.roles) assert.ok(Number.isFinite(role.x) && Number.isFinite(role.y), `${candidate.id}: ${role.role} has a position`);
+    }
+    const chosen = situation.plans.at(-1);
+    const answers = localAnswers(kind, situation, () => .5);
+    answers.plan = { type: 'choice', choice: chosen.id, confidence: .8, probabilities: { [chosen.id]: .8 } };
+    answers.doors = { type: 'choice', choice: 'warehouse_east', confidence: .8 };
+    const plan = planFromAnswers(kind, answers, situation);
+    assert.equal(plan.name, chosen.name, kind + ': the chosen plan is applied');
+    assert.equal(plan.field.doors, 'warehouse_east', kind + ': field orders remain Jev’s');
+  }
+});
+
 test('malformed or partial Jev answers never become guessed orders', () => {
   const sim = new ShadowSim({ seed: 4, mode: 'commander', remote: jev });
   sim.net.lastSeen = { ...at(36, 14), at: sim.t, zone: 'corr_e', heading: 0, pace: 'running' };
   const situation = buildSituation(sim, 'contact', null);
   const local = localAnswers('contact', situation, () => .5);
-  assert.equal(readAnswers('contact', { heading: { type: 'choice', choice: 'the moon' } }, situation), null, 'nothing usable');
-  const exit = Object.keys(shadowQuestions('contact', situation).heading.criteria)[0];
-  const partial = readAnswers('contact', { heading: { type: 'choice', choice: exit, confidence: .8, probabilities: { [exit]: .8 } }, response: { type: 'choice', choice: 'nuke' }, intercept: { type: 'noul', noul: 7 } }, situation);
-  assert.deepEqual(Object.keys(partial), ['heading', 'intercept'], 'only valid questions survive');
-  assert.equal(partial.heading.choice, exit);
-  assert.equal(partial.intercept.noul, 1, 'a probability is clamped, not guessed');
-  assert.equal(partial.response, undefined, 'an unknown choice is rejected');
+  assert.equal(readAnswers('contact', { plan: { type: 'choice', choice: 'the moon' } }, situation), null, 'nothing usable');
+  const planId = Object.keys(shadowQuestions('contact', situation).plan.criteria)[0];
+  const partial = readAnswers('contact', { plan: { type: 'choice', choice: planId, confidence: .8 }, intent: { type: 'choice', choice: 'server', confidence: .8, probabilities: { server: 7 } } }, situation);
+  assert.deepEqual(Object.keys(partial), ['intent', 'plan'], 'only valid questions survive');
+  assert.equal(partial.plan.choice, planId);
+  assert.equal(partial.intent.probabilities.server, 1, 'a probability is clamped, not guessed');
   assert.equal(readCompleteAnswers('contact', partial, situation), null, 'a partial reply cannot issue orders');
-  const complete = { ...local, heading: { type: 'choice', choice: exit, confidence: .8, probabilities: { [exit]: .8 } }, response: { type: 'choice', choice: 'pincer', confidence: .7 }, intercept: { type: 'noul', noul: 7 } };
-  assert.equal(readCompleteAnswers('contact', complete, situation).intercept.noul, 1, 'a probability is clamped');
+  const complete = local;
+  assert.ok(readCompleteAnswers('contact', complete, situation), 'the fixture answers every question');
   const plan = planFromAnswers('contact', complete, situation);
-  assert.deepEqual(plan.roles.slice(0, 2).map(role => role.role), ['pursue', 'intercept'], 'a pincer pursues and sends an interceptor around');
+  const chosen = situation.plans.find(item => item.id === complete.plan.choice);
+  assert.equal(plan.name, chosen.name, 'the chosen candidate plan is applied');
+  assert.ok(plan.roles.length >= 1);
 });
 
 test('Jev is the only source of orders: a complete reply commands, a failed reply freezes the field', async () => {
   const tick = ms => new Promise(resolve => setTimeout(resolve, ms));
   const situationAnswers = (kind, situation) => {
     const answers = localAnswers(kind, situation, () => .9);
-    if (answers.response) answers.response = { type: 'choice', choice: 'swarm', confidence: .9, probabilities: { swarm: .9 } };
+    if (kind === 'contact') {
+      const swarm = situation.candidates.plans.find(item => item.id.endsWith(':swarm'));
+      if (swarm) answers.plan = { type: 'choice', choice: swarm.id, confidence: .9, probabilities: { [swarm.id]: .9 } };
+    }
     return answers;
   };
   const sim = new ShadowSim({ seed: 8, mode: 'commander', remote: async (kind, situation) => situationAnswers(kind, situation) });
@@ -246,25 +274,20 @@ test('the dossier fades old habits and shifts security toward repeated ones', ()
   const faded = recordMission(dossier, { ...habit, entry: 'gate', labEntry: 'keycard', escapes: [], vanish: [] });
   assert.ok(faded.entries.culvert < dossier.entries.culvert, 'older attempts weigh less');
 
-  const watches = dossierUsed => {
-    const counts = {};
-    for (let seed = 1; seed <= 40; seed++) {
-      // A seeded stream per sim, so the dossier's shifting weights are measured
-      // rather than a single fixed draw.
-      let stream = seed * 2654435761 % 2147483647;
-      const random = () => (stream = stream * 48271 % 2147483647) / 2147483647;
-      const sim = new ShadowSim({ seed, mode: 'commander', difficulty: 'hard', dossier: dossierUsed,
-        remote: (kind, situation) => localAnswers(kind, situation, random) });
-      const plan = sim.decisions[0].plan;
-      counts[plan.focus] = (counts[plan.focus] || 0) + 1;
-      counts['watch:' + plan.watch] = (counts['watch:' + plan.watch] || 0) + 1;
-    }
-    return counts;
-  };
-  const fresh = watches(emptyDossier()), learned = watches(dossier);
-  const culvertSide = counts => (counts['watch:culvert_mouth'] || 0) + (counts['watch:duct_exit'] || 0) + (counts['watch:duct_grate'] || 0);
-  assert.ok(culvertSide(learned) > culvertSide(fresh) + 10, `watch posts follow the habit (${culvertSide(fresh)} → ${culvertSide(learned)} of 40)`);
-  assert.ok((learned.warehouse || 0) > (fresh.warehouse || 0), 'the warehouse is reinforced more often');
+  const freshSim = new ShadowSim({ seed: 1, mode: 'commander', remote: jev, dossier: emptyDossier() });
+  const learnedSim = new ShadowSim({ seed: 1, mode: 'commander', remote: jev, dossier });
+  const freshBelief = initialMind(freshSim).intent, learnedBelief = initialMind(learnedSim).intent;
+  assert.ok(learnedBelief.hide > freshBelief.hide, 'the locker habit raises the hiding theory');
+  assert.ok(learnedBelief.bait > freshBelief.bait, 'the distraction habit raises the bait theory');
+
+  const situation = buildSituation(learnedSim, 'posture');
+  assert.ok(situation.plans.length >= 2, 'Jev gets real plan choices');
+  const culvertPlan = situation.plans.find(item => item.id === 'posture:watch_culvert');
+  assert.ok(culvertPlan, 'the culvert route is one of the plans');
+  assert.equal(culvertPlan.plan.watch, 'duct_exit');
+  const before = readMind(learnedSim).intent.hide;
+  updateMind(learnedSim, { type: 'choice', choice: 'hide', confidence: .95, probabilities: { hide: .95, server: .05 } }, situation, 1);
+  assert.ok(readMind(learnedSim).intent.hide > before, 'a validated intent answer updates the ledger');
 });
 
 test('commander security coordinates where baseline security only converges', () => {
@@ -356,17 +379,19 @@ test('the interception counter requires an interceptor already in position and a
   assert.equal(count('intercept', { decision: undefined }), 0, 'not a commander assignment');
 });
 
-test('Jev changes actual posture even when its summary is unchanged, and the plan is credited to Jev', async () => {
+test('Jev chooses a different posture plan, and the choice is credited to Jev', async () => {
   let resolve;
   const sim = new ShadowSim({ seed: 36, mode: 'commander', remote: () => new Promise(done => { resolve = done; }) });
   const decision = sim.decisions[0];
   assert.equal(decision.plan, null, 'no plan exists before Jev answers');
   const answers = localAnswers('posture', decision.situation, () => .5);
-  const base = planFromAnswers('posture', answers, decision.situation), changedLevel = base.level === 3 ? 1 : 3;
-  resolve({ ...answers, level: { type: 'score', score: changedLevel, confidence: .9 } });
+  const chosen = decision.situation.plans.find(item => item.plan.level <= 1) || decision.situation.plans[0];
+  answers.plan = { type: 'choice', choice: chosen.id, confidence: .9, probabilities: { [chosen.id]: .9 } };
+  resolve(answers);
   await new Promise(done => setTimeout(done, 5));
-  assert.equal(decision.plan.summary, base.summary);
-  assert.equal(sim.net.level, changedLevel, 'the changed score is applied despite matching prose');
+  assert.equal(decision.plan.name, chosen.name);
+  assert.equal(decision.plan.level, chosen.plan.level);
+  assert.equal(sim.net.level, chosen.plan.level, 'the chosen plan’s level is applied');
   assert.equal(sim.net.planSource, 'jev');
 
   const matching = new ShadowSim({ seed: 37, mode: 'commander', remote: jev });

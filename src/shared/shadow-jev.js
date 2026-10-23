@@ -1,6 +1,7 @@
 // Shadow Protocol's Jev contract: the commander's typed questions, the
-// validation of Jev's answers and the mapping from answers to a tactical plan.
-// Only complete, validated Jev replies may become live commander orders.
+// validation of Jev's answers, the belief update and the mapping from a
+// chosen map-checked plan to live orders. Only complete, validated replies
+// may become live commander orders.
 // Provider contract: https://openrouter.ai/docs/guides/community/jev-tutorial
 // Independent questions: https://docs.typesafe.ai/primitives
 import { JEV_ENDPOINT, JEV_MODEL } from './girder-jev.js';
@@ -19,9 +20,21 @@ export const SHADOW_GAME = Object.freeze({
   coordinates: 'Distances are in tiles. The facility is 64x44 tiles; north is up.',
   authority: 'You are the only tactical decision maker. Guards execute your orders and react to direct sight; there is no local commander filling gaps. Choose every requested answer.',
   field: 'You can seal one named doorway for 10 seconds, switch on one bank of floodlights for 20 seconds, and put one camera on a faster, longer-range sweep for 20 seconds. Seals block guards too, warn for one second and wait for an occupied threshold to clear. Repeating a live seal does not extend it. Damaged or disabled cameras remain unavailable. Field timers are mechanical limits, not new decisions.',
+  beliefs: 'beliefs is security’s current probability over the intruder’s intent, not a fact. Update it from evidence. A low-confidence belief is a reason to gather information, not to commit everything.',
+  plans: 'The game generates legal, map-checked plans. Choose the plan that best fits the evidence and your belief about the intruder; you still choose the field orders separately.',
 });
 
 export const DECISION_KINDS = Object.freeze(['posture', 'contact', 'lost', 'sweep', 'anomaly']);
+
+export const INTENTS = Object.freeze(['server', 'helipad', 'hunt', 'bait', 'hide', 'leave']);
+export const INTENT_NAMES = Object.freeze({
+  server: 'Reach the lab server',
+  helipad: 'Reach the helipad with the data',
+  hunt: 'Hunt guards or clear a response',
+  bait: 'Draw security into a trap',
+  hide: 'Wait out the search',
+  leave: 'Withdraw and try another way',
+});
 
 export const RESPONSES = Object.freeze({
   swarm: 'Every committed guard converges on the last sighting.',
@@ -132,10 +145,8 @@ function tacticalQuestions(kind, situation) {
   return null;
 }
 
-export function shadowQuestions(kind, situation) {
-  const questions = tacticalQuestions(kind, situation);
-  if (!questions) return null;
-  return { ...questions,
+function fieldQuestions() {
+  return {
     doors: { type: 'choice', instructions: 'Which doorway should be temporarily sealed to shape the intruder route? This also blocks your guards.', criteria: {
       keep: 'Keep the existing seal or leave doors unsealed.', release: 'Release the active seal.',
       ...Object.fromEntries(DOOR_CONTROLS.map(item => [item.id, `Seal the ${item.name} for 10 seconds after a visible warning.`])),
@@ -149,6 +160,44 @@ export function shadowQuestions(kind, situation) {
       ...Object.fromEntries(CAMERAS.map(item => [item.id, `Prioritize the ${item.name} for 20 seconds if it is online.`])),
     } },
   };
+}
+
+function intentQuestion(situation) {
+  const belief = situation?.beliefs?.intent || {};
+  return {
+    type: 'choice',
+    instructions: 'What is the intruder most likely trying to do now? This becomes security’s working theory until new evidence arrives.',
+    criteria: Object.fromEntries(INTENTS.map(id => [id, `${INTENT_NAMES[id]}.${Number.isFinite(belief[id]) ? ` Current belief ${Math.round(belief[id] * 100)}%.` : ''}`])),
+  };
+}
+
+function planQuestion(plans) {
+  return {
+    type: 'choice',
+    instructions: 'Choose one coherent security plan. The options are legal, map-checked plans; you decide which trade-off fits the intruder and the evidence. You will give field orders separately.',
+    criteria: Object.fromEntries(plans.map(item => {
+      const summary = item.summary ? ` ${item.summary}.` : '';
+      const why = item.why ? ` ${item.why}` : '';
+      const risk = item.risk ? ` Risk: ${item.risk}` : '';
+      return [item.id, `${item.name}.${summary}${why}${risk}`];
+    })),
+  };
+}
+
+export function shadowQuestions(kind, situation) {
+  const plans = Array.isArray(situation?.candidates?.plans) ? situation.candidates.plans.filter(item => item && typeof item.id === 'string') : [];
+  if (plans.length >= 2) {
+    return {
+      intent: intentQuestion(situation),
+      plan: planQuestion(plans),
+      ...fieldQuestions(),
+    };
+  }
+  // Backward-compatible legal fallback for a situation without generated
+  // plans: ask the atomic questions again rather than inventing a plan.
+  const questions = tacticalQuestions(kind, situation);
+  if (!questions) return null;
+  return { ...questions, ...fieldQuestions() };
 }
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
@@ -211,6 +260,26 @@ const commitCount = (score, available) => {
  */
 export function planFromAnswers(kind, answers = {}, situation) {
   answers ||= {};
+  // A plan-choice reply selects one of the locally generated, map-checked
+  // plans. The game applies its own copy, so a provider cannot inject roles.
+  const chosen = answers.plan?.choice && Array.isArray(situation?.plans)
+    ? situation.plans.find(item => item.id === answers.plan.choice) : null;
+  if (chosen?.plan) {
+    const plan = {
+      ...chosen.plan,
+      roles: (chosen.plan.roles || []).map(role => ({ ...role })),
+      confidence: { ...(chosen.plan.confidence || {}) },
+      field: { ...(chosen.plan.field || {}) },
+    };
+    plan.field = {
+      doors: answers.doors?.choice ?? plan.field.doors,
+      lights: answers.lights?.choice ?? plan.field.lights,
+      camera: answers.camera?.choice ?? plan.field.camera,
+    };
+    plan.intent = answers.intent?.choice || chosen.counter || null;
+    plan.name = chosen.name;
+    return plan;
+  }
   const c = situation?.candidates || {};
   const lkp = situation?.intruder?.lastSeen || null;
   const available = Math.max(0, finite(situation?.force?.free, 3));

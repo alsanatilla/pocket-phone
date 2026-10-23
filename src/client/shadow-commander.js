@@ -1,12 +1,13 @@
 // Shadow Protocol's commander: what security knows (the situation Jev reads),
-// a deterministic fixture for mocks and tests, and the dossier that persists
-// between attempts. Live missions only accept Jev's complete orders.
+// the map-checked plans Jev chooses between, its belief about the intruder,
+// a deterministic fixture for mocks and tests, and the persistent dossier.
+// Live missions only accept Jev's complete orders.
 import {
   TILE, ZONES, ZONE_BY_ID, PORTALS, POSTS, POST_BY_ID, HIDING, HIDING_CLUSTERS, SECTORS, TERMINAL, EXTRACTION,
   toTile, zoneAt, zoneOfTile,
 } from './shadow-level.js';
-import { distanceField, guardWalk, playerWalk, nearestPassable, index, angleTo, wrapAngle } from './shadow-nav.js';
-import { SHADOW_GAME, shadowQuestions } from '../shared/shadow-jev.js';
+import { distanceField, guardWalk, playerWalk, nearestPassable, index, angleTo, wrapAngle, mulberry32 } from './shadow-nav.js';
+import { SHADOW_GAME, INTENTS, INTENT_NAMES, shadowQuestions, planFromAnswers } from '../shared/shadow-jev.js';
 import { ENTRY_NAMES, LAB_NAMES } from './shadow-voice.js';
 
 const round = value => Math.round(value * 10) / 10;
@@ -128,6 +129,60 @@ export function dossierInsights(dossier) {
   const p = d.predictions.hit + d.predictions.miss;
   if (p >= 1) lines.push(`Commander predictions on this intruder: ${Math.round(d.predictions.hit / p * 100)}% right.`);
   return lines;
+}
+
+/* ── Jev's working theory of the intruder ─────────────────────────────────── */
+
+const clamp01 = value => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+const normalizeIntent = values => {
+  const raw = Object.fromEntries(INTENTS.map(id => [id, Math.max(0, Number.isFinite(values?.[id]) ? values[id] : 0)]));
+  const total = INTENTS.reduce((sum, id) => sum + raw[id], 0);
+  return total > 0 ? Object.fromEntries(INTENTS.map(id => [id, raw[id] / total])) : Object.fromEntries(INTENTS.map(id => [id, 1 / INTENTS.length]));
+};
+
+/** The prior security starts each attempt with, shaped by the dossier and the objective. */
+export function initialMind(sim) {
+  const d = readDossier(sim.dossier), net = sim.net || {};
+  const vanish = Object.values(d.vanish || {}).reduce((sum, n) => sum + n, 0);
+  const escapes = Object.values(d.escapes || {}).reduce((sum, n) => sum + n, 0);
+  const intent = normalizeIntent({
+    server: 1 + (d.entries?.culvert || 0) * .5 + (d.entries?.gate || 0) * .4 + (net.breach ? 0 : 1.4),
+    helipad: (net.breach ? 3.2 : .3) + (d.extractions || 0) * .4,
+    hunt: .7 + (d.kills || 0) * .5 + (d.takedowns || 0) * .25,
+    bait: .7 + (d.distractions || 0) * .35,
+    hide: .9 + (d.afterDetect?.hid || 0) * .45 + vanish * .2,
+    leave: .5 + escapes * .3,
+  });
+  return { intent, updatedAt: sim.t || 0, source: d.attempts ? 'dossier' : 'standard patrol doctrine', history: [] };
+}
+
+/** The compact belief object shown to Jev and the intel overlay. */
+export function readMind(sim) {
+  const mind = sim.mind || (sim.mind = initialMind(sim));
+  const intent = normalizeIntent(mind.intent);
+  const [topId, topValue] = Object.entries(intent).sort((a, b) => b[1] - a[1])[0];
+  return {
+    intent: Object.fromEntries(INTENTS.map(id => [id, round(intent[id])])),
+    top: topId, confidence: round(topValue), label: INTENT_NAMES[topId],
+    age: whole((sim.t || 0) - (mind.updatedAt || 0)), source: mind.source,
+  };
+}
+
+/** Blends a validated intent answer into the ledger without letting one reply erase the prior. */
+export function updateMind(sim, answer, situation = null, decisionId = null) {
+  if (!answer || !INTENTS.includes(answer.choice)) return null;
+  const observed = normalizeIntent(Object.fromEntries(INTENTS.map(id => [
+    id, Number.isFinite(answer.probabilities?.[id]) ? answer.probabilities[id] : answer.choice === id ? 1 : 0,
+  ])));
+  const prior = normalizeIntent((sim.mind || initialMind(sim)).intent);
+  const confidence = clamp01(answer.confidence ?? .5);
+  const weight = Math.min(.86, .3 + confidence * .6 + (situation?.evidence?.length ? .05 : 0));
+  const intent = normalizeIntent(Object.fromEntries(INTENTS.map(id => [id, prior[id] * (1 - weight) + observed[id] * weight])));
+  sim.mind = {
+    intent, updatedAt: sim.t || 0, source: 'jev',
+    history: [{ at: sim.t || 0, decisionId, intent: { ...intent } }, ...(sim.mind?.history || [])].slice(0, 8),
+  };
+  return intent;
 }
 
 /* ── situation: what security knows ────────────────────────────────────────── */
@@ -284,8 +339,9 @@ export function buildSituation(sim, kind, event = null) {
   const evidence = net.evidence.slice(0, 5).map(item => ({ kind: item.kind, zone: item.zone, ago: whole(t - item.at), label: item.label, count: item.count || 1, cleared: item.cleared != null }));
   const objectiveGuard = known.find(g => g.objective);
   const originGuardField = origin ? distanceField(toTile(origin.x), toTile(origin.y), guardWalk) : null;
-  return {
+  const situation = {
     kind, difficulty: rules.id, time: whole(t), phase: net.phase, level: net.level,
+    beliefs: readMind(sim),
     rules: { coordination: rules.coordination, influence: rules.influence, search: rules.search },
     intruder: {
       lastSeen: lkp ? { zone: lkp.zone, x: lkp.x, y: lkp.y, tile: [toTile(lkp.x), toTile(lkp.y)], ago: round(elapsed), heading: compass(lkp.heading), headingAngle: lkp.heading, pace: lkp.pace || 'unknown' } : null,
@@ -318,6 +374,13 @@ export function buildSituation(sim, kind, event = null) {
     },
     plan: net.plan ? { strategy: net.plan.strategy, summary: net.plan.summary, age: whole(t - (net.decision?.t ?? t)), status: net.planStatus || 'issued', predicted: net.prediction?.zone ? ZONE_BY_ID[net.prediction.zone]?.name : null } : null,
   };
+  const plans = buildPlans(kind, situation, sim);
+  situation.plans = plans;
+  situation.candidates = {
+    ...situation.candidates,
+    plans: plans.map(({ id, name, summary, why, risk, counter, roles }) => ({ id, name, summary, why, risk, counter, roles })),
+  };
+  return situation;
 }
 
 /** The state object sent to Jev: names and tiles, no internal world coordinates. */
@@ -332,7 +395,7 @@ export function jevState(situation) {
     }
     return out;
   };
-  const fields = ['kind', 'difficulty', 'time', 'phase', 'level', 'rules', 'intruder', 'event', 'evidence', 'force', 'guards', 'objective', 'candidates', 'tendencies', 'plan'];
+  const fields = ['kind', 'difficulty', 'time', 'phase', 'level', 'beliefs', 'rules', 'intruder', 'event', 'evidence', 'force', 'guards', 'objective', 'candidates', 'tendencies', 'plan'];
   const observed = Object.fromEntries(fields.filter(key => Object.hasOwn(situation || {}, key)).map(key => [key, situation[key]]));
   return {
     game: SHADOW_GAME,
@@ -366,9 +429,7 @@ const score = (value, top = 3) => ({ type: 'score', score: Math.round(Math.max(0
  * This is not a fallback commander: live play only accepts Jev's complete
  * replies. Mocks and tests use this to exercise the same contract offline.
  */
-export function localAnswers(kind, situation, random = Math.random) {
-  const questions = shadowQuestions(kind, situation);
-  if (!questions) return null;
+export function atomicAnswers(kind, situation, random = Math.random) {
   const c = situation.candidates, td = situation.tendencies, influence = situation.rules?.influence ?? .5;
   const lkp = situation.intruder.lastSeen, breached = situation.objective.breached;
   const lethal = Number(td.killsPerAttempt) || 0;
@@ -496,4 +557,123 @@ export function localAnswers(kind, situation, random = Math.random) {
     return answers;
   }
   return null;
+}
+
+/* ── Jev’s plan choices ────────────────────────────────────────────────────── */
+
+const cloneAnswers = value => JSON.parse(JSON.stringify(value));
+const choiceFor = id => id ? { type: 'choice', choice: id, confidence: .7, probabilities: { [id]: .7 } } : null;
+const setChoice = (answers, key, id) => { const value = choiceFor(id); if (value) answers[key] = value; };
+const setNoul = (answers, key, value) => { answers[key] = noul(value); };
+const setScore = (answers, key, value) => { answers[key] = score(value); };
+const sectorId = (c, id) => (c.sectors || []).find(item => item.id === id)?.id || c.sectors?.[0]?.id;
+const postId = (c, id) => (c.posts || []).find(item => item.id === id)?.id || c.posts?.[0]?.id;
+const exitId = (c, id) => (c.exits || []).find(item => item.id === id)?.id || c.exits?.[0]?.id;
+const zoneId = (c, id) => (c.zones || []).find(item => item.id === id)?.id || c.zones?.[0]?.id;
+const clusterId = (c, id) => (c.clusters || []).find(item => item.id === id)?.id || c.clusters?.[0]?.id || 'none';
+
+function planDoctrines(kind, situation) {
+  const c = situation.candidates || {}, breached = situation.objective?.breached;
+  const firstExit = exitId(c), secondExit = exitId(c, c.exits?.[1]?.id);
+  const topZone = zoneId(c), secondZone = zoneId(c, c.zones?.[1]?.id), topCluster = clusterId(c);
+  const objectivePost = postId(c, breached ? 'heli_west' : 'server_door');
+  if (kind === 'posture') {
+    return [
+      { id: 'hold', name: 'Hold current patrols', counter: 'bait', why: 'Keep the shift familiar and the reserve free to react.', risk: 'Predictable routes; a patient intruder can wait them out.', change: a => setScore(a, 'level', 1.6) },
+      { id: 'fortify_server', name: 'Fortify the server', counter: 'server', why: 'Put the reserve on the lab approach and a sentry on the objective door.', risk: 'Thin cover in the warehouse and corridors.', change: a => { setChoice(a, 'focus', sectorId(c, 'lab')); setChoice(a, 'watch', postId(c, 'server_door')); setChoice(a, 'pattern', 'paired'); setNoul(a, 'probe', .8); setScore(a, 'level', 3); } },
+      { id: 'watch_culvert', name: 'Watch the culvert route', counter: 'server', why: 'Cover the duct exit and the warehouse approach this intruder has used before.', risk: 'The lab and helipad are less reinforced.', change: a => { setChoice(a, 'focus', sectorId(c, 'warehouse')); setChoice(a, 'watch', postId(c, 'duct_exit')); setChoice(a, 'pattern', 'paired'); setNoul(a, 'probe', .7); setScore(a, 'level', 2.4); } },
+      { id: 'bait_route', name: 'Bait a route', counter: 'bait', why: 'Leave one plausible way in lightly held and watch the exits around it.', risk: 'If the intruder ignores the bait, the shift is spent out of position.', change: a => { setChoice(a, 'focus', sectorId(c, 'corridors')); setChoice(a, 'watch', postId(c, 'gate')); setChoice(a, 'pattern', 'staggered'); setNoul(a, 'probe', .25); setScore(a, 'level', 1); } },
+      { id: 'hunt', name: 'Hunt the intruder', counter: 'hunt', why: 'Pair guards and push toward the areas the dossier says this intruder uses.', risk: 'Leaves posts thin and makes a decoy more dangerous.', change: a => { setChoice(a, 'focus', sectorId(c, 'barracks')); setChoice(a, 'watch', postId(c, 'east_fence')); setChoice(a, 'pattern', 'paired'); setNoul(a, 'probe', .9); setScore(a, 'level', 3); } },
+      { id: 'lockdown', name: 'Lock the facility down', counter: 'hide', why: 'Tighten routes and raise readiness; best when the intruder is already inside.', risk: 'Slow, obvious, and tiring for the guards.', change: a => { setChoice(a, 'focus', sectorId(c, 'lab')); setChoice(a, 'watch', postId(c, 'lab_main_door')); setChoice(a, 'pattern', 'tight'); setNoul(a, 'probe', 1); setScore(a, 'level', 3); } },
+    ];
+  }
+  if (kind === 'contact') {
+    const ambushExit = secondExit && secondExit !== firstExit ? secondExit : firstExit;
+    return [
+      { id: 'contain', name: 'Contain the sighting', counter: 'server', why: 'Pursue from the sighting and close the exits of the room.', risk: 'A fast intruder can slip through a door before it is covered.', change: a => { setChoice(a, 'heading', firstExit); setChoice(a, 'response', 'contain'); setNoul(a, 'intercept', .75); setNoul(a, 'hold_objective', .8); setScore(a, 'level', 2.5); } },
+      { id: 'pincer', name: 'Pincer the route', counter: 'server', why: 'Pursue while a second guard takes the short route ahead.', risk: 'Needs a free guard and a genuinely shorter route.', change: a => { setChoice(a, 'heading', firstExit); setChoice(a, 'response', 'pincer'); setNoul(a, 'intercept', .9); setNoul(a, 'hold_objective', .6); setScore(a, 'level', 2.7); } },
+      { id: 'swarm', name: 'Swarm the sighting', counter: 'hunt', why: 'Send every committed guard at the last sighting immediately.', risk: 'Leaves the objective and the exits open.', change: a => { setChoice(a, 'heading', firstExit); setChoice(a, 'response', 'swarm'); setNoul(a, 'intercept', .35); setNoul(a, 'hold_objective', .35); setScore(a, 'level', 3); } },
+      { id: 'protect', name: 'Protect the objective', counter: 'helipad', why: 'Keep the server or helipad covered first, then push one guard at the report.', risk: 'The intruder may disappear while the posts hold.', change: a => { setChoice(a, 'heading', firstExit); setChoice(a, 'response', 'protect'); setNoul(a, 'intercept', .5); setNoul(a, 'hold_objective', .95); setScore(a, 'level', 2.2); } },
+      { id: 'ambush', name: 'Ambush the far exit', counter: 'server', why: 'Let the intruder run and put the intercept on the exit beyond the sighting.', risk: 'If they go to ground instead, the ambush sees nothing.', change: a => { setChoice(a, 'heading', ambushExit); setChoice(a, 'response', 'pincer'); setNoul(a, 'intercept', 1); setNoul(a, 'hold_objective', .7); setScore(a, 'level', 2.8); } },
+      { id: 'probe_hiding', name: 'Check the hiding spots', counter: 'hide', why: 'Treat the disappearance as a hiding problem and search close to the sighting.', risk: 'Slow; the intruder may already be moving.', change: a => { setChoice(a, 'heading', 'hide'); setChoice(a, 'response', 'contain'); setNoul(a, 'intercept', .6); setNoul(a, 'hold_objective', .7); setScore(a, 'level', 2.4); } },
+    ];
+  }
+  if (kind === 'lost' || kind === 'sweep') {
+    const plans = [
+      { id: 'sweep', name: 'Sweep the likely room', counter: 'hide', why: 'Search the most likely room from the last sighting and hold its exits.', risk: 'Slow and predictable; a patient intruder can let the search pass.', change: a => { setChoice(a, 'whereabouts', topZone); setChoice(a, 'block', firstExit); setChoice(a, 'cluster', topCluster); setChoice(a, 'search', 'sweep'); setNoul(a, 'hiding', .5); setScore(a, 'commit', 1.6); setScore(a, 'level', 2.3); } },
+      { id: 'fan', name: 'Fan out across rooms', counter: 'server', why: 'Split the search across several likely rooms instead of committing to one.', risk: 'A small force can be defeated in detail.', change: a => { setChoice(a, 'whereabouts', secondZone || topZone); setChoice(a, 'block', firstExit); setChoice(a, 'cluster', topCluster); setChoice(a, 'search', 'fan'); setNoul(a, 'hiding', .4); setScore(a, 'commit', 2.2); setScore(a, 'level', 2.6); } },
+      { id: 'trap', name: 'Trap the exits', counter: 'bait', why: 'Hold the doors and make the intruder come to you.', risk: 'If they are already outside the ring, it is wasted time.', change: a => { setChoice(a, 'whereabouts', topZone); setChoice(a, 'block', firstExit); setChoice(a, 'cluster', topCluster); setChoice(a, 'search', 'trap'); setNoul(a, 'hiding', .6); setScore(a, 'commit', 2); setScore(a, 'level', 2.5); } },
+      { id: 'probe', name: 'Probe the hiding spots', counter: 'hide', why: 'Check lockers, grass and crates near the disappearance before widening the search.', risk: 'Ignores the possibility that the intruder kept moving.', change: a => { setChoice(a, 'whereabouts', topZone); setChoice(a, 'block', firstExit); setChoice(a, 'cluster', topCluster); setChoice(a, 'search', 'probe'); setNoul(a, 'hiding', .85); setScore(a, 'commit', 1.4); setScore(a, 'level', 2.3); } },
+      { id: 'lockdown', name: 'Lock down the sector', counter: 'hunt', why: 'Commit most of the force to a tight search and hold every exit.', risk: 'Leaves the rest of the facility quiet.', change: a => { setChoice(a, 'whereabouts', topZone); setChoice(a, 'block', firstExit); setChoice(a, 'cluster', topCluster); setChoice(a, 'search', 'trap'); setNoul(a, 'hiding', .5); setScore(a, 'commit', 3); setScore(a, 'level', 3); } },
+    ];
+    if (kind === 'sweep') plans.push({ id: 'stand_down', name: 'Stand down to heightened patrols', counter: 'leave', why: 'End the search before it empties the rest of the facility.', risk: 'If the intruder is still close, they get a free window.', change: a => { setChoice(a, 'whereabouts', topZone); setChoice(a, 'block', firstExit); setChoice(a, 'cluster', topCluster); setChoice(a, 'search', 'sweep'); setNoul(a, 'hiding', .4); setScore(a, 'commit', 1); setNoul(a, 'continue', .2); setScore(a, 'level', 2); } });
+    return plans;
+  }
+  if (kind === 'anomaly') {
+    const event = situation.event || { kind: 'noise' };
+    return [
+      { id: 'investigate', name: 'Investigate quietly', counter: 'server', why: 'Send a pair to look without abandoning the key posts.', risk: 'A decoy can pull two guards out of position.', change: a => { setNoul(a, 'worth', .9); setScore(a, 'threat', 2.4); setNoul(a, 'decoy', .25); setChoice(a, 'responders', 'pair'); setChoice(a, 'secure', objectivePost); } },
+      { id: 'search', name: 'Treat it as the intruder', counter: 'hunt', why: event.kind === 'body' || event.kind === 'corpse' || event.kind === 'missing' ? 'A body or missing guard is strong evidence; search the area and keep a key post covered.' : 'Escalate the report and search the area instead of only glancing at it.', risk: 'Overcommits the force if the report is a decoy.', change: a => { setNoul(a, 'worth', 1); setScore(a, 'threat', 3); setNoul(a, 'decoy', .1); setChoice(a, 'responders', 'pair'); setChoice(a, 'secure', objectivePost); } },
+      { id: 'cover', name: 'Check it with cover', counter: 'bait', why: 'One guard investigates while another holds the post the intruder may be trying to open up.', risk: 'The checker is alone if the report is genuine and armed.', change: a => { setNoul(a, 'worth', .85); setScore(a, 'threat', 2.2); setNoul(a, 'decoy', .6); setChoice(a, 'responders', 'one_and_cover'); setChoice(a, 'secure', objectivePost); } },
+      { id: 'ignore', name: 'Log it and hold', counter: 'bait', why: 'Treat the report as noise and keep every post manned.', risk: 'If it is real, security gives up the initiative.', change: a => { setNoul(a, 'worth', .2); setScore(a, 'threat', .8); setNoul(a, 'decoy', .5); setChoice(a, 'responders', 'none'); setChoice(a, 'secure', objectivePost); } },
+      { id: 'feint', name: 'Suspect a feint', counter: 'bait', why: 'Assume the report is meant to pull guards away and cover the likely real target.', risk: 'Ignores a genuine sighting while guarding the wrong place.', change: a => { setNoul(a, 'worth', .7); setScore(a, 'threat', 2.1); setNoul(a, 'decoy', .9); setChoice(a, 'responders', 'one_and_cover'); setChoice(a, 'secure', objectivePost); } },
+    ];
+  }
+  return [];
+}
+
+const planSignature = plan => JSON.stringify({
+  strategy: plan.strategy, summary: plan.summary, level: plan.level, prediction: plan.prediction,
+  focus: plan.focus, watch: plan.watch, pattern: plan.pattern, probe: plan.probe,
+  roles: plan.roles.map(role => ({ role: role.role, x: Math.round(role.x), y: Math.round(role.y), post: role.post, exit: role.exit, cluster: role.cluster, zone: role.zone })),
+});
+
+function buildPlans(kind, situation, sim) {
+  const base = atomicAnswers(kind, situation, mulberry32((sim.seed ^ (kind.length * 7919) ^ (sim.decisionSerial * 104729)) >>> 0));
+  if (!base) return [];
+  const plans = [], seen = new Set();
+  for (const doctrine of planDoctrines(kind, situation)) {
+    const answers = cloneAnswers(base);
+    doctrine.change?.(answers, situation.candidates || {}, situation);
+    const plan = planFromAnswers(kind, answers, situation);
+    if (!plan || !Array.isArray(plan.roles)) continue;
+    const signature = planSignature(plan);
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    plans.push({
+      id: `${kind}:${doctrine.id}`, name: doctrine.name, summary: plan.summary,
+      why: doctrine.why, risk: doctrine.risk, counter: doctrine.counter, roles: plan.roles.length, plan,
+    });
+  }
+  return plans.slice(0, 6);
+}
+
+function localIntent(situation) {
+  const beliefs = situation.beliefs?.intent || {};
+  const scores = Object.fromEntries(INTENTS.map(id => [id, Number.isFinite(beliefs[id]) ? beliefs[id] : 1 / INTENTS.length]));
+  const entries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const choice = entries[0]?.[0] || 'server';
+  const total = entries.reduce((sum, [, value]) => sum + value, 0) || 1;
+  const probabilities = Object.fromEntries(entries.map(([id, value]) => [id, Math.round(value / total * 1000) / 1000]));
+  return { type: 'choice', choice, confidence: probabilities[choice] ?? null, probabilities };
+}
+
+/** Fixture answers for the complete question set. Live play never uses this. */
+export function localAnswers(kind, situation, random = Math.random) {
+  const questions = shadowQuestions(kind, situation);
+  if (!questions) return null;
+  const answers = atomicAnswers(kind, situation, random);
+  if (!answers) return null;
+  if (questions.plan) {
+    const intent = localIntent(situation);
+    const plans = situation.candidates?.plans || [];
+    const preferred = plans.find(item => item.counter === intent.choice) || plans[0];
+    if (!preferred) return null;
+    answers.intent = intent;
+    answers.plan = {
+      type: 'choice', choice: preferred.id, confidence: .55,
+      probabilities: Object.fromEntries(plans.map(item => [item.id, item.id === preferred.id ? .55 : Math.round(.45 / Math.max(1, plans.length - 1) * 1000) / 1000])),
+    };
+  }
+  return answers;
 }

@@ -13,7 +13,7 @@ import {
 } from './shadow-nav.js';
 import { readCompleteAnswers, planFromAnswers } from '../shared/shadow-jev.js';
 import { DOOR_CONTROLS, FLOODLIGHTS, SEAL_SECONDS, FIELD_SECONDS } from '../shared/shadow-field.js';
-import { buildSituation, emptyDossier } from './shadow-commander.js';
+import { buildSituation, emptyDossier, initialMind, updateMind } from './shadow-commander.js';
 import { orderLine, openingLine, predictionLine, ackLine } from './shadow-voice.js';
 
 export const DIFFICULTY = Object.freeze({
@@ -128,6 +128,7 @@ export class ShadowSim {
       prediction: null, lostAt: null, lostEpisode: null, pendingAnomaly: null, alertEpisode: null, posture: null,
       jevQueued: null, jevInFlight: null, commandError: null, watcher: null, acked: 0,
     };
+    this.mind = initialMind(this);
     this.metrics = {
       alerts: 0, sightings: 0, cameraSightings: 0, interceptions: 0, searches: 0, reacquired: 0, reacquireTimes: [],
       recoveries: 0, takedowns: 0, kills: 0, shots: 0, killPoints: 0, killChain: 0, bestChain: 0, lastKillAt: -99,
@@ -2045,15 +2046,22 @@ export class ShadowSim {
       if (this.t - decision.t > 8 || moved && latest.zone !== sightingAtRequest.zone) {
         decision.status = 'superseded by a fresh report'; this.decide(kind, event); return;
       }
-      const current = moved ? buildSituation(this, kind, event) : situation;
-      const answers = readCompleteAnswers(kind, raw, current);
-      if (!answers) {
-        if (moved && readCompleteAnswers(kind, raw, situation)) { this.decide(kind, event); return; }
-        throw new Error('Jev returned incomplete orders.');
+      // Validate against the report Jev was actually asked about first. A
+      // same-room update may move the positions, but a plan that is no longer
+      // offered must never turn a valid reply into a frozen mission.
+      const askedAnswers = readCompleteAnswers(kind, raw, situation);
+      if (!askedAnswers) throw new Error('Jev returned incomplete orders.');
+      let answers = askedAnswers, current = situation, newest = false;
+      if (moved) {
+        const fresh = buildSituation(this, kind, event);
+        const freshAnswers = readCompleteAnswers(kind, raw, fresh);
+        const offered = !freshAnswers?.plan?.choice || fresh.plans?.some(item => item.id === freshAnswers.plan.choice);
+        if (freshAnswers && offered) { answers = freshAnswers; current = fresh; newest = true; }
       }
+      if (answers.intent) updateMind(this, answers.intent, current, decision.id);
       const jevPlan = planFromAnswers(kind, answers, current), first = !net.plan;
       decision.answers = answers; decision.plan = jevPlan; decision.source = 'jev';
-      decision.status = moved ? 'jev · planned on the newest report' : 'jev';
+      decision.status = newest ? 'jev · planned on the newest report' : 'jev';
       decision.situation = current;
       net.commandError = null;
       this.metrics.jevDecisions++;

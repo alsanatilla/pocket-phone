@@ -6,7 +6,7 @@ import { resolve as resolveProviderKey } from './pip-credentials.js';
 import { TILE, ZONE_BY_ID, CAMERAS } from './shadow-level.js';
 import { ShadowSim, DIFFICULTY } from './shadow-engine.js';
 import { readDossier, recordMission, dossierInsights, jevState, emptyDossier } from './shadow-commander.js';
-import { JEV_ENDPOINT, JEV_MODEL, shadowQuestions, readCompleteAnswers, LEVELS } from '../shared/shadow-jev.js';
+import { JEV_ENDPOINT, JEV_MODEL, shadowQuestions, readCompleteAnswers, LEVELS, INTENT_NAMES } from '../shared/shadow-jev.js';
 import { DOOR_CONTROLS, FLOODLIGHTS } from '../shared/shadow-field.js';
 import { VIEW_W, VIEW_H, SCALE, STATE_COLORS, STATE_NAMES, camera, drawWorld, drawSchematic, staticLayer, fitView } from './shadow-render.js';
 
@@ -112,9 +112,13 @@ function createJev() {
         if (!response.ok) throw Object.assign(new Error('OpenRouter rejected Jev.'), { status: response.status });
         payload = await response.json();
       } else {
+        // The full candidate plans stay in the browser; the relay only needs
+        // the compact option ids it turns into questions.
+        const wire = { ...situation };
+        delete wire.plans;
         const response = await fetch('/api/shadow/jev', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ kind, situation }), signal: AbortSignal.timeout(8000),
+          body: JSON.stringify({ kind, situation: wire }), signal: AbortSignal.timeout(8000),
         });
         if (!response.ok) throw Object.assign(new Error('Jev relay failed.'), { status: response.status });
         payload = await response.json();
@@ -285,7 +289,7 @@ export function mountShadow(body, api = {}) {
     return h('details', { class: 'shadow-help' },
       h('summary', { text: 'how jev plays' }),
       h('ul', {},
-        h('li', { text: 'Jev is the security commander, not a guard. At decision points (a sighting, lost contact, a strange noise, a body, a missed radio check) it answers typed questions: where you went, which exit to close, whether to split up, whether a noise is a decoy.' }),
+        h('li', { text: 'Jev is the security commander, not a guard. At decision points (a sighting, lost contact, a strange noise, a body, a missed radio check) it chooses one coherent, map-checked plan, updates its theory of what you are trying to do, and gives the field orders that support it.' }),
         h('li', { text: 'It only knows what guards and cameras reported, and reports take time to travel by radio. Take a guard down before they finish calling it in and nobody hears.' }),
         h('li', { text: 'Between attempts security keeps a dossier: how you got in, where it lost you, where it found you. Recent attempts weigh more, so changing your habits works.' }),
         h('li', { text: 'Jev makes every tactical decision: patrols, searches, seals, floodlights and camera priority. Game code only moves the guards. If the link drops, the field freezes until Jev answers; guards keep their last orders. With an OpenRouter key saved in Pip, Jev 1.14 is billed to your OpenRouter account.' }),
@@ -817,6 +821,11 @@ export function mountShadow(body, api = {}) {
       });
       const ago = decision ? Math.round(sim.t - decision.t) : 0;
       const prediction = net.prediction?.zone ? `${zoneName(net.prediction.zone)}${net.prediction.cluster ? ' · ' + net.prediction.cluster.split(':')[1] + 's' : ''} · ${net.prediction.resolved || 'open'}` : 'none';
+      const mind = sim.mind?.intent || {};
+      const topBelief = Object.entries(mind).sort((a, b) => b[1] - a[1])[0];
+      const beliefLine = topBelief
+        ? `intent · ${INTENT_NAMES[topBelief[0]] || topBelief[0]} ${percent(topBelief[1])} · updated ${Math.round(sim.t - (sim.mind.updatedAt || 0))}s ago`
+        : 'intent · no theory yet';
       const rows = sim.guards.map(g => {
         const knownDown = net.found.has(g.id) && g.down, missing = net.missing.has(g.id);
         const role = g.dead ? (missing ? 'missing' : knownDown ? 'body found' : 'no reply yet') : g.down ? (missing ? 'missing' : knownDown ? 'found down' : 'no reply yet') : g.task ? (g.task.label || g.task.role) : 'patrol route';
@@ -834,6 +843,7 @@ export function mountShadow(body, api = {}) {
           h('strong', { text: plan?.summary || 'Standard patrols' }),
           h('span', { class: 'small muted', text: decision ? `${decision.kind} · ${decision.source === 'jev' ? jev.state.model.split('/').pop() : decision.status} · ${ago}s ago${decision.latency ? ` · ${Math.round(decision.latency)} ms` : ''}` : 'no decision yet' })),
         h('p', { class: 'small shadow-prediction', text: `prediction · ${prediction}${net.planStatus ? ' · ' + net.planStatus : ''}` }),
+        h('p', { class: 'small shadow-prediction', text: beliefLine }),
         answerRows.length ? h('ol', { class: 'shadow-answers' }, answerRows) : null,
         h('ol', { class: 'shadow-guards' }, rows),
         selected ? guardDetail(selected) : h('p', { class: 'small muted', text: 'Select a guard here or click one on the map.' }),
@@ -982,6 +992,8 @@ function zoneOfPoint(point) {
 
 function optionName(question, id, situation) {
   const c = situation?.candidates || {};
+  if (question === 'intent') return INTENT_NAMES[id] || String(id).replace(/_/g, ' ');
+  if (question === 'plan') return c.plans?.find(item => item.id === id)?.name || String(id).split(':').pop().replace(/_/g, ' ');
   if (id === 'hide') return 'go to ground nearby';
   if (id === 'none') return 'no spot stands out';
   if (question === 'doors') {
