@@ -56,9 +56,11 @@
 .shadow-stage[data-phase="search"] .shadow-vignette { box-shadow: inset 0 0 70px rgba(239, 165, 142, .28); }
 .shadow-stage[data-phase="lockdown"] .shadow-vignette { box-shadow: inset 0 0 70px rgba(193, 174, 213, .22); }
 .shadow-stage.flash::before { content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none; background: rgba(240, 112, 94, .32); animation: shadow-flash .5s ease-out forwards; }
+.shadow-stage.spotflash::before { content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none; background: radial-gradient(circle at center, transparent 38%, rgba(240, 112, 94, .34) 100%); animation: shadow-spotflash .42s ease-out forwards; }
 .shadow-stage.killflash::before { content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none; background: rgba(255, 236, 210, .18); box-shadow: inset 0 0 60px rgba(160, 32, 24, .35); animation: shadow-killflash .18s ease-out forwards; }
 @keyframes shadow-pulse { 50% { box-shadow: inset 0 0 40px rgba(240, 112, 94, .25); } }
 @keyframes shadow-flash { to { opacity: 0; } }
+@keyframes shadow-spotflash { from { opacity: 1; } to { opacity: 0; } }
 @keyframes shadow-killflash { from { opacity: 1; } to { opacity: 0; } }
 @keyframes shadow-phase-in { from { opacity: 0; transform: translate(-50%, -4px) scale(.96); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
 
@@ -98,14 +100,19 @@
 .shadow-toast.muted { border-color: var(--line); color: var(--muted); }
 .shadow-toast.intel { border-color: var(--shadow-intel); color: var(--shadow-intel); }
 .shadow-toast.kill { border-color: var(--shadow-alert); background: rgba(45, 12, 10, .94); color: #ffd5c8; box-shadow: 0 0 18px rgba(240, 112, 94, .16); }
+.shadow-toast.alert { border-color: var(--shadow-alert); background: rgba(45, 12, 10, .94); color: #ffd5c8; box-shadow: 0 0 18px rgba(240, 112, 94, .2); }
+.shadow-toast.plan { border-color: rgba(193, 174, 213, .7); background: rgba(14, 12, 20, .94); color: #c1aed5; }
 .shadow-command { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; background: rgba(7, 8, 10, .82); text-align: center; }
 .shadow-command[hidden] { display: none; }
 .shadow-command-title { font: 40px/1 var(--pixel); font-weight: normal; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
 .shadow-command.error .shadow-command-title { color: var(--shadow-alert); }
 .shadow-command-text { max-width: 46ch; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .shadow-command .shadow-kicker { color: var(--accent); }
-.shadow-field-status { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin-top: 5px; }
+.shadow-field-status { position: absolute; left: 12px; bottom: 64px; z-index: 1; display: flex; flex-wrap: wrap; gap: 4px; max-width: calc(100% - 24px); }
 .shadow-field-status:empty { display: none; }
+.shadow-plan { overflow: hidden; padding: 2px 0 4px; color: #c1aed5; font: 10px/1.25 var(--mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; text-overflow: ellipsis; opacity: .72; transition: opacity .18s ease-out, color .18s ease-out; }
+.shadow-plan.on { opacity: 1; color: var(--accent); animation: shadow-plan-in .28s cubic-bezier(.2, .8, .2, 1); }
+@keyframes shadow-plan-in { from { opacity: .35; } to { opacity: 1; } }
 .shadow-field-chip { padding: 2px 7px; border: 1px solid rgba(236, 201, 129, .4); background: rgba(9, 10, 11, .72); color: var(--muted); font-size: 10px; letter-spacing: .04em; }
 .shadow-field-chip b { margin-right: 5px; color: var(--accent); font-weight: normal; text-transform: uppercase; letter-spacing: .1em; }
 .shadow-field-chip.seal { border-color: rgba(224, 138, 111, .55); }
@@ -181,11 +188,13 @@
 .shadow-debrief-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 22px; margin: 18px 0 8px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .shadow-stage[data-phase="alert"] .shadow-vignette, .shadow-stage.flash::before, .shadow-stage.killflash::before,
-  .shadow-brief, .shadow-live, .shadow-debrief, .shadow-phase, .shadow-intel:not([hidden]) { animation: none; }
-  .shadow-toast, .shadow-prompt, .shadow-phase, .shadow-vignette, .shadow-game button, .shadow-difficulty-option, .shadow-meter i { transition: none; }
+  .shadow-stage[data-phase="alert"] .shadow-vignette, .shadow-stage.flash::before, .shadow-stage.killflash::before, .shadow-stage.spotflash::before,
+  .shadow-brief, .shadow-live, .shadow-debrief, .shadow-phase, .shadow-plan, .shadow-intel:not([hidden]) { animation: none; }
+  .shadow-toast, .shadow-prompt, .shadow-phase, .shadow-plan, .shadow-vignette, .shadow-game button, .shadow-difficulty-option, .shadow-meter i { transition: none; }
+  .shadow-stage.spotflash::before { display: none; }
 }
-.reduce-motion .shadow-stage[data-phase="alert"] .shadow-vignette, .reduce-motion .shadow-stage.flash::before, .reduce-motion .shadow-stage.killflash::before { animation: none; }
+.reduce-motion .shadow-stage[data-phase="alert"] .shadow-vignette, .reduce-motion .shadow-stage.flash::before, .reduce-motion .shadow-stage.killflash::before, .reduce-motion .shadow-stage.spotflash::before { animation: none; }
+.reduce-motion .shadow-stage.spotflash::before { display: none; }
 
 @media (hover: none), (max-width: 840px) {
   .shadow-touch { display: grid; }
@@ -207,6 +216,8 @@
   .shadow-hud-status .shadow-meter.noise { display: none; }
   .shadow-objective { font-size: 14px; }
   .shadow-phase { top: 58px; font-size: 16px; }
+  .shadow-field-status { bottom: 64px; max-width: calc(100% - 24px); }
+  .shadow-plan { font-size: 9px; }
   .shadow-command-title { font-size: clamp(26px, 8vw, 40px); }
   .shadow-command-text { font-size: 12px; }
   .shadow-prompt { bottom: 40px; font-size: 11px; }

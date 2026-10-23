@@ -127,6 +127,7 @@ export class ShadowSim {
       camerasOff: false, breach: false, keycardMissing: false, searched: {}, checked: {}, nextCheckin: this.rules.checkin,
       prediction: null, lostAt: null, lostEpisode: null, pendingAnomaly: null, alertEpisode: null, posture: null,
       jevQueued: null, jevInFlight: null, commandError: null, watcher: null, acked: 0,
+      contactPulseAt: 0, contactPulses: 0,
     };
     this.mind = initialMind(this);
     this.metrics = {
@@ -1235,13 +1236,14 @@ export class ShadowSim {
       g.reportIn -= dt;
       if (g.reportIn <= 0) {
         g.reported = true;
-        this.say(g.name, `Contact! ${ZONE_BY_ID[zoneAt(g.lastSeen.x, g.lastSeen.y)]?.name || 'here'}.`, 'alert');
-        this.send({ kind: 'sighting', from: g.id, ...g.lastSeen, at: g.lastSeen.t }, rules.radio);
+        // The shout is immediate; the radio report follows a short beat so a
+        // very fast takedown can still cut the call.
+        this.send({ kind: 'sighting', from: g.id, ...g.lastSeen, at: g.lastSeen.t }, rules.radio * .55);
         g.nextUpdate = this.t + 1;
       }
     } else if (g.sees && g.reported && this.t >= g.nextUpdate) {
       g.nextUpdate = this.t + 1;
-      this.send({ kind: 'sighting', from: g.id, ...g.lastSeen, at: g.lastSeen.t }, rules.radio * .6);
+      this.send({ kind: 'sighting', from: g.id, ...g.lastSeen, at: g.lastSeen.t }, rules.radio * .45);
     }
     this.perceiveBodies(g, dt);
   }
@@ -1259,21 +1261,24 @@ export class ShadowSim {
       && !this.guards.some(other => other !== g && !other.down && other.sees)
       && !this.cameras.some(camera => camera.on && camera.lastSeen && this.t - camera.lastSeen.t < .6)) this.metrics.interceptions++;
     g.sees = true; g.lostFor = 0; g.state = 'alert';
-    // The classic beat of surprise: a guard freezes before reacting, which is the player's window.
+    // The guard sees you, shouts at once and brings the rifle up. The short
+    // freeze is a beat of surprise, not a silent stare.
     g.spottedAt = this.t;
-    g.freeze = wasHunting ? this.rules.reaction * .45 : this.rules.reaction;
+    g.freeze = wasHunting ? this.rules.reaction * .25 : this.rules.reaction * .4;
     g.lastSeen = { x: p.x, y: p.y, t: this.t, heading: p.facing, pace: this.pace() };
     g.knowledge = { source: 'eyes', x: p.x, y: p.y, t: this.t };
     g.indicator = '!'; g.indicatorAt = this.t;
     g.lastAction = 'spotted the intruder';
     g.task = { role: 'pursue', x: p.x, y: p.y, label: 'chase on sight', source: 'reflex', issued: this.t };
     this.metrics.sightings++;
+    const zoneName = ZONE_BY_ID[zoneAt(p.x, p.y)]?.name || 'the facility';
+    this.say(g.name, `Contact! ${zoneName}.`, 'alert');
     if (!g.reported || this.t - (g.lastSeenReport || -9) > 6) {
       g.reported = false;
-      g.reportIn = wasHunting ? this.rules.report * .5 : this.rules.report;
+      g.reportIn = wasHunting ? this.rules.report * .22 : this.rules.report * .35;
     }
     g.lastSeenReport = this.t;
-    this.emit('spotted', { guard: g.id });
+    this.emit('spotted', { guard: g.id, name: g.name, zone: zoneAt(p.x, p.y) });
   }
 
   perceiveBodies(g, dt) {
@@ -1316,7 +1321,10 @@ export class ShadowSim {
     if (g.groggy > 0) g.groggy -= dt;
     if (g.pendingTask && this.t >= g.pendingTask.deliverAt) {
       const task = g.pendingTask; g.pendingTask = null;
-      if (!g.sees) {
+      // A contact plan can keep the spotter in the plan. Other orders wait
+      // until the guard loses sight, so a chase is never interrupted by a
+      // stale post order.
+      if (!g.sees || task.role === 'pursue') {
         this.assign(g, task);
         // One voice answers each order round, so the radio carries the plan without chatter.
         if (task.decision && this.net.acked !== task.decision && task.role !== 'return' && task.role !== 'post') {
@@ -1794,6 +1802,14 @@ export class ShadowSim {
       this.metrics.alertTime += dt;
       if (!anyEyes && sinceSeen > 3) this.loseContact();
       else if (this.mode === 'commander' && this.t - net.lastDecisionAt > this.rules.replan && net.lastSeen && zoneAt(net.lastSeen.x, net.lastSeen.y) !== net.decisionZone) this.decide('contact', null);
+      else if (this.mode === 'commander' && net.contactPulses < 2 && this.t >= net.contactPulseAt
+        && this.t - net.lastDecisionAt > this.rules.gap && this.guards.some(g => g.sees)) {
+        // A pursuit is a conversation, not one delayed order. Jev gets two
+        // short update windows while the intruder is still in sight.
+        net.contactPulses++;
+        net.contactPulseAt = this.t + Math.max(2.4, this.rules.replan * .55);
+        this.decide('contact', { kind: 'pursuit', label: 'still in contact' });
+      }
     } else if (net.phase === 'search') {
       this.metrics.alertTime += dt;
       if (this.mode === 'baseline' && this.t >= net.searchUntil) this.endSearch();
@@ -1822,6 +1838,7 @@ export class ShadowSim {
     if (net.phase === phase) return;
     const before = net.phase;
     net.phase = phase; net.phaseSince = this.t;
+    if (phase !== 'alert') { net.contactPulses = 0; net.contactPulseAt = 0; }
     this.emit('phase', { phase, before });
     if (phase === 'returning') {
       this.say(this.chief, 'Stand down. Return to your routes, stay sharp.', '');
@@ -1857,6 +1874,8 @@ export class ShadowSim {
         }
         this.notePrediction(zone, null, true);
         this.setPhase('alert');
+        net.contactPulses = 0;
+        net.contactPulseAt = this.t + Math.max(2.4, this.rules.gap + .6);
         this.say('Security', `Contact reported in ${ZONE_BY_ID[zone]?.name || 'the facility'}. Awaiting orders.`, 'alert');
         this.emit('alarm', { zone });
         this.decide('contact', null);
@@ -2152,7 +2171,10 @@ export class ShadowSim {
   allocate(roles, plan, decision, voice = { kind: decision.kind }) {
     const net = this.net;
     const taken = new Set();
-    const free = g => !g.sees && !g.grabbed && !net.missing.has(g.id) && !(g.task?.role === 'revive') && !(g.down && net.found.has(g.id));
+    // A guard in contact is still Jev's guard. Contact plans may command the
+    // spotter directly; other plans leave a chasing guard to their reflex.
+    const contact = decision.kind === 'contact';
+    const free = g => !g.grabbed && !net.missing.has(g.id) && !(g.task?.role === 'revive') && !(g.down && net.found.has(g.id)) && (contact || !g.sees);
     const objectiveFree = plan.keepObjective === false || this.net.breach;
     const issued = [];
     for (const role of roles) {
@@ -2160,9 +2182,12 @@ export class ShadowSim {
       let best = null, bestScore = Infinity;
       for (const g of this.guards) {
         if (taken.has(g.id) || !free(g)) continue;
+        // A guard with eyes on the intruder can only take the pursuit slot;
+        // a post or flank order waits until contact breaks.
+        if (g.sees && role.role !== 'pursue') continue;
         if (g.objective && !objectiveFree && !OBJECTIVE_ROLES.has(role.role)) continue;
         // Security does not know who is unconscious: a downed guard can be picked.
-        const known = g.down ? g.known : g;
+        const known = g.sees ? g : g.down ? g.known : g;
         let score = field[index(toTile(known.x), toTile(known.y))];
         if (!Number.isFinite(score)) continue;
         if (role.role === 'pursue' && g.task?.role === 'pursue') score -= 6;
@@ -2188,8 +2213,11 @@ export class ShadowSim {
   }
 
   order(g, role, decision) {
-    const task = { ...role, source: decision.source, decision: decision.id, issued: this.t + this.rules.radio };
-    g.pendingTask = { ...task, deliverAt: this.t + this.rules.radio };
+    // Contact orders use the spotter's already-open channel: faster than a
+    // fresh radio call to a guard on the far side of the facility.
+    const delay = decision.kind === 'contact' ? this.rules.radio * .5 : this.rules.radio;
+    const task = { ...role, source: decision.source, decision: decision.id, issued: this.t + delay };
+    g.pendingTask = { ...task, deliverAt: this.t + delay };
     g.ackDue = this.t + this.rules.radio + 2.5;
     if (g.down) g.lastOrder = task;
   }

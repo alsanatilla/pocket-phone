@@ -89,6 +89,50 @@ test('a sighting reaches command only by radio; silencing the spotter first keep
   assert.notEqual(quietSim.net.phase, 'alert', 'nobody reported the intruder');
 });
 
+test('a guard who sees you shouts at once and stays in Jev’s contact plan', () => {
+  const sim = new ShadowSim({ seed: 72, mode: 'commander', remote: jev, difficulty: 'normal' });
+  quiet(sim);
+  sim.noCapture = true;
+  const g = sim.guards[0];
+  Object.assign(g, at(24, 22), { facing: 0, route: [{ ...at(24, 22), hold: 999, face: 0 }], routeIndex: 0 });
+  Object.assign(sim.player, at(27, 22));
+  let t = 0;
+  while (!g.sees && t < 2) { sim.step(1 / 60, {}); t += 1 / 60; }
+  assert.ok(g.sees, 'the guard sees the operative');
+  assert.ok(sim.radio.some(line => line.from === g.name && /Contact!/.test(line.text)), 'the shout is immediate');
+  assert.ok(g.reportIn <= sim.rules.report * .35 + .01, 'the radio report is no longer the old long delay');
+
+  sim.net.lastSeen = { ...at(27, 22), at: sim.t, zone: zoneAt(at(27, 22).x, at(27, 22).y), heading: 0, pace: 'running' };
+  const decision = sim.decide('contact', null);
+  assert.equal(decision.source, 'jev');
+  stepFor(sim, sim.rules.radio * .5 + .1);
+  assert.ok(sim.guards.some(guard => guard.task?.decision === decision.id), 'the contact plan reaches a guard');
+  assert.equal(g.task?.source, 'jev', 'the spotter is part of Jev’s plan, not only a reflex');
+});
+
+test('a continuing pursuit gives Jev a second look while the intruder is still visible', () => {
+  const sim = new ShadowSim({ seed: 73, mode: 'commander', remote: jev });
+  quiet(sim);
+  sim.noCapture = true;
+  const g = sim.guards[0];
+  Object.assign(g, at(24, 22), { facing: 0, route: [{ ...at(24, 22), hold: 999, face: 0 }], routeIndex: 0 });
+  Object.assign(sim.player, at(27, 22));
+  while (!g.sees) sim.step(1 / 60, {});
+  const lastSeen = { ...at(27, 22), at: sim.t, zone: zoneAt(at(27, 22).x, at(27, 22).y), heading: 0, pace: 'running' };
+  sim.net.phase = 'alert';
+  sim.net.lastSeen = lastSeen;
+  sim.net.decisionZone = lastSeen.zone;
+  sim.net.lastDecisionAt = -99;
+  sim.net.contactPulses = 0;
+  sim.net.contactPulseAt = 0;
+  sim.t = 10;
+  const before = sim.decisions.length;
+  sim.updateNet(1 / 60);
+  assert.equal(sim.net.contactPulses, 1);
+  assert.equal(sim.decisions.length, before + 1);
+  assert.equal(sim.decisions[0].kind, 'contact');
+});
+
 test('the commander never reads the player’s true position: unseen movement leaves its situation unchanged', () => {
   const make = () => { const sim = new ShadowSim({ seed: 11, mode: 'commander', remote: jev }); quiet(sim); return sim; };
   const a = make(), b = make();

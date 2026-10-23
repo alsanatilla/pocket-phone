@@ -107,6 +107,15 @@ function drawGuard(ctx, g, time, selected, pose = null) {
   ctx.lineCap = 'butt';
   ctx.fillStyle = GUARD.rifle; ctx.fillRect(5.2, 2.7, 1.1, 1.9);
   ctx.fillStyle = '#3a3e41'; ctx.fillRect(9.2, 3.1, 1.9, 1.1);
+  // A guard who has you in sight brings the rifle up: a short red aim line and
+  // a muzzle glint on the first beat make the spot readable before the chase.
+  if (g.sees) {
+    const flash = Math.max(0, 1 - (time - (g.spottedAt ?? -9)) / .22);
+    ctx.strokeStyle = `rgba(255,92,72,${(.2 + flash * .5).toFixed(3)})`;
+    ctx.lineWidth = .45;
+    ctx.beginPath(); ctx.moveTo(11.5, 2.6); ctx.lineTo(21, 2.6); ctx.stroke();
+    if (flash > 0) { ctx.fillStyle = `rgba(255,224,176,${flash.toFixed(3)})`; ctx.fillRect(10.2, 1.2, 3.2, 2.8); }
+  }
   ctx.fillStyle = GUARD.gloves; ctx.beginPath(); ctx.arc(4.3, 3, .9, 0, Math.PI * 2); ctx.arc(6.7, 2, .9, 0, Math.PI * 2); ctx.fill();
   // A cap with its brim to the front.
   ctx.fillStyle = GUARD.brim; ctx.beginPath(); ctx.ellipse(3.3, 0, 1.5, 2.5, 0, 0, Math.PI * 2); ctx.fill();
@@ -507,7 +516,7 @@ const ORDER_TAGS = { pursue: 'chase', intercept: 'cut off', block: 'hold', guard
 function drawOrders(ctx, sim, time) {
   for (const g of sim.guards) {
     const order = g.order;
-    if (!order || g.down || g.sees) continue;
+    if (!order || g.down) continue;
     const age = time - order.at;
     if (age < 0 || age > 2.6) continue;
     const fade = Math.min(1, age * 6) * Math.min(1, (2.6 - age) / .8);

@@ -326,6 +326,7 @@ export function mountShadow(body, api = {}) {
     refs.objective = h('strong', { class: 'shadow-objective', text: sim.player.data ? 'Extract at the helipad' : 'Reach the lab server' });
     refs.timer = h('span', { class: 'shadow-timer', text: '00:00' });
     refs.phase = h('div', { class: 'shadow-phase', 'aria-live': 'polite' });
+    refs.plan = h('div', { class: 'shadow-plan', 'aria-live': 'polite' });
     refs.stance = h('span', { class: 'shadow-stance', text: 'stand' });
     refs.exposure = h('i', {}); refs.noise = h('i', {});
     refs.items = h('div', { class: 'shadow-items' });
@@ -342,6 +343,7 @@ export function mountShadow(body, api = {}) {
     refs.radio = h('ol', { class: 'shadow-comms-lines', 'aria-live': 'polite' });
     refs.comms = h('section', { class: 'shadow-comms', 'aria-label': 'Security radio' },
       h('div', { class: 'shadow-comms-head' }, h('b', { text: 'jev' }), h('span', { text: 'security commander' }), refs.jevStatus),
+      refs.plan,
       refs.radio);
     refs.intel = h('section', { class: 'shadow-intel', hidden: true });
     refs.abortConfirm = h('div', { class: 'shadow-abort-confirm', hidden: true },
@@ -406,7 +408,7 @@ export function mountShadow(body, api = {}) {
     const latest = { x: 0, y: 0 };
     const edges = { crouch: false, interact: false, knife: false, shoot: false, knock: false, throw: false, dash: false };
     const touch = { x: 0, y: 0, run: false, act: false };
-    const state = { intel: false, selected: null, paused: startPaused, pointer: null, aimHold: false, held: false, toastUntil: 0, lastPaint: 0, alarmAt: 0, ended: false, shake: 0, hitstop: 0, kick: { x: 0, y: 0 }, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches };
+    const state = { intel: false, selected: null, paused: startPaused, pointer: null, aimHold: false, held: false, toastUntil: 0, lastPaint: 0, alarmAt: 0, ended: false, shake: 0, hitstop: 0, planUntil: 0, kick: { x: 0, y: 0 }, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches };
     if (matchMedia('(prefers-reduced-motion: reduce)').addEventListener) {
       const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
       const onMotion = event => { state.reduceMotion = event.matches; };
@@ -621,7 +623,12 @@ export function mountShadow(body, api = {}) {
       for (const event of sim.events.splice(0)) {
         if (event.type === 'toast') { toast(event.text); sound.pickup(); }
         else if (event.type === 'hint') toast(event.text, 'muted');
-        else if (event.type === 'spotted') sound.spot();
+        else if (event.type === 'spotted') {
+          sound.spot();
+          refs.stage.classList.remove('spotflash'); void refs.stage.offsetWidth; refs.stage.classList.add('spotflash');
+          state.shake = Math.min(1, state.shake + .18);
+          toast(`${event.name || 'a guard'} sees you${event.zone ? ' · ' + zoneName(event.zone) : ''}`, 'alert');
+        }
         else if (event.type === 'alarm') { sound.alarm(); refs.stage.classList.remove('flash'); void refs.stage.offsetWidth; refs.stage.classList.add('flash'); }
         else if (event.type === 'shot') { sound.gun(); state.shake = Math.min(1, state.shake + .7); }
         else if (event.type === 'knife') sound.knife();
@@ -725,6 +732,18 @@ export function mountShadow(body, api = {}) {
       const label = phase === 'alert' ? 'alert' : phase === 'search' ? `evasion ${clock(Math.max(0, net.searchUntil - sim.t))}` : phase === 'lockdown' ? 'lockdown' : phase === 'caution' || phase === 'returning' ? 'caution' : '';
       if (refs.phase.dataset.text !== label) { refs.phase.dataset.text = label; refs.phase.textContent = label; refs.phase.className = 'shadow-phase ' + phase; }
       refs.stage.dataset.phase = phase;
+      const plan = net.plan;
+      const planKey = plan ? plan.strategy + '|' + plan.summary : 'none';
+      if (refs.plan.dataset.key !== planKey) {
+        refs.plan.dataset.key = planKey;
+        refs.plan.textContent = plan ? `jev · ${plan.summary}` : 'jev · no standing orders';
+        refs.plan.classList.remove('on'); void refs.plan.offsetWidth; refs.plan.classList.add('on');
+        state.planUntil = performance.now() + 2400;
+        if (plan) toast(`jev · ${plan.summary}`, 'plan');
+      }
+      if (state.planUntil && performance.now() > state.planUntil) {
+        refs.plan.classList.remove('on'); state.planUntil = 0;
+      }
       const stance = p.locker ? 'locker' : p.move ? p.move.kind : p.hidden === 'duct' ? 'in duct' : p.hidden === 'grass' ? 'in grass' : p.carrying ? 'drag' : p.crouch ? 'crouch' : p.running ? 'sprint' : 'stand';
       refs.stance.classList.toggle('hidden', Boolean(p.locker || p.hidden));
       if (refs.stance.textContent !== stance) refs.stance.textContent = stance;
