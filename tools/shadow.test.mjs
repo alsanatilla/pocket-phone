@@ -1,16 +1,26 @@
 // Run with: node --test tools/shadow.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TILE, START, TERMINAL, EXTRACTION, ZONES, POSTS, PORTALS, MAP, kindAt, zoneAt } from '../src/client/shadow-level.js';
+import { TILE, START, TERMINAL, EXTRACTION, ZONES, POSTS, PORTALS, MAP, kindAt, tileAt, zoneAt } from '../src/client/shadow-level.js';
 import { findPath, playerWalk, guardWalk, lineClear, soundField, index, walkableLine } from '../src/client/shadow-nav.js';
 import { ShadowSim, SPEED, DASH } from '../src/client/shadow-engine.js';
 import { buildSituation, localAnswers, emptyDossier, recordMission, dossierInsights, jevState } from '../src/client/shadow-commander.js';
-import { DECISION_KINDS, shadowQuestions, readAnswers, planFromAnswers } from '../src/shared/shadow-jev.js';
+import { DECISION_KINDS, shadowQuestions, readAnswers, readCompleteAnswers, planFromAnswers } from '../src/shared/shadow-jev.js';
+import { DOOR_CONTROLS, FLOODLIGHTS } from '../src/shared/shadow-field.js';
 
 const at = (tx, ty) => ({ x: tx * TILE + 8, y: ty * TILE + 8 });
 const crawl = (x, y) => playerWalk(x, y, true);
 const quiet = sim => { for (const g of sim.guards) { g.x = 2 * TILE; g.y = 1 * TILE + 8; g.route = [{ x: g.x, y: g.y, hold: 999, face: Math.PI }]; g.routeIndex = 0; g.task = null; } };
 const stepFor = (sim, seconds, input = {}) => { for (let t = 0; t < seconds; t += 1 / 60) sim.step(1 / 60, input); };
+const jev = (kind, situation) => localAnswers(kind, situation, () => .5);
+
+test('Jev’s field controls refer to real doors and reachable floodlight positions', () => {
+  for (const control of DOOR_CONTROLS) {
+    assert.ok(control.tiles.length > 0, control.id + ' has a door tile');
+    for (const [tx, ty] of control.tiles) assert.ok(['D', 'K'].includes(tileAt(tx, ty)), `${control.id} names door tile ${tx},${ty}`);
+  }
+  for (const light of FLOODLIGHTS) assert.notEqual(kindAt(Math.floor(light.x), Math.floor(light.y)).walk, 'none', `${light.id} hangs over walkable ground`);
+});
 
 test('every way in reaches the server and the helipad, and guards cannot use the crawlways', () => {
   const terminal = [Math.floor(TERMINAL.x), Math.floor(TERMINAL.y) + 1];
@@ -40,7 +50,7 @@ test('walls block sight and sound; fences block neither sight nor sound; low cra
 });
 
 test('a guard cannot see the player through a wall, even in range and facing them', () => {
-  const sim = new ShadowSim({ seed: 3, mode: 'commander' });
+  const sim = new ShadowSim({ seed: 3, mode: 'commander', remote: jev });
   quiet(sim);
   const g = sim.guards[0];
   Object.assign(g, at(21, 15), { facing: Math.PI, route: [{ ...at(21, 15), hold: 999, face: Math.PI }] });
@@ -55,7 +65,7 @@ test('a guard cannot see the player through a wall, even in range and facing the
 });
 
 test('a sighting reaches command only by radio; silencing the spotter first keeps the alarm quiet', () => {
-  const sim = new ShadowSim({ seed: 5, mode: 'commander', difficulty: 'normal' });
+  const sim = new ShadowSim({ seed: 5, mode: 'commander', remote: jev, difficulty: 'normal' });
   quiet(sim);
   const g = sim.guards[0];
   Object.assign(g, at(24, 22), { facing: 0, route: [{ ...at(24, 22), hold: 999, face: 0 }] });
@@ -68,7 +78,7 @@ test('a sighting reaches command only by radio; silencing the spotter first keep
   stepFor(sim, sim.rules.report + sim.rules.radio + .3);
   assert.equal(sim.net.phase, 'alert', 'the report arrived after the report and radio delays');
 
-  const quietSim = new ShadowSim({ seed: 5, mode: 'commander', difficulty: 'normal' });
+  const quietSim = new ShadowSim({ seed: 5, mode: 'commander', remote: jev, difficulty: 'normal' });
   quiet(quietSim);
   const spotter = quietSim.guards[0];
   Object.assign(spotter, at(24, 22), { facing: 0, route: [{ ...at(24, 22), hold: 999, face: 0 }] });
@@ -80,7 +90,7 @@ test('a sighting reaches command only by radio; silencing the spotter first keep
 });
 
 test('the commander never reads the player’s true position: unseen movement leaves its situation unchanged', () => {
-  const make = () => { const sim = new ShadowSim({ seed: 11, mode: 'commander' }); quiet(sim); return sim; };
+  const make = () => { const sim = new ShadowSim({ seed: 11, mode: 'commander', remote: jev }); quiet(sim); return sim; };
   const a = make(), b = make();
   Object.assign(a.player, at(10, 40)); Object.assign(b.player, at(55, 40));
   stepFor(a, 2); stepFor(b, 2);
@@ -93,7 +103,7 @@ test('the commander never reads the player’s true position: unseen movement le
 });
 
 test('every decision asks typed Choice, Score and Noul questions whose options are real places', () => {
-  const sim = new ShadowSim({ seed: 2, mode: 'commander', dossier: recordMission(emptyDossier(), { outcome: 'captured', entry: 'culvert', labEntry: 'duct', escapes: ['warehouse'], vanish: ['warehouse:locker'], foundIn: ['locker'], afterDetect: ['hid'] }) });
+  const sim = new ShadowSim({ seed: 2, mode: 'commander', remote: jev, dossier: recordMission(emptyDossier(), { outcome: 'captured', entry: 'culvert', labEntry: 'duct', escapes: ['warehouse'], vanish: ['warehouse:locker'], foundIn: ['locker'], afterDetect: ['hid'] }) });
   sim.net.lastSeen = { ...at(10, 18), at: sim.t, zone: 'warehouse', heading: 0, pace: 'running' };
   const event = { kind: 'noise', ...at(10, 18), label: 'a clatter', at: 0, loud: 4 };
   const portals = new Set(PORTALS.map(portal => portal.id));
@@ -109,61 +119,84 @@ test('every decision asks typed Choice, Score and Noul questions whose options a
     }
     if (questions.block) for (const id of Object.keys(questions.block.criteria)) assert.ok(portals.has(id), id + ' is a real portal');
     const answers = localAnswers(kind, situation, () => .5);
-    assert.ok(readAnswers(kind, answers, situation), kind + ': local answers satisfy the contract');
+    assert.ok(readCompleteAnswers(kind, answers, situation), kind + ': complete answers satisfy the contract');
     const plan = planFromAnswers(kind, answers, situation);
     for (const role of plan.roles) assert.ok(Number.isFinite(role.x) && Number.isFinite(role.y), `${kind}: ${role.role} has a position`);
   }
 });
 
-test('malformed Jev answers are rejected question by question and filled from the local model', () => {
-  const sim = new ShadowSim({ seed: 4, mode: 'commander' });
+test('malformed or partial Jev answers never become guessed orders', () => {
+  const sim = new ShadowSim({ seed: 4, mode: 'commander', remote: jev });
   sim.net.lastSeen = { ...at(36, 14), at: sim.t, zone: 'corr_e', heading: 0, pace: 'running' };
   const situation = buildSituation(sim, 'contact', null);
   const local = localAnswers('contact', situation, () => .5);
-  assert.equal(readAnswers('contact', { heading: { type: 'choice', choice: 'the moon' } }, situation, null), null, 'nothing usable');
+  assert.equal(readAnswers('contact', { heading: { type: 'choice', choice: 'the moon' } }, situation), null, 'nothing usable');
   const exit = Object.keys(shadowQuestions('contact', situation).heading.criteria)[0];
-  const merged = readAnswers('contact', { heading: { type: 'choice', choice: exit, confidence: .8, probabilities: { [exit]: .8 } }, response: { type: 'choice', choice: 'nuke' }, intercept: { type: 'noul', noul: 7 } }, situation, local);
-  assert.equal(merged.heading.choice, exit);
-  assert.equal(merged.response, local.response, 'an unknown response falls back');
-  assert.equal(merged.intercept.noul, 1, 'a probability is clamped');
-  const plan = planFromAnswers('contact', { ...merged, response: { type: 'choice', choice: 'pincer', confidence: .7 }, intercept: { type: 'noul', noul: .9 } }, situation);
+  const partial = readAnswers('contact', { heading: { type: 'choice', choice: exit, confidence: .8, probabilities: { [exit]: .8 } }, response: { type: 'choice', choice: 'nuke' }, intercept: { type: 'noul', noul: 7 } }, situation);
+  assert.deepEqual(Object.keys(partial), ['heading', 'intercept'], 'only valid questions survive');
+  assert.equal(partial.heading.choice, exit);
+  assert.equal(partial.intercept.noul, 1, 'a probability is clamped, not guessed');
+  assert.equal(partial.response, undefined, 'an unknown choice is rejected');
+  assert.equal(readCompleteAnswers('contact', partial, situation), null, 'a partial reply cannot issue orders');
+  const complete = { ...local, heading: { type: 'choice', choice: exit, confidence: .8, probabilities: { [exit]: .8 } }, response: { type: 'choice', choice: 'pincer', confidence: .7 }, intercept: { type: 'noul', noul: 7 } };
+  assert.equal(readCompleteAnswers('contact', complete, situation).intercept.noul, 1, 'a probability is clamped');
+  const plan = planFromAnswers('contact', complete, situation);
   assert.deepEqual(plan.roles.slice(0, 2).map(role => role.role), ['pursue', 'intercept'], 'a pincer pursues and sends an interceptor around');
 });
 
-test('Jev answers replace the local plan when they arrive in time; failures and late answers keep the local plan', async () => {
+test('Jev is the only source of orders: a complete reply commands, a failed reply freezes the field', async () => {
+  const tick = ms => new Promise(resolve => setTimeout(resolve, ms));
   const situationAnswers = (kind, situation) => {
     const answers = localAnswers(kind, situation, () => .9);
     if (answers.response) answers.response = { type: 'choice', choice: 'swarm', confidence: .9, probabilities: { swarm: .9 } };
     return answers;
   };
   const sim = new ShadowSim({ seed: 8, mode: 'commander', remote: async (kind, situation) => situationAnswers(kind, situation) });
-  await new Promise(resolve => setTimeout(resolve, 5));
-  assert.equal(sim.decisions[0].source, 'jev', 'the posture came from Jev');
+  await tick(5);
+  assert.equal(sim.decisions[0].source, 'jev', 'the opening posture came from Jev');
+  assert.ok(sim.net.plan, 'the plan is Jev’s');
   sim.net.lastSeen = { ...at(36, 14), at: sim.t, zone: 'corr_e', heading: 0, pace: 'running' };
   const contact = sim.decide('contact', null);
-  assert.equal(contact.source, 'local', 'guards get orders before Jev answers');
-  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(contact.source, 'pending', 'no local orders are issued while Jev answers');
+  await tick(5);
   assert.equal(contact.source, 'jev');
   assert.equal(contact.plan.strategy, 'swarm');
 
   const failing = new ShadowSim({ seed: 8, mode: 'commander', remote: async () => { throw new Error('unreachable'); } });
-  await new Promise(resolve => setTimeout(resolve, 5));
-  assert.equal(failing.decisions[0].source, 'local');
-  assert.match(failing.decisions[0].status, /local kept/);
+  await tick(5);
+  assert.equal(failing.commandBlocked, true, 'a failed command freezes the field');
+  assert.match(failing.decisions[0].status, /mission paused/);
+  assert.match(failing.net.commandError, /unreachable/);
+  const frozen = failing.t;
+  failing.step(.25, {});
+  assert.equal(failing.t, frozen, 'time does not pass without a commander');
+
+  failing.remote = async (kind, situation) => situationAnswers(kind, situation);
+  failing.retryCommand();
+  await tick(5);
+  assert.equal(failing.commandBlocked, false);
+  assert.equal(failing.net.commandError, null);
+  failing.step(.25, {});
+  assert.ok(failing.t > frozen, 'the field moves again after Jev answers');
 
   const releases = [];
   const slow = new ShadowSim({ seed: 8, mode: 'commander', remote: (kind, situation) => new Promise(resolve => releases.push(() => resolve(situationAnswers(kind, situation)))) });
   const first = slow.decisions[0];
-  slow.decide('anomaly', { kind: 'noise', ...at(10, 18), label: 'a clatter', at: 0, loud: 3 });
-  await new Promise(resolve => setTimeout(resolve, 5));
+  const second = slow.decide('anomaly', { kind: 'noise', ...at(10, 18), label: 'a clatter', at: 0, loud: 3 });
+  await tick(5);
+  assert.equal(releases.length, 1, 'the second request waits for the line to free up');
   releases[0]();
-  await new Promise(resolve => setTimeout(resolve, 5));
-  assert.equal(first.source, 'local', 'an answer for a superseded decision is ignored');
-  assert.match(first.status, /superseded/);
+  await tick(5);
+  assert.equal(first.status, 'superseded', 'an answer for a superseded decision is ignored');
+  assert.equal(releases.length, 2, 'the queued decision is asked once the line frees');
+  releases[1]();
+  await tick(5);
+  assert.equal(second.source, 'jev');
+  assert.ok(second.plan, 'the queued decision still receives real orders');
 });
 
 test('a prediction contradicted by fresh evidence triggers a new plan', () => {
-  const sim = new ShadowSim({ seed: 9, mode: 'commander' });
+  const sim = new ShadowSim({ seed: 9, mode: 'commander', remote: jev });
   quiet(sim);
   sim.net.phase = 'alert';
   sim.net.lastSeen = { ...at(36, 14), at: sim.t, zone: 'corr_e', heading: 0, pace: 'running' };
@@ -178,7 +211,7 @@ test('a prediction contradicted by fresh evidence triggers a new plan', () => {
 });
 
 test('a downed guard misses the radio check, security escalates and rearranges patrols', () => {
-  const sim = new ShadowSim({ seed: 12, mode: 'commander', difficulty: 'extreme' });
+  const sim = new ShadowSim({ seed: 12, mode: 'commander', remote: jev, difficulty: 'extreme' });
   const victim = sim.guards.find(g => g.reserve) || sim.guards[1];
   sim.knockOut(victim);
   Object.assign(sim.player, at(20, 41));
@@ -190,7 +223,7 @@ test('a downed guard misses the radio check, security escalates and rearranges p
 });
 
 test('hiding in a locker in full view does not work', () => {
-  const sim = new ShadowSim({ seed: 13, mode: 'commander' });
+  const sim = new ShadowSim({ seed: 13, mode: 'commander', remote: jev });
   quiet(sim);
   const g = sim.guards[0];
   Object.assign(g, at(5, 18), { facing: Math.PI, route: [{ ...at(5, 18), hold: 999, face: Math.PI }] });
@@ -216,7 +249,12 @@ test('the dossier fades old habits and shifts security toward repeated ones', ()
   const watches = dossierUsed => {
     const counts = {};
     for (let seed = 1; seed <= 40; seed++) {
-      const sim = new ShadowSim({ seed, mode: 'commander', difficulty: 'hard', dossier: dossierUsed });
+      // A seeded stream per sim, so the dossier's shifting weights are measured
+      // rather than a single fixed draw.
+      let stream = seed * 2654435761 % 2147483647;
+      const random = () => (stream = stream * 48271 % 2147483647) / 2147483647;
+      const sim = new ShadowSim({ seed, mode: 'commander', difficulty: 'hard', dossier: dossierUsed,
+        remote: (kind, situation) => localAnswers(kind, situation, random) });
       const plan = sim.decisions[0].plan;
       counts[plan.focus] = (counts[plan.focus] || 0) + 1;
       counts['watch:' + plan.watch] = (counts['watch:' + plan.watch] || 0) + 1;
@@ -231,7 +269,7 @@ test('the dossier fades old habits and shifts security toward repeated ones', ()
 
 test('commander security coordinates where baseline security only converges', () => {
   const contact = mode => {
-    const sim = new ShadowSim({ seed: 21, mode, difficulty: 'hard' });
+    const sim = new ShadowSim({ seed: 21, mode, difficulty: 'hard', remote: mode === 'commander' ? jev : null });
     sim.noCapture = true;
     sim.receive({ kind: 'sighting', from: 'cam-north', ...at(36, 14), at: sim.t, heading: 0, pace: 'running' });
     stepFor(sim, sim.rules.radio + .2);
@@ -318,87 +356,125 @@ test('the interception counter requires an interceptor already in position and a
   assert.equal(count('intercept', { decision: undefined }), 0, 'not a commander assignment');
 });
 
-test('Jev changes actual posture even when its summary is unchanged, and credits matching plans', async () => {
+test('Jev changes actual posture even when its summary is unchanged, and the plan is credited to Jev', async () => {
   let resolve;
   const sim = new ShadowSim({ seed: 36, mode: 'commander', remote: () => new Promise(done => { resolve = done; }) });
-  const decision = sim.decisions[0], summary = decision.plan.summary;
-  const changedLevel = decision.plan.level === 3 ? 1 : 3;
-  await new Promise(done => setTimeout(done, 0));
-  resolve({ ...decision.localAnswers, level: { type: 'score', score: changedLevel, confidence: .9 } });
-  await new Promise(resolve => setTimeout(resolve, 5));
-  assert.equal(decision.plan.summary, summary);
+  const decision = sim.decisions[0];
+  assert.equal(decision.plan, null, 'no plan exists before Jev answers');
+  const answers = localAnswers('posture', decision.situation, () => .5);
+  const base = planFromAnswers('posture', answers, decision.situation), changedLevel = base.level === 3 ? 1 : 3;
+  resolve({ ...answers, level: { type: 'score', score: changedLevel, confidence: .9 } });
+  await new Promise(done => setTimeout(done, 5));
+  assert.equal(decision.plan.summary, base.summary);
   assert.equal(sim.net.level, changedLevel, 'the changed score is applied despite matching prose');
   assert.equal(sim.net.planSource, 'jev');
 
-  const matching = new ShadowSim({ seed: 37, mode: 'commander' });
-  matching.remote = async () => matching.net.decision.localAnswers;
+  const matching = new ShadowSim({ seed: 37, mode: 'commander', remote: jev });
+  matching.remote = async () => localAnswers('posture', matching.net.decision.situation, () => .5);
   const matched = matching.decide('posture', null);
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(matched.source, 'jev');
-  assert.equal(matching.net.planSource, 'jev', 'a validated matching plan is credited consistently in the overlay');
+  assert.equal(matching.net.planSource, 'jev', 'a validated plan is credited consistently in the overlay');
 });
 
 test('a delayed Jev answer is planned on the newest report in the same room, and dropped once the intruder is elsewhere', async () => {
   const tick = ms => new Promise(done => setTimeout(done, ms));
-  const sim = new ShadowSim({ seed: 38, mode: 'commander' });
+  const sim = new ShadowSim({ seed: 38, mode: 'commander', remote: jev });
   let resolve;
   sim.net.phase = 'alert'; sim.t = 10;
   sim.net.lastSeen = { ...at(36, 14), at: 10, zone: 'corr_e', heading: 0, pace: 'running' };
   sim.remote = () => new Promise(done => { resolve = done; });
-  const decision = sim.decide('contact', null);
+  const decision = sim.decide('contact', null), answers = localAnswers('contact', decision.situation, () => .5);
   await tick(0);
   sim.t = 11;
   sim.net.lastSeen = { ...at(41, 14), at: 11, zone: 'corr_e', heading: 0, pace: 'running' };
-  resolve(decision.localAnswers);
+  resolve(answers);
   await tick(5);
   assert.equal(decision.source, 'jev', 'a chase no longer throws Jev away');
   assert.match(decision.status, /newest report/);
   const pursue = decision.plan.roles.find(role => role.role === 'pursue');
   assert.ok(pursue.x > at(39, 14).x, 'the pursuer is sent to the newest sighting, not the one Jev was asked about');
 
-  const other = new ShadowSim({ seed: 38, mode: 'commander' });
+  const other = new ShadowSim({ seed: 38, mode: 'commander', remote: jev });
+  const releases = [];
   other.net.phase = 'alert'; other.t = 10;
   other.net.lastSeen = { ...at(36, 14), at: 10, zone: 'corr_e', heading: 0, pace: 'running' };
-  other.remote = () => new Promise(done => { resolve = done; });
+  other.remote = (kind, situation) => new Promise(done => releases.push(() => done(localAnswers(kind, situation, () => .5))));
   const stale = other.decide('contact', null);
   await tick(0);
   other.t = 11;
   other.net.lastSeen = { ...at(24, 14), at: 11, zone: 'corr_w', heading: Math.PI, pace: 'running' };
-  resolve(stale.localAnswers);
+  releases[0]();
   await tick(5);
-  assert.equal(stale.source, 'local');
-  assert.match(stale.status, /another area/);
+  assert.match(stale.status, /superseded by a fresh report/);
+  assert.notEqual(other.net.decision, stale, 'a fresh area creates a fresh request');
+  assert.equal(releases.length, 2, 'the fresh request is sent');
+  releases[1]();
+  await tick(5);
+  assert.equal(other.net.decision.source, 'jev');
 });
 
-test('a decision that meets a busy Jev is asked as soon as the line frees up', async () => {
+test('a decision that meets a busy Jev waits in line and is asked once the line frees up', async () => {
   const tick = ms => new Promise(done => setTimeout(done, ms));
-  const sim = new ShadowSim({ seed: 39, mode: 'commander' });
+  const sim = new ShadowSim({ seed: 39, mode: 'commander', remote: jev });
   quiet(sim);
   const answer = [];
-  let busy = false;
-  sim.remote = (kind, situation) => {
-    if (busy) return Promise.reject(new Error('busy'));
-    busy = true;
-    return new Promise(done => answer.push(() => { busy = false; done(localAnswers(kind, situation, () => .5)); }));
-  };
+  sim.remote = (kind, situation) => new Promise(done => answer.push(() => done(localAnswers(kind, situation, () => .5))));
   sim.net.phase = 'alert'; sim.t = 10;
   sim.net.lastSeen = { ...at(36, 14), at: 10, zone: 'corr_e', heading: 0, pace: 'running' };
   sim.decide('contact', null);
   await tick(0);
   const missed = sim.decide('contact', null);
   await tick(5);
-  assert.match(missed.status, /busy/);
+  assert.equal(missed.status, 'awaiting jev');
+  assert.equal(answer.length, 1, 'only one request is on the line');
   answer[0]();
   await tick(5);
   assert.equal(answer.length, 2, 'the missed decision is asked once Jev is free');
   answer[1]();
   await tick(5);
   assert.equal(missed.source, 'jev');
+  assert.ok(missed.plan, 'the queued decision gets real orders');
+});
+
+test('Jev’s field orders move the playing field: seals, floodlights and camera priority', () => {
+  const fieldAnswers = (kind, situation) => {
+    const answers = localAnswers(kind, situation, () => .5);
+    answers.doors = { type: 'choice', choice: 'warehouse_east', confidence: .9 };
+    answers.lights = { type: 'choice', choice: 'warehouse', confidence: .9 };
+    answers.camera = { type: 'choice', choice: 'cam-gate', confidence: .9 };
+    return answers;
+  };
+  const sim = new ShadowSim({ seed: 71, mode: 'commander', remote: fieldAnswers });
+  quiet(sim);
+  assert.equal(sim.net.plan.field.doors, 'warehouse_east');
+  assert.equal(sim.field.seal.id, 'warehouse_east');
+  assert.equal(sim.field.light.id, 'warehouse');
+  assert.equal(sim.field.camera.id, 'cam-gate');
+
+  const beforeLight = new ShadowSim({ seed: 71, mode: 'commander', remote: jev });
+  const base = beforeLight.lightAt(10 * TILE + 8, 18 * TILE + 8);
+  sim.step(1.05, {});
+  assert.equal(sim.isSealed(19, 18), true, 'the warehouse east door seals after the warning');
+  assert.equal(sim.guardPassable(19, 18), false, 'guards cannot walk through the seal');
+  Object.assign(sim.player, at(17, 18));
+  stepFor(sim, 1, { move: { x: 1, y: 0 } });
+  assert.ok(sim.player.x < 19 * TILE, 'the operative cannot walk through either');
+  assert.ok(sim.lightAt(10 * TILE + 8, 18 * TILE + 8) > base + .2, 'the floodlight brightens the warehouse');
+  const priority = sim.cameras.find(camera => camera.id === 'cam-gate');
+  sim.updateCameras(1 / 60);
+  assert.ok(priority.range > 8.5 * TILE, 'the chosen camera sees farther');
+  stepFor(sim, 18.1, {});
+  assert.equal(sim.isSealed(19, 18), false, 'the seal expires');
+  assert.equal(sim.field.light, null, 'the floodlight expires');
+  assert.equal(sim.field.camera, null, 'camera priority expires');
+  sim.updateCameras(1 / 60);
+  assert.equal(priority.range, 8.5 * TILE, 'the camera returns to routine range');
 });
 
 test('Jev opens the shift from the dossier, speaks its orders by name, and a guard answers', () => {
   const dossier = recordMission(emptyDossier(), { outcome: 'extracted', entry: 'culvert', labEntry: 'duct', escapes: [], vanish: [], foundIn: [], afterDetect: [] });
-  const sim = new ShadowSim({ seed: 9, mode: 'commander', dossier });
+  const sim = new ShadowSim({ seed: 9, mode: 'commander', remote: jev, dossier });
   const opening = sim.radio.at(-1);
   assert.equal(opening.from, 'Jev');
   assert.match(opening.text, /got out/);
@@ -421,7 +497,7 @@ test('Jev opens the shift from the dossier, speaks its orders by name, and a gua
 });
 
 test('the knife kills silently, leaves blood and feeds the pistol from the body', () => {
-  const sim = new ShadowSim({ seed: 41, mode: 'commander' });
+  const sim = new ShadowSim({ seed: 41, mode: 'commander', remote: jev });
   quiet(sim);
   const guard = sim.guards[0];
   Object.assign(guard, at(24, 22), { facing: 0, route: [{ ...at(24, 22), hold: 999, face: 0 }], routeIndex: 0 });
@@ -440,7 +516,7 @@ test('the knife kills silently, leaves blood and feeds the pistol from the body'
 });
 
 test('the pistol is loud, one shot kills and the shot creates a sound event', () => {
-  const sim = new ShadowSim({ seed: 42, mode: 'commander' });
+  const sim = new ShadowSim({ seed: 42, mode: 'commander', remote: jev });
   quiet(sim);
   const guard = sim.guards[0];
   Object.assign(guard, at(27, 22), { facing: Math.PI, route: [{ ...at(27, 22), hold: 999, face: Math.PI }], routeIndex: 0 });
@@ -457,7 +533,7 @@ test('the pistol is loud, one shot kills and the shot creates a sound event', ()
 });
 
 test('a dead guard cannot be revived by a colleague', () => {
-  const sim = new ShadowSim({ seed: 43, mode: 'commander' });
+  const sim = new ShadowSim({ seed: 43, mode: 'commander', remote: jev });
   quiet(sim);
   const [rescuer, body] = sim.guards;
   Object.assign(rescuer, at(24, 22), { facing: 0, state: 'investigate', task: { role: 'revive', ...at(26, 22), target: body.id, label: 'check body' } });
@@ -477,14 +553,14 @@ test('the dossier records lethal habits and the commander plans for them', () =>
   });
   assert.equal(d.kills, 2);
   assert.match(dossierInsights(d).join(' '), /Leaves bodies/);
-  const sim = new ShadowSim({ seed: 44, mode: 'commander', dossier: d });
+  const sim = new ShadowSim({ seed: 44, mode: 'commander', remote: jev, dossier: d });
   const situation = buildSituation(sim, 'posture');
   assert.equal(situation.tendencies.killsPerAttempt, 2);
   assert.equal(localAnswers('posture', situation, () => .5).pattern.type, 'choice');
 });
 
 test('a colleague who finds a corpse reports a death, not a body to revive', () => {
-  const sim = new ShadowSim({ seed: 45, mode: 'commander' });
+  const sim = new ShadowSim({ seed: 45, mode: 'commander', remote: jev });
   quiet(sim);
   const [watcher, body] = sim.guards;
   Object.assign(watcher, at(24, 22), { facing: 0, state: 'patrol', sees: false, bodyMeter: 0, bodyTarget: null });
@@ -525,7 +601,7 @@ test('movement eases in and out quickly, and a wall stops momentum on its axis',
 });
 
 test('a shot without a mouse snaps to the guard ahead; download progress survives letting go', () => {
-  const sim = new ShadowSim({ seed: 3, mode: 'commander' });
+  const sim = new ShadowSim({ seed: 3, mode: 'commander', remote: jev });
   quiet(sim);
   sim.noCapture = true;
   const guard = sim.guards[0];
@@ -574,7 +650,7 @@ test('the cursor turns the operative, and a click can lunge at a guard in front'
 });
 
 test('a discovered corpse turns a single check into a search from the body', () => {
-  const sim = new ShadowSim({ seed: 61, mode: 'commander' });
+  const sim = new ShadowSim({ seed: 61, mode: 'commander', remote: jev });
   quiet(sim);
   sim.noCapture = true;
   const witness = sim.guards[0], body = sim.guards[1];
@@ -593,7 +669,7 @@ test('a discovered corpse turns a single check into a search from the body', () 
 });
 
 test('a guard who sees a colleague killed calls it in and starts a search', () => {
-  const sim = new ShadowSim({ seed: 62, mode: 'commander' });
+  const sim = new ShadowSim({ seed: 62, mode: 'commander', remote: jev });
   quiet(sim);
   sim.noCapture = true;
   const witness = sim.guards[0], victim = sim.guards[1];

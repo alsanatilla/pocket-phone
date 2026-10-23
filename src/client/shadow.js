@@ -3,10 +3,11 @@
 // connection to Jev. Rules live in shadow-engine.js, art in shadow-render.js.
 import { storage, activeAccount } from './workspace-storage.js';
 import { resolve as resolveProviderKey } from './pip-credentials.js';
-import { TILE, ZONE_BY_ID } from './shadow-level.js';
+import { TILE, ZONE_BY_ID, CAMERAS } from './shadow-level.js';
 import { ShadowSim, DIFFICULTY } from './shadow-engine.js';
 import { readDossier, recordMission, dossierInsights, jevState, emptyDossier } from './shadow-commander.js';
-import { JEV_ENDPOINT, JEV_MODEL, shadowQuestions, readAnswers, LEVELS } from '../shared/shadow-jev.js';
+import { JEV_ENDPOINT, JEV_MODEL, shadowQuestions, readCompleteAnswers, LEVELS } from '../shared/shadow-jev.js';
+import { DOOR_CONTROLS, FLOODLIGHTS } from '../shared/shadow-field.js';
 import { VIEW_W, VIEW_H, SCALE, STATE_COLORS, STATE_NAMES, camera, drawWorld, drawSchematic, staticLayer, fitView } from './shadow-render.js';
 
 const DOSSIER_KEY = 'shadow-dossier';
@@ -78,7 +79,7 @@ function createSound(enabled) {
   };
 }
 
-/* ── Jev: typed decisions over OpenRouter, with the local model as the floor ─ */
+/* ── Jev: the only commander; a lost link freezes the field ───────────────── */
 
 function createJev() {
   const state = { mode: 'checking', model: JEV_MODEL, failures: 0, error: '', pending: 0, asked: 0, answered: 0, latency: null, retryAt: 0, access: undefined };
@@ -91,11 +92,11 @@ function createJev() {
     return state.access;
   }
   async function ask(kind, situation) {
-    if (state.mode === 'off') throw new Error('off');
+    if (state.mode === 'off') throw new Error('OpenRouter is not connected.');
     if (state.pending) throw new Error('busy');
     if (performance.now() < state.retryAt) throw new Error('busy');
     const route = await access();
-    if (!route) { state.mode = 'off'; throw new Error('off'); }
+    if (!route) { state.mode = 'off'; throw new Error('OpenRouter is not connected.'); }
     state.pending++; state.asked++;
     const started = performance.now();
     if (state.mode !== 'on') state.mode = 'asking';
@@ -118,8 +119,8 @@ function createJev() {
         if (!response.ok) throw Object.assign(new Error('Jev relay failed.'), { status: response.status });
         payload = await response.json();
       }
-      const answers = readAnswers(kind, payload?.answers, situation);
-      if (!answers) throw new Error('Jev sent no usable answers.');
+      const answers = readCompleteAnswers(kind, payload?.answers, situation);
+      if (!answers) throw new Error('Jev sent incomplete orders.');
       state.mode = 'on'; state.failures = 0; state.error = ''; state.answered++;
       state.model = payload.model || JEV_MODEL;
       state.latency = performance.now() - started;
@@ -250,11 +251,11 @@ export function mountShadow(body, api = {}) {
       try { route = import.meta.env.DEV && new URLSearchParams(location.search).has('jevmock') ? { relay: true } : await resolveProviderKey(OPENROUTER); } catch { route = null; }
       if (!line.isConnected) return;
       if (route) line.textContent = import.meta.env.DEV && new URLSearchParams(location.search).has('jevmock')
-        ? 'commander · development test relay · local answers, no live Jev calls'
-        : `commander · ${JEV_MODEL.split('/').pop()} on OpenRouter ${route.relay ? 'through your account' : 'with this tab’s key'} · local tactics cover every gap`;
+        ? 'commander · development test relay · mock orders, no live Jev calls'
+        : `commander · ${JEV_MODEL.split('/').pop()} on OpenRouter ${route.relay ? 'through your account' : 'with this tab’s key'} · every order comes from Jev`;
       else {
-        line.replaceChildren('commander · local tactical AI · ',
-          h('button', { type: 'button', class: 'shadow-link', onclick: () => api.go?.('/setup/pip') }, 'connect OpenRouter for Jev'));
+        line.replaceChildren('commander · Jev controls the field · ',
+          h('button', { type: 'button', class: 'shadow-link', onclick: () => api.go?.('/setup/pip') }, 'connect OpenRouter to play'));
       }
     })();
     node.querySelector('.shadow-begin').focus({ preventScroll: true });
@@ -287,7 +288,7 @@ export function mountShadow(body, api = {}) {
         h('li', { text: 'Jev is the security commander, not a guard. At decision points (a sighting, lost contact, a strange noise, a body, a missed radio check) it answers typed questions: where you went, which exit to close, whether to split up, whether a noise is a decoy.' }),
         h('li', { text: 'It only knows what guards and cameras reported, and reports take time to travel by radio. Take a guard down before they finish calling it in and nobody hears.' }),
         h('li', { text: 'Between attempts security keeps a dossier: how you got in, where it lost you, where it found you. Recent attempts weigh more, so changing your habits works.' }),
-        h('li', { text: 'Game code moves the guards: paths, sight, hearing and reactions stay instant. If Jev is slow or unavailable the local model answers the same questions at once. With an OpenRouter key saved in Pip, Jev 1.14 is billed to your OpenRouter account.' }),
+        h('li', { text: 'Jev makes every tactical decision: patrols, searches, seals, floodlights and camera priority. Game code only moves the guards. If the link drops, the field freezes until Jev answers; guards keep their last orders. With an OpenRouter key saved in Pip, Jev 1.14 is billed to your OpenRouter account.' }),
         h('li', { text: 'Nonlethal takedowns keep the alarm quiet. The knife is silent and gives you a pistol round; the pistol is loud, one-shot and brings guards running. A dead guard cannot be revived, and a body found later changes how security patrols.' }),
         h('li', { text: 'Guards cannot see through walls. Low crates hide a crouched body. Tall grass hides you unless someone is right on top of you. Lockers and ducts hide you completely, unless a guard decides to check.' })));
   }
@@ -351,16 +352,31 @@ export function mountShadow(body, api = {}) {
       refs.abortConfirm,
       controlsList(),
       h('span', { class: 'shadow-pause-hint', text: 'P or Esc to resume' }));
+    refs.field = h('div', { class: 'shadow-field-status', 'aria-live': 'polite' });
+    refs.commandTitle = h('strong', { class: 'shadow-command-title' });
+    refs.commandText = h('p', { class: 'shadow-command-text' });
+    refs.commandRetry = h('button', {
+      type: 'button', class: 'shadow-menu-button primary',
+      onclick: () => sim.retryCommand(),
+    }, 'retry orders');
+    refs.commandSettings = h('button', {
+      type: 'button', class: 'shadow-menu-button',
+      onclick: () => api.go?.('/setup/pip'),
+    }, 'open pip settings');
+    refs.command = h('div', { class: 'shadow-command', hidden: true, role: 'alert' },
+      h('span', { class: 'shadow-kicker', text: 'jev · security commander' }),
+      refs.commandTitle, refs.commandText,
+      h('div', { class: 'shadow-pause-actions' }, refs.commandRetry, refs.commandSettings));
     refs.stage = h('div', { class: 'shadow-stage', tabindex: '0', 'aria-label': 'Play field. WASD to move, mouse to aim.' }, canvas,
       h('div', { class: 'shadow-vignette' }),
       h('div', { class: 'shadow-hud' },
         h('div', { class: 'shadow-hud-objective' }, h('span', { class: 'shadow-label', text: 'objective' }), refs.objective, refs.timer),
-        refs.phase, refs.comms,
+        refs.phase, refs.field, refs.comms,
         h('div', { class: 'shadow-hud-status' }, refs.stance,
           h('span', { class: 'shadow-meter', title: 'How visible you are' }, h('span', { class: 'shadow-label', text: 'exposure' }), h('b', {}, refs.exposure)),
           h('span', { class: 'shadow-meter noise', title: 'How far your last sound carried' }, h('span', { class: 'shadow-label', text: 'noise' }), h('b', {}, refs.noise))),
         refs.items, refs.prompt, refs.toast),
-      refs.intel, refs.pause, refs.tools);
+      refs.intel, refs.pause, refs.command, refs.tools);
     const touch = touchControls(refs);
     const node = h('div', { class: 'shadow-live' }, refs.stage, touch);
     return { node, canvas, refs, touch };
@@ -689,6 +705,8 @@ export function mountShadow(body, api = {}) {
         for (const { body, x, y, facing } of actual) { body.x = x; body.y = y; body.facing = facing; }
       }
       paintHud();
+      paintField();
+      paintCommand();
       if (now - state.lastPaint > 250) { state.lastPaint = now; paintSide(); }
       if (!state.paused && !document.hidden && sim.net.phase === 'alert' && now - state.alarmAt > 1400) { state.alarmAt = now; sound.alarm(); }
       if (performance.now() > state.toastUntil) refs.toast.classList.remove('on');
@@ -728,18 +746,47 @@ export function mountShadow(body, api = {}) {
       }
     }
 
+    function paintField() {
+      const f = sim.field, chips = [];
+      if (f?.seal && f.seal.until > sim.t) chips.push([f.seal.active ? 'sealed' : 'sealing', f.seal.name, Math.ceil(f.seal.until - sim.t) + 's']);
+      if (f?.light && f.light.until > sim.t) chips.push(['lights', f.light.name, Math.ceil(f.light.until - sim.t) + 's']);
+      if (f?.camera && f.camera.until > sim.t) chips.push(['camera', f.camera.name, Math.ceil(f.camera.until - sim.t) + 's']);
+      const key = chips.map(chip => chip.join(':')).join('|');
+      if (refs.field.dataset.key === key) return;
+      refs.field.dataset.key = key;
+      refs.field.replaceChildren(...chips.map(([kind, name, left]) => h('span', { class: 'shadow-field-chip ' + kind },
+        h('b', { text: kind }), `${name} · ${left}`)));
+    }
+
+    function paintCommand() {
+      const blocked = sim.commandBlocked, error = sim.net.commandError;
+      refs.command.hidden = !blocked || state.paused;
+      if (!blocked) return;
+      const title = error ? 'jev link lost' : 'waiting for jev';
+      const text = error
+        ? `${error} The field is frozen: guards keep their last orders, but nothing moves until Jev answers.`
+        : 'Jev is reading the report and choosing the next orders. The field waits for the commander.';
+      if (refs.commandTitle.textContent !== title) refs.commandTitle.textContent = title;
+      if (refs.commandText.textContent !== text) refs.commandText.textContent = text;
+      refs.command.classList.toggle('error', Boolean(error));
+      refs.commandRetry.disabled = Boolean(sim.net.jevInFlight);
+      refs.commandSettings.hidden = !(error || jev.state.mode === 'off');
+    }
+
     function availability() {
       const js = jev.state, name = js.model.split('/').pop();
       return js.mode === 'on' ? `${name} live${js.latency ? ` · ${Math.round(js.latency)} ms` : ''}` : js.mode === 'asking' ? `asking ${name}…`
-        : js.mode === 'degraded' ? `${name} ${js.error || 'unavailable'} · local reflexes cover` : js.mode === 'off' ? (js.error ? `${name} off · ${js.error}` : 'not connected · local reflexes') : `checking ${name}…`;
+        : js.mode === 'degraded' ? `${name} ${js.error || 'unavailable'} · mission paused` : js.mode === 'off' ? (js.error ? `${name} off · ${js.error}` : 'not connected · mission paused') : `checking ${name}…`;
     }
 
     function paintSide(force = false) {
-      const js = jev.state, thinking = js.mode === 'asking' || sim.net.decision?.status === 'asking jev';
-      const status = thinking && js.mode !== 'off' ? 'thinking…' : js.mode === 'on' ? `live${js.latency ? ` · ${Math.round(js.latency)} ms` : ''}`
-        : js.mode === 'degraded' ? 'unreachable · local reflexes' : js.mode === 'off' ? 'not connected · local reflexes' : 'connecting…';
+      const js = jev.state, blocked = sim.commandBlocked, error = sim.net.commandError;
+      const thinking = !blocked && (js.mode === 'asking' || sim.net.decision?.status === 'asking jev');
+      const status = blocked ? (error ? 'link lost · field frozen' : 'waiting for orders…')
+        : thinking && js.mode !== 'off' ? 'thinking…' : js.mode === 'on' ? `live${js.latency ? ` · ${Math.round(js.latency)} ms` : ''}`
+          : js.mode === 'degraded' ? 'unreachable · mission paused' : js.mode === 'off' ? 'not connected · mission paused' : 'connecting…';
       if (refs.jevStatus.textContent !== status) refs.jevStatus.textContent = status;
-      refs.jevStatus.dataset.mode = thinking && js.mode !== 'off' ? 'thinking' : js.mode;
+      refs.jevStatus.dataset.mode = error ? 'off' : thinking && js.mode !== 'off' ? 'thinking' : js.mode;
       // The last few calls stay up and fade, newest at the bottom like a radio log.
       const recent = sim.radio.filter(line => sim.t - line.t < 16).slice(0, 5).reverse();
       const key = recent.map(line => line.t + line.text).join('|');
@@ -785,7 +832,7 @@ export function mountShadow(body, api = {}) {
         h('div', { class: 'shadow-strategy' },
           h('span', { class: 'shadow-label', text: 'security strategy' }),
           h('strong', { text: plan?.summary || 'Standard patrols' }),
-          h('span', { class: 'small muted', text: decision ? `${decision.kind} · ${decision.source === 'jev' ? jev.state.model.split('/').pop() : 'local tactics'} · ${ago}s ago${decision.latency ? ` · ${Math.round(decision.latency)} ms` : ''} · ${decision.status}` : 'no decision yet' })),
+          h('span', { class: 'small muted', text: decision ? `${decision.kind} · ${decision.source === 'jev' ? jev.state.model.split('/').pop() : decision.status} · ${ago}s ago${decision.latency ? ` · ${Math.round(decision.latency)} ms` : ''}` : 'no decision yet' })),
         h('p', { class: 'small shadow-prediction', text: `prediction · ${prediction}${net.planStatus ? ' · ' + net.planStatus : ''}` }),
         answerRows.length ? h('ol', { class: 'shadow-answers' }, answerRows) : null,
         h('ol', { class: 'shadow-guards' }, rows),
@@ -873,16 +920,13 @@ export function mountShadow(body, api = {}) {
     write(LAST_KEY, lastResult);
     if (sim.status === 'extracted') sound.success(); else sound.fail();
     stop();
-    // What the commander would do next shift with the updated dossier: the local model's actual posture.
-    const preview = new ShadowSim({ difficulty: id, seed: (Date.now() & 0xffff) + 7, mode: 'commander', dossier });
-    debrief(sim, score, before, newBest, preview.net.plan);
+    debrief(sim, score, before, newBest);
   }
 
-  function debrief(sim, score, before, newBest, nextPosture) {
+  function debrief(sim, score, before, newBest) {
     const m = sim.metrics, extracted = sim.status === 'extracted';
     const after = dossierInsights(dossier);
     const learned = after.filter(line => !before.includes(line));
-    const jevShare = m.decisions ? Math.round(m.jevDecisions / m.decisions * 100) : 0;
     const stats = [
       ['time', clock(sim.t)], ['alerts', String(m.alerts)], ['sightings', String(m.sightings)], ['takedowns', String(m.takedowns)],
       ['kills', String(m.kills)], ['shots', String(m.shots)], ['intercepted', String(m.interceptions)], ['searches escaped', `${m.recoveries}/${m.searches}`],
@@ -902,11 +946,11 @@ export function mountShadow(body, api = {}) {
           h('h3', { text: 'what security learned' }),
           learned.length ? h('ul', { class: 'shadow-insights' }, learned.map(text => h('li', { text })))
             : h('p', { class: 'small muted', text: after.length ? 'Nothing new: the dossier already matched this attempt, or older habits still weigh more.' : 'Nothing worth filing yet.' }),
-          h('p', { class: 'small muted', text: `${m.decisions} commander decisions · ${jevShare}% answered by Jev · ${m.predictionsHit} predictions right, ${m.predictionsMiss} wrong` })),
+          h('p', { class: 'small muted', text: `${m.decisions} commander decisions · ${m.jevDecisions} answered by Jev · ${m.jevFailures} link failures · ${m.predictionsHit} predictions right, ${m.predictionsMiss} wrong` })),
         h('section', { class: 'shadow-panel' },
           h('h3', { text: 'next shift' }),
-          h('p', { class: 'shadow-strategy-line', text: nextPosture?.summary || 'Standard patrols' }),
-          h('p', { class: 'small muted', text: `Planned by the local model from the updated dossier${nextPosture?.pattern && nextPosture.pattern !== 'standard' ? ` · ${nextPosture.pattern} patrols` : ''}${nextPosture?.probe ? ' · patrols will open lockers' : ''}. With Jev connected the commander may choose differently.` }))),
+          h('p', { class: 'shadow-strategy-line', text: dossier.attempts ? 'The file is updated. Jev reads it before the next attempt.' : 'No file yet. Jev starts from standard patrols.' }),
+          h('p', { class: 'small muted', text: 'Every tactic and field order next time comes from Jev. Nothing is chosen locally, so changing your habits can change the whole defence.' }))),
       h('div', { class: 'shadow-debrief-actions' },
         h('button', { type: 'button', class: 'primary shadow-begin', onclick: begin }, extracted ? 'infiltrate again' : 'try again'),
         h('button', { type: 'button', class: 'shadow-link', onclick: briefing }, 'back to the briefing')),
@@ -940,6 +984,21 @@ function optionName(question, id, situation) {
   const c = situation?.candidates || {};
   if (id === 'hide') return 'go to ground nearby';
   if (id === 'none') return 'no spot stands out';
+  if (question === 'doors') {
+    if (id === 'keep') return 'leave the doors as they are';
+    if (id === 'release') return 'release the active seal';
+    return DOOR_CONTROLS.find(item => item.id === id)?.name || String(id).replace(/_/g, ' ');
+  }
+  if (question === 'lights') {
+    if (id === 'keep') return 'keep current lighting';
+    if (id === 'off') return 'switch off the extra floodlights';
+    return FLOODLIGHTS.find(item => item.id === id)?.name || String(id).replace(/_/g, ' ');
+  }
+  if (question === 'camera') {
+    if (id === 'keep') return 'keep current camera coverage';
+    if (id === 'routine') return 'all cameras back to routine';
+    return CAMERAS.find(item => item.id === id)?.name || String(id).replace(/_/g, ' ');
+  }
   const found = [...(c.zones || []), ...(c.exits || []), ...(c.clusters || []), ...(c.posts || []), ...(c.sectors || [])].find(item => item.id === id);
   if (found) return found.name;
   return String(id).replace(/_/g, ' ');

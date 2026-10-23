@@ -5,7 +5,7 @@ import { failure, sameOrigin, readJson } from '../../../server/http.js';
 import { readKey } from '../../../server/pip-keys.js';
 import { ZONE_BY_ID, POST_BY_ID, PORTALS, HIDING_CLUSTERS, SECTORS } from '../../../client/shadow-level.js';
 import { jevState, localAnswers } from '../../../client/shadow-commander.js';
-import { DECISION_KINDS, JEV_ENDPOINT, JEV_MODEL, readAnswers, shadowQuestions } from '../../../shared/shadow-jev.js';
+import { DECISION_KINDS, JEV_ENDPOINT, JEV_MODEL, readCompleteAnswers, shadowQuestions } from '../../../shared/shadow-jev.js';
 
 // Jev as the security commander, relayed for signed-in players. The player's
 // own OpenRouter key is read from Pip settings and never reaches the browser.
@@ -84,7 +84,7 @@ export const POST: APIRoute = async ({ request }) => {
     sameOrigin(request);
     const mocked = import.meta.env.DEV && process.env.JEV_MOCK === '1';
     const user = mocked ? { id: 'jev-mock' } : await signedIn(request);
-    if (limited(user.id)) return fail('Jev is being asked too often. The local model covers for now.', 429);
+    if (limited(user.id)) return fail('Jev is being asked too often. The field stays frozen until the link recovers.', 429);
     const body = await readJson(request, 48 * 1024) as any;
     const kind = String(body?.kind || '');
     if (!DECISION_KINDS.includes(kind)) return fail('Unknown decision.');
@@ -97,7 +97,7 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     if (mocked) {
-      // Development: the same local model, behind the same contract, with some latency.
+      // Development: deterministic answers behind the same complete contract.
       await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 600));
       return json({ answers: localAnswers(kind, situation, Math.random), source: 'mock', model: 'jev-mock' });
     }
@@ -118,16 +118,16 @@ export const POST: APIRoute = async ({ request }) => {
         signal: AbortSignal.timeout(7000),
       });
     } catch {
-      return fail('Jev could not be reached. The local model covers.', 502);
+      return fail('Jev could not be reached. The field is frozen until the link returns.', 502);
     }
     if (!response.ok) {
       const rejected = response.status === 401 || response.status === 403;
-      return fail(rejected ? 'OpenRouter rejected the saved key. Save a valid key in Pip settings.' : 'Jev could not answer. The local model covers.', rejected ? 401 : [402, 429].includes(response.status) ? response.status : 502);
+      return fail(rejected ? 'OpenRouter rejected the saved key. Save a valid key in Pip settings.' : 'Jev could not answer. The field is frozen until the link returns.', rejected ? 401 : [402, 429].includes(response.status) ? response.status : 502);
     }
     let completion: any;
     try { completion = await response.json(); } catch { return fail('Jev sent an unreadable reply.', 502); }
-    const answers = readAnswers(kind, completion?.answers, situation);
-    if (!answers) return fail('Jev sent no usable answers.', 502);
+    const answers = readCompleteAnswers(kind, completion?.answers, situation);
+    if (!answers) return fail('Jev sent incomplete orders.', 502);
     return json({ answers, source: 'openrouter', model: typeof completion.model === 'string' ? completion.model.slice(0, 120) : model(), cost: Number.isFinite(completion?.usage?.cost) ? completion.usage.cost : null });
   } catch (error) { return failure(error); }
 };

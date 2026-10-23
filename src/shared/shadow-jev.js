@@ -1,10 +1,11 @@
 // Shadow Protocol's Jev contract: the commander's typed questions, the
 // validation of Jev's answers and the mapping from answers to a tactical plan.
-// The same mapping runs for Jev's answers and for the local System-One policy,
-// so a plan always means the same thing whichever model chose it.
+// Only complete, validated Jev replies may become live commander orders.
 // Provider contract: https://openrouter.ai/docs/guides/community/jev-tutorial
 // Independent questions: https://docs.typesafe.ai/primitives
 import { JEV_ENDPOINT, JEV_MODEL } from './girder-jev.js';
+import { CAMERAS } from '../client/shadow-level.js';
+import { DOOR_CONTROLS, FLOODLIGHTS } from './shadow-field.js';
 
 export { JEV_ENDPOINT, JEV_MODEL };
 
@@ -16,6 +17,8 @@ export const SHADOW_GAME = Object.freeze({
   bodies: 'A guard found unconscious can be revived by a colleague. A guard found dead cannot. A corpse or a gunshot is stronger evidence than a noise, and the intruder may be armed.',
   dossier: 'tendencies summarises what security has learned about this intruder over earlier attempts. Recent attempts weigh more. The intruder can change habits.',
   coordinates: 'Distances are in tiles. The facility is 64x44 tiles; north is up.',
+  authority: 'You are the only tactical decision maker. Guards execute your orders and react to direct sight; there is no local commander filling gaps. Choose every requested answer.',
+  field: 'You can seal one named doorway for 10 seconds, switch on one bank of floodlights for 20 seconds, and put one camera on a faster, longer-range sweep for 20 seconds. Seals block guards too, warn for one second and wait for an occupied threshold to clear. Repeating a live seal does not extend it. Damaged or disabled cameras remain unavailable. Field timers are mechanical limits, not new decisions.',
 });
 
 export const DECISION_KINDS = Object.freeze(['posture', 'contact', 'lost', 'sweep', 'anomaly']);
@@ -85,7 +88,7 @@ function postText(post) {
 }
 
 /** The typed questions for one commander decision. Option keys come from the situation. */
-export function shadowQuestions(kind, situation) {
+function tacticalQuestions(kind, situation) {
   const c = situation?.candidates || {};
   if (kind === 'posture') {
     return {
@@ -129,21 +132,39 @@ export function shadowQuestions(kind, situation) {
   return null;
 }
 
+export function shadowQuestions(kind, situation) {
+  const questions = tacticalQuestions(kind, situation);
+  if (!questions) return null;
+  return { ...questions,
+    doors: { type: 'choice', instructions: 'Which doorway should be temporarily sealed to shape the intruder route? This also blocks your guards.', criteria: {
+      keep: 'Keep the existing seal or leave doors unsealed.', release: 'Release the active seal.',
+      ...Object.fromEntries(DOOR_CONTROLS.map(item => [item.id, `Seal the ${item.name} for 10 seconds after a visible warning.`])),
+    } },
+    lights: { type: 'choice', instructions: 'Which floodlight bank should expose the area the intruder may use?', criteria: {
+      keep: 'Keep current lighting.', off: 'Switch off the extra floodlights.',
+      ...Object.fromEntries(FLOODLIGHTS.map(item => [item.id, `Turn on ${item.name} for 20 seconds; visibility and detection increase in the lit area.`])),
+    } },
+    camera: { type: 'choice', instructions: 'Which working camera should sweep faster and farther?', criteria: {
+      keep: 'Keep current camera coverage.', routine: 'Return all cameras to routine sweeps.',
+      ...Object.fromEntries(CAMERAS.map(item => [item.id, `Prioritize the ${item.name} for 20 seconds if it is online.`])),
+    } },
+  };
+}
+
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
 
 /**
- * Checks Jev's (or the local policy's) answers against the questions that were
- * asked. Anything missing or malformed is taken from the fallback answers, so a
- * partial reply still yields a whole plan. Returns null when nothing usable came back.
+ * Validates provider values without inventing missing answers. A partial reply
+ * remains partial; readCompleteAnswers is required before issuing a live plan.
  */
-export function readAnswers(kind, answers, situation, fallback = null) {
+export function readAnswers(kind, answers, situation) {
   const questions = shadowQuestions(kind, situation);
-  if (!questions || !answers || typeof answers !== 'object' || Array.isArray(answers)) return fallback;
+  if (!questions || !answers || typeof answers !== 'object' || Array.isArray(answers)) return null;
   const out = {};
   let usable = 0;
   for (const [name, question] of Object.entries(questions)) {
-    const answer = answers[name], backup = fallback?.[name];
+    const answer = answers[name];
     if (question.type === 'choice') {
       const options = Object.keys(question.criteria);
       if (answer?.type === 'choice' && options.includes(answer.choice)) {
@@ -151,7 +172,7 @@ export function readAnswers(kind, answers, situation, fallback = null) {
         for (const option of options) if (Number.isFinite(answer.probabilities?.[option])) probabilities[option] = clamp(answer.probabilities[option], 0, 1);
         out[name] = { type: 'choice', choice: answer.choice, confidence: Number.isFinite(answer.confidence) ? clamp(answer.confidence, 0, 1) : null, probabilities };
         usable++;
-      } else if (backup) out[name] = backup;
+      }
       // A partial provider reply must stay partial until the caller merges its
       // actual local answer. Inventing the first option hides a missing answer.
     } else if (question.type === 'score') {
@@ -159,15 +180,20 @@ export function readAnswers(kind, answers, situation, fallback = null) {
       if (answer?.type === 'score' && Number.isFinite(answer.score)) {
         out[name] = { type: 'score', score: clamp(answer.score, 0, top), confidence: Number.isFinite(answer.confidence) ? clamp(answer.confidence, 0, 1) : null };
         usable++;
-      } else if (backup) out[name] = backup;
+      }
     } else if (question.type === 'noul') {
       if (answer?.type === 'noul' && Number.isFinite(answer.noul)) {
         out[name] = { type: 'noul', noul: clamp(answer.noul, 0, 1) };
         usable++;
-      } else if (backup) out[name] = backup;
+      }
     }
   }
-  return usable ? out : fallback;
+  return usable ? out : null;
+}
+
+export function readCompleteAnswers(kind, raw, situation) {
+  const questions = shadowQuestions(kind, situation), answers = readAnswers(kind, raw, situation);
+  return questions && answers && Object.keys(questions).every(name => Object.hasOwn(answers, name)) ? answers : null;
 }
 
 const byId = (list, id) => (Array.isArray(list) ? list : []).find(item => item.id === id) || null;
@@ -193,6 +219,7 @@ export function planFromAnswers(kind, answers = {}, situation) {
   const roles = [];
   const role = (name, target, extra = {}) => { if (target && Number.isFinite(target.x) && Number.isFinite(target.y)) roles.push({ role: name, x: target.x, y: target.y, ...extra }); };
   const plan = { kind, strategy: 'hold', summary: 'Hold positions', level: null, prediction: null, roles, confidence: {} };
+  plan.field = { doors: answers.doors?.choice, lights: answers.lights?.choice, camera: answers.camera?.choice };
   for (const [name, answer] of Object.entries(answers || {})) {
     if (answer?.type === 'choice' || answer?.type === 'score') plan.confidence[name] = answer.confidence;
     else if (answer?.type === 'noul') plan.confidence[name] = Math.abs(answer.noul - .5) * 2;
@@ -324,7 +351,7 @@ export function planFromAnswers(kind, answers = {}, situation) {
   return plan;
 }
 
-/** Validates a relay or direct response and returns typed answers, or null. */
+/** Validates a relay or direct response and returns complete typed answers, or null. */
 export function answersFromResponse(kind, response, situation) {
-  return readAnswers(kind, response?.answers, situation, null);
+  return readCompleteAnswers(kind, response?.answers, situation);
 }

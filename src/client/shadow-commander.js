@@ -1,6 +1,6 @@
 // Shadow Protocol's commander: what security knows (the situation Jev reads),
-// the local System-One policy that answers the same typed questions when Jev
-// is slow or unavailable, and the dossier that persists between attempts.
+// a deterministic fixture for mocks and tests, and the dossier that persists
+// between attempts. Live missions only accept Jev's complete orders.
 import {
   TILE, ZONES, ZONE_BY_ID, PORTALS, POSTS, POST_BY_ID, HIDING, HIDING_CLUSTERS, SECTORS, TERMINAL, EXTRACTION,
   toTile, zoneAt, zoneOfTile,
@@ -345,7 +345,7 @@ export function jevState(situation) {
   };
 }
 
-/* ── local System-One policy ───────────────────────────────────────────────── */
+/* ── deterministic answer fixture (development mock and tests only) ────────── */
 
 function choose(scores, random, temperature = .32, noise = .12) {
   const entries = Object.entries(scores).filter(([, v]) => Number.isFinite(v));
@@ -362,8 +362,9 @@ const noul = value => ({ type: 'noul', noul: Math.round(Math.max(0, Math.min(1, 
 const score = (value, top = 3) => ({ type: 'score', score: Math.round(Math.max(0, Math.min(top, value)) * 100) / 100, confidence: .6 });
 
 /**
- * Answers the commander's questions from the same situation Jev would see.
- * Readable heuristics, weighted by the difficulty's trust in the dossier.
+ * Answers every commander question from the same situation Jev would see.
+ * This is not a fallback commander: live play only accepts Jev's complete
+ * replies. Mocks and tests use this to exercise the same contract offline.
  */
 export function localAnswers(kind, situation, random = Math.random) {
   const questions = shadowQuestions(kind, situation);
@@ -373,7 +374,10 @@ export function localAnswers(kind, situation, random = Math.random) {
   const lethal = Number(td.killsPerAttempt) || 0;
   const after = td.afterDetect.hid + td.afterDetect.fled;
   const hidShare = after > 0 ? td.afterDetect.hid / (after + .5) : .35;
-  const answers = {};
+  // Physical field orders are answered on every decision, even when the mock
+  // chooses to leave the current door, lights and camera sweeps untouched.
+  const field = choice => ({ type: 'choice', choice: 'keep', confidence: .6, probabilities: { keep: .6 } });
+  const answers = { doors: field(), lights: field(), camera: field() };
   const lkpServer = lkp ? TO_SERVER[lkp.zone] ?? 6 : 6, lkpHeli = lkp ? TO_HELIPAD[lkp.zone] ?? 6 : 6;
   const pull = zone => breached ? (TO_HELIPAD[zone] ?? 6) < lkpHeli ? .45 : 0 : (TO_SERVER[zone] ?? 6) < lkpServer ? .35 : 0;
 

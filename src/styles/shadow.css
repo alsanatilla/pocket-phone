@@ -98,6 +98,19 @@
 .shadow-toast.muted { border-color: var(--line); color: var(--muted); }
 .shadow-toast.intel { border-color: var(--shadow-intel); color: var(--shadow-intel); }
 .shadow-toast.kill { border-color: var(--shadow-alert); background: rgba(45, 12, 10, .94); color: #ffd5c8; box-shadow: 0 0 18px rgba(240, 112, 94, .16); }
+.shadow-command { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; background: rgba(7, 8, 10, .82); text-align: center; }
+.shadow-command[hidden] { display: none; }
+.shadow-command-title { font: 40px/1 var(--pixel); font-weight: normal; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+.shadow-command.error .shadow-command-title { color: var(--shadow-alert); }
+.shadow-command-text { max-width: 46ch; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.shadow-command .shadow-kicker { color: var(--accent); }
+.shadow-field-status { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin-top: 5px; }
+.shadow-field-status:empty { display: none; }
+.shadow-field-chip { padding: 2px 7px; border: 1px solid rgba(236, 201, 129, .4); background: rgba(9, 10, 11, .72); color: var(--muted); font-size: 10px; letter-spacing: .04em; }
+.shadow-field-chip b { margin-right: 5px; color: var(--accent); font-weight: normal; text-transform: uppercase; letter-spacing: .1em; }
+.shadow-field-chip.seal { border-color: rgba(224, 138, 111, .55); }
+.shadow-field-chip.seal b { color: #e08a6f; }
+.shadow-field-chip.camera b { color: #ffd27a; }
 .shadow-pause { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: rgba(7, 8, 10, .72); }
 .shadow-pause[hidden] { display: none; }
 .shadow-pause strong { font: 40px/1 var(--pixel); font-weight: normal; letter-spacing: .14em; text-transform: uppercase; color: var(--white); }
@@ -194,6 +207,8 @@
   .shadow-hud-status .shadow-meter.noise { display: none; }
   .shadow-objective { font-size: 14px; }
   .shadow-phase { top: 58px; font-size: 16px; }
+  .shadow-command-title { font-size: clamp(26px, 8vw, 40px); }
+  .shadow-command-text { font-size: 12px; }
   .shadow-prompt { bottom: 40px; font-size: 11px; }
 }
 @media (max-width: 420px) {
@@ -255,6 +270,8 @@ html.shadow-immersive .shadow-intel h3,
 
 html.shadow-immersive .shadow-pause,
 .shadow-game:fullscreen .shadow-pause { z-index: 12; padding: 24px; background: rgba(4, 5, 7, .84); }
+html.shadow-immersive .shadow-command,
+.shadow-game:fullscreen .shadow-command { z-index: 13; background: rgba(4, 5, 7, .9); }
 .shadow-pause-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 12px 0 4px; }
 .shadow-menu-button { min-height: 44px; padding: 0 18px; border: 1px solid var(--line); background: rgba(9, 10, 11, .9); color: var(--text); font: 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .shadow-menu-button:hover { border-color: var(--accent); color: var(--accent); box-shadow: none; }
