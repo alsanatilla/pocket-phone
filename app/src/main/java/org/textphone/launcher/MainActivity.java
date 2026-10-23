@@ -831,8 +831,10 @@ public class MainActivity extends Activity {
         controls.addView(titleView,new LinearLayout.LayoutParams(0,PocketDesign.headerHeight(this),1));
         TextView right=text(rightLabel,13,commit?accent():SECONDARY);PocketDesign.headerControl(right,commit?accent():SECONDARY);right.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);right.setOnClickListener(v->rightAction.run());
         if("settings".equalsIgnoreCase(rightLabel))right.setTag("app_settings");controls.addView(right,new LinearLayout.LayoutParams(PocketDesign.headerWidth(right,rightLabel.length()>5?92:56),PocketDesign.headerHeight(this)));header.addView(controls);
-        if(hero){String scene=headerScene();if(scene!=null)header.setBackground(new PixelBackdrop(this,accent(),116,scene));
-            TextView heading=text(title,46,PRIMARY);heading.setTag("page_heading");heading.setTextSize(size(46));heading.setTypeface(PocketFonts.pixel(this));heading.setPadding(0,dp(10),0,dp(4));if(Build.VERSION.SDK_INT>=28)heading.setAccessibilityHeading(true);header.addView(heading);}
+        // The workspace tabs already name the page, so the workspace skips the big title and its tiles start higher.
+        boolean workspace="today".equals(screen);
+        if(hero){String scene=headerScene();if(scene!=null)header.setBackground(new PixelBackdrop(this,accent(),workspace?84:116,scene));
+            if(!workspace){TextView heading=text(title,46,PRIMARY);heading.setTag("page_heading");heading.setTextSize(size(46));heading.setTypeface(PocketFonts.pixel(this));heading.setPadding(0,dp(10),0,dp(4));if(Build.VERSION.SDK_INT>=28)heading.setAccessibilityHeading(true);header.addView(heading);}}
         content.addView(header);gap(4);
     }
     private TextView section(LinearLayout host,String label,boolean first) {
@@ -1756,7 +1758,7 @@ public class MainActivity extends Activity {
     private TextView todayText(String value,float sp,int color,boolean bold){TextView view=text(value,sp,color);view.setTextSize(todaySize(sp));view.setTypeface(bold?PocketFonts.medium(this):PocketFonts.body(this));return view;}
     private void renderToday() {
         heading(workspaceTab,"home","settings",this::organizerSettings,false);
-        todayDate=todayText(new SimpleDateFormat("EEE · d MMM",Locale.getDefault()).format(new Date()),12,SECONDARY,false);todayDate.setTag("today_date");todayDate.setPadding(0,0,0,dp(12));content.addView(todayDate);
+        todayDate=todayText(new SimpleDateFormat("EEE · d MMM",Locale.getDefault()).format(new Date()),12,SECONDARY,false);todayDate.setTag("today_date");todayDate.setPadding(0,0,0,dp(10));content.addView(todayDate);
         workspaceTabs=new LinearLayout(this);workspaceTabs.setTag("workspace_tabs");
         for(String tab:new String[]{"today","thoughts","tasks","notes"}){
             TextView link=actionInto(workspaceTabs,tab,14,SECONDARY,()->selectWorkspace(tab));link.setTag("workspace_tab_"+tab);PocketDesign.tab(link,tab.equals(workspaceTab));
@@ -1767,7 +1769,7 @@ public class MainActivity extends Activity {
         if("notes".equals(workspaceTab)){renderWorkspaceNotes(content);workspaceBottom("capture",this::captureMenu);addFeedback();return;}
         boolean daily="today".equals(workspaceTab);
         if(daily){
-            renderDashboardMovement(content);
+            // Recovery, strain and condition live on the movement tile here; home keeps the score row.
             renderTodayTiles();
             workspaceBottom("capture",this::captureMenu);addFeedback();return;
         }
@@ -1883,9 +1885,6 @@ public class MainActivity extends Activity {
     // ── Today tiles: a synced, editable set of live readings. Tapping one opens its app. ──
     private void renderTodayTiles() {
         LinearLayout host = new LinearLayout(this); host.setOrientation(LinearLayout.VERTICAL); host.setTag("today_tiles");
-        LinearLayout controls = commands(host, "today_tile_commands", new String[]{"+ add tile", liveTilesEditing ? "done" : "edit tiles"},
-                new String[]{"today_add_tile", "today_edit_tiles"}, 0, this::addTodayTile, this::editTodayTiles);
-        editLiveTiles = (TextView)controls.getChildAt(1);
         liveTiles = new LiveTileBoard(this, planner, new LiveTileBoard.Actions() {
             public void open(String kind) { openTodayTile(kind); }
             public void edit(String kind) { tileMenu(TodayTiles.visible(MainActivity.this), kind); }
@@ -1893,8 +1892,12 @@ public class MainActivity extends Activity {
             public void failed(RuntimeException error) { showFeedback(error.getMessage() == null ? "Could not save the tiles." : error.getMessage()); }
         });
         liveTiles.editing(liveTilesEditing);
-        LinearLayout.LayoutParams board = new LinearLayout.LayoutParams(-1, -2); board.topMargin = dp(4); board.bottomMargin = dp(16);
+        LinearLayout.LayoutParams board = new LinearLayout.LayoutParams(-1, -2); board.topMargin = dp(12); board.bottomMargin = dp(8);
         host.addView(liveTiles, board);
+        // Pinning and editing follow the tiles, so the board starts right under the tabs.
+        LinearLayout controls = commands(host, "today_tile_commands", new String[]{"+ add tile", liveTilesEditing ? "done" : "edit tiles"},
+                new String[]{"today_add_tile", "today_edit_tiles"}, 0, this::addTodayTile, this::editTodayTiles);
+        editLiveTiles = (TextView)controls.getChildAt(1);
         content.addView(host);
     }
     private void openTodayTile(String kind) {
