@@ -1,6 +1,7 @@
 # 006 — Add a dodge roll: a fast burst that slips a grab
 
-- **Status**: TODO
+- **Status**: DONE as dash, slide and vault (2026-10-23)
+- **Delivered**: Space or the touch dash key launches a 60 px dash with a short cooldown and input buffer; sprint then C slides; low cover can be vaulted; doorway charges knock guards down. Motion uses collision checks, momentum handoff and reduced-motion-aware effects. This replaces the original R-key roll proposal below under the later gameplay brief.
 - **Commit**: 8c898bd
 - **Severity**: MEDIUM (missed opportunity, and the most direct answer to "make it more agile")
 - **Category**: Missed opportunities
