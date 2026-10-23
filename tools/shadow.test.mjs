@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TILE, START, TERMINAL, EXTRACTION, ZONES, POSTS, PORTALS, MAP, kindAt, zoneAt } from '../src/client/shadow-level.js';
 import { findPath, playerWalk, guardWalk, lineClear, soundField, index, walkableLine } from '../src/client/shadow-nav.js';
-import { ShadowSim } from '../src/client/shadow-engine.js';
+import { ShadowSim, SPEED, DASH } from '../src/client/shadow-engine.js';
 import { buildSituation, localAnswers, emptyDossier, recordMission, dossierInsights, jevState } from '../src/client/shadow-commander.js';
 import { DECISION_KINDS, shadowQuestions, readAnswers, planFromAnswers } from '../src/shared/shadow-jev.js';
 
@@ -513,9 +513,9 @@ test('movement eases in and out quickly, and a wall stops momentum on its axis',
   sim.noCapture = true;
   Object.assign(sim.player, at(36, 14));
   sim.step(1 / 60, { move: { x: 1, y: 0 } });
-  assert.ok(sim.player.speed > 0 && sim.player.speed < 76 * .5, 'the first tick is not instant top speed');
+  assert.ok(sim.player.speed > 0 && sim.player.speed < SPEED.walk * .5, 'the first tick is not instant top speed');
   stepFor(sim, .15, { move: { x: 1, y: 0 } });
-  assert.ok(sim.player.speed > 76 * .95, 'walking speed within about 0.15 s');
+  assert.ok(sim.player.speed > SPEED.walk * .95, 'walking speed within about 0.15 s');
   stepFor(sim, .12);
   assert.equal(sim.player.speed, 0, 'stopped within about 0.12 s of letting go');
   Object.assign(sim.player, at(42, 14));
@@ -551,7 +551,7 @@ test('holding the aim walks the operative toward the cursor instead of running',
   const aim = at(36, 20);
   stepFor(sim, .4, { move: { x: 1, y: 0 }, run: true, aimHold: true, aim });
   assert.equal(sim.player.running, false, 'no running with the pistol drawn');
-  assert.ok(sim.player.speed < 80, 'walking pace');
+  assert.ok(sim.player.speed <= SPEED.walk + 1, 'walking pace');
   assert.ok(Math.abs(sim.player.facing - Math.atan2(aim.y - sim.player.y, aim.x - sim.player.x)) < .05, 'faces the cursor while strafing');
 });
 
@@ -607,4 +607,146 @@ test('a guard who sees a colleague killed calls it in and starts a search', () =
   assert.equal(sim.net.phase, 'search', 'the witnessed kill starts a search');
   assert.equal(sim.net.plan?.kind, 'lost');
   assert.ok(sim.net.plan.roles.length >= 1);
+});
+
+test('a dash bursts about 60px, glides into a sprint, ignores a grab and stops at a wall', () => {
+  const sim = new ShadowSim({ seed: 2, mode: 'baseline' });
+  quiet(sim);
+  Object.assign(sim.player, at(30, 14));
+  const startX = sim.player.x;
+  sim.step(1 / 60, { dash: true, move: { x: 1, y: 0 } });
+  assert.equal(sim.player.move?.kind, 'dash');
+  const firstTick = sim.player.x - startX;
+  assert.ok(firstTick > 7, 'the launch is hard: ' + firstTick.toFixed(1) + 'px on the first tick');
+  stepFor(sim, DASH.time + .02, { move: { x: 1, y: 0 } });
+  assert.equal(sim.player.move, null, 'the dash ends on time');
+  assert.ok(sim.player.speed > SPEED.walk, 'it hands sprint speed back to the stick');
+  assert.ok(sim.player.x - startX > 58 && sim.player.x - startX < 80, 'about 60px, got ' + (sim.player.x - startX).toFixed(1));
+
+  sim.step(1 / 60, { dash: true, move: { x: -1, y: 0 } });
+  assert.equal(sim.player.move, null, 'no second dash inside the cooldown');
+  stepFor(sim, DASH.cooldown - DASH.buffer * .5);
+  sim.step(1 / 60, { dash: true, move: { x: -1, y: 0 } });
+  stepFor(sim, DASH.buffer);
+  assert.equal(sim.player.move?.kind, 'dash', 'a press just before the cooldown ends is buffered and fires');
+
+  const grabbed = new ShadowSim({ seed: 2, mode: 'baseline' });
+  quiet(grabbed);
+  const g = grabbed.guards[0];
+  Object.assign(g, at(30, 14), { facing: 0, sees: true, state: 'alert', freeze: 0, lastSeen: { ...at(31, 14), t: 0 } });
+  Object.assign(grabbed.player, at(31, 14), { caught: grabbed.rules.captureTime - .05 });
+  grabbed.step(1 / 60, { dash: true, move: { x: 1, y: 0 } });
+  stepFor(grabbed, .1, { move: { x: 1, y: 0 } });
+  assert.equal(grabbed.status, 'playing', 'a dashing body cannot be grabbed');
+
+  Object.assign(sim.player, at(42, 14), { move: null, vx: 0, vy: 0 });
+  sim.player.dashReadyAt = 0;
+  sim.step(1 / 60, { dash: true, move: { x: 1, y: 0 } });
+  stepFor(sim, .3);
+  assert.ok(sim.player.x < 44 * TILE, 'the east corridor wall stops the dash');
+});
+
+test('a dash through a doorway bangs a shut door open and flattens the guard beyond it', () => {
+  const sim = new ShadowSim({ seed: 3, mode: 'baseline' });
+  quiet(sim);
+  sim.noCapture = true;
+  Object.assign(sim.player, at(17, 18), { facing: 0 });
+  const door = sim.doors.get(index(19, 18));
+  stepFor(sim, .5);
+  assert.ok(door.open < .2, 'the warehouse east door starts shut');
+  sim.step(1 / 60, { dash: true, move: { x: 1, y: 0 } });
+  let widest = 0;
+  for (let t = 0; t < .3; t += 1 / 60) { sim.step(1 / 60, {}); widest = Math.max(widest, door.open); }
+  assert.ok(door.slamAt > 0 && widest === 1, 'the dash slammed it open');
+  assert.ok(sim.rings.some(ring => ring.kind === 'slam') || sim.metrics.noises > 1, 'a slam is loud');
+  assert.ok(sim.player.x > 19 * TILE + 8, 'and carried the operative through');
+
+  const charge = new ShadowSim({ seed: 3, mode: 'baseline' });
+  quiet(charge);
+  charge.noCapture = true;
+  const g = charge.guards[0];
+  Object.assign(g, at(20, 18), { facing: 0, route: [{ ...at(20, 18), hold: 999, face: 0 }], routeIndex: 0 });
+  Object.assign(charge.player, at(17, 18), { facing: 0 });
+  charge.step(1 / 60, { dash: true, move: { x: 1, y: 0 } });
+  stepFor(charge, .3);
+  assert.equal(g.down, true, 'the guard in the doorway is knocked flat');
+  assert.equal(g.dead, false, 'and is only knocked out');
+});
+
+test('crouching out of a sprint slides low and sweeps a guard off their feet', () => {
+  const sim = new ShadowSim({ seed: 4, mode: 'baseline' });
+  quiet(sim);
+  sim.noCapture = true;
+  const g = sim.guards[0];
+  Object.assign(g, at(27, 14), { facing: 0, route: [{ ...at(27, 14), hold: 999, face: 0 }], routeIndex: 0 });
+  Object.assign(sim.player, at(21, 14));
+  stepFor(sim, .35, { move: { x: 1, y: 0 }, run: true });
+  assert.equal(sim.player.running, true);
+  sim.step(1 / 60, { move: { x: 1, y: 0 }, run: true, crouch: true });
+  assert.equal(sim.player.move?.kind, 'slide');
+  assert.equal(sim.player.crouch, true, 'a slide is low');
+  stepFor(sim, .6, { move: { x: 1, y: 0 } });
+  assert.equal(g.down, true, 'the slide took the guard down');
+  assert.equal(sim.player.move, null);
+  assert.equal(sim.player.crouch, true, 'it ends crouched');
+
+  const walker = new ShadowSim({ seed: 4, mode: 'baseline' });
+  quiet(walker);
+  Object.assign(walker.player, at(21, 14));
+  stepFor(walker, .3, { move: { x: 1, y: 0 } });
+  walker.step(1 / 60, { move: { x: 1, y: 0 }, crouch: true });
+  assert.equal(walker.player.move, null, 'crouching from a walk just crouches');
+  assert.equal(walker.player.crouch, true);
+});
+
+test('a dash or a sprint at low cover vaults it, but never a wall or a fence', () => {
+  const sim = new ShadowSim({ seed: 5, mode: 'baseline' });
+  quiet(sim);
+  sim.noCapture = true;
+  Object.assign(sim.player, at(25, 26));
+  sim.step(1 / 60, { dash: true, move: { x: 0, y: 1 } });
+  assert.equal(sim.player.move?.kind, 'vault', 'dashing at the yard crates vaults them');
+  stepFor(sim, .4);
+  assert.equal(sim.player.move, null);
+  assert.ok(sim.player.y > 29 * TILE, 'landed beyond two rows of crates');
+  assert.equal(kindAt(Math.floor(sim.player.x / TILE), Math.floor(sim.player.y / TILE)).walk, 'all');
+
+  const runner = new ShadowSim({ seed: 5, mode: 'baseline' });
+  quiet(runner);
+  runner.noCapture = true;
+  Object.assign(runner.player, at(8, 27));
+  stepFor(runner, .9, { move: { x: 1, y: 0 }, run: true });
+  assert.ok(runner.player.x > 14 * TILE, 'sprinting into the west-lot crates hops over them');
+
+  const fence = new ShadowSim({ seed: 5, mode: 'baseline' });
+  quiet(fence);
+  Object.assign(fence.player, at(20, 30));
+  fence.step(1 / 60, { dash: true, move: { x: 0, y: 1 } });
+  stepFor(fence, .4);
+  assert.ok(fence.player.y < 31 * TILE, 'the perimeter fence cannot be vaulted');
+});
+
+test('a click with nobody in reach still swings, and a strike out of a dash reaches further', () => {
+  const sim = new ShadowSim({ seed: 6, mode: 'baseline' });
+  quiet(sim);
+  sim.noCapture = true;
+  Object.assign(sim.player, at(30, 14));
+  const startX = sim.player.x;
+  sim.knife(at(34, 14));
+  assert.equal(sim.player.action?.kind, 'swing', 'an empty click is a swing, not a refusal');
+  stepFor(sim, .25);
+  assert.equal(sim.player.action, null);
+  assert.ok(sim.player.x - startX > 6, 'the swing steps into the cut');
+
+  const dash = new ShadowSim({ seed: 6, mode: 'baseline' });
+  quiet(dash);
+  dash.noCapture = true;
+  const g = dash.guards[0];
+  Object.assign(g, at(37, 14), { facing: 0, route: [{ ...at(37, 14), hold: 999, face: 0 }], routeIndex: 0 });
+  Object.assign(dash.player, at(30, 14));
+  dash.step(1 / 60, { dash: true, move: { x: 1, y: 0 } });
+  stepFor(dash, .1);
+  dash.step(1 / 60, { knife: true, aim: { x: g.x, y: g.y } });
+  stepFor(dash, .6);
+  assert.equal(g.dead, true, 'the strike pressed mid-dash fired as it ended and reached the guard');
 });

@@ -1,6 +1,7 @@
 # 005 — Make the knife and the takedown strike, not pause
 
-- **Status**: TODO
+- **Status**: DONE (2026-10-23)
+- **Delivered**: lunging knife strikes and takedowns, a swing on missed attacks, buffered follow-ups, impact pauses and articulated combat animations. The original proposal below is retained as design history; the later gameplay brief determines the final timings.
 - **Commit**: 8c898bd
 - **Severity**: MEDIUM
 - **Category**: Interruptibility & duration (action timing)

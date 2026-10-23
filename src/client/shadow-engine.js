@@ -18,28 +18,34 @@ import { orderLine, openingLine, predictionLine, ackLine } from './shadow-voice.
 export const DIFFICULTY = Object.freeze({
   normal: Object.freeze({
     id: 'normal', name: 'Normal', guards: 9, detect: .9, range: 7, fov: 1.5, peripheral: 2.2, report: 1.5, radio: 1.1,
-    replan: 7, gap: 2.4, search: 36, lockdown: 28, influence: .5, coordination: 3, chase: 94, capture: 15,
+    replan: 7, gap: 2.4, search: 36, lockdown: 28, influence: .5, coordination: 3, chase: 120, capture: 15,
     captureTime: .9, pebbles: 6, checkin: 55, breach: 28, panelNotice: 35, turn: 3.6, reaction: .75,
     scannerInAlert: true, probe: .3, hearing: 1,
   }),
   hard: Object.freeze({
     id: 'hard', name: 'Hard', guards: 10, detect: 1.22, range: 7.8, fov: 1.6, peripheral: 2.6, report: 1.15, radio: .8,
-    replan: 5, gap: 1.8, search: 48, lockdown: 38, influence: .8, coordination: 4, chase: 104, capture: 16,
+    replan: 5, gap: 1.8, search: 48, lockdown: 38, influence: .8, coordination: 4, chase: 133, capture: 16,
     captureTime: .62, pebbles: 5, checkin: 42, breach: 18, panelNotice: 22, turn: 4.2, reaction: .58,
     scannerInAlert: false, probe: .5, hearing: 1.15,
   }),
   extreme: Object.freeze({
     id: 'extreme', name: 'Extreme', guards: 11, detect: 1.45, range: 8.4, fov: 1.7, peripheral: 3, report: .85, radio: .55,
-    replan: 3.6, gap: 1.3, search: 62, lockdown: 48, influence: 1, coordination: 6, chase: 111, capture: 17,
+    replan: 3.6, gap: 1.3, search: 62, lockdown: 48, influence: 1, coordination: 6, chase: 142, capture: 17,
     captureTime: .52, pebbles: 4, checkin: 30, breach: 10, panelNotice: 12, turn: 4.8, reaction: .45,
     scannerInAlert: false, probe: .72, hearing: 1.3,
   }),
 });
 
-export const SPEED = Object.freeze({ crouch: 40, walk: 76, run: 134 });
+export const SPEED = Object.freeze({ crouch: 56, walk: 104, run: 168 });
 // Velocity eases toward the stick: quick to start, a little quicker to stop.
-const ACCEL_TIME = .035, DECEL_TIME = .028;
-const PLAYER_R = 5, GUARD_R = 5.5;
+const ACCEL_TIME = .03, DECEL_TIME = .026;
+// Burst moves. A dash launches hard and glides out into a sprint; a slide keeps a sprint's
+// speed low to the floor; a vault clears low cover. Each hands its speed back to walking.
+export const DASH = Object.freeze({ time: .22, distance: 60, cooldown: .34, buffer: .15, reach: 56 });
+export const SLIDE = Object.freeze({ time: .5, boost: 1.12, turn: 2.6 });
+export const VAULT = Object.freeze({ time: .3, reach: 50, height: 7 });
+const VAULTABLE = new Set(['C', 'B']);
+const PLAYER_R = 4.5, GUARD_R = 5.5;
 const LEVEL_DETECT = [.9, 1, 1.12, 1.25];
 const STATE_SPEED = { patrol: 36, returning: 40, investigate: 44, suspicious: 0, search: 56, lockdown: 72 };
 const SECTOR_PATROL = { warehouse: ['warehouse', 1], yard: ['yard', 1], corridors: ['corridorB', 0], barracks: ['barracks', 1], lab: ['lab', 1], north: ['helipad', 0], exterior: ['perimeter', 0], perimeter: ['backlot', 0] };
@@ -86,6 +92,7 @@ export class ShadowSim {
       hidden: null, locker: null, carrying: null, keycard: false, data: false, pebbles: this.rules.pebbles,
       step: 0, action: null, anim: 0, visibility: 0, noise: 0, caught: 0, cameraOff: false,
       ammo: 3, maxAmmo: 6, shotAt: -99, recoil: 0,
+      move: null, dashReadyAt: 0, dashEndedAt: -9, buffer: null, z: 0, pressing: 0,
     };
     this.doors = new Map();
     for (let ty = 0; ty < ROWS; ty++) for (let tx = 0; tx < COLS; tx++) {
@@ -103,6 +110,10 @@ export class ShadowSim {
     this.blood = [];
     this.tracers = [];
     this.slashes = [];
+    // Afterimages and dust. Drawn only; they draw from their own random stream so the guards' dice stay put.
+    this.trail = [];
+    this.dust = [];
+    this.fx = mulberry32(this.seed ^ 0xf00d);
     this.events = [];
     this.radio = [];
     this.queue = [];
@@ -216,19 +227,23 @@ export class ShadowSim {
     let x = false, y = false;
     if (dx) {
       if (!this.blocked(body.x + dx, body.y, r, passable)) { body.x += dx; x = true; }
-      else if (nudge && Math.abs(dy) < Math.abs(dx) * .35) y = this.slideAround(body, dx, 0, r, passable, nudge);
+      else if (nudge && Math.abs(dy) < Math.abs(dx) * .55) y = this.slideAround(body, dx, 0, r, passable, nudge, dy);
     }
     if (dy) {
       if (!this.blocked(body.x, body.y + dy, r, passable)) { body.y += dy; y = true; }
-      else if (nudge && Math.abs(dx) < Math.abs(dy) * .35) x = this.slideAround(body, 0, dy, r, passable, nudge) || x;
+      else if (nudge && Math.abs(dx) < Math.abs(dy) * .55) x = this.slideAround(body, 0, dy, r, passable, nudge, dx) || x;
     }
     return { x, y };
   }
 
-  /** Finds the nearest sideways offset (up to `nudge` px) that frees the forward move, and steps toward it. */
-  slideAround(body, dx, dy, r, passable, nudge) {
+  /**
+   * Finds the nearest sideways offset (up to `nudge` px) that frees the forward move, and steps toward it.
+   * With some sideways input, that side is tried first.
+   */
+  slideAround(body, dx, dy, r, passable, nudge, lean = 0) {
     const step = Math.max(Math.abs(dx), Math.abs(dy));
-    for (let k = 1; k <= nudge; k++) for (const side of [-1, 1]) {
+    const sides = lean > 0 ? [1, -1] : [-1, 1];
+    for (let k = 1; k <= nudge; k++) for (const side of sides) {
       const ox = dy ? side * k : 0, oy = dx ? side * k : 0;
       if (this.blocked(body.x + ox, body.y + oy, r, passable)) continue;
       if (this.blocked(body.x + ox + dx, body.y + oy + dy, r, passable)) continue;
@@ -264,24 +279,31 @@ export class ShadowSim {
   updatePlayer(dt, input) {
     const p = this.player;
     p.anim += dt;
-    if (input.crouch) {
-      // Standing up needs headroom for the whole body, not just its centre.
-      if (!p.crouch) p.crouch = true;
-      else if (!this.blocked(p.x, p.y, PLAYER_R, (tx, ty) => playerWalk(tx, ty, false) && this.doorOpen(tx, ty))) p.crouch = false;
-      else this.emit('hint', { text: 'no room to stand' });
-    }
+    // A press that lands mid-move or mid-strike is kept for a moment and fires as soon as it can.
+    if (input.dash) p.buffer = { kind: 'dash', until: this.t + DASH.buffer };
+    if (input.knife && (p.action || p.move)) p.buffer = { kind: 'knife', aim: input.aim, until: this.t + DASH.buffer };
+    if (input.crouch) this.crouchPressed();
     if (p.locker) {
       if (input.interact || Math.hypot(input.move?.x || 0, input.move?.y || 0) > .5) this.leaveLocker();
-      p.moving = false; p.speed = 0; p.vx = 0; p.vy = 0; p.visibility = 0; p.aiming = false;
+      p.moving = false; p.speed = 0; p.vx = 0; p.vy = 0; p.visibility = 0; p.aiming = false; p.buffer = null;
       return;
     }
     if (p.action) { p.aiming = false; this.updateAction(dt, input); return; }
+    if (p.move) { this.updateMove(dt, input); this.settle(); return; }
+    const buffered = p.buffer && this.t <= p.buffer.until ? p.buffer : null;
+    p.buffer = null;
     if (input.interact) this.interact();
     if (input.knife) this.knife(input.aim);
+    else if (buffered?.kind === 'knife') this.knife(buffered.aim);
     if (input.shoot) this.shoot(input.aim);
     if (input.knock) this.knock();
     if (input.throw) this.throwPebble(input.aim);
     if (p.action) return;
+    if (buffered?.kind === 'dash') {
+      // Pressed during the cooldown: it fires the moment the cooldown ends, inside the buffer window.
+      if (this.startDash(input.move) === 'wait') p.buffer = buffered;
+      if (p.move) { this.updateMove(dt, input); this.settle(); return; }
+    }
 
     let mx = input.move?.x || 0, my = input.move?.y || 0;
     const length = Math.hypot(mx, my);
@@ -302,18 +324,30 @@ export class ShadowSim {
     else if (wants) p.facing = Math.atan2(my, mx);
     if (p.speed > 0) {
       const before = { x: p.x, y: p.y };
-      const moved = this.moveBody(p, p.vx * dt, p.vy * dt, PLAYER_R, this.playerPassable, 6);
+      const moved = this.moveBody(p, p.vx * dt, p.vy * dt, PLAYER_R, this.playerPassable, 8);
       // A wall stops momentum on that axis; a corner nudge counts as movement.
       if (!moved.x) p.vx = 0;
       if (!moved.y) p.vy = 0;
-      p.step += Math.hypot(p.x - before.x, p.y - before.y);
+      const progress = Math.hypot(p.x - before.x, p.y - before.y);
+      // Sprinting into crates or a desk vaults it instead of grinding against it.
+      if (running && progress < top * dt * .35) {
+        p.pressing += dt;
+        if (p.pressing > .07 && this.startVault(Math.atan2(my, mx))) { p.pressing = 0; this.updateMove(dt, input); this.settle(); return; }
+      } else p.pressing = 0;
+      p.step += progress;
       if (p.moving) {
         this.metrics.movingTime += dt;
         if (running) this.metrics.runningTime += dt;
       }
-      if (p.step >= 18) { p.step = 0; this.footstep(); }
+      if (p.step >= (running ? 26 : 22)) { p.step = 0; this.footstep(); }
       this.noteTraces();
     }
+    this.settle();
+  }
+
+  /** What the operative's position means this tick: a dragged body follows; cover, light and pace set visibility. */
+  settle() {
+    const p = this.player;
     if (p.carrying) {
       const body = this.guards.find(g => g.id === p.carrying);
       if (body) { body.x = p.x - Math.cos(p.facing) * 9; body.y = p.y - Math.sin(p.facing) * 9; }
@@ -322,8 +356,220 @@ export class ShadowSim {
     p.hidden = kind.hide === 'duct' ? 'duct' : kind.hide === 'grass' && p.crouch ? 'grass' : null;
     const light = lightAt(p.x, p.y);
     const posture = p.hidden === 'duct' ? 0 : p.hidden === 'grass' ? .22 : p.crouch ? .6 : 1;
-    const motion = !p.moving ? .72 : running ? 1.32 : p.crouch ? .85 : 1;
+    const motion = !p.moving ? .72 : p.running ? 1.32 : p.crouch ? .85 : 1;
     p.visibility = Math.min(1, (.16 + .84 * light) * posture * motion * (p.carrying ? 1.3 : 1));
+  }
+
+  standing = (tx, ty) => playerWalk(tx, ty, false) && this.doorOpen(tx, ty);
+  surface() { const p = this.player; return kindAt(toTile(p.x), toTile(p.y)).sound ?? 1; }
+
+  crouchPressed() {
+    const p = this.player;
+    if (!p.crouch) {
+      // Crouching out of a sprint drops into a slide.
+      if (!p.move && !p.action && !p.locker && !p.carrying && p.running && p.speed > SPEED.walk * 1.05) this.startSlide();
+      else p.crouch = true;
+      return;
+    }
+    // Standing up needs headroom for the whole body, not just its centre.
+    if (this.blocked(p.x, p.y, PLAYER_R, this.standing)) { this.emit('hint', { text: 'no room to stand' }); return; }
+    p.crouch = false;
+    // Standing out of a slide pops up and keeps its speed.
+    if (p.move?.kind === 'slide') this.endMove(Math.hypot(p.vx, p.vy));
+  }
+
+  /* ── burst moves ───────────────────────────────────────────────────────── */
+
+  startDash(move) {
+    const p = this.player;
+    if (p.move || p.action || p.locker) return false;
+    if (p.carrying) { this.emit('hint', { text: 'hands full' }); return false; }
+    if (this.t < p.dashReadyAt) return 'wait';
+    const length = Math.hypot(move?.x || 0, move?.y || 0);
+    const angle = length > .2 ? Math.atan2(move.y, move.x) : p.facing;
+    // Low cover right ahead is cleared instead of dashed into.
+    if (this.startVault(angle)) return true;
+    if (p.crouch) {
+      if (this.blocked(p.x, p.y, PLAYER_R, this.standing)) { this.emit('hint', { text: 'no room to dash' }); return false; }
+      p.crouch = false;
+    }
+    p.move = { kind: 'dash', t: 0, time: DASH.time, angle, done: 0, trailAt: -1 };
+    p.vx = 0; p.vy = 0;
+    this.noise(p.x, p.y, 2.4 * this.surface(), 'a scuffle of feet', 'step');
+    this.puff(p.x, p.y, angle + Math.PI, 6);
+    this.emit('dash', { x: p.x, y: p.y, angle });
+    return true;
+  }
+
+  startSlide() {
+    const p = this.player, angle = Math.atan2(p.vy, p.vx);
+    p.crouch = true;
+    p.move = { kind: 'slide', t: 0, time: SLIDE.time, angle, speed: Math.max(p.speed, SPEED.run) * SLIDE.boost, trailAt: -1 };
+    this.noise(p.x, p.y, 1.5 * this.surface(), 'a scrape', 'step');
+    this.puff(p.x, p.y, angle + Math.PI, 4);
+    this.emit('slide', { x: p.x, y: p.y, angle });
+  }
+
+  /** Clears crates or furniture just ahead along `angle`, landing on the first free floor beyond. */
+  startVault(angle) {
+    const p = this.player;
+    if (p.carrying || p.locker || p.action || p.move) return false;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    let cover = false, landing = null;
+    for (let d = 2; d <= VAULT.reach; d += 2) {
+      const x = p.x + cos * d, y = p.y + sin * d;
+      // The width of the body passes over cover or floor, never a wall, a locker or a fence.
+      let solid = false, low = false;
+      for (const side of [-3, 0, 3]) {
+        const tx = toTile(x - sin * side), ty = toTile(y + cos * side);
+        if (kindAt(tx, ty).walk !== 'none') continue;
+        if (VAULTABLE.has(tileAt(tx, ty))) low = true; else solid = true;
+      }
+      if (solid) return false;
+      if (low) { cover = true; continue; }
+      if (!cover) { if (d > PLAYER_R + 8) return false; continue; }
+      if (!this.blocked(x, y, PLAYER_R, this.standing)) { landing = { x, y }; break; }
+    }
+    if (!landing) return false;
+    p.crouch = false;
+    p.move = { kind: 'vault', t: 0, time: VAULT.time, angle, fromX: p.x, fromY: p.y, toX: landing.x, toY: landing.y, trailAt: -1 };
+    p.vx = 0; p.vy = 0;
+    this.emit('vault', { x: p.x, y: p.y, angle });
+    return true;
+  }
+
+  updateMove(dt, input) {
+    const p = this.player, m = p.move;
+    m.t += dt;
+    p.aiming = false;
+    const aim = input.aim && Number.isFinite(input.aim.x) && Number.isFinite(input.aim.y) ? input.aim : null;
+    const face = () => { p.facing = aim && input.faceAim ? angleTo(p.x, p.y, aim.x, aim.y) : m.angle; };
+    if (m.kind === 'vault') {
+      const u = Math.min(1, m.t / VAULT.time), eased = u < .5 ? 2 * u * u : 1 - Math.pow(2 - 2 * u, 2) / 2;
+      const x = m.fromX + (m.toX - m.fromX) * eased, y = m.fromY + (m.toY - m.fromY) * eased;
+      p.speed = Math.hypot(x - p.x, y - p.y) / Math.max(dt, 1e-6);
+      p.x = x; p.y = y; p.z = Math.sin(Math.PI * u) * VAULT.height;
+      p.running = true; p.moving = true; face();
+      this.ghost(m, .04);
+      if (u >= 1) {
+        p.z = 0;
+        this.noise(p.x, p.y, 2 * this.surface(), 'a heavy landing', 'step');
+        this.puff(p.x, p.y, null, 7);
+        this.emit('land', { x: p.x, y: p.y });
+        this.noteTraces();
+        this.endMove(SPEED.walk);
+      }
+      return;
+    }
+    if (m.kind === 'dash') {
+      // Ease-out: most of the distance goes in the first frames, then it glides.
+      const u = Math.min(1, m.t / DASH.time), travelled = DASH.distance * (1 - (1 - u) * (1 - u));
+      const cos = Math.cos(m.angle), sin = Math.sin(m.angle), before = { x: p.x, y: p.y };
+      let left = travelled - m.done, blocked = false;
+      m.done = travelled;
+      // Small sub-steps, so corner nudges still work and nothing tunnels through a wall.
+      while (left > 1e-6 && !blocked) {
+        const part = Math.min(4, left);
+        left -= part;
+        if (this.slamAhead(cos, sin, m) === 'locked') { blocked = true; break; }
+        const moved = this.moveBody(p, cos * part, sin * part, PLAYER_R, this.playerPassable, 8);
+        blocked = !moved.x && !moved.y;
+      }
+      p.speed = Math.hypot(p.x - before.x, p.y - before.y) / Math.max(dt, 1e-6);
+      p.running = true; p.moving = true; p.crouch = false; face();
+      this.ghost(m, .03);
+      this.noteTraces();
+      if (u >= 1 || blocked) this.endMove(blocked ? 0 : SPEED.run);
+      return;
+    }
+    // Slide: a sprint's speed, low to the floor, bleeding off. The stick steers it a little.
+    const u = Math.min(1, m.t / SLIDE.time);
+    const mx = input.move?.x || 0, my = input.move?.y || 0;
+    if (Math.hypot(mx, my) > .2) m.angle = turnToward(m.angle, Math.atan2(my, mx), SLIDE.turn * dt);
+    // It holds its speed, then bleeds it off at the end: a glide, not a stumble.
+    const speed = Math.max(SPEED.crouch, m.speed * (1 - u * u));
+    const cos = Math.cos(m.angle), sin = Math.sin(m.angle), before = { x: p.x, y: p.y };
+    const moved = this.moveBody(p, cos * speed * dt, sin * speed * dt, PLAYER_R, this.playerPassable, 6);
+    p.vx = moved.x ? cos * speed : 0; p.vy = moved.y ? sin * speed : 0;
+    p.speed = Math.hypot(p.x - before.x, p.y - before.y) / Math.max(dt, 1e-6);
+    p.crouch = true; p.running = false; p.moving = true; face();
+    if (this.fx() < dt * 20) this.puff(p.x - cos * 4, p.y - sin * 4, m.angle + Math.PI, 1);
+    this.ghost(m, .06);
+    this.noteTraces();
+    // Sliding into a guard's legs takes them down.
+    const g = speed > SPEED.walk * .8 && this.guards.find(other => !other.down && !other.grabbed && dist(other, p) < PLAYER_R + GUARD_R + 2);
+    if (g) {
+      this.knockOut(g);
+      g.lastAction = 'swept off their feet';
+      this.noise(g.x, g.y, 2.6, 'a crash', 'scuffle');
+      this.emit('tackle', { guard: g.id, x: g.x, y: g.y });
+      this.endMove(SPEED.crouch * .5);
+      return;
+    }
+    if (u >= 1 || (!moved.x && !moved.y)) this.endMove(Math.min(speed, SPEED.crouch));
+  }
+
+  /** Hands a burst's speed back to ordinary movement along its direction. */
+  endMove(carry = 0) {
+    const p = this.player, m = p.move;
+    if (!m) return;
+    p.move = null; p.z = 0;
+    p.vx = Math.cos(m.angle) * carry; p.vy = Math.sin(m.angle) * carry;
+    if (m.kind === 'dash' || m.kind === 'vault') { p.dashReadyAt = this.t + DASH.cooldown; p.dashEndedAt = this.t; }
+  }
+
+  /**
+   * A dash through a doorway flattens whoever stands just beyond it. A door that has not opened
+   * yet bangs open on the way, loudly. Each doorway counts once per dash.
+   */
+  slamAhead(cos, sin, m) {
+    const p = this.player, probe = { x: p.x + cos * (PLAYER_R + 4), y: p.y + sin * (PLAYER_R + 4) };
+    const door = this.doors.get(index(toTile(probe.x), toTile(probe.y)));
+    if (!door || m.doors?.has(door)) return null;
+    const shut = door.open < .85;
+    if (shut && door.locked && !p.keycard) return 'locked';
+    // Double doors swing together.
+    const leaves = [...this.doors.values()].filter(other => Math.abs(other.tx - door.tx) + Math.abs(other.ty - door.ty) <= 1 && other.locked === door.locked);
+    m.doors = m.doors || new Set();
+    for (const leaf of leaves) m.doors.add(leaf);
+    const cx = leaves.reduce((sum, leaf) => sum + leaf.tx * TILE + 8, 0) / leaves.length, cy = leaves.reduce((sum, leaf) => sum + leaf.ty * TILE + 8, 0) / leaves.length;
+    if (shut) {
+      for (const leaf of leaves) { leaf.open = 1; leaf.slamAt = this.t; }
+      this.noise(cx, cy, 3.6, 'a door slamming', 'slam');
+    }
+    let flattened = 0;
+    for (const g of this.guards) {
+      if (g.down || g.grabbed) continue;
+      const ox = g.x - cx, oy = g.y - cy;
+      if (Math.hypot(ox, oy) > 30 || ox * cos + oy * sin < 2) continue;
+      if (!shut) for (const leaf of leaves) leaf.slamAt = this.t;
+      this.knockOut(g);
+      g.lastAction = 'flattened in a doorway';
+      flattened++;
+    }
+    if (shut || flattened) {
+      this.puff(cx, cy, Math.atan2(sin, cos), 6);
+      this.emit('slam', { x: cx, y: cy, flattened, shut });
+    }
+    return 'through';
+  }
+
+  ghost(m, every) {
+    if (this.t - m.trailAt < every) return;
+    const p = this.player;
+    m.trailAt = this.t;
+    this.trail.push({ x: p.x, y: p.y, z: p.z, facing: p.facing, angle: m.angle, crouch: p.crouch, age: 0 });
+    if (this.trail.length > 8) this.trail.shift();
+  }
+
+  /** Dust kicked up behind a move; `angle` null spreads it all round. */
+  puff(x, y, angle, count) {
+    for (let i = 0; i < count; i++) {
+      const a = angle == null ? this.fx() * Math.PI * 2 : angle + (this.fx() * 2 - 1) * .9;
+      const speed = 14 + this.fx() * 26;
+      this.dust.push({ x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, r: 1.4 + this.fx() * 1.8, age: 0, life: .3 + this.fx() * .25 });
+    }
+    if (this.dust.length > 60) this.dust.splice(0, this.dust.length - 60);
   }
 
   noteTraces() {
@@ -398,6 +644,15 @@ export class ShadowSim {
     this.tracers = this.tracers.filter(tracer => tracer.age < tracer.life);
     for (const slash of this.slashes) slash.age += dt;
     this.slashes = this.slashes.filter(slash => slash.age < slash.life);
+    for (const ghost of this.trail) ghost.age += dt;
+    this.trail = this.trail.filter(ghost => ghost.age < .2);
+    for (const mote of this.dust) {
+      mote.age += dt;
+      const drag = Math.exp(-dt * 7);
+      mote.vx *= drag; mote.vy *= drag;
+      mote.x += mote.vx * dt; mote.y += mote.vy * dt;
+    }
+    this.dust = this.dust.filter(mote => mote.age < mote.life);
   }
 
   /** A guard the knife can reach: unaware from behind, or already on the floor. */
@@ -419,18 +674,18 @@ export class ShadowSim {
     return best;
   }
 
-  /** A cursor-directed lunge: a guard in the knife's forward arc at close range. */
-  knifeTargetAt(aim) {
+  /** A cursor-directed lunge: a guard in the knife's forward arc at close range, further out of a dash. */
+  knifeTargetAt(aim, reach = this.t - this.player.dashEndedAt < .2 ? DASH.reach : 34) {
     const p = this.player;
     if (!aim || !Number.isFinite(aim.x) || !Number.isFinite(aim.y)) return null;
     const angle = angleTo(p.x, p.y, aim.x, aim.y);
-    let best = null, bestD = 34;
+    let best = null, bestD = reach;
     for (const g of this.guards) {
       if (g.dead || g.grabbed || g.hidden || g.carried) continue;
       const d = dist(g, p);
       if (d >= bestD) continue;
       const off = Math.abs(wrapAngle(angleTo(p.x, p.y, g.x, g.y) - angle));
-      if (off > .6) continue;
+      if (off > (reach > 34 ? .5 : .6)) continue;
       if (!walkableLine(p.x, p.y, g.x, g.y, this.playerPassable, PLAYER_R)) continue;
       best = g; bestD = d;
     }
@@ -443,9 +698,17 @@ export class ShadowSim {
     if (p.carrying) { this.emit('hint', { text: 'hands full' }); return; }
     if (p.action) return;
     const target = this.knifeTargetAt(aim) || this.knifeTarget();
-    if (!target) { this.emit('hint', { text: 'no one within knife reach' }); return; }
-    if (aim) p.facing = angleTo(p.x, p.y, aim.x, aim.y);
-    p.action = { kind: 'kill', t: 0, need: target.down ? .36 : .32, target: target.id };
+    const angle = aim && Number.isFinite(aim.x) && Number.isFinite(aim.y) ? angleTo(p.x, p.y, aim.x, aim.y) : p.facing;
+    p.facing = angle;
+    if (!target) {
+      // Nothing in reach: the knife still cuts the air, a short step toward the cursor, and
+      // catches anyone who ends up inside its arc.
+      p.action = { kind: 'swing', t: 0, need: .17, angle, fromX: p.x, fromY: p.y, struck: false };
+      this.slashes.push({ x: p.x, y: p.y, angle, age: 0, life: .16, whiff: true });
+      this.emit('swing', { angle });
+      return;
+    }
+    p.action = { kind: 'kill', t: 0, need: target.down ? .3 : .26, target: target.id, fromX: p.x, fromY: p.y };
     if (!target.down) target.grabbed = true;
     this.emit('knife', { guard: target.id });
   }
@@ -532,6 +795,8 @@ export class ShadowSim {
     this.metrics.bestChain = Math.max(this.metrics.bestChain, chain);
     const points = 120 * chain;
     this.metrics.killPoints += points;
+    // A round throws the body back a step.
+    if (how === 'gun') this.moveBody(g, Math.cos(p.facing) * 7, Math.sin(p.facing) * 7, GUARD_R, this.guardPassable);
     this.spawnBlood(g.x, g.y, p.facing, how);
     this.emit('kill', { guard: g.id, how, chain, points });
     this.witnessKill(g);
@@ -585,7 +850,7 @@ export class ShadowSim {
     if (p.carrying) { this.dropBody(); return; }
     const target = this.takedownTarget();
     if (target) {
-      p.action = { kind: 'takedown', t: 0, need: .55, target: target.id };
+      p.action = { kind: 'takedown', t: 0, need: .38, target: target.id, fromX: p.x, fromY: p.y };
       target.grabbed = true;
       return;
     }
@@ -624,16 +889,39 @@ export class ShadowSim {
     return best;
   }
 
+  /** The first 90 ms of a strike closes the gap, eased out; then the operative holds. */
+  lunge(action, toX, toY, stop) {
+    const p = this.player, u = Math.min(1, action.t / .09), eased = 1 - Math.pow(1 - u, 3);
+    const d = Math.hypot(toX - action.fromX, toY - action.fromY) || 1, reach = Math.max(0, d - stop);
+    const tx = action.fromX + (toX - action.fromX) / d * reach * eased, ty = action.fromY + (toY - action.fromY) / d * reach * eased;
+    this.moveBody(p, tx - p.x, ty - p.y, PLAYER_R, this.playerPassable);
+  }
+
   updateAction(dt, input) {
     const p = this.player, action = p.action;
     p.moving = false; p.speed = 0; p.vx = 0; p.vy = 0;
+    if (action.kind === 'swing') {
+      action.t += dt;
+      this.lunge(action, action.fromX + Math.cos(action.angle) * 10, action.fromY + Math.sin(action.angle) * 10, 0);
+      if (!action.struck && action.t >= .07) {
+        action.struck = true;
+        const g = this.guards.find(other => !other.dead && !other.grabbed && !other.hidden && !other.carried && dist(other, p) < 21
+          && Math.abs(wrapAngle(angleTo(p.x, p.y, other.x, other.y) - action.angle)) < .95);
+        if (g) this.killGuard(g, 'knife');
+      }
+      if (action.t >= action.need) p.action = null;
+      return;
+    }
     if (action.kind === 'kill') {
       const g = this.guards.find(item => item.id === action.target);
       if (!g || g.dead) { p.action = null; return; }
       action.t += dt;
+      if (action.fromX != null) this.lunge(action, g.x, g.y, 9);
       p.facing = angleTo(p.x, p.y, g.x, g.y);
       if (action.t >= action.need) {
         g.grabbed = false;
+        // A lunge a wall stopped short does not land.
+        if (dist(g, p) > 30) { p.action = null; this.emit('hint', { text: 'out of reach' }); return; }
         this.killGuard(g, 'knife');
         p.action = null;
       }
@@ -643,6 +931,7 @@ export class ShadowSim {
       const g = this.guards.find(item => item.id === action.target);
       if (!g || g.down) { p.action = null; return; }
       action.t += dt;
+      if (action.fromX != null) this.lunge(action, g.x, g.y, 9);
       p.facing = angleTo(p.x, p.y, g.x, g.y);
       if (action.t >= action.need) {
         g.grabbed = false; this.knockOut(g);
@@ -747,10 +1036,14 @@ export class ShadowSim {
     for (const door of this.doors.values()) {
       const cx = door.tx * TILE + 8, cy = door.ty * TILE + 8;
       let want = false;
-      if (!p.locker && Math.hypot(p.x - cx, p.y - cy) < 21 && (!door.locked || p.keycard)) want = true;
+      // A door opens ahead of the operative in proportion to the speed they come at it, so walking
+      // or sprinting through never meets a closed door. A dash is too quick for it: that slams it.
+      const d = Math.hypot(p.x - cx, p.y - cy);
+      const approach = p.move || d < 1 ? 0 : Math.max(0, (p.vx * (cx - p.x) + p.vy * (cy - p.y)) / d);
+      if (!p.locker && d < 21 + approach * .24 && (!door.locked || p.keycard)) want = true;
       if (!want) for (const g of this.guards) if (!g.down && Math.hypot(g.x - cx, g.y - cy) < 23) { want = true; break; }
       if (!want) for (const g of this.guards) if (g.down && toTile(g.x) === door.tx && toTile(g.y) === door.ty) { want = true; break; }
-      door.open = Math.max(0, Math.min(1, door.open + (want ? 4.5 : -2.2) * dt));
+      door.open = Math.max(0, Math.min(1, door.open + (want ? 7.5 : -2.2) * dt));
     }
   }
 
@@ -1930,6 +2223,8 @@ export class ShadowSim {
 
   updateCapture(dt) {
     const p = this.player;
+    // Nobody gets a grip on a dashing or vaulting body; they still see it.
+    if (p.move && p.move.kind !== 'slide') { p.caught = Math.max(0, p.caught - dt * 2); return; }
     let close = false;
     for (const g of this.guards) {
       if (g.down || !g.sees || g.freeze > 0) continue;

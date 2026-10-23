@@ -65,6 +65,11 @@ function createSound(enabled) {
     clink() { tone(1900, 0, .05, 'triangle', .04); tone(2400, .05, .04, 'triangle', .025); },
     thud() { tone(120, 0, .18, 'sine', .09, -60); },
     knife() { tone(2600, 0, .05, 'triangle', .045, -1800); tone(420, .03, .1, 'sawtooth', .03, -180); },
+    swing() { tone(1700, 0, .07, 'triangle', .025, -1300); },
+    dash() { tone(260, 0, .12, 'sawtooth', .022, 380); tone(900, .02, .08, 'triangle', .02, -500); },
+    slide() { tone(180, 0, .28, 'sawtooth', .018, -90); },
+    land() { tone(90, 0, .12, 'sine', .07, -30); },
+    slam() { tone(70, 0, .22, 'square', .07, -40); tone(160, 0, .1, 'sawtooth', .05, -100); },
     gun() { tone(120, 0, .2, 'sawtooth', .13, -80); tone(1500, 0, .035, 'square', .07, -1100); tone(2200, .01, .025, 'triangle', .04, -900); },
     kill() { tone(100, 0, .14, 'sine', .1, -50); tone(320, .02, .08, 'triangle', .05, -120); },
     pickup() { tone(660, 0, .07, 'triangle', .05); tone(990, .07, .1, 'triangle', .05); },
@@ -266,9 +271,11 @@ export function mountShadow(body, api = {}) {
 
   function controlsList() {
     return h('ul', { class: 'shadow-controls' },
-      h('li', { text: 'WASD / arrows move · Shift run · C crouch' }),
-      h('li', { text: 'Mouse aims · left click knifes · hold right click to draw the pistol, left click fires' }),
-      h('li', { text: 'E or Space: take down without killing, drag, hide, use · hold to download' }),
+      h('li', { text: 'WASD / arrows move · Shift sprint · C crouch' }),
+      h('li', { text: 'Space dash · dash at crates to vault them, through a door to slam it into whoever is behind' }),
+      h('li', { text: 'Sprint, then C: slide low, and sweep a guard off their feet' }),
+      h('li', { text: 'Mouse aims · left click knifes, further straight out of a dash · hold right click to draw the pistol, left click fires' }),
+      h('li', { text: 'E: take down without killing, drag, hide, use · hold to download' }),
       h('li', { text: 'Q knock on a wall · F throw a pebble at the cursor' }),
       h('li', { text: 'No mouse: X knife · G pistol, which snaps to the guard ahead · Tab intel · P pause' }));
   }
@@ -364,8 +371,9 @@ export function mountShadow(body, api = {}) {
     const button = (label, action, extra = '') => h('button', { type: 'button', class: 'shadow-touch-key ' + extra, 'data-action': action }, label);
     return h('div', { class: 'shadow-touch', role: 'group', 'aria-label': 'Touch controls' }, stick,
       h('div', { class: 'shadow-touch-keys' },
-        button('act', 'act', 'primary-key'), button('crouch', 'crouch'), button('run', 'run'), button('intel', 'intel'),
-        button('knife', 'knife', 'danger-key'), button('pistol', 'shoot', 'danger-key'), button('knock', 'knock'), button('throw', 'throw')));
+        button('act', 'act', 'primary-key'), button('dash', 'dash', 'primary-key'), button('crouch', 'crouch'), button('run', 'run'),
+        button('knife', 'knife', 'danger-key'), button('pistol', 'shoot', 'danger-key'), button('knock', 'knock'), button('throw', 'throw'),
+        button('intel', 'intel', 'wide-key')));
   }
 
   function startLoop(sim, view, startPaused = false) {
@@ -374,9 +382,11 @@ export function mountShadow(body, api = {}) {
     const controller = new AbortController(), signal = controller.signal;
     const camView = { x: 0, y: 0, snap: true };
     const keys = { up: false, down: false, left: false, right: false, run: false };
-    const edges = { crouch: false, interact: false, knife: false, shoot: false, knock: false, throw: false };
+    // With both keys of an axis held, the one pressed last wins: a quick reversal never stalls at zero.
+    const latest = { x: 0, y: 0 };
+    const edges = { crouch: false, interact: false, knife: false, shoot: false, knock: false, throw: false, dash: false };
     const touch = { x: 0, y: 0, run: false, act: false };
-    const state = { intel: false, selected: null, paused: startPaused, pointer: null, aimHold: false, held: false, toastUntil: 0, lastPaint: 0, alarmAt: 0, ended: false, shake: 0, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches };
+    const state = { intel: false, selected: null, paused: startPaused, pointer: null, aimHold: false, held: false, toastUntil: 0, lastPaint: 0, alarmAt: 0, ended: false, shake: 0, hitstop: 0, kick: { x: 0, y: 0 }, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches };
     if (matchMedia('(prefers-reduced-motion: reduce)').addEventListener) {
       const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
       const onMotion = event => { state.reduceMotion = event.matches; };
@@ -439,10 +449,16 @@ export function mountShadow(body, api = {}) {
       if (onControl && [' ', 'Spacebar', 'Enter', 'Tab'].includes(event.key)) return;
       if (onControl && !['Escape', 'p', 'P'].includes(event.key)) refs.stage.focus({ preventScroll: true });
       const key = keyFor(event);
-      if (key) { keys[key] = true; event.preventDefault(); return; }
+      if (key) {
+        keys[key] = true;
+        if (key === 'left' || key === 'right') latest.x = key === 'left' ? -1 : 1;
+        if (key === 'up' || key === 'down') latest.y = key === 'up' ? -1 : 1;
+        event.preventDefault(); return;
+      }
       const k = event.key;
       if (k === 'c' || k === 'C') { if (!event.repeat) edges.crouch = true; event.preventDefault(); }
-      else if (k === 'e' || k === 'E' || k === ' ' || k === 'Spacebar') { if (!event.repeat) edges.interact = true; state.held = true; event.preventDefault(); }
+      else if (k === ' ' || k === 'Spacebar') { if (!event.repeat) edges.dash = true; event.preventDefault(); }
+      else if (k === 'e' || k === 'E') { if (!event.repeat) edges.interact = true; state.held = true; event.preventDefault(); }
       else if (k === 'x' || k === 'X') { if (!event.repeat) edges.knife = true; event.preventDefault(); }
       else if (k === 'g' || k === 'G') { if (!event.repeat) edges.shoot = true; event.preventDefault(); }
       else if (k === 'q' || k === 'Q') { if (!event.repeat) edges.knock = true; event.preventDefault(); }
@@ -454,7 +470,7 @@ export function mountShadow(body, api = {}) {
       const key = keyFor(event);
       if (key) keys[key] = false;
       const k = event.key;
-      if (k === 'e' || k === 'E' || k === ' ' || k === 'Spacebar') state.held = false;
+      if (k === 'e' || k === 'E') state.held = false;
     }, { signal });
     const clearInput = () => {
       Object.keys(keys).forEach(key => { keys[key] = false; });
@@ -488,6 +504,8 @@ export function mountShadow(body, api = {}) {
       if (pointerType !== 'mouse') return;
       pointAt(event);
       if (event.button === 2) { state.aimHold = true; return; }
+      // The thumb button dashes; neither side button may navigate away mid-mission.
+      if (event.button === 3 || event.button === 4) { event.preventDefault(); if (event.button === 3) edges.dash = true; return; }
       if (event.button !== 0) return;
       if (state.intel) {
         // With intel open, clicking a guard inspects him; clicking elsewhere still strikes.
@@ -498,7 +516,10 @@ export function mountShadow(body, api = {}) {
       }
       if (state.aimHold) edges.shoot = true; else edges.knife = true;
     }, { signal });
-    addEventListener('mouseup', event => { if (event.button === 2) state.aimHold = false; }, { signal });
+    addEventListener('mouseup', event => {
+      if (event.button === 2) state.aimHold = false;
+      if ((event.button === 3 || event.button === 4) && event.target === canvas) event.preventDefault();
+    }, { signal });
 
     // Touch: a stick on the left, keys on the right.
     const stick = view.touch.querySelector('.shadow-stick'), knob = stick.querySelector('.shadow-stick-knob');
@@ -523,6 +544,7 @@ export function mountShadow(body, api = {}) {
         event.preventDefault(); button.classList.add('held');
         if (action === 'act') { edges.interact = true; touch.act = true; }
         else if (action === 'crouch') edges.crouch = true;
+        else if (action === 'dash') edges.dash = true;
         else if (action === 'knife') edges.knife = true;
         else if (action === 'shoot') edges.shoot = true;
         else if (action === 'run') { touch.run = !touch.run; button.classList.toggle('on', touch.run); }
@@ -558,13 +580,14 @@ export function mountShadow(body, api = {}) {
     live.togglePause = togglePauseLocal;
 
     function input() {
-      const move = { x: (keys.right ? 1 : 0) - (keys.left ? 1 : 0) + touch.x, y: (keys.down ? 1 : 0) - (keys.up ? 1 : 0) + touch.y };
+      const axis = (minus, plus, newer) => minus && plus ? newer : (plus ? 1 : 0) - (minus ? 1 : 0);
+      const move = { x: axis(keys.left, keys.right, latest.x) + touch.x, y: axis(keys.up, keys.down, latest.y) + touch.y };
       const value = {
         move, run: keys.run || touch.run, crouch: edges.crouch, interact: edges.interact, interactHeld: state.held || touch.act,
-        knife: edges.knife, shoot: edges.shoot, knock: edges.knock, throw: edges.throw,
+        knife: edges.knife, shoot: edges.shoot, knock: edges.knock, throw: edges.throw, dash: edges.dash,
         aim: state.pointer ? toWorld(state.pointer) : null, aimHold: state.aimHold, faceAim: Boolean(state.pointer),
       };
-      edges.crouch = edges.interact = edges.knife = edges.shoot = edges.knock = edges.throw = false;
+      edges.crouch = edges.interact = edges.knife = edges.shoot = edges.knock = edges.throw = edges.dash = false;
       return value;
     }
 
@@ -582,13 +605,31 @@ export function mountShadow(body, api = {}) {
         else if (event.type === 'alarm') { sound.alarm(); refs.stage.classList.remove('flash'); void refs.stage.offsetWidth; refs.stage.classList.add('flash'); }
         else if (event.type === 'shot') { sound.gun(); state.shake = Math.min(1, state.shake + .7); }
         else if (event.type === 'knife') sound.knife();
+        else if (event.type === 'swing') sound.swing();
         else if (event.type === 'kill') {
           sound.kill();
           state.shake = Math.min(1, state.shake + .55);
+          // A short freeze on the hit sells it: the frame holds, then the world moves again.
+          state.hitstop = Math.max(state.hitstop, event.how === 'gun' ? .035 : .055);
           refs.stage.classList.remove('killflash'); void refs.stage.offsetWidth; refs.stage.classList.add('killflash');
           toast(`${event.how === 'gun' ? 'shot' : 'knife'} kill · ×${event.chain} · +${event.points}`, 'kill');
         }
-        else if (event.type === 'takedown') sound.thud();
+        else if (event.type === 'takedown') { sound.thud(); state.hitstop = Math.max(state.hitstop, .05); }
+        else if (event.type === 'dash' || event.type === 'vault') {
+          sound.dash();
+          state.kick.x += Math.cos(event.angle) * 7; state.kick.y += Math.sin(event.angle) * 7;
+        }
+        else if (event.type === 'slide') sound.slide();
+        else if (event.type === 'land') sound.land();
+        else if (event.type === 'slam') {
+          if (event.shut) sound.slam();
+          state.shake = Math.min(1, state.shake + (event.flattened ? .7 : .4));
+          if (event.flattened) {
+            state.hitstop = Math.max(state.hitstop, .07);
+            toast(`${event.shut ? 'door slam' : 'doorway charge'}${event.flattened > 1 ? ` · ${event.flattened} down` : ''}`, 'kill');
+          }
+        }
+        else if (event.type === 'tackle') { state.shake = Math.min(1, state.shake + .45); toast('swept', 'kill'); }
         else if (event.type === 'objective') refs.objective.textContent = event.text;
         else if (event.type === 'misread' && state.intel) toast(`prediction failed: ${zoneName(event.zone)}, not ${zoneName(event.predicted)}`, 'intel');
         else if (event.type === 'finish') { state.ended = true; }
@@ -601,10 +642,13 @@ export function mountShadow(body, api = {}) {
       const dt = Math.min(.1, Math.max(0, (now - last) / 1000));
       last = now;
       if (!state.paused && !document.hidden && sim.status === 'playing') {
-        acc += dt;
-        let steps = 0;
-        while (acc >= STEP && steps < 6) { snapshot(); sim.step(STEP, input()); acc -= STEP; steps++; }
-        if (steps === 6) acc = 0;
+        if (state.hitstop > 0) { state.hitstop = Math.max(0, state.hitstop - dt); acc = 0; }
+        else {
+          acc += dt;
+          let steps = 0;
+          while (acc >= STEP && steps < 6) { snapshot(); sim.step(STEP, input()); acc -= STEP; steps++; }
+          if (steps === 6) acc = 0;
+        }
       }
       handleEvents();
       const alpha = state.paused ? 1 : Math.min(1, acc / STEP);
@@ -623,11 +667,24 @@ export function mountShadow(body, api = {}) {
       }
       sim.player.facing = drawn.facing;
       try {
+        // The view leans toward the cursor, further with the pistol drawn, so you see where you are going.
+        // The lean comes from the cursor's place on screen, not in the world, so it cannot feed on itself.
+        if (state.pointer) {
+          const rect = canvas.getBoundingClientRect(), w = camView.w || VIEW_W, h = camView.h || VIEW_H;
+          const ox = ((state.pointer.clientX - rect.left) / rect.width - .5) * w, oy = ((state.pointer.clientY - rect.top) / rect.height - .5) * h;
+          const gain = state.aimHold ? .55 : .26;
+          camView.lean = { x: Math.max(-w * .3, Math.min(w * .3, ox * gain)), y: Math.max(-h * .3, Math.min(h * .3, oy * gain)) };
+        } else camView.lean = null;
         camera(sim, camView, dt);
+        // A dash nudges the view along it for a moment.
+        const settle = Math.exp(-dt * 9);
+        state.kick.x *= settle; state.kick.y *= settle;
+        if (state.reduceMotion) state.kick.x = state.kick.y = 0;
         state.shake = state.reduceMotion ? 0 : Math.max(0, state.shake - dt * 2.6);
-        const shake = state.shake > .01 ? { x: (Math.random() * 2 - 1) * state.shake * 5, y: (Math.random() * 2 - 1) * state.shake * 4 } : null;
+        const jitter = state.shake > .01 ? { x: (Math.random() * 2 - 1) * state.shake * 5, y: (Math.random() * 2 - 1) * state.shake * 4 } : { x: 0, y: 0 };
+        const shake = jitter.x || jitter.y || Math.abs(state.kick.x) > .05 || Math.abs(state.kick.y) > .05 ? { x: jitter.x + state.kick.x, y: jitter.y + state.kick.y } : null;
         const jammed = !sim.rules.scannerInAlert && (sim.net.phase === 'alert' || sim.net.phase === 'search');
-        drawWorld(ctx, sim, camView, { intel: state.intel, selected: state.selected, aim: aimPoint, aiming: Boolean(aimPoint), aimHold: state.aimHold, target: reachable?.id || null, jammed, shake, compact: innerWidth <= 840 });
+        drawWorld(ctx, sim, camView, { intel: state.intel, selected: state.selected, aim: aimPoint, aiming: Boolean(aimPoint), aimHold: state.aimHold, target: reachable?.id || null, jammed, shake, compact: innerWidth <= 840, reduceMotion: state.reduceMotion });
       } finally {
         for (const { body, x, y, facing } of actual) { body.x = x; body.y = y; body.facing = facing; }
       }
@@ -646,7 +703,7 @@ export function mountShadow(body, api = {}) {
       const label = phase === 'alert' ? 'alert' : phase === 'search' ? `evasion ${clock(Math.max(0, net.searchUntil - sim.t))}` : phase === 'lockdown' ? 'lockdown' : phase === 'caution' || phase === 'returning' ? 'caution' : '';
       if (refs.phase.dataset.text !== label) { refs.phase.dataset.text = label; refs.phase.textContent = label; refs.phase.className = 'shadow-phase ' + phase; }
       refs.stage.dataset.phase = phase;
-      const stance = p.locker ? 'locker' : p.hidden === 'duct' ? 'in duct' : p.hidden === 'grass' ? 'in grass' : p.carrying ? 'drag' : p.crouch ? 'crouch' : p.running ? 'run' : 'stand';
+      const stance = p.locker ? 'locker' : p.move ? p.move.kind : p.hidden === 'duct' ? 'in duct' : p.hidden === 'grass' ? 'in grass' : p.carrying ? 'drag' : p.crouch ? 'crouch' : p.running ? 'sprint' : 'stand';
       refs.stance.classList.toggle('hidden', Boolean(p.locker || p.hidden));
       if (refs.stance.textContent !== stance) refs.stance.textContent = stance;
       refs.exposure.style.transform = `scaleX(${p.locker ? 0 : p.visibility})`;
