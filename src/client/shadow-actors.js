@@ -10,8 +10,12 @@ const clamp = x => Math.max(0, Math.min(1, x));
 const ease = x => (x = clamp(x), x * x * (3 - 2 * x));
 const loaded = image => image?.complete && image.naturalWidth > 0;
 
+/** The sprite sheet image for an actor kind, for the first-person billboard pass. */
+export function actorImage(kind, glow = false) { return images[kind]?.[glow ? 'glow' : 'body'] || null; }
+export { loaded as actorImageLoaded };
+
 /** Pure selection, also useful for previews. All time values are seconds. */
-export function actorFrame(sim, actor, time = sim.t || 0) {
+export function actorFrame(sim, actor, time = sim.t || 0, viewAngle = null) {
   const player = actor === sim.player, kind = player ? 'operative' : 'guard';
   let name = 'idle', progress = null, clock = actor.anim ?? time, angle = actor.facing || 0;
   if (player) {
@@ -36,7 +40,7 @@ export function actorFrame(sim, actor, time = sim.t || 0) {
     else if (actor.moving) name = actor.groggy > 0 ? 'groggyWalk' : actor.sees || actor.state === 'alert' ? 'run' : 'walk';
   }
   const clip = atlas.actors[kind].animations[name] || atlas.actors[kind].animations.idle;
-  const direction = ((Math.round(angle / (Math.PI / 4)) % 8) + 8) % 8;
+  const direction = ((Math.round((viewAngle ?? angle) / (Math.PI / 4)) % 8) + 8) % 8;
   const frame = progress == null ? Math.floor(((clock % clip.duration + clip.duration) % clip.duration) / clip.duration * clip.frames) : Math.min(clip.frames - 1, Math.floor(clamp(progress) * clip.frames));
   const index = clip.start + direction * clip.frames + frame;
   return { kind, name, direction, frame, sx: index % atlas.columns * atlas.cell[0], sy: Math.floor(index / atlas.columns) * atlas.cell[1] };

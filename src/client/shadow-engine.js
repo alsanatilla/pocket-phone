@@ -94,7 +94,7 @@ export class ShadowSim {
       x: START.x, y: START.y, facing: -Math.PI / 2, crouch: false, running: false, moving: false, speed: 0, vx: 0, vy: 0, aiming: false,
       hidden: null, locker: null, carrying: null, keycard: false, data: false, pebbles: this.rules.pebbles,
       step: 0, action: null, anim: 0, visibility: 0, noise: 0, caught: 0, cameraOff: false,
-      ammo: 3, maxAmmo: 6, shotAt: -99, recoil: 0,
+      ammo: 17, maxAmmo: 33, shotAt: -99, nextShotAt: 0, recoil: 0,
       move: null, dashReadyAt: 0, dashEndedAt: -9, buffer: null, z: 0, pressing: 0,
     };
     this.doors = new Map();
@@ -308,6 +308,9 @@ export class ShadowSim {
     // A body picked up by holding the strike button is dropped when the button is let go.
     if (p.dragHeld && p.carrying && !input.strikeHeld) this.dropBody();
     if (input.shoot) this.shoot(input.aim);
+    // The Glock 18's selector is on automatic: hold the trigger while aiming
+    // and it keeps firing at the pistol's cycle rate.
+    else if (input.shootHeld && input.aimHold && !p.action && p.ammo > 0 && this.t >= p.nextShotAt) this.shoot(input.aim);
     if (input.knock) this.knock();
     if (input.throw) this.throwPebble(input.aim);
     if (p.action) return;
@@ -737,7 +740,7 @@ export class ShadowSim {
       const assist = this.aimAssist(angle);
       if (assist) angle = angleTo(p.x, p.y, assist.x, assist.y);
     }
-    p.facing = angle; p.ammo--; p.shotAt = this.t; p.recoil = .18;
+    p.facing = angle; p.ammo--; p.shotAt = this.t; p.nextShotAt = this.t + .1; p.recoil = .18;
     this.metrics.shots++;
     const range = 9.5 * TILE;
     let end = { x: p.x + Math.cos(angle) * range, y: p.y + Math.sin(angle) * range };
