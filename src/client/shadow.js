@@ -284,11 +284,11 @@ export function mountShadow(body, api = {}) {
       h('li', { text: 'WASD / arrows move · Shift sprint · C crouch' }),
       h('li', { text: 'Space dash · dash at crates to vault them, through a door to slam it into whoever is behind' }),
       h('li', { text: 'Sprint, then C: slide low, and sweep a guard off their feet' }),
-      h('li', { text: 'Mouse aims · left click knifes, further straight out of a dash · hold right click to draw the pistol, left click fires' }),
+      h('li', { text: 'Mouse aims · left click knifes, further straight out of a dash · hold right click to raise the Glock 18, left click fires, hold to empty the magazine' }),
       h('li', { text: 'E: take down without killing, drag, hide, use · hold to download' }),
       h('li', { text: 'Q knock on a wall · F throw a pebble at the cursor' }),
       h('li', { text: 'V: switch between first-person and tactical views · click the field to look in first person' }),
-      h('li', { text: 'No mouse: X knife · G pistol, which snaps to the guard ahead · Tab intel · P pause' }));
+      h('li', { text: 'No mouse: X knife · G Glock 18, which snaps to the guard ahead · Tab intel · P pause' }));
   }
 
   function help() {
@@ -416,7 +416,7 @@ export function mountShadow(body, api = {}) {
     const latest = { x: 0, y: 0 };
     const edges = { crouch: false, interact: false, knife: false, shoot: false, knock: false, throw: false, dash: false };
     const touch = { x: 0, y: 0, run: false, act: false };
-    const state = { intel: false, selected: null, paused: startPaused, pointer: null, aimHold: false, held: false, toastUntil: 0, lastPaint: 0, alarmAt: 0, ended: false, shake: 0, hitstop: 0, planUntil: 0, fps: settings.view === 'first', kick: { x: 0, y: 0 }, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches };
+    const state = { intel: false, selected: null, paused: startPaused, pointer: null, aimHold: false, fireHeld: false, held: false, toastUntil: 0, lastPaint: 0, alarmAt: 0, ended: false, shake: 0, hitstop: 0, planUntil: 0, fps: settings.view === 'first', kick: { x: 0, y: 0 }, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches };
     if (matchMedia('(prefers-reduced-motion: reduce)').addEventListener) {
       const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
       const onMotion = event => { state.reduceMotion = event.matches; };
@@ -506,7 +506,7 @@ export function mountShadow(body, api = {}) {
     const clearInput = () => {
       Object.keys(keys).forEach(key => { keys[key] = false; });
       Object.keys(edges).forEach(key => { edges[key] = false; });
-      state.held = false; state.aimHold = false; touch.x = touch.y = 0; touch.act = false; touch.run = false;
+      state.held = false; state.aimHold = false; state.fireHeld = false; touch.x = touch.y = 0; touch.act = false; touch.run = false;
       view.touch.querySelectorAll('.held, .on').forEach(button => button.classList.remove('held', 'on'));
       const knob = view.touch.querySelector('.shadow-stick-knob');
       if (knob) knob.style.transform = '';
@@ -544,7 +544,7 @@ export function mountShadow(body, api = {}) {
       }
     }, { signal });
     document.addEventListener('pointerlockchange', () => {
-      if (state.fps && document.pointerLockElement !== canvas) toast('click the field to look', 'muted');
+      if (state.fps && document.pointerLockElement !== canvas) { state.fireHeld = false; toast('click the field to look', 'muted'); }
     }, { signal });
     canvas.addEventListener('pointerleave', () => { state.pointer = null; }, { signal });
     canvas.addEventListener('contextmenu', event => event.preventDefault(), { signal });
@@ -574,10 +574,12 @@ export function mountShadow(body, api = {}) {
         for (const g of sim.guards) { const d = Math.hypot(g.x - point.x, g.y - point.y); if (d < bestD) { best = g; bestD = d; } }
         if (best && best !== sim.takedownTarget()) { state.selected = best.id; paintSide(true); return; }
       }
+      if (event.button === 0) state.fireHeld = true;
       if (state.aimHold) edges.shoot = true; else edges.knife = true;
     }, { signal });
     addEventListener('mouseup', event => {
       if (event.button === 2) state.aimHold = false;
+      if (event.button === 0) state.fireHeld = false;
       if ((event.button === 3 || event.button === 4) && event.target === canvas) event.preventDefault();
     }, { signal });
 
@@ -671,7 +673,7 @@ export function mountShadow(body, api = {}) {
       }
       const value = {
         move, run: keys.run || touch.run, crouch: edges.crouch, interact: edges.interact, interactHeld: state.held || touch.act,
-        knife: edges.knife, shoot: edges.shoot, knock: edges.knock, throw: edges.throw, dash: edges.dash,
+        knife: edges.knife, shoot: edges.shoot, shootHeld: state.fireHeld, knock: edges.knock, throw: edges.throw, dash: edges.dash,
         aim, aimHold: state.aimHold, faceAim: state.fps || Boolean(state.pointer),
       };
       edges.crouch = edges.interact = edges.knife = edges.shoot = edges.knock = edges.throw = edges.dash = false;
@@ -829,7 +831,7 @@ export function mountShadow(body, api = {}) {
         refs.items.dataset.state = items;
         refs.items.replaceChildren(...[
           h('span', { class: 'shadow-item', title: 'Pebbles (F)' }, h('b', { text: '●' }), `×${p.pebbles}`),
-          h('span', { class: 'shadow-item' + (p.ammo ? '' : ' empty'), title: 'Pistol rounds (G)' }, h('b', { text: '▮' }), `×${p.ammo}`),
+          h('span', { class: 'shadow-item' + (p.ammo ? '' : ' empty'), title: 'Glock 18 rounds (G) · hold fire to empty the magazine' }, h('b', { text: '▮' }), `×${p.ammo}`),
           sim.metrics.kills ? h('span', { class: 'shadow-item kill', title: 'Guards killed' }, h('b', { text: '✕' }), `×${sim.metrics.kills}`) : null,
           chain > 1 ? h('span', { class: 'shadow-item chain', title: 'Kill chain' }, h('b', { text: '»' }), `×${chain}`) : null,
           p.keycard ? h('span', { class: 'shadow-item on', title: 'Lab keycard' }, h('b', { text: '▭' }), 'keycard') : null,

@@ -595,6 +595,16 @@ test('the knife kills silently, leaves blood and feeds the pistol from the body'
   assert.ok(sim.events.some(event => event.type === 'kill'), 'the UI receives a kill event');
 });
 
+test('the Glock 18 keeps firing while the trigger is held', () => {
+  const sim = new ShadowSim({ seed: 42, mode: 'baseline' });
+  quiet(sim);
+  sim.noCapture = true;
+  sim.player.ammo = 3;
+  for (let i = 0; i < 30; i++) sim.step(1 / 60, { aimHold: true, shootHeld: true, aim: { x: sim.player.x + 120, y: sim.player.y } });
+  assert.equal(sim.player.ammo, 0, 'the magazine empties');
+  assert.ok(sim.metrics.shots >= 3, 'the selector is on automatic');
+});
+
 test('the pistol is loud, one shot kills and the shot creates a sound event', () => {
   const sim = new ShadowSim({ seed: 42, mode: 'commander', remote: jev });
   quiet(sim);

@@ -7,6 +7,7 @@ import { TILE, COLS, ROWS, PROPS, kindAt, tileAt, toTile, zoneOfTile, ZONE_BY_ID
 import { wrapAngle } from './shadow-nav.js';
 import { actorFrame, actorImage, actorImageLoaded } from './shadow-actors.js';
 import { SHADOW_SPRITES } from '../shared/shadow-sprites.js';
+import { SHADOW_WEAPONS } from '../shared/shadow-weapons.js';
 import { PROP_SPRITES, PROP_SHEET } from '../shared/shadow-props.js';
 
 export const FPS_FOV = 68 * Math.PI / 180;
@@ -27,6 +28,8 @@ const SECTOR_WALL = {
 
 const propImage = typeof Image !== 'undefined' ? new Image() : null;
 if (propImage) propImage.src = PROP_SHEET;
+const weaponImage = typeof Image !== 'undefined' ? new Image() : null;
+if (weaponImage) weaponImage.src = SHADOW_WEAPONS.url;
 
 const rgb = (c, shade = 1) => `rgb(${Math.max(0, Math.min(255, Math.round(c[0] * shade)))},${Math.max(0, Math.min(255, Math.round(c[1] * shade)))},${Math.max(0, Math.min(255, Math.round(c[2] * shade)))})`;
 
@@ -143,7 +146,7 @@ function drawProps(ctx, sim, yaw, W, H, horizon, zbuf, time) {
   }
 }
 
-function drawWeapon(ctx, p, W, H, time, opts) {
+function drawFallbackWeapon(ctx, p, W, H, time, opts) {
   const reduce = Boolean(opts.reduceMotion);
   const moving = p.moving ? 1 : 0;
   const bob = reduce ? 0 : Math.sin(p.anim * (p.running ? 17 : 9)) * 3 * moving + Math.sin(time * 2.1) * 1.2;
@@ -172,6 +175,53 @@ function drawWeapon(ctx, p, W, H, time, opts) {
     ctx.fillStyle = '#2a3032'; ctx.fillRect(-8, 1, 16, 8);
   }
   ctx.restore();
+}
+
+function drawWeaponViewmodel(ctx, sim, p, W, H, time, opts) {
+  const image = weaponImage;
+  if (!image?.complete || !image.naturalWidth) { drawFallbackWeapon(ctx, p, W, H, time, opts); return; }
+  const shotAge = time - (p.shotAt ?? -99);
+  let name = 'idle', progress = null;
+  if (time < .55) { name = 'draw'; progress = time / .55; }
+  else if (shotAge >= 0 && shotAge < .32) { name = 'fire'; progress = shotAge / .32; }
+  else if (p.aiming || opts.aiming) name = 'aim';
+  else if (p.move?.kind === 'sprint' || p.running) name = 'sprint';
+  else if (p.moving) name = 'walk';
+  const clip = SHADOW_WEAPONS.animations[name] || SHADOW_WEAPONS.animations.idle;
+  const frames = clip.frames;
+  const frame = progress != null
+    ? Math.min(frames - 1, Math.floor(Math.max(0, Math.min(1, progress)) * frames))
+    : Math.floor((((time % clip.duration) + clip.duration) % clip.duration) / clip.duration * frames);
+  const index = clip.start + frame;
+  const cellW = SHADOW_WEAPONS.cell[0], cellH = SHADOW_WEAPONS.cell[1];
+  const sx = (index % SHADOW_WEAPONS.columns) * cellW;
+  const sy = Math.floor(index / SHADOW_WEAPONS.columns) * cellH;
+  const scale = H / 760;
+  const width = cellW * scale, height = cellH * scale;
+  const reduce = Boolean(opts.reduceMotion);
+  const bob = reduce ? 0 : (p.moving ? Math.sin(p.anim * (p.running ? 15 : 8)) * (p.running ? 9 : 5) : Math.sin(time * 2.1) * 2.2);
+  const sway = reduce ? 0 : Math.sin(time * 1.35) * 3.2;
+  let left = W * .78 - SHADOW_WEAPONS.anchor[0] * scale + sway;
+  let top = H * .82 - SHADOW_WEAPONS.anchor[1] * scale + bob;
+  if (name === 'aim') { left += W * .045; top -= H * .055; }
+  if (shotAge >= 0 && shotAge < .16) { top -= (1 - shotAge / .16) * 9; left += (1 - shotAge / .16) * 4; }
+  ctx.save();
+  ctx.globalAlpha = .98;
+  ctx.drawImage(image, sx, sy, cellW, cellH, left, top, width, height);
+  ctx.restore();
+  // A hot muzzle bloom sits over the baked flash; it is what the room sees.
+  if (shotAge >= 0 && shotAge < .1) {
+    const mx = left + width * .22, my = top + height * .2, glow = ctx.createRadialGradient(mx, my, 0, mx, my, width * .13);
+    glow.addColorStop(0, `rgba(255,230,160,${(.75 * (1 - shotAge / .1)).toFixed(3)})`);
+    glow.addColorStop(.4, `rgba(255,166,70,${(.35 * (1 - shotAge / .1)).toFixed(3)})`);
+    glow.addColorStop(1, 'rgba(255,140,50,0)');
+    ctx.fillStyle = glow; ctx.fillRect(mx - width * .13, my - width * .13, width * .26, width * .26);
+  }
+  // A single brass case tumbles out of the ejection port.
+  if (shotAge >= 0 && shotAge < .3) {
+    const k = shotAge / .3, cx = left + width * .54 + k * width * .12, cy = top + height * .34 - k * height * .12 + k * k * height * .08;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(k * 4); ctx.fillStyle = '#d8b04a'; ctx.fillRect(-1.5, -1, 3, 2); ctx.restore();
+  }
 }
 
 function drawCrosshair(ctx, W, H, target, moving) {
@@ -286,7 +336,7 @@ export function drawFirstPerson(ctx, sim, view, opts = {}) {
   const vignette = ctx.createRadialGradient(W / 2, H * .52, H * .18, W / 2, H * .52, H * .82);
   vignette.addColorStop(0, 'rgba(0,0,0,0)'); vignette.addColorStop(1, 'rgba(0,0,0,.55)');
   ctx.fillStyle = vignette; ctx.fillRect(0, 0, W, H);
-  drawWeapon(ctx, p, W, H, time, opts);
+  drawWeaponViewmodel(ctx, sim, p, W, H, time, opts);
   drawCrosshair(ctx, W, H, opts.target, p.moving);
 }
 

@@ -62,13 +62,13 @@ try {
     const decision = document.querySelector('.shadow-canvas').shadowDebug.sim.net.decision;
     return decision?.kind === 'contact' && decision.source === 'jev' && decision.answers;
   }, null, { timeout: 20000 });
-  await page.waitForTimeout(300);
   // Freeze the simulation for the intel assertion: a pursuit pulse must not
   // replace the answered contact decision while the test is reading it.
   await page.evaluate(() => {
     const sim = document.querySelector('.shadow-canvas').shadowDebug.sim;
     window.__shadowStep = sim.step; sim.step = () => {};
   });
+  await page.waitForTimeout(300);
   await page.screenshot({ path: `${report}/alert.png` });
   assert.match(await page.locator('.shadow-phase').innerText(), /alert/i);
   console.log('PASS: a guard spots the player, radios it in and the alert phase starts');
@@ -232,6 +232,19 @@ try {
   await page.mouse.up();
   const facingAfter = await page.evaluate(() => document.querySelector('.shadow-canvas').shadowDebug.sim.player.facing);
   assert.ok(Math.abs(facingAfter - facingBefore) > .04, 'mouse look turns the operative');
+  // Glock 18: hold the trigger while aiming and the magazine empties.
+  await page.evaluate(() => { document.querySelector('.shadow-canvas').shadowDebug.sim.player.ammo = 3; });
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.down();
+  await page.waitForTimeout(450);
+  await page.mouse.up();
+  await page.mouse.up({ button: 'right' });
+  const fired = await page.evaluate(() => {
+    const s = document.querySelector('.shadow-canvas').shadowDebug.sim;
+    return { shots: s.metrics.shots, ammo: s.player.ammo };
+  });
+  assert.ok(fired.shots >= 2, 'the Glock 18 fires automatically');
+  assert.equal(fired.ammo, 0, 'the magazine empties');
   await page.screenshot({ path: `${report}/fps-view.png` });
   console.log('PASS: first-person view, relative movement and mouse look');
   assert.deepEqual(errors, []);
