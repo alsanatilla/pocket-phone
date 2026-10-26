@@ -8,7 +8,8 @@ import { ShadowSim, DIFFICULTY } from './shadow-engine.js';
 import { readDossier, recordMission, dossierInsights, jevState, emptyDossier } from './shadow-commander.js';
 import { JEV_ENDPOINT, JEV_MODEL, shadowQuestions, readCompleteAnswers, LEVELS, INTENT_NAMES } from '../shared/shadow-jev.js';
 import { DOOR_CONTROLS, FLOODLIGHTS } from '../shared/shadow-field.js';
-import { VIEW_W, VIEW_H, SCALE, STATE_COLORS, STATE_NAMES, camera, drawWorld, drawSchematic, staticLayer, fitView } from './shadow-render.js';
+import { VIEW_W, VIEW_H, SCALE, STATE_COLORS, STATE_NAMES, camera, drawWorld, drawSchematic, staticLayer, fitView, actorBox } from './shadow-render.js';
+import { K, V } from './shadow-view.js';
 
 const DOSSIER_KEY = 'shadow-dossier';
 const BEST_KEY = 'shadow-best';
@@ -504,9 +505,22 @@ export function mountShadow(body, api = {}) {
     };
     const pauseAway = () => { clearInput(); if (!state.paused && sim.status === 'playing') togglePauseLocal(); };
     document.addEventListener('visibilitychange', () => { if (document.hidden) pauseAway(); }, { signal });
+    // The play field is tilted: a screen point maps to the floor under it, and a cursor over
+    // someone's body aims at them, not at the floor behind their head.
     const toWorld = event => {
       const rect = canvas.getBoundingClientRect();
-      return { x: camView.x + (event.clientX - rect.left) / rect.width * (camView.w || VIEW_W), y: camView.y + (event.clientY - rect.top) / rect.height * (camView.h || VIEW_H) };
+      const px = camView.x + (event.clientX - rect.left) / rect.width * (camView.w || VIEW_W);
+      const py = camView.y * K + (event.clientY - rect.top) / rect.height * (camView.h || VIEW_H);
+      let best = null, bestD = Infinity;
+      for (const g of sim.guards) {
+        if (g.down || g.hidden) continue;
+        // A body's own width, not the sprite's whole cell, so aiming beside someone still aims beside them.
+        const feet = g.y * K, box = actorBox(g);
+        if (Math.abs(px - g.x) > 6 || py > feet + 1 || py < feet - box.h) continue;
+        const d = Math.abs(px - g.x) + (feet - py) * .1;
+        if (d < bestD) { bestD = d; best = g; }
+      }
+      return best ? { x: best.x, y: best.y } : { x: px, y: py / K };
     };
     // The cursor aims while it is over the play field. Its screen point is kept and re-projected
     // every frame, so a still cursor keeps aiming at the same spot on screen as the camera moves.
@@ -901,6 +915,11 @@ export function mountShadow(body, api = {}) {
         teleport(x, y) { sim.player.x = x * TILE + 8; sim.player.y = y * TILE + 8; snapshot(); drawn.facing = sim.player.facing; camView.snap = true; },
         step(seconds = 1, value = {}) { for (let t = 0; t < seconds; t += STEP) sim.step(STEP, value); },
         intel: toggleIntelLocal,
+        /** Where a world point (and height) is on screen, in client pixels: for browser checks that click the field. */
+        toScreen(x, y, z = 0) {
+          const rect = canvas.getBoundingClientRect();
+          return { x: rect.left + (x - camView.x) / (camView.w || VIEW_W) * rect.width, y: rect.top + ((y - camView.y) * K - z * V) / (camView.h || VIEW_H) * rect.height };
+        },
       };
     }
   }

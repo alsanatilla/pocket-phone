@@ -96,12 +96,16 @@ export function makeTarget(w, h) { return { w, h, rgba: new Float32Array(w * h *
 export function render(target, parts, { camera, materials, lights, snap = true, fog = null, cull = true }) {
   const { w, h } = target, tris = [];
   const view = camera.view, f = 1 / Math.tan(camera.fov / 2);
+  // An orthographic camera ({ ortho: pixels per unit, origin: [x, y] in pixels }) keeps sizes constant with distance.
+  const project = camera.ortho
+    ? ([x, y]) => [(camera.origin?.[0] ?? w / 2) + x * camera.ortho, (camera.origin?.[1] ?? h / 2) - y * camera.ortho]
+    : ([x, y, z]) => [w / 2 + x * f / -z * w / 2, h / 2 - y * f / -z * w / 2];
   for (const { mesh: m, matrix, bias = 0 } of parts) {
     const mv = mul(view, matrix);
     for (const t of m.tris) {
       const V = t.v.map(i => point(mv, m.pos[i])), N = t.n.map(n => norm(dir(matrix, n)));
-      if (V.some(v => v[2] > -.05)) continue;
-      const S = V.map(([x, y, z]) => { const sx = w / 2 + x * f / -z * w / 2, sy = h / 2 - y * f / -z * w / 2; return snap ? [Math.round(sx), Math.round(sy), z] : [sx, sy, z]; });
+      if (!camera.ortho && V.some(v => v[2] > -.05)) continue;
+      const S = V.map(v => { const [sx, sy] = project(v); return snap ? [Math.round(sx), Math.round(sy), v[2]] : [sx, sy, v[2]]; });
       const area = (S[1][0] - S[0][0]) * (S[2][1] - S[0][1]) - (S[2][0] - S[0][0]) * (S[1][1] - S[0][1]);
       if (cull && area >= 0) continue;
       const mat = materials[t.mat];

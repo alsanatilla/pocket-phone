@@ -895,3 +895,44 @@ test('a click with nobody in reach still swings, and a strike out of a dash reac
   stepFor(dash, .6);
   assert.equal(g.dead, true, 'the strike pressed mid-dash fired as it ended and reached the guard');
 });
+
+test('one strike button: tap behind a guard chokes him out, hold kills; on a body, tap finishes and hold drags', () => {
+  const make = () => {
+    const sim = new ShadowSim({ seed: 7, mode: 'baseline' });
+    quiet(sim);
+    sim.noCapture = true;
+    const g = sim.guards[0];
+    Object.assign(g, at(31, 14), { facing: 0, route: [{ ...at(31, 14), hold: 999, face: 0 }], routeIndex: 0, sees: false, meter: 0 });
+    Object.assign(sim.player, at(30, 14), { facing: 0 });
+    sim.player.x = g.x - 14;
+    return { sim, g };
+  };
+  const tap = make();
+  tap.sim.step(1 / 60, { strike: true, strikeHeld: true });
+  assert.equal(tap.sim.player.action?.kind, 'grab', 'pressing behind an unaware guard grabs him');
+  tap.sim.step(1 / 60, { strikeHeld: true });
+  stepFor(tap.sim, .6);
+  assert.equal(tap.g.down, true);
+  assert.equal(tap.g.dead, false, 'a quick tap chokes him out');
+
+  const hold = make();
+  hold.sim.step(1 / 60, { strike: true, strikeHeld: true });
+  stepFor(hold.sim, .7, { strikeHeld: true });
+  assert.equal(hold.g.dead, true, 'holding past the grab kills');
+
+  const body = make();
+  body.sim.knockOut(body.g);
+  body.sim.step(1 / 60, { strike: true, strikeHeld: true });
+  stepFor(body.sim, .4, { strikeHeld: true });
+  assert.equal(body.sim.player.carrying, body.g.id, 'holding on a body picks it up');
+  stepFor(body.sim, .3, { strikeHeld: true, move: { x: -1, y: 0 } });
+  body.sim.step(1 / 60, {});
+  assert.equal(body.sim.player.carrying, null, 'letting go drops it');
+
+  const finish = make();
+  finish.sim.knockOut(finish.g);
+  finish.sim.step(1 / 60, { strike: true, strikeHeld: true });
+  finish.sim.step(1 / 60, {});
+  stepFor(finish.sim, .5);
+  assert.equal(finish.g.dead, true, 'a tap on an unconscious guard finishes him');
+});

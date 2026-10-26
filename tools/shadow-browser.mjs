@@ -12,7 +12,7 @@ page.on('pageerror', error => errors.push(error.message));
 page.on('console', message => { if (message.type() === 'error' && !/Failed to load resource/.test(message.text())) errors.push(message.text()); });
 const missing = [];
 page.on('response', response => { if (response.status() === 404) missing.push(response.url()); });
-page.setDefaultTimeout(15000);
+page.setDefaultTimeout(30000);
 const report = 'app/build/reports/shadow-web';
 await mkdir(report, { recursive: true });
 const debug = () => page.evaluate(() => !!document.querySelector('.shadow-canvas')?.shadowDebug);
@@ -58,7 +58,11 @@ try {
     d.teleport(Math.floor(g.x / 16 + Math.cos(g.facing) * 3), Math.floor(g.y / 16 + Math.sin(g.facing) * 3));
   });
   await page.waitForFunction(() => document.querySelector('.shadow-canvas').shadowDebug.sim.net.phase === 'alert', null, { timeout: 8000 });
-  await page.waitForTimeout(500);
+  await page.waitForFunction(() => {
+    const decision = document.querySelector('.shadow-canvas').shadowDebug.sim.net.decision;
+    return decision?.kind === 'contact' && decision.source === 'jev' && decision.answers;
+  }, null, { timeout: 20000 });
+  await page.waitForTimeout(300);
   await page.screenshot({ path: `${report}/alert.png` });
   assert.match(await page.locator('.shadow-phase').innerText(), /alert/i);
   console.log('PASS: a guard spots the player, radios it in and the alert phase starts');
@@ -68,7 +72,7 @@ try {
   await page.waitForTimeout(600);
   const intel = await page.locator('.shadow-intel').innerText();
   assert.match(intel, /security strategy/i);
-  assert.match(intel, /heading|response/i, 'the contact decision answers are listed');
+  assert.match(intel, /\bplan\b[\s\S]*\bdoors\b/i, 'the contact decision lists Jev’s chosen plan and field orders');
   await page.locator('.shadow-guard-row').first().click();
   await page.waitForSelector('.shadow-detail');
   await page.screenshot({ path: `${report}/intel.png` });
@@ -142,11 +146,7 @@ try {
     return { x: g.x, y: g.y };
   });
   await page.waitForTimeout(300);
-  const point = await page.evaluate(({ x, y }) => {
-    const d = document.querySelector('.shadow-canvas').shadowDebug;
-    const rect = document.querySelector('.shadow-canvas').getBoundingClientRect();
-    return { x: rect.left + (x - d.view.x) / d.view.w * rect.width, y: rect.top + (y - d.view.y) / d.view.h * rect.height };
-  }, target);
+  const point = await page.evaluate(({ x, y }) => document.querySelector('.shadow-canvas').shadowDebug.toScreen(x, y, 8), target);
   const killsBefore = await page.evaluate(() => document.querySelector('.shadow-canvas').shadowDebug.sim.metrics.kills);
   await page.mouse.move(point.x, point.y);
   await page.mouse.down();

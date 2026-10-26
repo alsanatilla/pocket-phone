@@ -45,7 +45,10 @@ const ACCEL_TIME = .03, DECEL_TIME = .026;
 export const DASH = Object.freeze({ time: .22, distance: 60, cooldown: .34, buffer: .15, reach: 56 });
 export const SLIDE = Object.freeze({ time: .5, boost: 1.12, turn: 2.6 });
 export const VAULT = Object.freeze({ time: .3, reach: 50, height: 7 });
-const VAULTABLE = new Set(['C', 'B']);
+// Crates, furniture, wrecks, drums and sandbags can be vaulted; a burning barrel cannot.
+// The mouse's one close-range button tells a tap from a hold after this long.
+export const STRIKE_HOLD = .26;
+const VAULTABLE = new Set(['C', 'B', 'W', 'Y', 'S']);
 const PLAYER_R = 4.5, GUARD_R = 5.5;
 const LEVEL_DETECT = [.9, 1, 1.12, 1.25];
 const STATE_SPEED = { patrol: 36, returning: 40, investigate: 44, suspicious: 0, search: 56, lockdown: 72 };
@@ -286,6 +289,7 @@ export class ShadowSim {
     // A press that lands mid-move or mid-strike is kept for a moment and fires as soon as it can.
     if (input.dash) p.buffer = { kind: 'dash', until: this.t + DASH.buffer };
     if (input.knife && (p.action || p.move)) p.buffer = { kind: 'knife', aim: input.aim, until: this.t + DASH.buffer };
+    if (input.strike && (p.action || p.move)) p.buffer = { kind: 'strike', aim: input.aim, until: this.t + DASH.buffer };
     if (input.crouch) this.crouchPressed();
     if (p.locker) {
       if (input.interact || Math.hypot(input.move?.x || 0, input.move?.y || 0) > .5) this.leaveLocker();
@@ -298,7 +302,11 @@ export class ShadowSim {
     p.buffer = null;
     if (input.interact) this.interact();
     if (input.knife) this.knife(input.aim);
+    else if (input.strike) this.strike(input.aim);
     else if (buffered?.kind === 'knife') this.knife(buffered.aim);
+    else if (buffered?.kind === 'strike') this.strike(buffered.aim);
+    // A body picked up by holding the strike button is dropped when the button is let go.
+    if (p.dragHeld && p.carrying && !input.strikeHeld) this.dropBody();
     if (input.shoot) this.shoot(input.aim);
     if (input.knock) this.knock();
     if (input.throw) this.throwPebble(input.aim);
@@ -860,11 +868,7 @@ export class ShadowSim {
       return;
     }
     const body = this.guards.find(g => g.down && !g.hidden && !g.carried && dist(g, p) < 18);
-    if (body) {
-      p.carrying = body.id; body.carried = true;
-      if (body.keycard && !p.keycard) { p.keycard = true; body.keycard = false; this.emit('toast', { text: `${body.name}’s keycard` }); }
-      return;
-    }
+    if (body) { this.pickUp(body); return; }
     if (!p.data && dist(p, { x: TERMINAL.x * TILE, y: TERMINAL.y * TILE + 10 }) < 26) { p.action = { kind: 'hack', t: this.mission.progress.hack, need: 4 }; return; }
     if (!this.net.camerasOff && dist(p, { x: PANEL.x * TILE + 8, y: PANEL.y * TILE + 8 }) < 24) { p.action = { kind: 'panel', t: this.mission.progress.panel, need: 1.6 }; return; }
     if (this.keycardOnDesk && dist(p, { x: KEYCARD.x * TILE, y: KEYCARD.y * TILE }) < 22) {
@@ -905,6 +909,34 @@ export class ShadowSim {
   updateAction(dt, input) {
     const p = this.player, action = p.action;
     p.moving = false; p.speed = 0; p.vx = 0; p.vy = 0;
+    if (action.kind === 'grab') {
+      const g = this.guards.find(item => item.id === action.target);
+      if (!g || g.down) { p.action = null; return; }
+      action.t += dt;
+      this.lunge(action, g.x, g.y, 9);
+      p.facing = angleTo(p.x, p.y, g.x, g.y);
+      // Let go: a choke, carrying on from the time already spent in the grab.
+      if (!input.strikeHeld) { p.action = { kind: 'takedown', t: action.t, need: .38, target: g.id, fromX: action.fromX, fromY: action.fromY }; return; }
+      // Still holding: the knife.
+      if (action.t >= action.need) {
+        p.action = { kind: 'kill', t: .1, need: .26, target: g.id, fromX: action.fromX, fromY: action.fromY };
+        this.emit('knife', { guard: g.id });
+      }
+      return;
+    }
+    if (action.kind === 'body') {
+      const g = this.guards.find(item => item.id === action.target);
+      if (!g || !g.down || g.carried || g.hidden) { p.action = null; return; }
+      action.t += dt;
+      p.facing = angleTo(p.x, p.y, g.x, g.y);
+      if (!input.strikeHeld) {
+        p.action = g.dead ? null : { kind: 'kill', t: 0, need: .3, target: g.id, fromX: p.x, fromY: p.y };
+        if (!g.dead) this.emit('knife', { guard: g.id });
+        return;
+      }
+      if (action.t >= action.need) { p.action = null; this.pickUp(g, true); }
+      return;
+    }
     if (action.kind === 'swing') {
       action.t += dt;
       this.lunge(action, action.fromX + Math.cos(action.angle) * 10, action.fromY + Math.sin(action.angle) * 10, 0);
@@ -983,9 +1015,36 @@ export class ShadowSim {
     this.emit('takedown', { guard: g.id });
   }
 
+  pickUp(body, held = false) {
+    const p = this.player;
+    p.carrying = body.id; body.carried = true; p.dragHeld = held;
+    if (body.keycard && !p.keycard) { p.keycard = true; body.keycard = false; this.emit('toast', { text: `${body.name}’s keycard` }); }
+  }
+
+  /**
+   * The mouse's one close-range button. Behind a guard who has not seen you it grabs: let go
+   * quickly and he is choked out, keep holding and the knife finishes it. On a body a tap
+   * finishes it and a hold picks it up. Anything else is the knife: a lunge at a guard in
+   * reach, or a swing at the air.
+   */
+  strike(aim = null) {
+    const p = this.player;
+    if (p.action) return;
+    if (p.carrying) { this.dropBody(); return; }
+    const sneak = this.takedownTarget();
+    if (sneak) {
+      p.action = { kind: 'grab', t: 0, need: STRIKE_HOLD, target: sneak.id, fromX: p.x, fromY: p.y };
+      sneak.grabbed = true;
+      return;
+    }
+    const body = this.guards.find(g => g.down && !g.hidden && !g.carried && dist(g, p) < 18);
+    if (body) { p.action = { kind: 'body', t: 0, need: STRIKE_HOLD, target: body.id, fromX: p.x, fromY: p.y }; return; }
+    this.knife(aim);
+  }
+
   dropBody() {
     const p = this.player, body = this.guards.find(g => g.id === p.carrying);
-    p.carrying = null;
+    p.carrying = null; p.dragHeld = false;
     if (!body) return;
     body.carried = false;
     const locker = this.lockerNear(p, 22);
@@ -2295,6 +2354,9 @@ export class ShadowSim {
     if (this.status !== 'playing') return '';
     if (p.locker) return 'E - leave the locker';
     if (p.action) {
+      if (p.action.kind === 'grab') return 'let go - choke out · keep holding - kill';
+      if (p.action.kind === 'body') return 'let go - finish · keep holding - drag';
+      if (p.action.kind === 'swing') return '';
       if (p.action.kind === 'takedown') return 'taking down...';
       if (p.action.kind === 'kill') return 'knife...';
       const left = Math.max(0, p.action.need - p.action.t).toFixed(1);
@@ -2306,8 +2368,8 @@ export class ShadowSim {
     }
     const target = this.takedownTarget();
     const downed = this.guards.find(g => g.down && !g.dead && !g.hidden && !g.carried && dist(g, p) < 18);
-    if (target) return `E - take down ${target.name} · click - knife`;
-    if (downed) return `E - drag ${downed.name}${downed.keycard ? ' · has a keycard' : ''} · click - finish`;
+    if (target) return `E or click - choke out ${target.name} · hold click - kill`;
+    if (downed) return `E or hold click - drag ${downed.name}${downed.keycard ? ' · has a keycard' : ''} · click - finish`;
     const dead = this.guards.find(g => g.dead && !g.hidden && !g.carried && dist(g, p) < 18);
     if (dead) return `E - drag ${dead.name}${dead.keycard ? ' · has a keycard' : ''}`;
     if (!p.data && dist(p, { x: TERMINAL.x * TILE, y: TERMINAL.y * TILE + 10 }) < 26) return 'hold E - download the data';
