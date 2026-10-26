@@ -12,12 +12,13 @@ export const LIGHT_RES = 2;
 // Moonlight outside, a dim night level indoors, and roofs darker still.
 const AMBIENT = { indoor: [50, 56, 76], outdoor: [58, 68, 98], roof: [40, 44, 58] };
 // These lamps flicker, so they are drawn live rather than baked.
-const FLICKER = new Set([12, 15, 21]);
+const FLICKER = new Set([12, 15, 21, ...LAMPS.flatMap((lamp, i) => lamp.fire ? [i] : [])]);
 
 const zoneOf = (x, y) => ZONES.find(zone => (zone.rects || [zone.rect]).some(r => x >= r[0] && x <= r[2] + .99 && y >= r[1] && y <= r[3] + .99));
 
 /** A lamp's colour from where it hangs: sodium outside, fluorescent in the corridors, cold in the lab. */
 export function lampColor(lamp) {
+  if (lamp.fire) return [255, 178, 104];
   const zone = zoneOf(lamp.x, lamp.y);
   if (!zone) return [255, 178, 98];
   if (zone.sector === 'lab') return [176, 226, 255];
@@ -27,7 +28,7 @@ export function lampColor(lamp) {
   if (zone.sector === 'barracks') return [255, 198, 138];
   return [255, 176, 96];
 }
-export const isOutdoorLamp = lamp => ['yard', 'north', 'exterior', 'perimeter'].includes(zoneOf(lamp.x, lamp.y)?.sector);
+export const isOutdoorLamp = lamp => !lamp.fire && ['yard', 'north', 'exterior', 'perimeter'].includes(zoneOf(lamp.x, lamp.y)?.sector);
 
 const polygons = new Map();
 /** Where a lamp's light reaches: rays stop at walls and shut doors, and bite a little into the wall they hit. */
@@ -93,17 +94,21 @@ export function lightMap() {
 /** A lamp's brightness this instant: steady ones are 1; a bad tube stutters now and then. */
 export function lampLevel(i, time, reduceMotion = false) {
   if (!FLICKER.has(i) || reduceMotion) return 1;
+  // Fire breathes rather than stutters.
+  if (LAMPS[i].fire) return .82 + .1 * Math.sin(time * 7.3 + i) + .08 * Math.sin(time * 17.9);
   const slow = Math.sin(time * 1.3 + i * 7.1), fast = Math.sin(time * 37 + i * 3.3);
   return slow > .82 ? (fast > 0 ? .35 : .9) : .96 + .04 * Math.sin(time * 9 + i);
 }
 
 let buffer = null;
 /**
- * Builds this frame's light for the view and multiplies the world by it. `sources` are the
- * live lights: { points, x, y, range, color, strength } polygons, and { x, y, radius, color, strength } glows.
+ * Builds this frame's light over a region of the ground (world units), at LIGHT_RES pixels per unit.
+ * `sources` are the live lights: { points, x, y, range, color, strength } polygons, and
+ * { x, y, radius, color, strength } glows. Returns the canvas; the renderer multiplies the
+ * ground by it, and the standing layer by the same light lifted to where each thing stands.
  */
-export function applyLight(ctx, view, sources, { time = 0, alarm = 0, reduceMotion = false } = {}) {
-  const { sx, sy, vw, vh } = view;
+export function buildLight(region, sources, { time = 0, alarm = 0, reduceMotion = false } = {}) {
+  const { sx, sy, vw, vh } = region;
   const lw = Math.max(1, Math.ceil(vw * LIGHT_RES)), lh = Math.max(1, Math.ceil(vh * LIGHT_RES));
   if (!buffer) buffer = document.createElement('canvas');
   if (buffer.width !== lw || buffer.height !== lh) { buffer.width = lw; buffer.height = lh; }
@@ -111,8 +116,10 @@ export function applyLight(ctx, view, sources, { time = 0, alarm = 0, reduceMoti
   l.setTransform(1, 0, 0, 1, 0, 0);
   l.globalCompositeOperation = 'source-over';
   l.imageSmoothingEnabled = true;
-  l.drawImage(lightMap(), sx, sy, vw, vh, 0, 0, lw, lh);
+  // Past the edge of the world it is just night.
+  l.fillStyle = `rgb(${AMBIENT.roof.join(',')})`; l.fillRect(0, 0, lw, lh);
   l.setTransform(LIGHT_RES, 0, 0, LIGHT_RES, -sx * LIGHT_RES, -sy * LIGHT_RES);
+  l.drawImage(lightMap(), 0, 0, WORLD_W, WORLD_H);
   l.globalCompositeOperation = 'lighter';
   for (const i of FLICKER) {
     const lamp = LAMPS[i], reach = lamp.r * TILE;
@@ -136,11 +143,7 @@ export function applyLight(ctx, view, sources, { time = 0, alarm = 0, reduceMoti
     l.fillStyle = `rgba(255,46,30,${(alarm * (reduceMotion ? .1 : .07 + .07 * Math.sin(time * 4.5))).toFixed(3)})`;
     l.fillRect(0, 0, lw, lh);
   }
-  ctx.save();
-  ctx.globalCompositeOperation = 'multiply';
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(buffer, 0, 0, lw, lh, sx, sy, vw, vh);
-  ctx.restore();
+  return { canvas: buffer, lw, lh, region };
 }
 
 /** 0..1, how lit a point is on the gameplay grid; used to keep bodies in shadow just readable. */
