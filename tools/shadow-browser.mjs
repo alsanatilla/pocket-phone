@@ -17,7 +17,7 @@ const report = 'app/build/reports/shadow-web';
 await mkdir(report, { recursive: true });
 const debug = () => page.evaluate(() => !!document.querySelector('.shadow-canvas')?.shadowDebug);
 try {
-  await page.goto(base + '/?jevmock#/shadow');
+  await page.goto(base + '/?jevmock&view=tactical#/shadow');
   await page.waitForSelector('.shadow-begin');
   await page.waitForTimeout(1500);
   assert.match(await page.locator('.shadow-brief').innerText(), /security dossier/);
@@ -63,6 +63,12 @@ try {
     return decision?.kind === 'contact' && decision.source === 'jev' && decision.answers;
   }, null, { timeout: 20000 });
   await page.waitForTimeout(300);
+  // Freeze the simulation for the intel assertion: a pursuit pulse must not
+  // replace the answered contact decision while the test is reading it.
+  await page.evaluate(() => {
+    const sim = document.querySelector('.shadow-canvas').shadowDebug.sim;
+    window.__shadowStep = sim.step; sim.step = () => {};
+  });
   await page.screenshot({ path: `${report}/alert.png` });
   assert.match(await page.locator('.shadow-phase').innerText(), /alert/i);
   console.log('PASS: a guard spots the player, radios it in and the alert phase starts');
@@ -76,6 +82,11 @@ try {
   await page.locator('.shadow-guard-row').first().click();
   await page.waitForSelector('.shadow-detail');
   await page.screenshot({ path: `${report}/intel.png` });
+  await page.evaluate(() => {
+    const sim = document.querySelector('.shadow-canvas').shadowDebug.sim;
+    if (window.__shadowStep) sim.step = window.__shadowStep;
+    window.__shadowStep = null;
+  });
   console.log('PASS: intel overlay lists the strategy, the typed answers and a guard’s detail');
 
   // Break contact: teleport into the duct and let the search run.
@@ -194,6 +205,35 @@ try {
   await page.waitForSelector('.shadow-brief');
   assert.match(await page.locator('.shadow-dossier').innerText(), /1 attempt/i);
   console.log('PASS: the dossier persists between attempts');
+
+  // First-person prototype: look, move relative to the view, and render the field.
+  await page.goto(base + '/?jevmock&view=first#/shadow');
+  await page.waitForSelector('.shadow-begin');
+  await page.locator('.shadow-begin').click();
+  await page.waitForSelector('.shadow-canvas');
+  await page.waitForFunction(() => !!document.querySelector('.shadow-canvas')?.shadowDebug);
+  await page.waitForTimeout(800);
+  const fpsStart = await page.evaluate(() => {
+    const canvas = document.querySelector('.shadow-canvas'), d = canvas.shadowDebug;
+    return { fps: d.state.fps, facing: d.sim.player.facing, x: d.sim.player.x, y: d.sim.player.y, cursor: getComputedStyle(canvas).cursor };
+  });
+  assert.equal(fpsStart.fps, true, 'the first-person view is active');
+  assert.equal(fpsStart.cursor, 'none', 'the tactical cursor is hidden in first person');
+  await page.keyboard.down('w'); await page.waitForTimeout(700); await page.keyboard.up('w');
+  const fpsMoved = await page.evaluate(({ x, y }) => {
+    const p = document.querySelector('.shadow-canvas').shadowDebug.sim.player;
+    return Math.hypot(p.x - x, p.y - y);
+  }, fpsStart);
+  assert.ok(fpsMoved > 20, 'W moves the operative forward in first person');
+  const facingBefore = await page.evaluate(() => document.querySelector('.shadow-canvas').shadowDebug.sim.player.facing);
+  await page.mouse.move(680, 400);
+  await page.mouse.down();
+  await page.mouse.move(880, 400, { steps: 8 });
+  await page.mouse.up();
+  const facingAfter = await page.evaluate(() => document.querySelector('.shadow-canvas').shadowDebug.sim.player.facing);
+  assert.ok(Math.abs(facingAfter - facingBefore) > .04, 'mouse look turns the operative');
+  await page.screenshot({ path: `${report}/fps-view.png` });
+  console.log('PASS: first-person view, relative movement and mouse look');
   assert.deepEqual(errors, []);
   console.log('PASS: no page errors' + (missing.length ? ` (404s outside the game: ${[...new Set(missing)].join(', ')})` : ''));
   assert.ok(!missing.some(url => /shadow/.test(url)), 'no missing Shadow Protocol resources');

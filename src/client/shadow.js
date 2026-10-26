@@ -9,6 +9,7 @@ import { readDossier, recordMission, dossierInsights, jevState, emptyDossier } f
 import { JEV_ENDPOINT, JEV_MODEL, shadowQuestions, readCompleteAnswers, LEVELS, INTENT_NAMES } from '../shared/shadow-jev.js';
 import { DOOR_CONTROLS, FLOODLIGHTS } from '../shared/shadow-field.js';
 import { VIEW_W, VIEW_H, SCALE, STATE_COLORS, STATE_NAMES, camera, drawWorld, drawSchematic, staticLayer, fitView, actorBox } from './shadow-render.js';
+import { drawFirstPerson, firstPersonAim } from './shadow-fps.js';
 import { K, V } from './shadow-view.js';
 
 const DOSSIER_KEY = 'shadow-dossier';
@@ -165,8 +166,11 @@ export function mountShadow(body, api = {}) {
   const root = h('div', { class: 'shadow-game' });
   body.append(root);
   const confirmBox = api.confirm || (title => Promise.resolve(globalThis.confirm?.(title)));
-  const settings = { difficulty: 'normal', sound: true, fullscreen: true, ...read(SETTINGS_KEY, {}) };
+  const settings = { difficulty: 'normal', sound: true, fullscreen: true, view: 'first', ...read(SETTINGS_KEY, {}) };
   if (!DIFFICULTY[settings.difficulty]) settings.difficulty = 'normal';
+  const requestedView = new URLSearchParams(location.search).get('view');
+  if (requestedView === 'first' || requestedView === 'tactical') settings.view = requestedView;
+  if (settings.view !== 'tactical') settings.view = 'first';
   const sound = createSound(settings.sound);
   const jev = sharedJev || (sharedJev = createJev());
   jev.refresh();
@@ -283,6 +287,7 @@ export function mountShadow(body, api = {}) {
       h('li', { text: 'Mouse aims · left click knifes, further straight out of a dash · hold right click to draw the pistol, left click fires' }),
       h('li', { text: 'E: take down without killing, drag, hide, use · hold to download' }),
       h('li', { text: 'Q knock on a wall · F throw a pebble at the cursor' }),
+      h('li', { text: 'V: switch between first-person and tactical views · click the field to look in first person' }),
       h('li', { text: 'No mouse: X knife · G pistol, which snaps to the guard ahead · Tab intel · P pause' }));
   }
 
@@ -335,11 +340,13 @@ export function mountShadow(body, api = {}) {
     refs.toast = h('div', { class: 'shadow-toast', role: 'status' });
     const backToGame = () => refs.stage.focus({ preventScroll: true });
     const tool = (text, onclick, extra = {}) => h('button', { type: 'button', class: 'shadow-tool', onclick, ...extra }, text);
+    refs.viewButton = tool(settings.view === 'first' ? 'view · 1st' : 'view · tactical', () => { toggleView(); backToGame(); }, { 'aria-pressed': String(settings.view === 'first'), 'data-tool': 'view' });
     refs.pauseButton = tool('pause · p', () => togglePause(), { 'aria-pressed': 'false', 'data-tool': 'pause' });
     refs.intelButton = tool('intel · tab', () => { toggleIntel(); backToGame(); }, { 'aria-pressed': 'false', 'data-tool': 'intel' });
     refs.soundButton = tool(settings.sound ? 'sound on' : 'sound off', () => { toggleSound(); backToGame(); }, { 'aria-pressed': String(settings.sound), 'data-tool': 'sound' });
     refs.fullButton = tool('fullscreen', () => { toggleFullscreen(); backToGame(); }, { hidden: !canFullscreen(), 'data-tool': 'fullscreen' });
-    refs.tools = h('div', { class: 'shadow-tools' }, refs.pauseButton, refs.intelButton, refs.soundButton, refs.fullButton);
+    refs.tools = h('div', { class: 'shadow-tools' }, refs.viewButton, refs.pauseButton, refs.intelButton, refs.soundButton, refs.fullButton);
+    canvas.style.cursor = settings.view === 'first' ? 'none' : '';
     refs.jevStatus = h('span', { class: 'shadow-jev-status', text: 'connecting…' });
     refs.radio = h('ol', { class: 'shadow-comms-lines', 'aria-live': 'polite' });
     refs.comms = h('section', { class: 'shadow-comms', 'aria-label': 'Security radio' },
@@ -409,7 +416,7 @@ export function mountShadow(body, api = {}) {
     const latest = { x: 0, y: 0 };
     const edges = { crouch: false, interact: false, knife: false, shoot: false, knock: false, throw: false, dash: false };
     const touch = { x: 0, y: 0, run: false, act: false };
-    const state = { intel: false, selected: null, paused: startPaused, pointer: null, aimHold: false, held: false, toastUntil: 0, lastPaint: 0, alarmAt: 0, ended: false, shake: 0, hitstop: 0, planUntil: 0, kick: { x: 0, y: 0 }, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches };
+    const state = { intel: false, selected: null, paused: startPaused, pointer: null, aimHold: false, held: false, toastUntil: 0, lastPaint: 0, alarmAt: 0, ended: false, shake: 0, hitstop: 0, planUntil: 0, fps: settings.view === 'first', kick: { x: 0, y: 0 }, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches };
     if (matchMedia('(prefers-reduced-motion: reduce)').addEventListener) {
       const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
       const onMotion = event => { state.reduceMotion = event.matches; };
@@ -486,6 +493,7 @@ export function mountShadow(body, api = {}) {
       else if (k === 'g' || k === 'G') { if (!event.repeat) edges.shoot = true; event.preventDefault(); }
       else if (k === 'q' || k === 'Q') { if (!event.repeat) edges.knock = true; event.preventDefault(); }
       else if (k === 'f' || k === 'F') { if (!event.repeat) edges.throw = true; event.preventDefault(); }
+      else if (k === 'v' || k === 'V') { if (!event.repeat) toggleView(); event.preventDefault(); }
       else if (k === 'Tab' && !event.shiftKey && event.target === refs.stage) { toggleIntel(); event.preventDefault(); }
       else if (k === 'p' || k === 'P' || k === 'Escape') { togglePause(); event.preventDefault(); }
     }, { signal });
@@ -525,25 +533,41 @@ export function mountShadow(body, api = {}) {
     // The cursor aims while it is over the play field. Its screen point is kept and re-projected
     // every frame, so a still cursor keeps aiming at the same spot on screen as the camera moves.
     const pointAt = event => { state.pointer = { clientX: event.clientX, clientY: event.clientY }; };
-    canvas.addEventListener('pointermove', event => { if (event.pointerType === 'mouse') pointAt(event); }, { signal });
+    canvas.addEventListener('pointermove', event => { if (event.pointerType === 'mouse' && !state.fps) pointAt(event); }, { signal });
+    // First-person mouse look. The pointer is locked on the field, so the
+    // cursor never leaves the game and movementX is the turn.
+    canvas.addEventListener('mousemove', event => {
+      if (!state.fps) return;
+      if (document.pointerLockElement === canvas || event.buttons) {
+        sim.player.facing += event.movementX * .0024;
+        event.preventDefault();
+      }
+    }, { signal });
+    document.addEventListener('pointerlockchange', () => {
+      if (state.fps && document.pointerLockElement !== canvas) toast('click the field to look', 'muted');
+    }, { signal });
     canvas.addEventListener('pointerleave', () => { state.pointer = null; }, { signal });
     canvas.addEventListener('contextmenu', event => event.preventDefault(), { signal });
     let pointerType = 'mouse';
     canvas.addEventListener('pointerdown', event => {
       pointerType = event.pointerType;
       refs.stage.focus({ preventScroll: true });
-      if (event.pointerType === 'mouse') pointAt(event);
+      if (event.pointerType === 'mouse' && !state.fps) pointAt(event);
     }, { signal });
     // Mouse buttons use mouse events: a second button pressed while one is held
     // (left click while aiming) fires no new pointerdown. Taps from touch are ignored.
     canvas.addEventListener('mousedown', event => {
       if (pointerType !== 'mouse') return;
-      pointAt(event);
+      if (state.fps && document.pointerLockElement !== canvas) {
+        const request = canvas.requestPointerLock?.(); request?.catch?.(() => {});
+        return;
+      }
+      if (!state.fps) pointAt(event);
       if (event.button === 2) { state.aimHold = true; return; }
       // The thumb button dashes; neither side button may navigate away mid-mission.
       if (event.button === 3 || event.button === 4) { event.preventDefault(); if (event.button === 3) edges.dash = true; return; }
       if (event.button !== 0) return;
-      if (state.intel) {
+      if (state.intel && !state.fps) {
         // With intel open, clicking a guard inspects him; clicking elsewhere still strikes.
         const point = toWorld(event);
         let best = null, bestD = 16;
@@ -612,16 +636,43 @@ export function mountShadow(body, api = {}) {
       clearInput(); acc = 0;
       if (!state.paused) { snapshot(); last = performance.now(); refs.stage.focus({ preventScroll: true }); }
     }
+    function toggleViewLocal() {
+      state.fps = !state.fps;
+      settings.view = state.fps ? 'first' : 'tactical';
+      saveSettings();
+      refs.viewButton.textContent = state.fps ? 'view · 1st' : 'view · tactical';
+      refs.viewButton.setAttribute('aria-pressed', String(state.fps));
+      canvas.style.cursor = state.fps ? 'none' : '';
+      state.pointer = null;
+      camView.snap = true;
+      if (state.fps) { const request = canvas.requestPointerLock?.(); request?.catch?.(() => {}); }
+      else if (document.pointerLockElement === canvas) document.exitPointerLock?.();
+    }
     live.toggleIntel = toggleIntelLocal;
     live.togglePause = togglePauseLocal;
+    live.toggleView = toggleViewLocal;
 
     function input() {
       const axis = (minus, plus, newer) => minus && plus ? newer : (plus ? 1 : 0) - (minus ? 1 : 0);
-      const move = { x: axis(keys.left, keys.right, latest.x) + touch.x, y: axis(keys.up, keys.down, latest.y) + touch.y };
+      let move, aim;
+      if (state.fps) {
+        // Movement is relative to where the operative is looking, not to the map.
+        const forward = -axis(keys.up, keys.down, latest.y) - touch.y;
+        const strafe = axis(keys.left, keys.right, latest.x) + touch.x;
+        const yaw = sim.player.facing;
+        move = {
+          x: Math.cos(yaw) * forward + Math.cos(yaw + Math.PI / 2) * strafe,
+          y: Math.sin(yaw) * forward + Math.sin(yaw + Math.PI / 2) * strafe,
+        };
+        aim = firstPersonAim(sim);
+      } else {
+        move = { x: axis(keys.left, keys.right, latest.x) + touch.x, y: axis(keys.up, keys.down, latest.y) + touch.y };
+        aim = state.pointer ? toWorld(state.pointer) : null;
+      }
       const value = {
         move, run: keys.run || touch.run, crouch: edges.crouch, interact: edges.interact, interactHeld: state.held || touch.act,
         knife: edges.knife, shoot: edges.shoot, knock: edges.knock, throw: edges.throw, dash: edges.dash,
-        aim: state.pointer ? toWorld(state.pointer) : null, aimHold: state.aimHold, faceAim: Boolean(state.pointer),
+        aim, aimHold: state.aimHold, faceAim: state.fps || Boolean(state.pointer),
       };
       edges.crouch = edges.interact = edges.knife = edges.shoot = edges.knock = edges.throw = edges.dash = false;
       return value;
@@ -694,8 +745,9 @@ export function mountShadow(body, api = {}) {
       handleEvents();
       const alpha = state.paused ? 1 : Math.min(1, acc / STEP);
       const turn = 22 * dt, toward = shortest(sim.player.facing - drawn.facing);
-      drawn.facing = Math.abs(toward) <= turn ? sim.player.facing : drawn.facing + Math.sign(toward) * turn;
-      const aimPoint = state.pointer ? toWorld(state.pointer) : null;
+      if (state.fps) drawn.facing = sim.player.facing;
+      else drawn.facing = Math.abs(toward) <= turn ? sim.player.facing : drawn.facing + Math.sign(toward) * turn;
+      const aimPoint = state.fps ? firstPersonAim(sim) : state.pointer ? toWorld(state.pointer) : null;
       const reachable = sim.status === 'playing' && !sim.player.action && !sim.player.locker && !sim.player.carrying
         ? (aimPoint ? sim.knifeTargetAt(aimPoint) : sim.takedownTarget()) : null;
       const actual = bodies().map(body => ({ body, x: body.x, y: body.y, facing: body.facing }));
@@ -708,15 +760,6 @@ export function mountShadow(body, api = {}) {
       }
       sim.player.facing = drawn.facing;
       try {
-        // The view leans toward the cursor, further with the pistol drawn, so you see where you are going.
-        // The lean comes from the cursor's place on screen, not in the world, so it cannot feed on itself.
-        if (state.pointer) {
-          const rect = canvas.getBoundingClientRect(), w = camView.w || VIEW_W, h = camView.h || VIEW_H;
-          const ox = ((state.pointer.clientX - rect.left) / rect.width - .5) * w, oy = ((state.pointer.clientY - rect.top) / rect.height - .5) * h;
-          const gain = state.aimHold ? .55 : .26;
-          camView.lean = { x: Math.max(-w * .3, Math.min(w * .3, ox * gain)), y: Math.max(-h * .3, Math.min(h * .3, oy * gain)) };
-        } else camView.lean = null;
-        camera(sim, camView, dt);
         // A dash nudges the view along it for a moment.
         const settle = Math.exp(-dt * 9);
         state.kick.x *= settle; state.kick.y *= settle;
@@ -724,8 +767,21 @@ export function mountShadow(body, api = {}) {
         state.shake = state.reduceMotion ? 0 : Math.max(0, state.shake - dt * 2.6);
         const jitter = state.shake > .01 ? { x: (Math.random() * 2 - 1) * state.shake * 5, y: (Math.random() * 2 - 1) * state.shake * 4 } : { x: 0, y: 0 };
         const shake = jitter.x || jitter.y || Math.abs(state.kick.x) > .05 || Math.abs(state.kick.y) > .05 ? { x: jitter.x + state.kick.x, y: jitter.y + state.kick.y } : null;
-        const jammed = !sim.rules.scannerInAlert && (sim.net.phase === 'alert' || sim.net.phase === 'search');
-        drawWorld(ctx, sim, camView, { intel: state.intel, selected: state.selected, aim: aimPoint, aiming: Boolean(aimPoint), aimHold: state.aimHold, target: reachable?.id || null, jammed, shake, compact: innerWidth <= 840, reduceMotion: state.reduceMotion });
+        if (state.fps) {
+          drawFirstPerson(ctx, sim, camView, { intel: state.intel, selected: state.selected, aim: aimPoint, aiming: Boolean(state.aimHold), aimHold: state.aimHold, target: reachable?.id || null, shake, compact: innerWidth <= 840, reduceMotion: state.reduceMotion });
+        } else {
+          // The view leans toward the cursor, further with the pistol drawn, so you see where you are going.
+          // The lean comes from the cursor's place on screen, not in the world, so it cannot feed on itself.
+          if (state.pointer) {
+            const rect = canvas.getBoundingClientRect(), w = camView.w || VIEW_W, h = camView.h || VIEW_H;
+            const ox = ((state.pointer.clientX - rect.left) / rect.width - .5) * w, oy = ((state.pointer.clientY - rect.top) / rect.height - .5) * h;
+            const gain = state.aimHold ? .55 : .26;
+            camView.lean = { x: Math.max(-w * .3, Math.min(w * .3, ox * gain)), y: Math.max(-h * .3, Math.min(h * .3, oy * gain)) };
+          } else camView.lean = null;
+          camera(sim, camView, dt);
+          const jammed = !sim.rules.scannerInAlert && (sim.net.phase === 'alert' || sim.net.phase === 'search');
+          drawWorld(ctx, sim, camView, { intel: state.intel, selected: state.selected, aim: aimPoint, aiming: Boolean(aimPoint), aimHold: state.aimHold, target: reachable?.id || null, jammed, shake, compact: innerWidth <= 840, reduceMotion: state.reduceMotion });
+        }
       } finally {
         for (const { body, x, y, facing } of actual) { body.x = x; body.y = y; body.facing = facing; }
       }
@@ -925,6 +981,7 @@ export function mountShadow(body, api = {}) {
   }
 
   function toggleIntel() { live?.toggleIntel?.(); }
+  function toggleView() { live?.toggleView?.(); }
   function togglePause() { live?.togglePause?.(); }
   function toggleSound() {
     settings.sound = !settings.sound; sound.state.enabled = settings.sound; saveSettings();

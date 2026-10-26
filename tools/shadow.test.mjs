@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { TILE, START, TERMINAL, EXTRACTION, ZONES, POSTS, PORTALS, MAP, kindAt, tileAt, zoneAt } from '../src/client/shadow-level.js';
 import { findPath, playerWalk, guardWalk, lineClear, soundField, index, walkableLine } from '../src/client/shadow-nav.js';
 import { ShadowSim, SPEED, DASH } from '../src/client/shadow-engine.js';
+import { castRay, firstPersonAim } from '../src/client/shadow-fps.js';
 import { buildSituation, localAnswers, emptyDossier, recordMission, dossierInsights, jevState, initialMind, readMind, updateMind } from '../src/client/shadow-commander.js';
 import { DECISION_KINDS, shadowQuestions, readAnswers, readCompleteAnswers, planFromAnswers } from '../src/shared/shadow-jev.js';
 import { DOOR_CONTROLS, FLOODLIGHTS } from '../src/shared/shadow-field.js';
@@ -87,6 +88,16 @@ test('a sighting reaches command only by radio; silencing the spotter first keep
   quietSim.knockOut(spotter);
   stepFor(quietSim, 4);
   assert.notEqual(quietSim.net.phase, 'alert', 'nobody reported the intruder');
+});
+
+test('the first-person ray hits the wall and the crosshair follows the facing', () => {
+  const sim = new ShadowSim({ seed: 1, mode: 'baseline' });
+  quiet(sim);
+  Object.assign(sim.player, at(1, 1), { facing: -Math.PI / 2 });
+  const aim = firstPersonAim(sim, 100);
+  assert.ok(aim.y < sim.player.y && Math.abs(aim.x - sim.player.x) < .001, 'the crosshair points north');
+  const hit = castRay(sim, sim.player.x, sim.player.y, -Math.PI / 2, 200);
+  assert.ok(hit && hit.dist > 0, 'the ray reaches the north wall');
 });
 
 test('a guard who sees you shouts at once and stays in Jev’s contact plan', () => {
