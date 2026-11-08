@@ -12,6 +12,27 @@ const fail = message => ({ error: 'training_not_saved', message });
 const compact = date => date.replaceAll('-', '');
 const taskSignature = task => hash(JSON.stringify([task.text, task.due, task.important, task.steps, task.source?.text]));
 const shift = (date, days) => new Date(Date.parse(date + 'T12:00:00Z') + days * DAY).toISOString().slice(0, 10);
+/** A planned session the planner itself wrote, that is now in the past and untouched: it was missed, not done. */
+export const isMissedSession = (task, today) => Boolean(task && !task.deleted && !task.done
+  && typeof task.due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(task.due) && task.due < today
+  && task.source?.name === 'Pip training' && String(task.uid || '').startsWith('pip-training-')
+  // The planner re-signs every task it writes; a different token means the person edited it, so it stays.
+  && task.source?.token === task.uid + ':' + taskSignature(task));
+
+/**
+ * A missed session used to stay open for ever while the planner added the next one, so a fortnight of missed
+ * workouts became a pile of overdue copies. Clearing its own untouched, past-dated tasks keeps the list honest
+ * without touching anything the person wrote or edited.
+ */
+export async function sweepMissedSessions(userId, now = Date.now()) {
+  const doc = (await readDocuments(userId))['tasks.json']?.value;
+  const tasks = Array.isArray(doc?.tasks) ? doc.tasks : [];
+  const today = new Date(now).toISOString().slice(0, 10), missed = tasks.filter(task => isMissedSession(task, today));
+  if (!missed.length) return 0;
+  await syncDocuments(userId, { 'tasks.json': { v: 1, tasks: missed.map(task => ({ ...task, deleted: true, updated: Math.max(now, (task.updated || 0) + 1) })) } }, true);
+  return missed.length;
+}
+
 export const TRAINING_GRANTS = ['gym', 'coros', 'tasks'];
 export const TRAINING_CHECK_INTERVAL = 30 * 60000;
 export const TRAINING_LOOKAHEAD = 3, TRAINING_SESSIONS = 2;

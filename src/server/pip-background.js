@@ -7,7 +7,7 @@ import { corosState, corosTool, corosCatalog } from './coros.js';
 import { EMPTY } from '../shared/workspace.js';
 import { config as pipConfig, requestBody, contextCoverage } from '../client/pip-core.js';
 import { execute as runTool, recordSource, WRITE_TOOLS } from '../client/pip-tools.js';
-import { trainingRuntime, trainingObservation, trainingCheckpoint, trainingChanged, rememberTraining, TRAINING_GRANTS, TRAINING_CHECK_INTERVAL } from './pip-training.js';
+import { trainingRuntime, trainingObservation, trainingCheckpoint, trainingChanged, rememberTraining, sweepMissedSessions, TRAINING_GRANTS, TRAINING_CHECK_INTERVAL } from './pip-training.js';
 import { trainingChatRoutine } from '../shared/pip-training-chat.js';
 import { sweepRuns } from './pip-runs.js';
 import { notify } from './pip-notify.js';
@@ -280,6 +280,8 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   if (routine.kind === 'training' && !conversation) {
     if (!TRAINING_GRANTS.every(grant => settings.grants.includes(grant))) return { status: 'off', error: 'Training planning needs Gym, COROS and Tasks access.' };
     if (routine.enabled === false) return { status: 'off', error: 'Enable the training planner first.' };
+    // Missed sessions the planner wrote itself are cleared before it plans the next ones.
+    await sweepMissedSessions(userId, now).catch(() => 0);
     if (!routine.prompt) return { status: 'unchanged' };
     observation = await trainingObservation(userId, today, trainingServices);
     checkpoint = await trainingCheckpoint(userId, routine.id);
