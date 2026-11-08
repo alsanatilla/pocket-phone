@@ -231,10 +231,62 @@ function serialize(node: Tree, state: State, context: Context, depth = 0): strin
   return tag === 'table' ? `<div class="md-table">${html}</div>` : html;
 }
 
+/** A fenced ```pocket block is a small JSON card, not code. It is built here, after the markdown tree,
+ *  so the rest of the renderer and its allowlists stay exactly as they are. */
+const POCKET_FENCE = /^[ \t]*```pocket[ \t]*\n([\s\S]*?)\n[ \t]*```[ \t]*$/gm;
+const POCKET_TOKEN = (index: number) => `POCKETCARD${index}TOKEN`;
+
+type Card = { title: string; subtitle: string; progress: number | null; rows: Array<{ k: string; v: string }> };
+
+function card(value: string): Card | null {
+  let data: unknown;
+  try { data = JSON.parse(value); } catch { return null; }
+  if (!data || typeof data !== 'object') return null;
+  const raw = data as Record<string, unknown>;
+  const text = (input: unknown, limit: number) => (typeof input === 'string' ? input.slice(0, limit) : '');
+  const title = text(raw.title, 80).trim();
+  const subtitle = text(raw.subtitle, 120).trim();
+  const rows = Array.isArray(raw.rows)
+    ? raw.rows.filter(row => row && typeof row === 'object' && typeof (row as Record<string, unknown>).v === 'string')
+        .slice(0, 8).map(row => ({ k: text((row as Record<string, unknown>).k, 20).trim(), v: text((row as Record<string, unknown>).v, 140).trim() }))
+    : [];
+  if (!title && !rows.length) return null;
+  const progress = typeof raw.progress === 'number' && Number.isFinite(raw.progress) ? Math.min(1, Math.max(0, raw.progress)) : null;
+  return { title, subtitle, progress, rows };
+}
+
+function cardHtml(value: string): string | null {
+  const parsed = card(value);
+  if (!parsed) return null;
+  const cells = 20, filled = parsed.progress === null ? 0 : Math.round(parsed.progress * cells);
+  return '<section class="pocket-card">'
+    + '<div class="pocket-bar"></div>'
+    + (parsed.title ? `<div class="pocket-title">${escape(parsed.title)}</div>` : '')
+    + (parsed.subtitle ? `<div class="pocket-sub">${escape(parsed.subtitle)}</div>` : '')
+    + (parsed.progress === null ? '' : `<div class="pocket-progress" role="img" aria-label="${Math.round(parsed.progress * 100)}%">${
+        Array.from({ length: cells }, (_, index) => `<span class="${index < filled ? 'pocket-on' : 'pocket-off'}"></span>`).join('')}</div>`)
+    + parsed.rows.map(row => `<div class="pocket-row"><span class="pocket-k">${escape(row.k)}</span><span class="pocket-v">${escape(row.v)}</span></div>`).join('')
+    + '</section>';
+}
+
+/** Replaces every fenced card with a token so markdown never sees the JSON, and keeps the card HTML aside. */
+function extractCards(source: string): { source: string; cards: string[] } {
+  const cards: string[] = [];
+  const replaced = source.replace(POCKET_FENCE, (whole, body: string) => {
+    const html = cardHtml(body);
+    if (!html) return whole;
+    cards.push(html);
+    return '\n' + POCKET_TOKEN(cards.length - 1) + '\n';
+  });
+  return { source: replaced, cards };
+}
+
 /** Compile with Astro 7's native Rust Markdown engine, then serialize an allowlisted tree. */
 export function renderMarkdown(value: unknown): string {
   const input = markdownInput(value);
   if (!input.source.trim()) return '';
+  const cards = input.inline ? { source: input.source, cards: [] as string[] } : extractCards(input.source);
+  input.source = cards.source;
   const scope = 'md-' + randomUUID().replace(/-/g, '') + '-';
   const state: State = { nodes: 0, scope, ids: new Map(), lines: input.source.split('\n'), originalLines: [], annotations: new Map((input.annotations ?? []).map(item => [item.line, item])), markers: new Map(), strips: new Set() };
   if (input.inline) {
@@ -259,7 +311,8 @@ export function renderMarkdown(value: unknown): string {
   }
   if (state.markers.size) root = tree(rewritten.join('\n'), scope);
   collectIds(root, state);
-  const html = serialize(root, state, { inline: false, code: false, anchor: false, quote: 0, prose: false });
+  let html = serialize(root, state, { inline: false, code: false, anchor: false, quote: 0, prose: false });
+  if (cards.cards.length) html = html.replace(/<p>POCKETCARD(\d+)TOKEN<\/p>/g, (_whole, index: string) => cards.cards[Number(index)] ?? '');
   if (html.length > MAX_HTML) throw problem('Markdown is too complex.', 413);
   return html;
 }

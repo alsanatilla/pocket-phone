@@ -49,7 +49,7 @@ function fragment(html, namespace) {
       if (!ATTRS.has(attr.name)) throw new Error('Invalid Markdown attribute.');
       if (attr.name === 'href' && (node.tagName !== 'A' || !safeHref(attr.value))) throw new Error('Invalid Markdown link.');
       if (attr.name === 'id' && !FOOTNOTE.test(attr.value)) throw new Error('Invalid Markdown id.');
-      if (attr.name === 'class' && !/^(?:language-[\w#+.-]{1,24}|tasks|md-table|thought-line|accent|meta muted|footnotes|footnote-backref|footnote-ref|sr-only)$/.test(attr.value)) throw new Error('Invalid Markdown class.');
+      if (attr.name === 'class' && !/^(?:language-[\w#+.-]{1,24}|tasks|md-table|thought-line|accent|meta muted|footnotes|footnote-backref|footnote-ref|sr-only|pocket-card|pocket-bar|pocket-title|pocket-sub|pocket-progress|pocket-row|pocket-k|pocket-v|pocket-on|pocket-off)$/.test(attr.value)) throw new Error('Invalid Markdown class.');
       if (attr.name === 'target' && attr.value !== '_blank' || attr.name === 'rel' && attr.value !== 'noopener noreferrer') throw new Error('Invalid Markdown target.');
       if (attr.name === 'data-align' && !/^(left|right|center)$/.test(attr.value)) throw new Error('Invalid Markdown alignment.');
       if (attr.name === 'start' && !/^\d{1,9}$/.test(attr.value)) throw new Error('Invalid list start.');

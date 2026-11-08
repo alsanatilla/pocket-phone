@@ -1023,3 +1023,17 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 .pip-activity summary::marker, .pip-tool summary::marker, .pip-sources summary::marker, .pip-reasoning summary::marker { content: ""; }
 /* On a wide screen the sidebar already lists the chats, so the chip is redundant. */
 @media (min-width: 900px) { .pip-chip { display: none; } }
+
+/* A Pip card: a fenced ```pocket block the server turns into this. The bar is a real gradient, so the
+   card reads as one object rather than a table. */
+.pocket-card { margin: 14px 0 4px; padding: 0 0 10px; border-bottom: 1px solid var(--line); }
+.pocket-bar { height: 3px; background: linear-gradient(90deg, var(--accent), rgba(236, 201, 129, .12)); }
+.pocket-title { margin-top: 10px; font: 20px/1.2 var(--pixel); color: var(--accent); }
+.pocket-sub { margin-top: 2px; font: 12px/1.4 var(--mono); color: var(--muted); }
+.pocket-progress { display: flex; gap: 2px; margin: 10px 0 2px; }
+.pocket-progress span { flex: 1 1 0; height: 6px; background: var(--line); }
+.pocket-progress .pocket-on { background: var(--accent); }
+.pocket-row { display: grid; grid-template-columns: minmax(64px, 96px) minmax(0, 1fr); gap: 10px; padding: 6px 0; border-top: 1px dotted var(--line); }
+.pocket-row:first-of-type { margin-top: 8px; }
+.pocket-k { font: 11px/1.6 var(--mono); color: var(--dim); letter-spacing: .06em; text-transform: lowercase; }
+.pocket-v { font: 14px/1.5 var(--mono); color: var(--text); }
