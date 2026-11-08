@@ -68,7 +68,7 @@ function shell() {
   root.replaceChildren(
     h("header", { class: "bar" },
       h("button", { class: "brand", onclick: () => go("/today"), title: "Today", text: "pocket" }),
-      h("nav", { class: "tabs", "aria-label": "Workspace" }, tabs),
+      h("nav", { class: "tabs", "aria-label": "Workspace" }, h("div", { class: "tab-scroll" }, tabs)),
       h("button", { class: "pip-entry", id: "pip-entry", "aria-label": "Pip", title: "Pip", onclick: () => go("/pip") }, mascot(true)),
       h("button", { class: "status", id: "sync-status", onclick: () => go("/sync"), title: "Sync settings" }, statusLabel())),
     content, notice);
@@ -84,9 +84,11 @@ function view(tool, actions = []) {
   zines.leave(); pip.leave(); travel.leave(); movement.leave(); shell(); closeDialog(); say("");
   content.querySelectorAll('.pixel-backdrop').forEach(canvas=>canvas.dispose?.());
   const pipEntry = document.getElementById("pip-entry"); pipEntry.classList.toggle("selected", tool === "pip"); pipEntry.setAttribute("aria-current", tool === "pip" ? "page" : "false");
-  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && ["receipt", "dice", "zines", "sync", "calendar", "clock", "travel", "account", "brief", "setup", "girder", "shadow"].includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
+  const inApps = ["receipt", "dice", "zines", "sync", "calendar", "clock", "travel", "account", "brief", "setup", "girder", "shadow"].includes(tool);
+  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && inApps; tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
   const activeTab = document.querySelector(".tab.active"), tabs = activeTab?.parentElement;
-  if (tabs) tabs.scrollLeft = activeTab.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - activeTab.clientWidth) / 2;
+  // A pinned tab is already in view; centring it would scroll the row for no reason.
+  if (tabs && !activeTab.classList.contains("pinned")) tabs.scrollLeft = activeTab.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - activeTab.clientWidth) / 2;
   document.title = "pocket · " + (tool === "sync" ? "account" : tool);
   content.replaceChildren();
   content.classList.toggle('content-pip', tool === 'pip');
@@ -249,8 +251,23 @@ function tileReading(kind) {
     default: return reading("", "");
   }
 }
+/**
+ * A reading that says "nothing here yet": no number, no event, nothing connected. Those tiles should not take a
+ * quarter of the board to say it, so they render small unless the person chose a size for them by hand.
+ */
+const QUIET_VALUE = /^(|0|free|off|nothing|all clear|no sessions yet)$/i;
+const QUIET_DETAIL = /^(no upcoming|nothing|all clear|turned off|no sessions yet)$/i;
+/** Something the person has to do (connect a service, start a session) keeps its tile: shrinking it would hide the ask. */
+const ACTIONABLE = /^(connect|not connected|reconnect|start a session|sign in)/i;
+const quietReading = data => Boolean(data) && !data.alert
+  && !ACTIONABLE.test(String(data.detail || "").trim()) && !ACTIONABLE.test(String(data.value || "").trim())
+  && (QUIET_VALUE.test(String(data.value || "").trim()) || QUIET_DETAIL.test(String(data.detail || "").trim()));
+const quietSide = kind => { try { return quietReading(tileReading(kind)); } catch { return false; } };
+
 function liveTile(tile) {
-  const size = tileSize(tile), small = size === "small", pip = tile.kind === "pip";
+  // An explicit size is the person's choice and always wins; otherwise an empty tile shrinks to one cell.
+  const size = tileSize(tile) === "small" || tile.size ? tileSize(tile) : quietSide(tile.kind) ? "small" : tileSize(tile);
+  const small = size === "small", pip = tile.kind === "pip";
   const value = h("span", { class: "live-value" }), detail = small ? null : h("span", { class: "live-detail" }), chart = small ? null : h("span", { class: "live-chart", "aria-hidden": "true", hidden: true });
   const node = h("button", { class: "live-tile", "data-tile": tile.kind, "data-size": size }, pip ? mascot() : value, detail, chart,
     // The foot is the scan point: icon and name. A small tile has room for the icon only; Pip's sprite is its own icon.
@@ -279,17 +296,18 @@ function paintTile(node, roll) {
 /** Today's live tiles: dense four-column packing like the phone, refreshed on the minute and whenever synced data lands. */
 function tileBoard() {
   const owner = activeAccount(), board = h("section", { class: "live-tiles", "aria-label": "Today tiles" });
-  let timer = 0, layout = '', stopped = false;
+  let timer = 0, layout = '', packed = '', stopped = false;
   const disposeTiles = () => board.querySelectorAll('.live-tile').forEach(node => { node.releasePress?.(); node.getAnimations({ subtree: true }).forEach(a => a.cancel()); node.querySelectorAll('.pip-mascot').forEach(c => c.dispose?.()); });
   const paint = roll => {
     if (owner !== activeAccount()) { disposeTiles(); board.replaceChildren(); return; }
     const appearance = preferences.get('appearance') || {};
     board.style.setProperty('--accent', ['#ecc981', '#adbf9c', '#a5bfdc', '#f0e9dd'][appearance.accent] || '#ecc981');
     document.documentElement.classList.toggle('reduce-motion', Boolean(appearance.reduceMotion));
-    const list = todayTiles.list(), key = JSON.stringify(list);
-    if (key !== layout) {
+    const list = todayTiles.list(), key = JSON.stringify(list), shape = list.map(tile => quietSide(tile.kind) ? "q" : "f").join("");
+    // A tile that fills up (or empties out) changes the packing, so the board is rebuilt on that change too.
+    if (key !== layout || shape !== packed) {
       const focus = board.contains(document.activeElement) ? document.activeElement.dataset.tile : null;
-      disposeTiles(); board.replaceChildren(...list.map(liveTile)); layout = key; roll = false;
+      disposeTiles(); board.replaceChildren(...list.map(liveTile)); layout = key; packed = shape; roll = false;
       if (focus) board.querySelector(`[data-tile="${focus}"]`)?.focus({ preventScroll: true });
     }
     board.querySelectorAll('.live-tile').forEach(node => paintTile(node, roll));

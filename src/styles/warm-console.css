@@ -74,8 +74,8 @@ input[type=checkbox] { accent-color: var(--accent); }
 .live-tile:not(:disabled):hover, .live-tile:not(:disabled):active { color: var(--ink); background: var(--tile); box-shadow: none; }
 .live-tile.pressed { transform: perspective(800px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(.97); transition-duration: 110ms; }
 .live-tile:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
-.live-value { display: block; font: clamp(38px, 8cqi, 68px)/.95 var(--pixel); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
-.live-tile[data-size=small] .live-value { font-size: clamp(26px, 5cqi, 46px); }
+.live-value { display: block; font: clamp(26px, 4.6cqi, 42px)/.95 var(--pixel); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+.live-tile[data-size=small] .live-value { font-size: clamp(20px, 3.6cqi, 30px); }
 .live-tile[data-tile=clock] .live-value, .live-tile[data-tile=agenda] .live-value { font-size: clamp(24px, 6cqi, 52px); }
 .live-tile[data-size=small][data-tile=clock] .live-value, .live-tile[data-size=small][data-tile=agenda] .live-value { font-size: clamp(16px, 3.5cqi, 30px); }
 .live-detail { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; font: 13px/1.35 var(--mono); min-height: 0; overflow: hidden; overflow-wrap: anywhere; white-space: pre-line; }
