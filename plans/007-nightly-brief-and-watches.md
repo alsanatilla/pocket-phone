@@ -38,8 +38,11 @@ claim lock, the reply chat, the run history and the push notice. Two kinds join 
 - **The "nothing changed" guard runs before any request.** One query compares the newest record revision with the
   routine's `last_run` (`newestRecordAt()`). Equal or older means `status: 'unchanged'` and no model call at all — the
   same status the training planner already uses for an unchanged workout set.
-- **Chats never count as news.** The brief writes into a chat object, so counting every object would make each brief
-  look like a change and run again the next night. `newestRecordAt()` reads content collections only; a test pins it.
+- **The guard reads where the records actually live.** Content is one document per collection in
+  `pocket_documents`; chats are objects in `pocket_objects`. `newestRecordAt()` takes the newest of the two, ignores
+  chats (its own output, which would otherwise wake it every night) and ignores drafts, the clock, receipts and
+  preferences (which change constantly and are not news). Six tests against a throwaway libSQL file pin all three.
+- **The digest names the changed documents**, so a run knows that `tasks` and `notes` moved before it reads them.
 - **An empty first brief stays silent.** With no records at all there is nothing to compare, and a request spent
   saying "nothing is here" is the exact waste this plan removes. The routine waits for the first record instead.
 - When something did change, the prompt gains a **deterministic digest**: records changed per collection
@@ -96,7 +99,7 @@ cents metered.
 
 ## Verification
 
-`node --experimental-vm-modules --test tools/*.test.mjs` — 259 tests, including 10 for this plan:
+`node --experimental-vm-modules --test tools/*.test.mjs` — every suite green, including 16 for this plan:
 
 1. a brief needs no prompt, gets a readable default name, and keeps a name the user chose;
 2. a brief ignores a prompt and refuses an unknown kind;
@@ -104,5 +107,12 @@ cents metered.
 4. only a one-word `SKIP` silences a watch (`SKIPpy` and ordinary prose do not);
 5. both kinds are scheduled by the existing `nextRun`, including a chosen-days case.
 
-Live checks on the self-hosted worker: `/healthz` shows the routine timer, and a forced brief run writes one chat
-turn and one push notice.
+5. `newestRecordAt` ignores chats, drafts, the clock and receipts, and sees documents and objects (6 DB tests).
+
+Live checks on the self-hosted worker, all three paths run for real against the account holding the OpenCode Go key:
+
+- a forced brief wrote one turn in `pip-routine-…-2026-11` (15.7k in / 1.2k out, 13.4k cached) and opened with
+  "One thing changed: a new note …";
+- a watch with nothing to match returned `unchanged`, wrote no chat object and sent no notice;
+- after a matching note was added, the same watch replied in 60 words with the note, its collection and a next step;
+- `/healthz` reports `routines: { everyMs: 60000, ran, failed, busy }`.

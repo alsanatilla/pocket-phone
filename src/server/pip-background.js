@@ -22,6 +22,8 @@ export const BACKGROUND_GRANTS = ['notes', 'thoughts', 'tasks', 'gym', 'coros'];
 export const BACKGROUND_OWNER = 'pip-routine';
 const CHECKIN = 'Morning check-in. Look at my open tasks (overdue, due today and important ones), thoughts I parked more than a week ago, and my COROS readiness and recent training load if available. Tell me briefly what needs attention today and suggest at most three concrete changes, such as moving a task. If nothing needs attention, say so in one line.';
 const BRIEF = 'Nightly brief. Look at what actually changed in my Pocket records since the last brief: completed and moved tasks, new or edited notes, thoughts I parked, gym sessions, and my COROS readiness and load when available. Write at most five short parts and leave out any part with nothing to say: (1) what changed, in one line; (2) what is rotting: overdue tasks, a task I moved more than once, a thought parked over a week with no action; (3) one connection or contradiction worth knowing, such as two notes about the same thing or a task that no longer matches the note it came from; (4) the single action that would help most today, and why; (5) a closing line only if something else matters. Never invent a record or a number. Under 150 words, plain sentences, no headings, no list longer than three items.';
+/** The collections a brief is about. Drafts, the clock, receipts and preferences change constantly and are not news. */
+const CONTENT_DOCUMENTS = ['notes.json', 'tasks.json', 'parking.json', 'journal.json', 'gym.json'];
 /** A watch answers SKIP, in one word, when nothing new matches; that reply is never written to the chat. */
 const SKIP = /^\s*skip\b/i;
 export const quietWatch = answer => SKIP.test(String(answer || ''));
@@ -92,9 +94,9 @@ export function backgroundRoutine(value) {
  * source would make the brief think nothing ever changes.
  */
 export async function newestRecordAt(userId) {
-  const row = (await sql({ sql: `SELECT (SELECT MAX(updated_at) FROM pocket_documents WHERE user_id = ?) AS documents,
+  const row = (await sql({ sql: `SELECT (SELECT MAX(updated_at) FROM pocket_documents WHERE user_id = ? AND name IN (${CONTENT_DOCUMENTS.map(() => '?').join(',')})) AS documents,
     (SELECT MAX(json_extract(payload, '$.updated')) FROM pocket_objects WHERE user_id = ? AND collection <> 'chats') AS objects`,
-    args: [userId, userId] })).rows[0];
+    args: [userId, ...CONTENT_DOCUMENTS, userId] })).rows[0];
   return Math.max(Number(row?.documents || 0), Number(row?.objects || 0));
 }
 const parse = raw => { try { return JSON.parse(String(raw)); } catch { return null; } };
@@ -242,8 +244,8 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
       if (routine.kind === 'brief' && !newest) return { status: 'unchanged' };
       if (lastRun > 0 && newest <= lastRun) return { status: 'unchanged' };
       if (routine.kind === 'brief' && lastRun > 0) {
-        const documents = (await sql({ sql: `SELECT name FROM pocket_documents WHERE user_id = ? AND updated_at > ?`,
-          args: [userId, lastRun] })).rows.map(row => String(row.name).replace(/\.json$/, ''));
+        const documents = (await sql({ sql: `SELECT name FROM pocket_documents WHERE user_id = ? AND updated_at > ? AND name IN (${CONTENT_DOCUMENTS.map(() => '?').join(',')})`,
+          args: [userId, lastRun, ...CONTENT_DOCUMENTS] })).rows.map(row => String(row.name).replace(/\.json$/, ''));
         const objects = (await sql({ sql: `SELECT collection, COUNT(*) AS n FROM pocket_objects WHERE user_id = ? AND collection <> 'chats' AND json_extract(payload, '$.updated') > ? GROUP BY collection`,
           args: [userId, lastRun] })).rows.map(row => `${row.collection}: ${Number(row.n)}`);
         const parts = [...documents, ...objects];

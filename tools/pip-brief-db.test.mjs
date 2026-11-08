@@ -46,13 +46,20 @@ test('an object outside chats is news', async () => {
   assert.equal(await newestRecordAt(USER), 7_000);
 });
 
+test('drafts, the clock and receipts are not news', async () => {
+  await document('drafts.json', 8_500);
+  await document('clock.json', 8_600);
+  await document('receipt.json', 8_700);
+  assert.equal(await newestRecordAt(USER), 7_000);
+});
+
 test('the newest of documents, objects and chats wins', async () => {
   await object('chats', 'pip-routine-brief-2026-12', 9_000);
-  await document('tasks.json', 8_000);
-  assert.equal(await newestRecordAt(USER), 8_000);
+  await document('tasks.json', 9_000);
+  assert.equal(await newestRecordAt(USER), 9_000);
 });
 
 test('a record newer than the last brief wakes it', async () => {
-  const lastRun = 7_500;
+  const lastRun = 8_500;
   assert.ok(await newestRecordAt(USER) > lastRun);
 });
