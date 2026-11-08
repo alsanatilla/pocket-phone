@@ -7,7 +7,7 @@ const TAGS = new Set('P BR STRONG EM DEL CODE PRE A UL OL LI BLOCKQUOTE H2 H3 H4
 const ATTRS = new Set('class data-align start title href target rel id aria-describedby aria-label role tabindex data-pocket-action data-pocket-value data-spec data-top data-bottom'.split(' '));
 const PAGE = /^#\/(?:notes|tasks|thoughts|gym|movement|calendar)(?:\/[A-Za-z0-9_:.~%-]{1,120})?$/;
 // Every class token must match; a value may hold several ("pocket-tr pocket-thead pocket-c3").
-const ALLOWED_CLASS = /^(?:language-[\w#+.-]{1,24}|tasks|md-table|thought-line|accent|meta muted|footnotes|footnote-backref|footnote-ref|sr-only|pocket-.*)$/;
+const ALLOWED_CLASS = /^(?:language-[\w#+.-]{1,24}|tasks|md-table|thought-line|accent|meta|muted|footnotes|footnote-backref|footnote-ref|sr-only|pocket-.*)$/;
 const FOOTNOTE = /^md-[A-Za-z0-9_%~.-]{1,1000}$/;
 let owner = null, cache = [], pending = new Map(), serial = 0;
 const key = (source, options) => JSON.stringify([source, !!options.inline, options.annotations || []]);
