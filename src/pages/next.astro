@@ -1,0 +1,21 @@
+---
+// The next shell, served beside the current app while Today and Pip move over. Nothing here shares the legacy
+// bundle: the page ships its own small stylesheet and a single module entry with route-level chunks.
+import '../client/shell/shell.css';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>pocket</title>
+    <link rel="preload" href="/fonts/VT323-Regular.ttf" as="font" type="font/ttf" crossorigin />
+    <link rel="preload" href="/fonts/AtkinsonHyperlegibleMono-Regular.woff2" as="font" type="font/woff2" crossorigin />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>import "../client/shell/main.jsx";</script>
+  </body>
+</html>
