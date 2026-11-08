@@ -45,7 +45,7 @@ Vercel builds from the repository root using vercel.json and the Astro adapter. 
 
 ### Detached Pip worker (optional)
 
-Pip’s replies can run on a separate process instead of inside the web request. Set `PIP_RUNS_DETACHED=1` in the web app and start the worker with `npm run worker` (or `npm run worker:once` from cron). It needs the database credentials and, if you set one, the same encryption secret as the web app — there is no queue service and no paid runtime; Turso holds the job rows and the worker can run on a home server, a free container tier or a scheduled CI job. See [services/pip/README.md](services/pip/README.md).
+Pip’s replies can run on a separate process instead of inside the web request. Set `PIP_RUNS_DETACHED=1` in the web app and start the worker with `npm run worker` (or `npm run worker:once` from cron). It needs the database credentials and, if you set one, the same encryption secret as the web app — there is no queue service and no paid runtime; Turso holds the job rows and the worker can run on a home server, a free container tier or a scheduled CI job. Set `PIP_ROUTINES_EVERY_MS` to have the same worker run Pip’s schedules itself, within a minute of their time. See [services/pip/README.md](services/pip/README.md).
 
 ## Android build and downloads
 

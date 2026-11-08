@@ -70,7 +70,11 @@ The chat has the same static pixel glow on phone and web: only the upper-corner 
 
 Signed-in browsers open **on its own** from the Pip header. Pip then runs on Pocket's server while Pocket is closed, with a dedicated API key that is stored encrypted on the account and never sent back to the browser. Use a key with a spending limit at the provider; Pocket adds a daily token limit and an off switch. Pip reads only the granted Notes, Thoughts, Tasks, Gym and COROS data from the account's server copy; Calendar appointments stay on the phone. Each run replies in that routine's synced Pip chat, one chat per routine and month.
 
-Routines are a morning check-in or a scheduled prompt at a time and weekdays in the browser's timezone. A GitHub workflow calls `/api/jobs/pip` every 15 minutes and runs whatever is due; **run now** runs one immediately. Check-ins and prompts only read and suggest.
+Routines are a morning check-in, a nightly brief, a standing watch or a scheduled prompt at a time and weekdays in
+the browser's timezone. A **nightly brief** reads what changed since the last one and writes only what is rotting,
+one connection worth knowing and the one action that would help today; it skips itself when no note, task, thought,
+journal page or workout changed. A **standing watch** is one sentence you write ("tell me if I mention Lisbon
+again"); it reads only what is new and answers `SKIP` — nothing written, nothing sent — unless something matches. A GitHub workflow calls `/api/jobs/pip` every 15 minutes and runs whatever is due; **run now** runs one immediately. Check-ins and prompts only read and suggest.
 
 The training planner works through conversation: **training chat** opens a chat where you tell Pip your goals, available days and how workouts felt. Pip asks follow-up questions and remembers a training brief, available weekdays and up to 12 dated feedback notes; it can pause or resume automatic planning when asked. With Gym, COROS and Tasks access and COROS connected, Pip checks about every 30 minutes for newly completed COROS and Gym workouts and reviews recovery once a day. It reads the actual session details, then adjusts at most the next two sessions, from tomorrow through three days ahead, on available days. Running, cycling and trail workouts go to COROS; gym and recovery sessions become dated Pocket tasks. Pip changes only its own workouts, keeps manual ones, explains what changed in the training chat, and stops when live data is missing or access was revoked. Unchanged data does not start a paid run.
 
