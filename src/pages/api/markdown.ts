@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { MARKDOWN_BODY_LIMIT, MarkdownError, renderMarkdown } from '../../server/markdown.js';
+import { sameHost } from '../../server/http.js';
 
 export const prerender = false;
 const reply = (value: object, status = 200) => new Response(JSON.stringify(value), {
@@ -14,7 +15,7 @@ export const POST: APIRoute = async ({ request }) => {
     const expected = new URL(request.url).origin;
     const origin = request.headers.get('origin');
     const site = request.headers.get('sec-fetch-site');
-    if ((origin && origin !== expected) || (site && site !== 'same-origin' && site !== 'none') || (!origin && request.headers.get('cookie'))) throw fail('Request origin is not allowed.', 403);
+    if ((origin && !sameHost(origin, expected)) || (site && site !== 'same-origin' && site !== 'none') || (!origin && request.headers.get('cookie'))) throw fail('Request origin is not allowed.', 403);
     if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type') || '')) throw fail('Use a JSON request.', 415);
     const length = request.headers.get('content-length');
     if (length && (!/^\d+$/.test(length) || Number(length) > MARKDOWN_BODY_LIMIT)) throw fail('Markdown request is too large.', 413);

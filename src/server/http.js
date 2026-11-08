@@ -7,10 +7,14 @@ export function failure(error) {
   const message = typeof error?.message === 'string' && error.message ? error.message : 'Request failed.';
   return json({ error: status >= 500 ? 'Pocket storage is unavailable. Try again.' : message }, status);
 }
+/** Compares hosts, not schemes: behind a TLS proxy the app sees http while the browser sends https. */
+export function sameHost(left, right) {
+  try { return new URL(left).host.toLowerCase() === new URL(right).host.toLowerCase(); } catch { return false; }
+}
 export function sameOrigin(request) {
   const origin = request.headers.get('origin');
   const expected = process.env.BETTER_AUTH_URL || new URL(request.url).origin;
-  if (origin && origin !== expected) throw Object.assign(new Error('Request origin is not allowed.'), { status: 403 });
+  if (origin && !sameHost(origin, expected)) throw Object.assign(new Error('Request origin is not allowed.'), { status: 403 });
   // Native clients use a bearer session rather than a browser cookie.
   if (!origin && request.headers.get('cookie') && !request.headers.get('authorization')) throw Object.assign(new Error('Request origin is required.'), { status: 403 });
 }
