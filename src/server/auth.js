@@ -1,3 +1,4 @@
+import { sameHost } from './http.js';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { betterAuth } from 'better-auth';
 import { bearer, deviceAuthorization } from 'better-auth/plugins';
@@ -91,13 +92,23 @@ function pocketPasskeys(secret, origin) {
 const instances = new Map();
 export async function authFor(request) {
   await ensureSchema();
-  const origin = process.env.BETTER_AUTH_URL || new URL(request.url).origin;
+  // Behind a TLS terminator the request arrives as http while the browser says https. Same host, so the browser's
+  // origin is the truthful base URL — it decides the cookie's Secure flag and the links Pocket hands out.
+  const requestUrl = new URL(request.url), claimed = request.headers.get('origin');
+  const origin = process.env.BETTER_AUTH_URL || (claimed && sameHost(claimed, requestUrl.origin) ? claimed : requestUrl.origin);
   if (!instances.has(origin)) {
     const token = process.env.TURSO_AUTH_TOKEN;
     const secret = process.env.BETTER_AUTH_SECRET || (token && createHash('sha256').update('pocket-auth-v1:' + token).digest('hex'));
     if (!secret) throw new Error('Pocket authentication is not configured.');
+    // A TLS terminator (a tunnel, a proxy) forwards http while the browser sends https. Both belong to the same
+    // host, so both are trusted; a foreign origin stays untrusted. POCKET_TRUSTED_ORIGINS adds more, comma separated.
+    const trustedOrigins = [...new Set([
+      origin,
+      origin.startsWith('https:') ? origin.replace(/^https:/, 'http:') : origin.replace(/^http:/, 'https:'),
+      ...(process.env.POCKET_TRUSTED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean)
+    ])];
     instances.set(origin, betterAuth({
-      appName: 'Pocket', baseURL: origin, secret,
+      appName: 'Pocket', baseURL: origin, secret, trustedOrigins,
       database: drizzleAdapter(drizzle(database(), { schema }), { provider: 'sqlite', schema, transaction: true }),
       emailAndPassword: { enabled: true, minPasswordLength: 12, maxPasswordLength: 128, requireEmailVerification: false },
       session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },
