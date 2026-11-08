@@ -1,0 +1,14 @@
+---
+// Pages that mount React themselves (outside Astro's islands) never get plugin-react's refresh preamble, and every
+// transformed .jsx module throws "can't detect preamble" without it. A module script with a static import runs, in
+// document order, before the page's own module scripts, so the flag is set before any .jsx is evaluated.
+---
+{import.meta.env.DEV && (
+  <script is:inline type="module">
+    import RefreshRuntime from '/@react-refresh';
+    RefreshRuntime.injectIntoGlobalHook(window);
+    window.$RefreshReg$ = () => {};
+    window.$RefreshSig$ = () => type => type;
+    window.__vite_plugin_react_preamble_installed__ = true;
+  </script>
+)}
