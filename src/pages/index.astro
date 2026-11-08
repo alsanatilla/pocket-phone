@@ -19,6 +19,17 @@ export const prerender = true;
     <title>pocket</title>
     <link rel="preload" href="/fonts/VT323-Regular.ttf" as="font" type="font/ttf" crossorigin />
     <link rel="preload" href="/fonts/AtkinsonHyperlegibleMono-Regular.woff2" as="font" type="font/woff2" crossorigin />
+    {import.meta.env.DEV && (
+      <script is:inline>
+        // The chat mounts React itself, outside Astro's islands, so plugin-react's refresh preamble is missing.
+        import('/@react-refresh').then(RefreshRuntime => {
+          RefreshRuntime.injectIntoGlobalHook(window);
+          window.$RefreshReg$ = () => {};
+          window.$RefreshSig$ = () => type => type;
+          window.__vite_plugin_react_preamble_installed__ = true;
+        }).catch(() => {});
+      </script>
+    )}
   </head>
   <body>
     <div id="app" class="app"><noscript>Pocket needs JavaScript.</noscript></div>

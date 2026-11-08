@@ -122,6 +122,8 @@ export function withTravel(trip, stop, action = 'find') {
 
 export function mount(root, uid, helpers) {
   leave(); ui = helpers;
+  // The route may carry a query inside the hash (#/pip/<uid>?engine=react); it is not part of the chat's id.
+  uid = String(uid || "").split("?")[0];
   // Every routine, its next run and its recent outcomes; the nav points here when something failed.
   if (uid === 'scheduled') {
     pipScheduled(ui, { root, go: ui.go, openChat: id => ui.go('/pip/' + id) })
@@ -137,7 +139,14 @@ export function mount(root, uid, helpers) {
     localStorage.setItem("pocket:pip-current", chat.uid);
     // A stable route makes browser Back work for both a chat and its source page.
     if (uid !== chat.uid) history.replaceState(null, "", "#/pip/" + chat.uid);
-    mounted = { root, uid: chat.uid, replies: new Map(), latest: null, seen: new Set(chat.turns.map(t => t.uid)), startersShown: false }; render(); watchViewport();
+    mounted = { root, uid: chat.uid, replies: new Map(), latest: null, seen: new Set(chat.turns.map(t => t.uid)), startersShown: false, react: false };
+    // Opt-in while the port is unfinished: the legacy view stays the default and keeps working if this fails.
+    if (/(?:\?|&)engine=react(?:&|$)/.test(location.search + location.hash)) {
+      import("./pip/Chat.jsx")
+        .then(module => { mounted.react = module.createChatView; render(); })
+        .catch(error => { mounted.reactError = String(error?.message || error).slice(0, 200); render(); });
+    }
+    render(); watchViewport();
   } catch (error) { root.append(caption(error.message), button("API settings", () => apiSettings(DEFAULT_CONFIG))); }
 }
 
@@ -244,6 +253,10 @@ function replyComponent(turn, chat) {
   updateReply(turn); return message;
 }
 
+/** json-render's React renderer, loaded only when a reply carries a card. */
+let cardModule = null;
+const cards = () => (cardModule ||= import("./pip-cards.jsx"));
+
 function selectedAnswer(node, fallback) {
   const selection = window.getSelection();
   return selection?.rangeCount && node.contains(selection.getRangeAt(0).commonAncestorContainer) && selection.toString().trim() ? selection.toString().trim() : fallback;
@@ -255,7 +268,13 @@ function updateReply(turn) {
   const thread = mounted.thread, follow = thread && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 70;
   const formatting = { streaming: active,
     onBeforeRender: () => mounted?.thread === thread && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 70,
-    onRender: (node, follow) => { if (follow && mounted?.thread === thread) thread.scrollTop = thread.scrollHeight; } };
+    onRender: (node, follow) => {
+      void cards().then(module => module.hydrateCards(node)).catch(error => {
+        node.dataset.cardError = String(error?.message || error).slice(0, 160);
+        console.warn("pocket card failed", error);
+      });
+      if (follow && mounted?.thread === thread) thread.scrollTop = thread.scrollHeight;
+    } };
   if (!parts.answer.firstElementChild) parts.answer.append(ui.markdown(turn.answer || "", null, formatting));
   else parts.answer.firstElementChild.updateMarkdown(turn.answer || "", formatting);
   parts.reasoning.hidden = !turn.reasoning;
@@ -630,6 +649,7 @@ function emptyChat(chat) {
 function render() {
   if (!mounted?.root.isConnected) return;
   const chat = store.get(mounted.uid); if (!chat) return;
+  if (mounted.react || mounted.reactError) return renderReact(chat);
   const oldThread = mounted.thread, oldScroll = oldThread?.scrollTop || 0;
   const following = !oldThread || oldThread.scrollHeight - oldScroll - oldThread.clientHeight < 70;
   const focused = mounted.root.contains(document.activeElement) && document.activeElement.id === 'pip-prompt' ? { start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd } : null;
@@ -659,6 +679,48 @@ function render() {
     if (focused) { const field = mounted.root.querySelector('#pip-prompt'); field?.focus({ preventScroll: true }); field?.setSelectionRange(focused.start, focused.end); }
     fitViewport(); thread.scrollTop = following ? thread.scrollHeight : oldScroll;
   } });
+}
+
+/** The React transcript, filled one slot at a time. Only reachable with #/pip?engine=react. */
+function renderReact(chat) {
+  if (mounted.reactError) {
+    mounted.root.replaceChildren(ui.h("p", { class: "meta warn", text: "The React chat could not load: " + mounted.reactError }),
+      ui.h("p", { class: "meta muted", text: "Open the chat without ?engine=react to use the built-in view." }));
+    return;
+  }
+  const active = runner.active?.chatId === chat.uid ? runner.active : null;
+  if (!mounted.panel?.isConnected) {
+    const panel = ui.h("div", { class: "pip-panel" });
+    mounted.root.replaceChildren(ui.h("div", { class: "pip-layout" }, conversationNav(chat), panel));
+    mounted.panel = panel;
+    mounted.chatView = mounted.react(panel, {
+      onSend: text => { if (runner.active) return; void safely(() => runner.send(chat.uid, { text, context: store.get(chat.uid).context }))(); },
+      onStop: () => runner.stop(),
+      onNew: () => ui.go("/pip/new"),
+      onChats: () => { const nav = mounted?.root.querySelector(".pip-navigation"); if (nav) { nav.open = !nav.open; nav.scrollIntoView({ block: "nearest" }); } },
+      onScope: () => pocketAccess(chat),
+      onOptions: () => composerOptions(chat.uid),
+      onDraft: value => { try { store.update(chat.uid, c => { c.draft = value; }); } catch { /* draft is best effort */ } }
+    });
+  }
+  const scope = access(chat.config);
+  mounted.chatView.setChat({ count: store.list().length, scope: scope.length ? "reads " + scope.join(" · ") : "choose what pip can read", options: true });
+  mounted.chatView.setDraft(chat.draft || "");
+  mounted.chatView.setActive(active ? { turnId: active.turnId } : null);
+  mounted.chatView.setTurns(chat.turns.map(turn => ({ uid: turn.uid, text: turn.text, created: turn.created, status: turn.status })));
+  mounted.chatView.setEmpty(chat.turns.length ? null : emptyChat(chat));
+  const signature = chat.turns.map(turn => turn.uid).join(",");
+  if (mounted.bodies !== signature) {
+    for (const reply of mounted.replies.values()) { reply.answer.firstElementChild?.disposeMarkdown?.(); reply.reasoningText.firstElementChild?.disposeMarkdown?.(); }
+    mounted.replies.clear();
+    for (const turn of chat.turns) {
+      const message = replyComponent(turn, chat), reply = message.querySelector(".pip-reply"), context = message.querySelector(".pip-contexts");
+      mounted.chatView.setBody(turn.uid, ui.h("div", { class: "pip-body" }, context || null, reply || message));
+    }
+    mounted.bodies = signature;
+  }
+  mounted.latest = null;
+  if (active) updateReply(active.turn);
 }
 
 async function attachSource(uid) {

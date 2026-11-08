@@ -1,9 +1,11 @@
 import { defineConfig } from 'astro/config';
 import vercel from '@astrojs/vercel';
+import react from '@astrojs/react';
 
 export default defineConfig({
   output: 'server',
   adapter: vercel({ maxDuration: 300 }),
+  integrations: [react()],
   trailingSlash: 'never',
   // Astro refuses a POST whose Origin does not match the request URL, which a TLS terminator breaks: the server
   // sees http, the browser sends https. Pocket's own routes check the origin per request, so the dev server may

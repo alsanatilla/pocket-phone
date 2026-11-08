@@ -372,8 +372,11 @@ function elementMap(spec: Record<string, unknown>): string {
 function cardHtml(value: string): string | null {
   const spec = pocketSpec(value);
   if (!spec || typeof spec !== 'object') return null;
-  const record = spec as Record<string, unknown>;
-  return (record.elements ? elementMap(record) : pocketNode(record)) || null;
+  // Validated here, drawn in the browser by json-render's React renderer: the spec travels as base64 so it never
+  // interacts with the HTML parser or the sanitizer.
+  const payload = Buffer.from(JSON.stringify(spec), 'utf8').toString('base64');
+  if (payload.length > 200_000) return null;
+  return `<div class="pocket-spec" data-spec="${payload}"></div>`;
 }
 
 
@@ -384,7 +387,7 @@ function openCard(source: string): { source: string; card: string | null } {
   const body = match[2];
   if (body.includes('```')) return { source, card: null };
   const spec = pocketSpec(body);
-  const html = spec ? (('elements' in (spec as object)) ? elementMap(spec as Record<string, unknown>) : pocketNode(spec)) : '';
+  const html = spec ? cardHtml(JSON.stringify(spec)) : null;
   if (!html) return { source, card: null };
   return { source: source.slice(0, match.index), card: html };
 }

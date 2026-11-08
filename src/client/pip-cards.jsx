@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { defineCatalog } from "@json-render/core";
 import { schema } from "@json-render/react/schema";
-import { defineRegistry, Renderer } from "@json-render/react";
+import { defineRegistry, Renderer, JSONUIProvider } from "@json-render/react";
 import { z } from "zod";
 
 // Pocket's card, rendered by json-render's own React renderer.
@@ -107,7 +107,11 @@ export function hydrateCards(node) {
     if (!spec || !spec.elements) continue;
     const root = createRoot(slot);
     roots.set(slot, root);
-    root.render(<Renderer spec={spec} registry={registry} />);
+    root.render(
+      <JSONUIProvider registry={registry} initialState={spec.state ?? {}}>
+        <Renderer spec={spec} registry={registry} />
+      </JSONUIProvider>
+    );
   }
 }
 

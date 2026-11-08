@@ -1176,7 +1176,8 @@ async function keySettings() {
 const setupApi = { h, add, go, say, route, workspaceTitle, normalCode, linkPhone, signInForm: signedOutAccount };
 // ── Routing and keys ──
 function route() {
-  const [, name, arg, sub, leaf, deep] = (location.hash.replace(/^#/, "") || "/").split("/");
+  // A query string may ride along inside the hash (#/pip?engine=react); it is not part of the tool name.
+  const [, rawName, arg, sub, leaf, deep] = (location.hash.replace(/^#/, "") || "/").split("/"), name = (rawName || "").split("?")[0];
   if (name === "notes") notesView(arg); else if (name === "receipt") receiptView(arg); else if (name === "dice") diceView(); else if (name === "sync" || name === "account" || name === "link") accountView(name === "link" ? arg || "" : "", name === "account" && arg === "new");
   else if (name === "pip") pip.mount(view("pip"), arg, pipHelpers);
   else if (name === "zines") zines.mount(view("zines"), arg, { go, say, dialog, confirm: confirmBox });
