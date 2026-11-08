@@ -30,5 +30,9 @@
     "drizzle-orm": "0.45.3",
     "satteri": "0.10.5",
     "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@json-render/chat": "^0.22.0",
+    "@json-render/core": "^0.22.0"
   }
 }

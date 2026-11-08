@@ -1059,3 +1059,11 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 .pocket-col.pocket-h5 { height: 50%; } .pocket-col.pocket-h6 { height: 60%; }
 .pocket-col.pocket-h7 { height: 70%; } .pocket-col.pocket-h8 { height: 80%; }
 .pocket-col.pocket-h9 { height: 90%; } .pocket-col.pocket-h10 { height: 100%; background: var(--accent); }
+/* Remaining standard components: muted text, an action row, image placeholder and links. */
+.pocket-text.pocket-muted { color: var(--muted); }
+.pocket-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.pocket-button { font: 12px/1 var(--mono); color: var(--accent); border: 1px solid var(--line); padding: 10px 14px; min-height: 40px; display: inline-flex; align-items: center; }
+.pocket-button.pocket-primary { background: var(--accent); color: var(--ink); border-color: var(--accent); }
+.pocket-link { font: 12px/1 var(--mono); color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--line); padding: 10px 2px; }
+.pocket-image { display: grid; place-items: center; min-height: 64px; border: 1px dashed var(--line); color: var(--dim); font: 11px/1 var(--mono); }
+.pocket-table .pocket-label { margin-top: 6px; }

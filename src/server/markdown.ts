@@ -243,70 +243,101 @@ const MAX_CHILDREN = 24, MAX_ROWS = 12, MAX_VALUES = 40;
 const str = (value: unknown, limit: number) => (typeof value === 'string' ? value.slice(0, limit) : '');
 const list = (value: unknown, limit: number) => (Array.isArray(value) ? value.slice(0, limit) : []);
 
+/** Field/Fields: a label and a value, the same pair the standard catalog uses. */
 function fields(items: unknown[]): string {
   return items
-    .filter(item => item && typeof item === 'object' && typeof (item as Record<string, unknown>).v === 'string')
+    .filter(item => item && typeof item === 'object' && typeof (item as Record<string, unknown>).value === 'string')
     .map(item => {
       const row = item as Record<string, unknown>;
-      return `<div class="pocket-row"><span class="pocket-k">${escape(str(row.k, 24))}</span><span class="pocket-v">${escape(str(row.v, 160))}</span></div>`;
+      return `<div class="pocket-row"><span class="pocket-k">${escape(str(row.label, 24))}</span><span class="pocket-v">${escape(str(row.value, 160))}</span></div>`;
     })
     .join('');
 }
 
+/** Table takes headers + rows + optional caption + align, exactly like the standard component. */
 function table(node: Record<string, unknown>): string {
-  const columns = list(node.columns, 4).map(item => str(item, 24));
+  const headers = list(node.headers, 5).map(item => str(item, 24));
   const rows = list(node.rows, MAX_ROWS).filter(row => Array.isArray(row));
-  if (!columns.length || !rows.length) return '';
-  const colspan = ` pocket-c${Math.min(4, columns.length)}`;
-  const head = columns.map(item => `<span class="pocket-th">${escape(item)}</span>`).join('');
-  const body = rows.map(row => `<div class="pocket-tr${colspan}">${columns.map((_, index) => `<span class="pocket-td">${escape(str(row[index], 120))}</span>`).join('')}</div>`).join('');
-  return `<div class="pocket-table"><div class="pocket-tr pocket-thead${colspan}">${head}</div>${body}</div>`;
+  if (!headers.length || !rows.length) return '';
+  const columns = Math.min(5, Math.max(headers.length, ...rows.map(row => (row as unknown[]).length)));
+  const align = str(node.align, 10);
+  const cell = (tag: string, value: unknown) => `<span class="${tag}"${align === 'right' ? ' data-align="right"' : ''}>${escape(str(value, 120))}</span>`;
+  const head = headers.map(item => cell('pocket-th', item)).join('');
+  const body = rows.map(row => `<div class="pocket-tr pocket-c${Math.min(4, columns)}">${Array.from({ length: columns }, (_, index) => cell('pocket-td', (row as unknown[])[index] ?? '')).join('')}</div>`).join('');
+  const caption = str(node.caption, 80);
+  return `<div class="pocket-table"><div class="pocket-tr pocket-thead pocket-c${Math.min(4, columns)}">${head}</div>${body}${caption ? `<div class="pocket-label">${escape(caption)}</div>` : ''}</div>`;
 }
 
+/** Chart accepts {data:[{label,value}]} or a bare number list; bars are quantised to ten steps. */
 function chart(node: Record<string, unknown>): string {
-  const values = list(node.values, MAX_VALUES).map(item => (typeof item === 'number' && Number.isFinite(item) ? Math.max(0, item) : 0));
+  const raw = node.chart ?? node;
+  const source = Array.isArray(raw) ? raw : Array.isArray((raw as Record<string, unknown>)?.data) ? (raw as Record<string, unknown>).data as unknown[] : [];
+  const values = list(source, MAX_VALUES).map(item => {
+    if (typeof item === 'number' && Number.isFinite(item)) return Math.max(0, item);
+    if (item && typeof item === 'object') { const value = Number((item as Record<string, unknown>).value); return Number.isFinite(value) ? Math.max(0, value) : 0; }
+    return 0;
+  });
   if (values.length < 2) return '';
   const max = Math.max(...values) || 1;
-  const bars = values.map(item => {
-    const step = Math.min(10, Math.max(1, Math.round((item / max) * 10)));
-    return `<span class="pocket-col pocket-h${step}" title="${escape(String(item))}"></span>`;
-  }).join('');
-  const label = str(node.label, 80);
+  const bars = values.map(item => `<span class="pocket-col pocket-h${Math.min(10, Math.max(1, Math.round((item / max) * 10)))}"></span>`).join('');
+  const label = str((node && node.title) ?? (raw as Record<string, unknown>)?.title, 80);
   return `<div class="pocket-chart">${label ? `<div class="pocket-label">${escape(label)}</div>` : ''}<div class="pocket-bars">${bars}</div></div>`;
 }
 
+/**
+ * Two shapes are accepted: json-render's element map ({root, elements:{id:{type, props, children}}}) and the
+ * nested form a model writes more easily ({type, title, children:[...]}). Both end up in the same HTML.
+ */
 function pocketNode(raw: unknown, depth = 0): string {
-  if (!raw || typeof raw !== 'object' || depth > 3) return '';
+  if (!raw || typeof raw !== 'object' || depth > 4) return '';
   const node = raw as Record<string, unknown>;
   const type = str(node.type, 20).toLowerCase() || 'card';
-  if (type === 'text' || type === 'p') {
-    const value = str(node.text, 600).trim();
-    return value ? `<div class="pocket-text">${escape(value)}</div>` : '';
+  const props = (node.props && typeof node.props === 'object' ? node.props : node) as Record<string, unknown>;
+  const children = list(node.children, MAX_CHILDREN);
+  if (type === 'text') {
+    const value = str(props.content ?? props.text, 600).trim();
+    return value ? `<div class="pocket-text${str(props.style, 10) === 'muted' ? ' pocket-muted' : ''}">${escape(value)}</div>` : '';
   }
   if (type === 'note') {
-    const value = str(node.text, 300).trim();
+    const value = str(props.text ?? props.content, 300).trim();
     return value ? `<div class="pocket-note">${escape(value)}</div>` : '';
   }
   if (type === 'divider' || type === 'hr') return '<div class="pocket-divider"></div>';
-  if (type === 'fields' || type === 'rows') return fields(list(node.items ?? node.rows, MAX_ROWS));
-  if (type === 'table') return table(node);
-  if (type === 'chart' || type === 'bars') return chart(node);
+  if (type === 'field') {
+    return `<div class="pocket-row"><span class="pocket-k">${escape(str(props.label, 24))}</span><span class="pocket-v">${escape(str(props.value, 160))}</span></div>`;
+  }
+  if (type === 'fields' || type === 'rows') return fields(list(props.items ?? props.rows ?? children, MAX_ROWS));
+  if (type === 'table') return table(props);
+  if (type === 'chart' || type === 'bars') return chart(props);
+  if (type === 'image') {
+    const url = str(props.url, 300);
+    if (!/^https:\/\/[^\s"'<>]{4,300}$/i.test(url)) return '';
+    return `<div class="pocket-image"><span class="pocket-image-alt">${escape(str(props.alt, 120) || 'image')}</span></div>`;
+  }
+  if (type === 'button') {
+    return `<span class="pocket-button${str(props.style, 10) === 'primary' ? ' pocket-primary' : ''}">${escape(str(props.label, 40))}</span>`;
+  }
+  if (type === 'linkbutton') {
+    const url = str(props.url, 300);
+    if (!/^https?:\/\/[^\s"'<>]{4,300}$/i.test(url)) return `<span class="pocket-button">${escape(str(props.label, 40))}</span>`;
+    return `<a class="pocket-link" href="${escape(url)}" target="_blank" rel="noopener noreferrer">${escape(str(props.label, 40))}</a>`;
+  }
+  if (type === 'actions') {
+    const inner = str((node as Record<string, unknown>).html, 20_000) || children.map(child => pocketNode(child, depth + 1)).join('');
+    return inner ? `<div class="pocket-actions">${inner}</div>` : '';
+  }
   if (type === 'progress') {
-    const value = typeof node.value === 'number' && Number.isFinite(node.value) ? Math.min(1, Math.max(0, node.value)) : 0;
+    const value = typeof props.value === 'number' && Number.isFinite(props.value) ? Math.min(1, Math.max(0, props.value)) : 0;
     const cells = 20, filled = Math.round(value * cells);
     return `<div class="pocket-progress" role="img" aria-label="${Math.round(value * 100)}%">${
       Array.from({ length: cells }, (_, index) => `<span class="${index < filled ? 'pocket-on' : 'pocket-off'}"></span>`).join('')}</div>`;
   }
-  // Everything else is a container: card, section, column.
-  const title = str(node.title, 80).trim();
-  const subtitle = str(node.subtitle, 120).trim();
-  const children = list(node.children, MAX_CHILDREN).map(child => pocketNode(child, depth + 1)).join('');
-  // Shorthand kept from the first version: rows and progress straight on the card.
-  const shorthand = type === 'card' || type === 'section'
-    ? (typeof node.progress === 'number' ? pocketNode({ type: 'progress', value: node.progress }) : '')
-      + fields(list(node.rows, MAX_ROWS))
-    : '';
-  const inner = children + shorthand;
+  // Containers: card and section. Children are nested nodes, or HTML already rendered from an element map.
+  const nested = str((node as Record<string, unknown>).html, 60_000) || children.map(child => (typeof child === 'string' ? '' : pocketNode(child, depth + 1))).join('');
+  const title = str(props.title, 80).trim();
+  const subtitle = str(props.subtitle, 120).trim();
+  const inline = type === 'section' ? '' : (typeof props.progress === 'number' ? pocketNode({ type: 'progress', value: props.progress }, depth + 1) : '') + fields(list(props.rows, MAX_ROWS));
+  const inner = inline + nested;
   if (!title && !subtitle && !inner) return '';
   return `<section class="pocket-card${depth ? ' pocket-nested' : ''}">`
     + (depth ? '' : '<div class="pocket-bar"></div>')
@@ -316,11 +347,32 @@ function pocketNode(raw: unknown, depth = 0): string {
     + '</section>';
 }
 
+/** Walks an element map from its root id, resolving children by reference. */
+function elementMap(spec: Record<string, unknown>): string {
+  const elements = spec.elements;
+  if (!elements || typeof elements !== 'object') return '';
+  const map = elements as Record<string, Record<string, unknown>>;
+  const seen = new Set<string>();
+  const walk = (id: string, depth: number): string => {
+    if (depth > 4 || seen.has(id)) return '';
+    const element = map[id];
+    if (!element) return '';
+    seen.add(id);
+    const node = { ...element, props: element.props ?? {}, html: list(element.children, MAX_CHILDREN).map(child => walk(String(child), depth + 1)).filter(Boolean).join('') };
+    const built = pocketNode(node, depth);
+    // Children were already rendered above; pass them as HTML by re-running the container path.
+    if (built) return built;
+    return '';
+  };
+  return walk(str(spec.root, 40) || Object.keys(map)[0] || '', 0);
+}
+
 function cardHtml(value: string): string | null {
   let data: unknown;
   try { data = JSON.parse(value); } catch { return null; }
-  const html = pocketNode(data);
-  return html || null;
+  if (!data || typeof data !== 'object') return null;
+  const record = data as Record<string, unknown>;
+  return (record.elements ? elementMap(record) : pocketNode(record)) || null;
 }
 
 /** Replaces every fenced card with a token so markdown never sees the JSON, and keeps the card HTML aside. */
