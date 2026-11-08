@@ -58,9 +58,12 @@ export const listWorkouts = doc => doc.workouts.filter(w => !w.deleted).sort((a,
 export const notes = {
   list() { return listNotes(load("notes.json")); },
   get(uid) { return load("notes.json").notes.find(n => n.uid === uid && !n.deleted) || null; },
-  create(text) {
+  /** `uid` lets a client choose the id up front (the React editor opens /notes/<uid> before the first save). */
+  create(text, uid = crypto.randomUUID()) {
     const value = String(text || "").slice(0, NOTE_LIMIT); if (!value.trim()) throw new Error("Write something first.");
-    const doc = load("notes.json"), now = Date.now(), note = { uid: crypto.randomUUID(), text: value, pinned: false, created: now, updated: now, deleted: false };
+    const doc = load("notes.json"), now = Date.now();
+    if (doc.notes.some(n => n.uid === uid)) throw new Error("A note with this id already exists.");
+    const note = { uid, text: value, pinned: false, created: now, updated: now, deleted: false };
     doc.notes.push(note); save("notes.json", doc); changed("notes.json"); return note;
   },
   edit(uid, change) {
