@@ -1,0 +1,13 @@
+.status h1 { font: 34px/1.1 var(--pixel); font-weight: normal; margin: 20px 0 4px; color: var(--white); }
+.status p { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
+.card { border: 1px solid var(--line); padding: 14px 16px; margin-top: 14px; }
+.card h2 { font: 13px/1 var(--mono); letter-spacing: .08em; color: var(--accent); font-weight: normal; margin: 0 0 10px; }
+.card p { margin: 0 0 6px; }
+.task { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px dotted var(--line); }
+.check { width: var(--control); min-width: var(--control); height: var(--control); margin-top: -6px; border: 1px solid var(--line); }
+.check:hover { border-color: var(--accent); }
+.taskText { margin: 0; }
+.taskMeta { margin: 2px 0 0; color: var(--dim); font-size: 12px; }
+.muted { color: var(--muted); font-size: 13px; }
+.quiet { display: flex; gap: 18px; color: var(--dim); font-size: 12px; margin-top: 22px; }
+.quiet a { color: var(--muted); }

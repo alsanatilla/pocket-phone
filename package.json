@@ -12,7 +12,10 @@
     "preview": "astro preview",
     "worker": "node --env-file-if-exists=.env services/pip/worker.mjs",
     "worker:once": "node --env-file-if-exists=.env services/pip/worker.mjs --once",
-    "db:setup": "node --env-file=.env scripts/db-setup.mjs"
+    "db:setup": "node --env-file=.env scripts/db-setup.mjs",
+    "typecheck": "tsc -p tsconfig.app.json",
+    "test": "vitest run",
+    "test:tools": "node --test \"tools/**/*.test.mjs\""
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.78",
@@ -26,6 +29,7 @@
     "@libsql/client": "0.18.0",
     "@openrouter/ai-sdk-provider": "3.1.0",
     "@simplewebauthn/browser": "13.3.0",
+    "@tanstack/react-router": "1.170.46",
     "ai": "7.0.136",
     "astro": "7.3.6",
     "better-auth": "1.7.7",
@@ -37,6 +41,12 @@
   },
   "devDependencies": {
     "@json-render/chat": "^0.22.0",
-    "@json-render/core": "^0.22.0"
+    "@json-render/core": "^0.22.0",
+    "@testing-library/react": "16.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "jsdom": "26.1.0",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
   }
 }

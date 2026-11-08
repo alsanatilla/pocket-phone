@@ -1,7 +1,6 @@
 ---
 // The new Pocket client (src/app), served beside the classic app while views move over route by route. Nothing
-// here shares the legacy bundle: one module entry, its own stylesheet, a chunk per route.
-import '../app/styles/app.css';
+// here shares the legacy bundle: one module entry (styles come with it), a chunk per route.
 import ReactPreamble from '../components/ReactPreamble.astro';
 ---
 
@@ -18,6 +17,6 @@ import ReactPreamble from '../components/ReactPreamble.astro';
   </head>
   <body>
     <div id="app"></div>
-    <script>import "../app/main.jsx";</script>
+    <script>import "../app/main.tsx";</script>
   </body>
 </html>
