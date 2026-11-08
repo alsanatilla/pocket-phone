@@ -56,7 +56,7 @@ function App() {
         <a className="shell-legacy" href="/#/today">classic</a>
       </header>
       {failed ? <p className="shell-error">This view failed to load: {failed}</p> : null}
-      {view ? <View /> : <p className="shell-loading">loading…</p>}
+      {View ? <View /> : <p className="shell-loading">loading…</p>}
     </div>
   );
 }
