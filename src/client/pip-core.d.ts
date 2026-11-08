@@ -1,6 +1,12 @@
 // Types for the parts of pip-core.js the React client uses. Chat shapes live in src/app/data/chats.ts.
 import type { Chat, ChatTurn } from "../app/data/chats.ts";
 
+/** Which provider, endpoint and model a chat (or Pocket's default) uses. */
+export interface PipConfig { provider: "anthropic" | "compatible"; model: string; baseUrl: string; maxTokens: number; thinking: boolean; webSearch: boolean }
+export const DEFAULT_CONFIG: Readonly<PipConfig>;
+/** Pocket's saved default; throws when the saved settings cannot be read. */
+export function settings(storage?: Storage): PipConfig;
+
 export class ChatStore {
   constructor(storage?: Storage);
   list(): Chat[];

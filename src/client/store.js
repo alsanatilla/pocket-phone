@@ -217,6 +217,8 @@ export const tasks = {
   edit(uid, change) { const doc=load("tasks.json"), item=doc.tasks.find(t=>t.uid===uid&&!t.deleted);if(!item)throw new Error("This task was removed.");change(item);item.updated=Math.max(Date.now(),item.updated+1);save("tasks.json",doc);changed("tasks.json");return item; },
   complete(uid) { const item=this.edit(uid,t=>{t.done=!t.done;});if(item.done)receipt.log(KIND.DONE,item.text);return item; },
   remove(uid) { return this.edit(uid,t=>{t.deleted=true;}); },
+  /** The uid chosen as "do next", or null. */
+  chosen() { return load("tasks.json").next?.uid || null; },
   next(uid) { const doc=load("tasks.json");doc.next={uid,updated:Math.max(Date.now(),(doc.next?.updated||0)+1)};save("tasks.json",doc);changed("tasks.json"); },
   fromThought(item) {
     const current=load("parking.json").items.find(t=>String(t.id)===String(item.id));if(!current)throw new Error("This thought was removed.");

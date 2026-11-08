@@ -13,13 +13,15 @@ interface ComposerProps {
   /** May throw or reject; the text then stays in the field and the error is shown. */
   onSubmit: (text: string) => unknown;
   onCancel?: () => void;
+  /** Text the field starts with, e.g. a question handed over from another screen. */
+  initialText?: string;
   /** A second action on the same text, such as "ask pip". */
   secondary?: { label: string; run: (text: string) => unknown };
 }
 
 /** One input line with its action. Nothing typed is lost when the action fails. */
-export function Composer({ label, placeholder, action, maxLength = 500, busy = false, cancelLabel = "stop", onSubmit, onCancel, secondary }: ComposerProps) {
-  const [text, setText] = useState("");
+export function Composer({ label, placeholder, action, maxLength = 500, busy = false, cancelLabel = "stop", onSubmit, onCancel, secondary, initialText = "" }: ComposerProps) {
+  const [text, setText] = useState(initialText);
 
   const run = async (handler: (value: string) => unknown) => {
     const value = text.trim();

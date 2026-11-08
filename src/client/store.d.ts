@@ -25,7 +25,13 @@ export const tasks: {
   list(): Task[];
   get(uid: string): Task | null;
   complete(uid: string): Task;
+  create(text: string, source?: unknown, fields?: Partial<Task>): Task;
+  /** The uid chosen as "do next". */
+  chosen(): string | null;
 };
+export interface Workout { id: string; started: number; ended?: number }
+export const gym: { all(): Workout[]; active(): Workout | null };
+export function weekStart(at: number): number;
 export const parking: {
   open(now?: number): Thought[];
   park(text: string, due?: number): Thought;

@@ -33,8 +33,10 @@ const note = createRoute({
 
 const pip = createRoute({
   getParentRoute: () => root, path: "pip",
-  validateSearch: (search: Record<string, unknown>): { chat?: string } =>
-    typeof search.chat === "string" && search.chat ? { chat: search.chat } : {},
+  validateSearch: (search: Record<string, unknown>): { chat?: string; ask?: string } => ({
+    ...(typeof search.chat === "string" && search.chat ? { chat: search.chat } : {}),
+    ...(typeof search.ask === "string" && search.ask ? { ask: search.ask.slice(0, 2000) } : {}),
+  }),
   component: lazyRouteComponent(() => import("./features/pip/PipPage.tsx"), "PipPage"),
 });
 

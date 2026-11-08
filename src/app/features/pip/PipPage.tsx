@@ -43,7 +43,7 @@ function Turn({ turn, live }: { turn: ChatTurn; live: Partial<ChatTurn> | null }
 }
 
 export function PipPage() {
-  const { chat: picked } = useSearch({ from: "/pip" });
+  const { chat: picked, ask } = useSearch({ from: "/pip" });
   const navigate = useNavigate({ from: "/pip" });
   const list = useCollection(["chats"], listChats);
   const chat = list.find(item => item.uid === picked) ?? list[0] ?? null;
@@ -77,7 +77,7 @@ export function PipPage() {
         ))}
       </div>
       <div className="sticky bottom-0 bg-background py-3">
-        <Composer label="Message Pip" placeholder="message pip…" action="send" maxLength={16000}
+        <Composer key={chat.uid + (ask ?? "")} initialText={ask} label="Message Pip" placeholder="message pip…" action="send" maxLength={16000}
           busy={Boolean(live)} onCancel={stop} onSubmit={text => send(chat.uid, text)} />
       </div>
     </main>

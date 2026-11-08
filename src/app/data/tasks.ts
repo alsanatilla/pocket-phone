@@ -16,3 +16,11 @@ export function daySummary(list: Task[], day: string): DaySummary {
   const open = list.filter(task => !task.done);
   return { open, due: open.filter(task => Boolean(task.due) && task.due <= day), done: list.length - open.length };
 }
+
+/** The task chosen as "do next", if any. */
+export function chosenTask(): Task | null {
+  const uid = store.chosen();
+  return uid ? store.get(uid) : null;
+}
+
+export const createTask = (text: string, fields: Partial<Task> = {}): Task => store.create(text, null, fields);
