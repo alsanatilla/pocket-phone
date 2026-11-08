@@ -4,7 +4,7 @@ import { storage, activeAccount } from '../client/workspace-storage.js';
 
 const CACHE_KEY = 'pocket:markdown-cache:v1', MAX_CACHE = 600000, MAX_ENTRIES = 20;
 const TAGS = new Set('P BR STRONG EM DEL CODE PRE A UL OL LI BLOCKQUOTE H2 H3 H4 H5 H6 HR TABLE THEAD TBODY TR TH TD DIV SPAN SECTION SUP'.split(' '));
-const ATTRS = new Set('class data-align start title href target rel id aria-describedby aria-label role data-top data-bottom'.split(' '));
+const ATTRS = new Set('class data-align start title href target rel id aria-describedby aria-label role tabindex data-pocket-action data-pocket-value data-top data-bottom'.split(' '));
 const PAGE = /^#\/(?:notes|tasks|thoughts|gym|movement|calendar)(?:\/[A-Za-z0-9_:.~%-]{1,120})?$/;
 // Every class token must match; a value may hold several ("pocket-tr pocket-thead pocket-c3").
 const ALLOWED_CLASS = /^(?:language-[\w#+.-]{1,24}|tasks|md-table|thought-line|accent|meta muted|footnotes|footnote-backref|footnote-ref|sr-only|pocket-.*)$/;
@@ -55,6 +55,9 @@ function fragment(html, namespace) {
       if (attr.name === 'target' && attr.value !== '_blank' || attr.name === 'rel' && attr.value !== 'noopener noreferrer') throw new Error('Invalid Markdown target.');
       if (attr.name === 'data-align' && !/^(left|right|center)$/.test(attr.value)) throw new Error('Invalid Markdown alignment.');
       if (attr.name === 'start' && !/^\d{1,9}$/.test(attr.value)) throw new Error('Invalid list start.');
+      if (attr.name === 'tabindex' && !/^(?:0|-1)$/.test(attr.value)) throw new Error('Invalid Markdown tabindex.');
+      if ((attr.name === 'data-pocket-action' || attr.name === 'data-pocket-value')
+        && (!attr.value.trim() || attr.value.length > 300 || /[\u0000-\u001f\u007f]/.test(attr.value))) throw new Error('Invalid Markdown action.');
       if ((attr.name === 'data-top' || attr.name === 'data-bottom') && (!Number.isFinite(+attr.value) || +attr.value < 0 || +attr.value > 1)) throw new Error('Invalid handwriting strip.');
     }
     if (node.tagName === 'A' && /^https?:/i.test(node.getAttribute('href') || '')) { node.target = '_blank'; node.rel = 'noopener noreferrer'; }

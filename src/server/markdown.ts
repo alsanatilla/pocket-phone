@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { markdownToHast, type HastNode } from 'satteri';
+import { pocketSpec } from '../shared/pocket-spec.js';
 
 export const MARKDOWN_SOURCE_LIMIT = 200_000;
 export const MARKDOWN_BODY_LIMIT = 1024 * 1024;
@@ -315,7 +316,8 @@ function pocketNode(raw: unknown, depth = 0): string {
     return `<div class="pocket-image"><span class="pocket-image-alt">${escape(str(props.alt, 120) || 'image')}</span></div>`;
   }
   if (type === 'button') {
-    return `<span class="pocket-button${str(props.style, 10) === 'primary' ? ' pocket-primary' : ''}">${escape(str(props.label, 40))}</span>`;
+    const label = str(props.label, 40), id = str(props.id, 40), value = str(props.value, 200);
+    return `<span class="pocket-button${str(props.style, 10) === 'primary' ? ' pocket-primary' : ''}" role="button" tabindex="0" data-pocket-action="${escape(id || label)}" data-pocket-value="${escape(value || label)}">${escape(label)}</span>`;
   }
   if (type === 'linkbutton') {
     const url = str(props.url, 300);
@@ -368,11 +370,23 @@ function elementMap(spec: Record<string, unknown>): string {
 }
 
 function cardHtml(value: string): string | null {
-  let data: unknown;
-  try { data = JSON.parse(value); } catch { return null; }
-  if (!data || typeof data !== 'object') return null;
-  const record = data as Record<string, unknown>;
+  const spec = pocketSpec(value);
+  if (!spec || typeof spec !== 'object') return null;
+  const record = spec as Record<string, unknown>;
   return (record.elements ? elementMap(record) : pocketNode(record)) || null;
+}
+
+
+/** The fenced block at the end of a streaming reply is still open; render what arrived instead of showing code. */
+function openCard(source: string): { source: string; card: string | null } {
+  const match = /(?:^|\n)([ \t]*)```pocket[ \t]*\n([\s\S]*)$/.exec(source);
+  if (!match) return { source, card: null };
+  const body = match[2];
+  if (body.includes('```')) return { source, card: null };
+  const spec = pocketSpec(body);
+  const html = spec ? (('elements' in (spec as object)) ? elementMap(spec as Record<string, unknown>) : pocketNode(spec)) : '';
+  if (!html) return { source, card: null };
+  return { source: source.slice(0, match.index), card: html };
 }
 
 /** Replaces every fenced card with a token so markdown never sees the JSON, and keeps the card HTML aside. */
@@ -392,6 +406,8 @@ export function renderMarkdown(value: unknown): string {
   const input = markdownInput(value);
   if (!input.source.trim()) return '';
   const cards = input.inline ? { source: input.source, cards: [] as string[] } : extractCards(input.source);
+  const open = input.inline ? { source: cards.source, card: null } : openCard(cards.source);
+  cards.source = open.source;
   input.source = cards.source;
   const scope = 'md-' + randomUUID().replace(/-/g, '') + '-';
   const state: State = { nodes: 0, scope, ids: new Map(), lines: input.source.split('\n'), originalLines: [], annotations: new Map((input.annotations ?? []).map(item => [item.line, item])), markers: new Map(), strips: new Set() };
@@ -419,6 +435,7 @@ export function renderMarkdown(value: unknown): string {
   collectIds(root, state);
   let html = serialize(root, state, { inline: false, code: false, anchor: false, quote: 0, prose: false });
   if (cards.cards.length) html = html.replace(/<p>POCKETCARD(\d+)TOKEN<\/p>/g, (_whole, index: string) => cards.cards[Number(index)] ?? '');
+  if (open.card) html += open.card;
   if (html.length > MAX_HTML) throw problem('Markdown is too complex.', 413);
   return html;
 }

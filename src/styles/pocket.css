@@ -1067,3 +1067,8 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 .pocket-link { font: 12px/1 var(--mono); color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--line); padding: 10px 2px; }
 .pocket-image { display: grid; place-items: center; min-height: 64px; border: 1px dashed var(--line); color: var(--dim); font: 11px/1 var(--mono); }
 .pocket-table .pocket-label { margin-top: 6px; }
+/* Card buttons are real controls: they send their value back to Pip. */
+.pocket-button[data-pocket-action], .pocket-link { cursor: pointer; }
+.pocket-button[data-pocket-action]:hover, .pocket-button[data-pocket-action]:focus-visible { border-color: var(--accent); }
+.pocket-button.pocket-primary[data-pocket-action]:hover, .pocket-button.pocket-primary[data-pocket-action]:focus-visible { filter: brightness(1.08); }
+.pip-answer.streaming .pocket-button[data-pocket-action] { opacity: .45; pointer-events: none; }

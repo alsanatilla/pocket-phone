@@ -207,6 +207,19 @@ function contextCards(items, remove = null) {
 function replyComponent(turn, chat) {
   const plan = ui.h('div', {class:'pip-plan'}), proposals = ui.h('div', {class:'pip-proposals'});
   const answer = ui.h("div", { class: "md pip-answer" });
+  // A card button is a message: the value it carries becomes the next thing sent to Pip.
+  const act = button => {
+    const value = String(button.dataset.pocketValue || button.dataset.pocketAction || "").trim();
+    if (!value || runner.active) return;
+    void safely(() => runner.send(chat.uid, { text: value }))();
+  };
+  answer.addEventListener("click", event => { const button = event.target.closest?.("[data-pocket-action]"); if (button && answer.contains(button)) { event.preventDefault(); act(button); } });
+  answer.addEventListener("keydown", event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const button = event.target.closest?.("[data-pocket-action]");
+    if (!button || !answer.contains(button)) return;
+    event.preventDefault(); act(button);
+  });
   const reasoningText = ui.h("div", { class: "md pip-reasoning-text" });
   const reasoning = ui.h("details", { class: "pip-reasoning", hidden: !turn.reasoning }, ui.h("summary", { text: "reasoning summary" }), reasoningText);
   const phase = ui.h("p", { class: "meta muted pip-phase", role: "status" });
