@@ -25,7 +25,7 @@ const BRIEF = 'Nightly brief. Look at what actually changed in my Pocket records
 /** A watch answers SKIP, in one word, when nothing new matches; that reply is never written to the chat. */
 const SKIP = /^\s*skip\b/i;
 export const quietWatch = answer => SKIP.test(String(answer || ''));
-const watchMessage = (routine, since) => `Standing watch. ${routine.prompt}\n\nLook only at what is new or changed since ${since}. If nothing matches, reply with exactly SKIP and nothing else. If something matches, reply in at most 80 words: what you found, where it is, and what I should do next.`;
+const watchMessage = (routine, since) => `Standing watch. ${routine.prompt}\n\nLook only at what is new or changed since ${since}. Read what you already reported earlier in this chat and stay silent about it. If nothing new matches, reply with exactly SKIP and nothing else. If something matches, reply in at most 80 words: what you found, where it is, and what I should do next.`;
 const WATCH_KINDS = ['brief', 'watch'];
 const AWAY = '\n\nThis reply runs on a schedule while the user is away; they read it later, perhaps from a notification. Lead with what needs their attention. You cannot save or change anything in this run: describe a change you suggest so the user can ask for it in this chat. Calendar appointments are on the user\'s phone and not available here.';
 
@@ -85,6 +85,11 @@ export function backgroundRoutine(value) {
   if (kind === 'training' && !trainingDays.length) throw invalid('Choose your available training days.');
   const feedback = (Array.isArray(value.feedback) ? value.feedback : []).filter(item => Number.isSafeInteger(item.at) && typeof item.text === 'string').slice(-12).map(item => ({ at: item.at, text: item.text.slice(0, 1000) }));
   return { id, kind, title, prompt, time: value.time, days, enabled: value.enabled !== false, ...(kind === 'training' ? { trainingDays, feedback } : {}) };
+}
+/** The newest change in the records a brief reads. Chats are the brief's own output, so they never count as news. */
+export async function newestRecordAt(userId) {
+  const row = (await sql({ sql: `SELECT MAX(json_extract(payload, '$.updated')) AS changed FROM pocket_objects WHERE user_id = ? AND collection <> 'chats'`, args: [userId] })).rows[0];
+  return Number(row?.changed || 0);
 }
 const parse = raw => { try { return JSON.parse(String(raw)); } catch { return null; } };
 async function stored(userId) {
@@ -224,12 +229,14 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   let lastRun = 0, digest = '';
   if (WATCH_KINDS.includes(routine.kind) && !conversation && !force) {
     try {
-      const seen = (await sql({ sql: `SELECT (SELECT last_run FROM pocket_pip_routines WHERE user_id = ? AND id = ?) AS lastRun,
-        (SELECT MAX(json_extract(payload, '$.updated')) FROM pocket_objects WHERE user_id = ?) AS changed`, args: [userId, routine.id, userId] })).rows[0];
-      lastRun = Number(seen?.lastRun) || 0;
-      if (lastRun > 0 && Number(seen?.changed || 0) <= lastRun) return { status: 'unchanged' };
+      const row = (await sql({ sql: 'SELECT last_run FROM pocket_pip_routines WHERE user_id = ? AND id = ?', args: [userId, routine.id] })).rows[0];
+      lastRun = Number(row?.last_run) || 0;
+      const newest = await newestRecordAt(userId);
+      // A first brief on an empty workspace would spend a request to say it found nothing; wait for a record.
+      if (routine.kind === 'brief' && !newest) return { status: 'unchanged' };
+      if (lastRun > 0 && newest <= lastRun) return { status: 'unchanged' };
       if (routine.kind === 'brief' && lastRun > 0) {
-        const rows = (await sql({ sql: `SELECT collection, COUNT(*) AS n FROM pocket_objects WHERE user_id = ? AND json_extract(payload, '$.updated') > ? GROUP BY collection`,
+        const rows = (await sql({ sql: `SELECT collection, COUNT(*) AS n FROM pocket_objects WHERE user_id = ? AND collection <> 'chats' AND json_extract(payload, '$.updated') > ? GROUP BY collection`,
           args: [userId, lastRun] })).rows;
         if (rows.length) digest = rows.map(row => `${row.collection}: ${Number(row.n)}`).join(', ');
       }

@@ -36,8 +36,12 @@ claim lock, the reply chat, the run history and the push notice. Two kinds join 
   action that would help today, and an optional closing line — and demands that a part with nothing to say is left
   out. No headings, under 150 words, no invented records.
 - **The "nothing changed" guard runs before any request.** One query compares the newest record revision with the
-  routine's `last_run` (`MAX(json_extract(payload,'$.updated'))`). Equal or older means `status: 'unchanged'` and no
-  model call at all — the same status the training planner already uses for an unchanged workout set.
+  routine's `last_run` (`newestRecordAt()`). Equal or older means `status: 'unchanged'` and no model call at all — the
+  same status the training planner already uses for an unchanged workout set.
+- **Chats never count as news.** The brief writes into a chat object, so counting every object would make each brief
+  look like a change and run again the next night. `newestRecordAt()` reads content collections only; a test pins it.
+- **An empty first brief stays silent.** With no records at all there is nothing to compare, and a request spent
+  saying "nothing is here" is the exact waste this plan removes. The routine waits for the first record instead.
 - When something did change, the prompt gains a **deterministic digest**: records changed per collection
   (`tasks: 2, notes: 1`). It is a map of what is new, never a substitute for reading the record, and it costs a
   couple of dozen tokens rather than a pre-computed summary.
@@ -52,7 +56,8 @@ claim lock, the reply chat, the run history and the push notice. Two kinds join 
 - `quietWatch()` recognises that answer (`/^\s*skip\b/i`, so `SKIP`, `skip.` and `SKIP: nothing new` all count, and
   `SKIPpy` does not). A quiet run **removes its own turn from the chat**, records `status: 'unchanged'`, charges the
   tokens it actually spent and sends no notification. Nothing to read, nothing to dismiss.
-- A match replies in at most 80 words: what, where, what to do next.
+- A match replies in at most 80 words: what, where, what to do next. The watch reads its own earlier answers in the
+  same chat and is told not to report the same thing twice.
 
 ## Routines without a cron
 
