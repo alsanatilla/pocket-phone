@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { backgroundRoutine, nextRun, localDay, quietWatch } from '../src/server/pip-background.js';
+import { ROUTINE_KINDS, routineCaption, statusText } from '../src/client/pip-routine-model.js';
 
 // Two kinds that share one rule: they only speak when there is something new. A brief reads what changed since the
 // last brief; a watch looks for one thing the user named and stays silent otherwise. Both reuse the routine row,
@@ -65,4 +66,17 @@ test('a brief only runs on its chosen days', () => {
   const at = Date.UTC(2026, 10, 8, 23, 0);
   const next = nextRun({ time: '04:30', days: [1] }, 'UTC', at);
   assert.equal(localDay(next, 'UTC'), '2026-11-09');
+});
+
+test('the new kinds are named where the person sees them', () => {
+  assert.equal(ROUTINE_KINDS.brief, 'nightly brief');
+  assert.equal(ROUTINE_KINDS.watch, 'standing watch');
+  const caption = routineCaption({ kind: 'brief', time: '04:30', days: [0, 1, 2, 3, 4, 5, 6], enabled: true, nextRun: Date.now() + 3600000 });
+  assert.match(caption, /^04:30 · every day · next /);
+  const watch = routineCaption({ kind: 'watch', time: '08:00', days: [1, 2, 3, 4, 5], enabled: false, nextRun: 0 });
+  assert.match(watch, /^08:00 · weekdays · paused$/);
+});
+
+test('a quiet run reads as nothing new, not as a failure', () => {
+  assert.equal(statusText('unchanged'), 'nothing new');
 });
