@@ -1,6 +1,9 @@
 import { defineConfig } from 'astro/config';
 import vercel from '@astrojs/vercel';
 import react from '@astrojs/react';
+import { fileURLToPath } from 'node:url';
+
+const root = dir => fileURLToPath(new URL('./' + dir + '/**', import.meta.url));
 
 export default defineConfig({
   output: 'server',
@@ -12,5 +15,6 @@ export default defineConfig({
   // opt out when it is published through a proxy (POCKET_ALLOW_PROXY=1); production keeps the check.
   security: { checkOrigin: process.env.POCKET_ALLOW_PROXY !== '1' },
   devToolbar: { enabled: false },
-  vite: { build: { sourcemap: false }, server: { watch: { ignored: ['**/app/**', '**/build/**', '**/.gradle/**', '**/.vercel/**', '**/dist/**'] } } },
+  // The Android project's app/ and build/ sit at the root; anchor them there so src/app (the React client) is watched.
+  vite: { build: { sourcemap: false }, server: { watch: { ignored: [root('app'), root('build'), '**/.gradle/**', '**/.vercel/**', '**/dist/**'] } } },
 });
