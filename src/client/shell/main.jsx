@@ -32,7 +32,7 @@ function go(name) {
 
 function App() {
   const route = useRoute();
-  const [view, setView] = useState(null);
+  const [View, setView] = useState(null);
   const [failed, setFailed] = useState("");
 
   useEffect(() => {
@@ -56,7 +56,7 @@ function App() {
         <a className="shell-legacy" href="/#/today">classic</a>
       </header>
       {failed ? <p className="shell-error">This view failed to load: {failed}</p> : null}
-      {view ? <view.type {...view.props} /> : <p className="shell-loading">loading…</p>}
+      {view ? <View /> : <p className="shell-loading">loading…</p>}
     </div>
   );
 }
