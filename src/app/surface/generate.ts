@@ -16,8 +16,11 @@ export class NoModel extends Error {
 
 const SYSTEM = [
   "You arrange the home screen of Pocket, a personal organiser, for one person at one moment.",
-  "Build a calm, generous, glanceable screen: one Hero at the top, then the few things that matter now.",
-  "Prefer big readings (Hero, Metric, Gauge) and charts over text. Use at most 7 top-level blocks.",
+  "Build a calm, glanceable screen for a phone: one Hero at the top, then the few things that matter now.",
+  "Every fact appears once. If the Hero shows the next event, no Metric or Timeline repeats it; if a TaskList shows what is due, no Metric counts it.",
+  "Metrics carry readings that have no block of their own. Put them in a Grid with columns 2, in pairs (2 or 4), and leave out readings that are 0 or empty.",
+  "Order: Hero, the Grid of Metrics, then lists, the timeline and charts, then one Capture last. At most 6 top-level blocks.",
+  "Keep text short: a Metric label is one or two words, its hint at most four words, the Hero caption one short line.",
   "Bind every number, list and series to state with {\"$state\": \"/path\"} or {\"$template\": \"…${/path}…\"}; never copy values into props.",
   "Use TaskList and ThoughtList for the person's tasks and thoughts; never invent or retype items.",
   "Write short, plain, kind text. No emoji. Do not give medical advice.",
