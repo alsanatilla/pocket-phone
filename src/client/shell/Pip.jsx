@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChatStore, ReplyRunner, streamReply } from "../pip-core.js";
+import { ChatStore } from "../pip-core.js";
 import { resolve } from "../pip-credentials.js";
 import { markdownNode } from "../../shared/markdown.js";
 import { hydrateCards } from "../pip-cards.jsx";
@@ -32,15 +32,38 @@ export default function Pip() {
   const [chatId, setChatId] = useState(() => store.list()[0]?.uid ?? null);
   const [draft, setDraft] = useState("");
   const [, setTick] = useState(0);
-  const runner = useMemo(() => new ReplyRunner(store, {
-    key: value => resolve(value),
-    stream: (chat, turn, options) => streamReply(chat, turn, options),
-    title: async () => {},
-    onChange: event => {
-      if (event.type === "delta") return; // the transcript reads the turn itself
-      setTick(n => n + 1);
-    }
-  }), []);
+  // Sending needs the provider stack; opening a chat does not. The runner arrives with the first message.
+  const runnerRef = useRef(null);
+  let lastPaint = 0;
+  const runner = useMemo(() => {
+    const api = {
+      active: null,
+      stop() { api.active = null; setTick(n => n + 1); },
+      async send(uid, options) {
+        if (!runnerRef.current) {
+          const [{ ReplyRunner, streamReply }, { resolve }] = await Promise.all([import("../pip-core.js"), import("../pip-credentials.js")]);
+          runnerRef.current = new ReplyRunner(store, {
+            key: value => resolve(value),
+            stream: (chat, turn, opts) => streamReply(chat, turn, opts),
+            title: async () => {},
+            onChange: event => {
+              api.active = runnerRef.current?.active ?? null;
+              // Deltas arrive many times a second; a repaint per frame is enough for the caret and the text.
+              const now = Date.now();
+              if (event.type === "delta" && now - lastPaint < 90) return;
+              lastPaint = now;
+              setTick(n => n + 1);
+            }
+          });
+        }
+        const result = await runnerRef.current.send(uid, options);
+        api.active = runnerRef.current.active ?? null;
+        setTick(n => n + 1);
+        return result;
+      }
+    };
+    return api;
+  }, []);
 
   const chat = chatId ? store.get(chatId) : null;
   const active = runner.active?.chatId === chatId ? runner.active : null;
