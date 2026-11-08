@@ -1,0 +1,41 @@
+name: Drain Pip queue
+# A free way to run Pip's detached worker: no server, only scheduled CI. Each run drains what is queued and exits.
+# Set TURSO_DATABASE_URL, TURSO_AUTH_TOKEN and POCKET_ENCRYPTION_SECRET as repository secrets. Until they exist the
+# job skips itself. For lower latency, run `npm run worker` on any always-on box instead (see services/pip/README.md).
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: pip-worker
+  cancel-in-progress: false
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check worker secrets
+        id: check
+        env:
+          URL: ${{ secrets.TURSO_DATABASE_URL }}
+        run: |
+          if [ -n "$URL" ]; then
+            echo "ready=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "Pip worker secrets are not set; skipping."
+          fi
+      - if: steps.check.outputs.ready == '1'
+        run: npm ci --omit=dev
+      - if: steps.check.outputs.ready == '1'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          POCKET_ENCRYPTION_SECRET: ${{ secrets.POCKET_ENCRYPTION_SECRET }}
+          PIP_WORKER_CONCURRENCY: '4'
+          PIP_WORKER_ONCE: '1'
+        run: node services/pip/worker.mjs --once

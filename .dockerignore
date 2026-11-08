@@ -1,0 +1,12 @@
+node_modules
+dist
+.vercel
+.preview
+.playwright-mcp
+.git
+.github
+app/build
+.gradle
+build
+.env
+*.log

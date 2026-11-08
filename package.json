@@ -10,6 +10,8 @@
     "dev": "node --env-file-if-exists=.env node_modules/astro/bin/astro.mjs dev --host 127.0.0.1",
     "build": "astro build",
     "preview": "astro preview",
+    "worker": "node --env-file-if-exists=.env services/pip/worker.mjs",
+    "worker:once": "node --env-file-if-exists=.env services/pip/worker.mjs --once",
     "db:setup": "node --env-file=.env scripts/db-setup.mjs"
   },
   "dependencies": {
