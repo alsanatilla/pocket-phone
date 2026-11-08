@@ -60,6 +60,7 @@ ingress at all.
 | `PIP_WORKER_POLL_MS` | `1000` | Idle poll interval |
 | `PIP_WORKER_JOB_LEASE_MS` | `210000` | Claim length; must exceed one stretch |
 | `PIP_WORKER_MAX_ATTEMPTS` | `3` | Retries before a job fails |
+| `PIP_ROUTINES_EVERY_MS` | `0` (off) | Run scheduled routines from this worker too, instead of a cron calling `/api/jobs/pip`. `60000` checks once a minute. Routine claims already prevent a double run, so the cron can stay |
 | `PIP_WORKER_PORT` | `8787` | `/healthz`; `0` disables it |
 | `PIP_QUEUE_TTL_MS` | `1800000` | How long a queued run may wait with no usable job before the sweep fails it |
 

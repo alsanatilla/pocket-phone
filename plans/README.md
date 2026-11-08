@@ -8,6 +8,7 @@
 | [004 — Faster stride with a short acceleration curve](004-shadow-movement-curve.md) | HIGH | DONE | Player speeds, acceleration, guard chase balance |
 | [005 — Make the knife and the takedown strike, not pause](005-shadow-snappy-strikes.md) | MEDIUM | DONE | Strike timing, lunge, hit-stop |
 | [006 — Dash, slide and vault](006-shadow-dodge-roll.md) | MEDIUM | DONE | Replaces the roll proposal; keyboard/touch burst moves and animations |
+| [007 — A brief that reads, and watches that stay quiet](007-nightly-brief-and-watches.md) | HIGH | DONE | Scheduled runs that only speak when something is new; routines on the worker |
 
 ## Recommended order
 

@@ -35,3 +35,4 @@ signing.properties
 *.apk
 *.apks
 *.aab
+.worker.log

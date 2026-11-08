@@ -28,8 +28,8 @@ export async function routineEditor(ui, routine = { kind: 'prompt', title: '', p
         ...(training ? { trainingDays: trainingDays.filter(item => item.input.checked).map(item => item.day) } : {}) } }));
     } catch (failure) { problem.textContent = failure.message; }
   };
-  await ui.dialog(routine.id ? routine.title : training ? 'training planner' : routine.kind === 'checkin' ? 'morning check-in' : 'scheduled prompt', ui.h('div', { class: 'pip-settings' },
-    ui.h('label', {}, 'name', title), training ? caption('Talk to Pip about your goals, available days and how each workout felt in any chat. Pip remembers it and replies in the chat where you last talked training.') : routine.kind === 'prompt' ? ui.h('label', {}, 'what Pip should do', prompt) : caption('Overdue and due tasks, old parked thoughts, COROS readiness and load, with up to three suggestions.'),
+  await ui.dialog(routine.id ? routine.title : training ? 'training planner' : routine.kind === 'checkin' ? 'morning check-in' : routine.kind === 'brief' ? 'nightly brief' : routine.kind === 'watch' ? 'standing watch' : 'scheduled prompt', ui.h('div', { class: 'pip-settings' },
+    ui.h('label', {}, 'name', title), training ? caption('Talk to Pip about your goals, available days and how each workout felt in any chat. Pip remembers it and replies in the chat where you last talked training.') : routine.kind === 'prompt' ? ui.h('label', {}, 'what Pip should do', prompt) : routine.kind === 'watch' ? ui.h('label', {}, 'what to watch for', prompt) : routine.kind === 'brief' ? caption('Reads what changed in your records since the last brief, then writes what is rotting, one connection worth knowing and the one action that would help today. Skips itself when nothing changed.') : caption('Overdue and due tasks, old parked thoughts, COROS readiness and load, with up to three suggestions.'),
     training && routine.prompt ? caption('remembered · ' + routine.prompt) : null,
     training ? caption('Reviews how your latest workouts went, then adjusts just the next one or two sessions within three days, starting tomorrow. Checks for completed COROS and synced Gym workouts about every 30 minutes, and reviews recovery at the daily check below. Unchanged data does not start another AI review.') : null,
     training ? caption('Running, cycling and trail workouts go to COROS; gym and recovery sessions become dated Pocket tasks. Pip reviews actual workout details, updates its own upcoming sessions and explains what changed. Manual workouts stay intact.') : null,
@@ -132,6 +132,8 @@ export async function pipAway(ui, openChat) {
       state.hasKey ? button('forget key', async () => show(await post(API, { action: 'forget-key' }))) : null,
       caption('routines'), ...(routines.length ? routines : [caption('No routines yet.')]),
       hasCheckin ? null : button('+ morning check-in', () => edit({ kind: 'checkin', title: 'Morning check-in', time: '07:30', days: [0, 1, 2, 3, 4, 5, 6], enabled: true })),
+      state.routines.some(routine => routine.kind === 'brief') ? null : button('+ nightly brief', () => edit({ kind: 'brief', title: 'Nightly brief', time: '04:30', days: [0, 1, 2, 3, 4, 5, 6], enabled: true })),
+      button('+ standing watch', () => edit({ kind: 'watch', title: 'Standing watch', prompt: '', time: '08:00', days: [1, 2, 3, 4, 5], enabled: true })),
       state.routines.some(routine => routine.kind === 'training') ? null : button('+ training chat', () => openTraining(ui, openChat)),
       button('+ scheduled prompt', () => edit())), [['close', null]]);
   };

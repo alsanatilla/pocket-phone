@@ -1,7 +1,7 @@
 // The scheduled-run model: when each routine runs, what its last runs did, and what needs a person's
 // attention. Free of browser APIs so it can be tested directly; pip-scheduled.js renders it.
 export const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'], WEEK = [1, 2, 3, 4, 5, 6, 0];
-export const ROUTINE_KINDS = { checkin: 'morning check-in', prompt: 'scheduled prompt', training: 'training planner' };
+export const ROUTINE_KINDS = { checkin: 'morning check-in', brief: 'nightly brief', watch: 'standing watch', prompt: 'scheduled prompt', training: 'training planner' };
 export const STATUS_TEXT = { done: 'answered', failed: 'failed', limit: 'token limit reached', off: 'did not run', skipped: 'skipped', unchanged: 'nothing new' };
 export const STATUS_MARK = { done: '✓', failed: '△', limit: '△', off: '−', skipped: '−', unchanged: '·' };
 /** A run that produced no chat but did something else is still worth naming plainly. */

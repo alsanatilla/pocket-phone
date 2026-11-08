@@ -21,6 +21,12 @@ export const JOB_BUDGET = 240000;
 export const BACKGROUND_GRANTS = ['notes', 'thoughts', 'tasks', 'gym', 'coros'];
 export const BACKGROUND_OWNER = 'pip-routine';
 const CHECKIN = 'Morning check-in. Look at my open tasks (overdue, due today and important ones), thoughts I parked more than a week ago, and my COROS readiness and recent training load if available. Tell me briefly what needs attention today and suggest at most three concrete changes, such as moving a task. If nothing needs attention, say so in one line.';
+const BRIEF = 'Nightly brief. Look at what actually changed in my Pocket records since the last brief: completed and moved tasks, new or edited notes, thoughts I parked, gym sessions, and my COROS readiness and load when available. Write at most five short parts and leave out any part with nothing to say: (1) what changed, in one line; (2) what is rotting: overdue tasks, a task I moved more than once, a thought parked over a week with no action; (3) one connection or contradiction worth knowing, such as two notes about the same thing or a task that no longer matches the note it came from; (4) the single action that would help most today, and why; (5) a closing line only if something else matters. Never invent a record or a number. Under 150 words, plain sentences, no headings, no list longer than three items.';
+/** A watch answers SKIP, in one word, when nothing new matches; that reply is never written to the chat. */
+const SKIP = /^\s*skip\b/i;
+export const quietWatch = answer => SKIP.test(String(answer || ''));
+const watchMessage = (routine, since) => `Standing watch. ${routine.prompt}\n\nLook only at what is new or changed since ${since}. If nothing matches, reply with exactly SKIP and nothing else. If something matches, reply in at most 80 words: what you found, where it is, and what I should do next.`;
+const WATCH_KINDS = ['brief', 'watch'];
 const AWAY = '\n\nThis reply runs on a schedule while the user is away; they read it later, perhaps from a notification. Lead with what needs their attention. You cannot save or change anything in this run: describe a change you suggest so the user can ask for it in this chat. Calendar appointments are on the user\'s phone and not available here.';
 
 // ── Time: a routine's wall-clock time on chosen weekdays, in the account's timezone. ──
@@ -66,12 +72,12 @@ export function backgroundSettings(value) {
   return { ...base, thinking: false, grants, dailyTokens, timezone: value.timezone, enabled: Boolean(value.enabled) };
 }
 export function backgroundRoutine(value) {
-  const kind = ['checkin', 'prompt', 'training'].includes(value.kind) ? value.kind : null;
-  if (!kind) throw invalid('Choose a check-in, training planner or scheduled prompt.');
+  const kind = ['checkin', 'prompt', 'training', 'brief', 'watch'].includes(value.kind) ? value.kind : null;
+  if (!kind) throw invalid('Choose a check-in, nightly brief, standing watch, training planner or scheduled prompt.');
   const id = typeof value.id === 'string' && /^[a-zA-Z0-9_-]{1,40}$/.test(value.id) ? value.id : randomUUID().replaceAll('-', '');
-  const title = String(value.title || (kind === 'checkin' ? 'Morning check-in' : kind === 'training' ? 'Training planner' : '')).trim(), prompt = kind !== 'checkin' ? String(value.prompt || '').trim() : '';
+  const title = String(value.title || (kind === 'checkin' ? 'Morning check-in' : kind === 'brief' ? 'Nightly brief' : kind === 'training' ? 'Training planner' : kind === 'watch' ? 'Standing watch' : '')).trim(), prompt = kind !== 'checkin' && kind !== 'brief' ? String(value.prompt || '').trim() : '';
   if (!title || title.length > 80) throw invalid('Give the routine a name, up to 80 characters.');
-  if (kind === 'prompt' && !prompt || prompt.length > 4000) throw invalid('Write the prompt, up to 4,000 characters.');
+  if ((kind === 'prompt' || kind === 'watch') && !prompt || prompt.length > 4000) throw invalid(kind === 'watch' ? 'Write what to watch for, up to 4,000 characters.' : 'Write the prompt, up to 4,000 characters.');
   if (typeof value.time !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value.time)) throw invalid('Choose a time.');
   const days = [...new Set(Array.isArray(value.days) ? value.days.filter(day => Number.isInteger(day) && day >= 0 && day <= 6) : [])].sort();
   if (!days.length) throw invalid('Choose at least one day.');
@@ -214,9 +220,23 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   if (!saved?.credentials || !conversation && !saved.settings?.enabled) return { status: 'off' };
   const { settings } = saved, today = localDay(now, settings.timezone), used = saved.usedDay === today ? saved.usedTokens : 0;
   if (used >= settings.dailyTokens) return { status: 'limit', error: 'Today\'s token limit for Pip on its own is used up.' };
+  // A brief or a watch that has nothing new to read must not spend a request to say so.
+  let lastRun = 0, digest = '';
+  if (WATCH_KINDS.includes(routine.kind) && !conversation && !force) {
+    try {
+      const seen = (await sql({ sql: `SELECT (SELECT last_run FROM pocket_pip_routines WHERE user_id = ? AND id = ?) AS lastRun,
+        (SELECT MAX(json_extract(payload, '$.updated')) FROM pocket_objects WHERE user_id = ?) AS changed`, args: [userId, routine.id, userId] })).rows[0];
+      lastRun = Number(seen?.lastRun) || 0;
+      if (lastRun > 0 && Number(seen?.changed || 0) <= lastRun) return { status: 'unchanged' };
+      if (routine.kind === 'brief' && lastRun > 0) {
+        const rows = (await sql({ sql: `SELECT collection, COUNT(*) AS n FROM pocket_objects WHERE user_id = ? AND json_extract(payload, '$.updated') > ? GROUP BY collection`,
+          args: [userId, lastRun] })).rows;
+        if (rows.length) digest = rows.map(row => `${row.collection}: ${Number(row.n)}`).join(', ');
+      }
+    } catch { /* an unreadable revision is no reason to skip the run */ }
+  }
   const chat = await routineChat(userId, routine, settings, now);
-  if (!chat) return { status: 'skipped', error: 'This month\'s chat for the routine was deleted.' };
-  if (conversation && (routine.kind !== 'training' || message.chat !== chat.uid || trainingChatRoutine(message.chat) !== routine.id)) throw invalid('Open your current training chat to continue.');
+  if (!chat) return { status: 'skipped', error: 'This month\'s chat for the routine was deleted.' };  if (conversation && (routine.kind !== 'training' || message.chat !== chat.uid || trainingChatRoutine(message.chat) !== routine.id)) throw invalid('Open your current training chat to continue.');
   const earlier = conversation ? chat.turns.find(turn => turn.uid === message.uid) : null;
   if (earlier && earlier.text !== message.text) throw invalid('This message already has different text.');
   if (earlier?.status === 'done') return { status: 'done', chat: chat.uid, turn: earlier.uid, reply: earlier };
@@ -249,7 +269,7 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
     if (!force && !dailyReview && !trainingChanged(checkpoint, observation)) return { status: 'unchanged' };
     await getTraining();
   }
-  const turn = Object.assign(earlier || {}, { uid: message?.uid || randomUUID(), text: message?.text || (routine.kind === 'checkin' ? CHECKIN : routine.kind === 'training' ? 'Check my latest workouts and recovery, using what we discussed, and adjust only the next sessions if needed.' : routine.prompt), context: message?.context || [], created: earlier?.created || now, owner: conversation ? 'pip-training-chat' : BACKGROUND_OWNER, attempt: message?.attempt || randomUUID(), answer: '', reasoning: '', error: '', status: 'streaming', usage: {}, activity: [], sources: [], phase: 'requesting' });
+  const turn = Object.assign(earlier || {}, { uid: message?.uid || randomUUID(), text: message?.text || (routine.kind === 'checkin' ? CHECKIN : routine.kind === 'brief' ? BRIEF : routine.kind === 'watch' ? watchMessage(routine, lastRun ? new Date(lastRun).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'the beginning') : routine.kind === 'training' ? 'Check my latest workouts and recovery, using what we discussed, and adjust only the next sessions if needed.' : routine.prompt), context: message?.context || [], created: earlier?.created || now, owner: conversation ? 'pip-training-chat' : BACKGROUND_OWNER, attempt: message?.attempt || randomUUID(), answer: '', reasoning: '', error: '', status: 'streaming', usage: {}, activity: [], sources: [], phase: 'requesting' });
   if (!earlier) chat.turns.push(turn);
   if (conversation) { chat.updated = now; await writeObject(userId, 'chats', chat); }
   const view = { ...chat, config: value }, body = requestBody(view, turn);
@@ -258,6 +278,8 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
 Remembered training brief: ${JSON.stringify(routine.prompt || 'Not set yet; learn it through conversation.')}
 Available weekdays (0=Sunday): ${JSON.stringify(routine.trainingDays)}
 Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '\n\nThis is the authorized proactive training routine. The training tools save automatically within its scope; no interactive confirmation is required. Calendar appointments are unavailable. ' : AWAY;
+  if (digest) body.instructions += `\n\nRecords changed since your last brief, by collection: ${digest}. Use that only to know what is new; read the records themselves before quoting one.`;
+  if (routine.kind === 'watch') body.instructions += '\n\nThis is a standing watch the user set up. If nothing new matches it, answer exactly SKIP.';
   if (training) body.messages.push({ role: 'user', content: training.prompt });
   const source = await serverSource(userId);
   const prepare = async (value, name, input) => {
@@ -301,6 +323,14 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
       } });
     Object.assign(turn, reply, { status: 'done' });
   } catch (error) { Object.assign(turn, { status: 'failed', phase: 'failed', error: String(error?.message || 'The scheduled reply failed.').slice(0, 500) }); }
+  // A watch that found nothing answers SKIP; the chat stays empty and no notification is sent.
+  const quiet = routine.kind === 'watch' && !conversation && turn.status === 'done' && quietWatch(turn.answer);
+  if (quiet) {
+    chat.turns = chat.turns.filter(item => item !== turn);
+    const spent = (turn.usage?.input_tokens || 0) + (turn.usage?.output_tokens || 0);
+    await sql({ sql: 'UPDATE pocket_pip_background SET used_day = ?, used_tokens = ? WHERE user_id = ?', args: [today, used + spent, userId] });
+    return { status: 'unchanged' };
+  }
   turn.updated = chat.updated = Math.max(Date.now(), chat.updated + 1);
   await writeObject(userId, 'chats', chat);
   if (!conversation && training?.complete && turn.status === 'done') await rememberTraining(userId, routine.id, observation, dailyReview ? today : checkpoint?.reviewDay || '');
