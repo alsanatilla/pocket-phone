@@ -12,6 +12,7 @@ import { settle } from '../client/pip-activity.js';
 import { objectId, validObject } from '../shared/objects.js';
 import { replyNotice, waitingNotice } from '../shared/pip-notice.js';
 import { notify, watched, watching, unwatch, forgetWatches } from './pip-notify.js';
+import { enqueue, claimJob, finishJob, releaseJob } from './pip-queue.js';
 
 // Pip's shared conversations: the account's server runs each turn once for every device. A run holds its own
 // provider messages and budgets, so it can stop at a change waiting for approval and continue in a later
@@ -27,7 +28,14 @@ import { notify, watched, watching, unwatch, forgetWatches } from './pip-notify.
 const RUN_DEADLINE = 150000, HEARTBEAT = 2000, LEASE = 20000, PROGRESS = 700, WAIT_TTL = 12 * 3600000, DEVICE_ANSWER = 16000;
 /** A chat run on a vaulted key has no dedicated daily budget; this bounds a runaway day without a settings page. */
 const VAULT_TOKENS = 200000;
-const ACTIVE = ['running', 'awaiting', 'stopping'];
+const ACTIVE = ['queued', 'running', 'awaiting', 'stopping'];
+/** Detached runs are queued in Turso and executed by a worker process (services/pip), not by the request. */
+const detached = () => process.env.PIP_RUNS_DETACHED === '1';
+/** How long a queued run may wait for a worker before the sweep ends it as failed. */
+const QUEUE_TTL = (() => {
+  const value = Number(process.env.PIP_QUEUE_TTL_MS);
+  return Number.isInteger(value) && value >= 30000 && value <= 86400000 ? value : 1800000;
+})();
 /** Tools a device may answer instead of the server: sources that can live only on that device. */
 const DEVICE_TOOLS = ['search_calendar'];
 const USAGE = ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'];
@@ -133,10 +141,11 @@ async function endIdle(userId, run, { stop = false, device = '' } = {}) {
   const now = Date.now(), stopping = stop || String(run.status) === 'stopping', status = stopping ? 'stopped' : 'failed';
   const turn = endTurn(parse(run.turn), status, stopping ? STOPPED : INTERRUPTED);
   const row = (await sql({ sql: `UPDATE pocket_pip_runs SET status = ?, turn = ?, checkpoint = NULL, lease_id = '', lease_until = 0, updated = ?
-    WHERE user_id = ? AND run_id = ? AND (${stop ? "status = 'awaiting' OR " : ''}(status IN ('running', 'stopping') AND lease_until <= ?)) RETURNING *`,
+    WHERE user_id = ? AND run_id = ? AND (${stop ? "status IN ('awaiting', 'queued') OR " : ''}(status IN ('running', 'stopping') AND lease_until <= ?)) RETURNING *`,
     args: [status, JSON.stringify(turn), now, userId, String(run.run_id), now] })).rows[0];
   if (!row) return null;
   await sql({ sql: "UPDATE pocket_pip_run_requests SET state = 'stopped', decided_by = ?, decided_at = ? WHERE user_id = ? AND run_id = ? AND state = 'pending'", args: [device, now, userId, String(run.run_id)] });
+  if (stopping) await finishJob(userId, String(run.run_id), 'done', 'stopped', now);
   const saved = await writeTurn(userId, String(row.chat_uid), turn);
   await event(userId, String(run.run_id), stopping ? 'stopped' : 'interrupted', { ...(device ? { device } : {}), ...(saved ? {} : { chat: 'not_saved' }) }, now);
   return row;
@@ -178,26 +187,37 @@ export async function submitRun(userId, body, { fetcher, now = Date.now() } = {}
   const turn = { uid: turnUid, text, context: Array.isArray(body.context) ? body.context : [], created: now, updated: now, owner: device || 'pocket-server', attempt,
     answer: '', reasoning: '', error: '', status: 'streaming', usage: { runtime: 'pocket-server' }, activity: [], sources: [], phase: 'requesting', model: value.model };
   if (!validObject('chats', { ...chat, updated: now, turns: [turn] })) throw no('Check the message and its attached sources: up to three, each with a title and up to 8,000 characters.');
-  const active = (await sql({ sql: `SELECT * FROM pocket_pip_runs WHERE user_id = ? AND chat_uid = ? AND status IN ('running', 'awaiting', 'stopping')`, args: [userId, uid] })).rows[0];
+  const active = (await sql({ sql: `SELECT * FROM pocket_pip_runs WHERE user_id = ? AND chat_uid = ? AND status IN ('queued', 'running', 'awaiting', 'stopping')`, args: [userId, uid] })).rows[0];
   if (active && ACTIVE.includes(String((await recover(userId, active))?.status))) throw no('Let the current reply finish, or stop it first.', 409);
   const deviceTools = [...new Set((Array.isArray(body.deviceTools) ? body.deviceTools : []).filter(name => DEVICE_TOOLS.includes(name)))];
-  const runId = randomUUID(), leaseId = randomUUID();
+  const runId = randomUUID(), leaseId = randomUUID(), deferred = detached(), status = deferred ? 'queued' : 'running';
   let inserted;
   try {
     inserted = (await sql({ sql: `INSERT INTO pocket_pip_runs (user_id, run_id, chat_uid, request_id, turn_uid, device, status, turn, checkpoint, config, device_tools, lease_id, lease_until, expires_at, created, updated)
-      VALUES (?, ?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, ?, ?, 0, ?, ?) ON CONFLICT(user_id, request_id) DO NOTHING RETURNING *`,
-      args: [userId, runId, uid, requestId, turn.uid, device, JSON.stringify(turn), JSON.stringify(value), JSON.stringify(deviceTools), leaseId, Date.now() + LEASE, now, now] })).rows[0];
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, ?, ?) ON CONFLICT(user_id, request_id) DO NOTHING RETURNING *`,
+      args: [userId, runId, uid, requestId, turn.uid, device, status, JSON.stringify(turn), JSON.stringify(value), JSON.stringify(deviceTools), deferred ? '' : leaseId, deferred ? 0 : Date.now() + LEASE, now, now] })).rows[0];
   } catch (error) {
     // Another device started a reply in this conversation at the same moment.
     if (/UNIQUE constraint failed/i.test(String(error?.message))) throw no('Let the current reply finish, or stop it first.', 409);
     throw error;
   }
   if (!inserted) return view(userId, await recover(userId, await requestRow(userId, requestId)), 0);
-  await event(userId, runId, 'started', { chat: uid, turn: turn.uid, device }, now);
   // Both devices see the question before the answer starts.
   try { await writeObject(userId, 'chats', { ...chat, updated: Math.max(now, chat.updated + 1), turns: [turn] }, { appendTurns: true }); }
-  catch (error) { await closeRun(userId, runId, leaseId, 'failed', endTurn(turn, 'failed', String(error?.message || 'This chat could not be saved.').slice(0, 300))); throw error; }
-  await drive(userId, inserted, leaseId, { fetcher });
+  catch (error) {
+    const failed = endTurn(turn, 'failed', String(error?.message || 'This chat could not be saved.').slice(0, 300));
+    await sql({ sql: `UPDATE pocket_pip_runs SET status = 'failed', turn = ?, lease_id = '', lease_until = 0, updated = ? WHERE user_id = ? AND run_id = ? AND status IN ('queued', 'running')`,
+      args: [JSON.stringify(failed), Date.now(), userId, runId] });
+    await event(userId, runId, 'failed', { error: failed.error }, Date.now());
+    throw error;
+  }
+  if (deferred) {
+    await enqueue(userId, runId, { now });
+    await event(userId, runId, 'queued', { chat: uid, turn: turn.uid, device }, now);
+  } else {
+    await event(userId, runId, 'started', { chat: uid, turn: turn.uid, device }, now);
+    await drive(userId, inserted, leaseId, { fetcher });
+  }
   return view(userId, await runRow(userId, runId), 0);
 }
 
@@ -241,6 +261,7 @@ export async function decideRun(userId, body, { fetcher } = {}) {
 
 /** Continues a waiting run whose requests are all settled. Any device may ask; one request wins the claim. */
 export async function continueRun(userId, runId, { fetcher } = {}) {
+  if (detached()) return await queueRun(userId, runId);
   const leaseId = randomUUID(), now = Date.now();
   const claimed = (await sql({ sql: `UPDATE pocket_pip_runs SET status = 'running', lease_id = ?, lease_until = ?, updated = ?
     WHERE user_id = ? AND run_id = ? AND status = 'awaiting' AND NOT EXISTS (SELECT 1 FROM pocket_pip_run_requests r
@@ -249,6 +270,18 @@ export async function continueRun(userId, runId, { fetcher } = {}) {
   if (!claimed) return false;
   await event(userId, runId, 'continued', {}, now);
   await drive(userId, claimed, leaseId, { fetcher });
+  return true;
+}
+
+/** Hands a settled, waiting run to a worker instead of continuing it inside this request. */
+async function queueRun(userId, runId, { now = Date.now() } = {}) {
+  const moved = (await sql({ sql: `UPDATE pocket_pip_runs SET status = 'queued', lease_id = '', lease_until = 0, updated = ?
+    WHERE user_id = ? AND run_id = ? AND status = 'awaiting' AND NOT EXISTS (SELECT 1 FROM pocket_pip_run_requests r
+      WHERE r.user_id = pocket_pip_runs.user_id AND r.run_id = pocket_pip_runs.run_id AND r.state = 'pending') RETURNING run_id`,
+    args: [now, userId, runId] })).rows[0];
+  if (!moved) return false;
+  await enqueue(userId, runId, { now });
+  await event(userId, runId, 'queued', { reason: 'continue' }, now);
   return true;
 }
 
@@ -399,6 +432,21 @@ async function drive(userId, run, leaseId, { fetcher }) {
 export async function sweepRuns({ fetcher, now = Date.now(), deadline = Date.now() + JOB_BUDGET } = {}) {
   let interrupted = 0, expired = 0, continued = 0, more = false;
   await forgetWatches().catch(() => {});
+  // A queued run must not wait forever when no worker is running at all.
+  const abandoned = (await sql({ sql: `SELECT r.user_id, r.run_id FROM pocket_pip_runs r
+    LEFT JOIN pocket_pip_jobs j ON j.user_id = r.user_id AND j.run_id = r.run_id
+    WHERE r.status = 'queued' AND r.updated <= ? AND (j.run_id IS NULL OR j.state = 'failed') LIMIT 20`, args: [now - QUEUE_TTL] })).rows;
+  for (const row of abandoned) {
+    const userId = String(row.user_id), runId = String(row.run_id), run = await runRow(userId, runId);
+    if (!run) continue;
+    const turn = endTurn(parse(run.turn), 'failed', 'No Pip worker picked up this reply. Start the worker and retry.');
+    const moved = (await sql({ sql: `UPDATE pocket_pip_runs SET status = 'failed', turn = ?, checkpoint = NULL, lease_id = '', lease_until = 0, updated = ?
+      WHERE user_id = ? AND run_id = ? AND status = 'queued' RETURNING chat_uid`, args: [JSON.stringify(turn), now, userId, runId] })).rows[0];
+    if (!moved) continue;
+    await finishJob(userId, runId, 'failed', turn.error, now);
+    await writeTurn(userId, String(moved.chat_uid), turn);
+    await event(userId, runId, 'failed', { error: turn.error }, now);
+  }
   for (const row of (await sql({ sql: "SELECT * FROM pocket_pip_runs WHERE status IN ('running', 'stopping') AND lease_until <= ? LIMIT 50", args: [Date.now()] })).rows)
     if (['failed', 'stopped'].includes(String((await recover(String(row.user_id), row))?.status))) interrupted++;
   const unanswered = JSON.stringify({ error: 'device_unavailable', message: 'The device did not answer in time; use what you already have.' });
@@ -423,7 +471,7 @@ export async function runView(userId, { runId = '', request = '', chat = '', aft
   const cursor = Number.isSafeInteger(Number(after)) && Number(after) > 0 ? Number(after) : 0;
   const row = runId && allowedId(runId) ? await runRow(userId, runId)
     : request && allowedId(request) ? await requestRow(userId, request)
-    : (await sql({ sql: `SELECT * FROM pocket_pip_runs WHERE user_id = ? ${chat && objectId(chat) ? 'AND chat_uid = ?' : ''} AND status IN ('running', 'awaiting', 'stopping') ORDER BY created DESC LIMIT 1`,
+    : (await sql({ sql: `SELECT * FROM pocket_pip_runs WHERE user_id = ? ${chat && objectId(chat) ? 'AND chat_uid = ?' : ''} AND status IN ('queued', 'running', 'awaiting', 'stopping') ORDER BY created DESC LIMIT 1`,
       args: chat && objectId(chat) ? [userId, chat] : [userId] })).rows[0];
   return view(userId, await recover(userId, row), cursor);
 }
@@ -480,6 +528,40 @@ export async function followView(userId, query) {
   const current = await runView(userId, query);
   if (current.run && ACTIVE.includes(current.run.status)) await watching(userId, current.run.runId).catch(() => {});
   return current;
+}
+
+/**
+ * One stretch of a queued run, for a worker process (services/pip). The job lease decides which worker owns the
+ * stretch; the run lease is the same one the request-owned path uses, so a stop, a decision and a recovery behave
+ * identically whether a request or a worker is executing. Returns null when the queue is empty.
+ */
+export async function workerStep({ fetcher, now = Date.now() } = {}) {
+  const job = await claimJob({ now });
+  if (!job) return null;
+  const { userId, runId } = job;
+  try {
+    const run = await runRow(userId, runId);
+    if (!run) { await finishJob(userId, runId, 'done', 'missing run'); return { userId, runId, state: 'missing' }; }
+    if (!['queued', 'running'].includes(String(run.status))) { await finishJob(userId, runId, 'done', ''); return { userId, runId, state: String(run.status) }; }
+    // A queued run, or one whose worker died mid-stretch, can be adopted from its last recorded state.
+    const leaseId = randomUUID();
+    const claimed = (await sql({ sql: `UPDATE pocket_pip_runs SET status = 'running', lease_id = ?, lease_until = ?, updated = ?
+      WHERE user_id = ? AND run_id = ? AND status IN ('queued', 'running') AND lease_until <= ? RETURNING *`,
+      args: [leaseId, now + LEASE, now, userId, runId, now] })).rows[0];
+    if (!claimed) { await finishJob(userId, runId, 'done', 'claimed elsewhere'); return { userId, runId, state: 'claimed' }; }
+    await event(userId, runId, 'started', { attempt: job.attempts, worker: process.pid }, now);
+    await drive(userId, claimed, leaseId, { fetcher });
+    const after = await runRow(userId, runId), status = String(after?.status || '');
+    if (!after || ['running', 'queued'].includes(status)) { await releaseJob(userId, runId, { now: Date.now() }); return { userId, runId, state: 'retry' }; }
+    await finishJob(userId, runId, 'done', '');
+    return { userId, runId, state: status };
+  } catch (error) {
+    const after = await runRow(userId, runId).catch(() => null);
+    if (!after) { await finishJob(userId, runId, 'done', 'missing run'); return { userId, runId, state: 'missing' }; }
+    if (!['running', 'queued', 'awaiting'].includes(String(after.status))) { await finishJob(userId, runId, 'done', ''); return { userId, runId, state: String(after.status) }; }
+    await releaseJob(userId, runId, { error: String(error?.message || 'The worker failed.') });
+    return { userId, runId, state: 'error', error: String(error?.message || 'The worker failed.') };
+  }
 }
 
 

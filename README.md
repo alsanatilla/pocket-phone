@@ -43,6 +43,10 @@ npm run build
 
 Vercel builds from the repository root using vercel.json and the Astro adapter. Source lives in src/client, src/styles, src/pages, src/shared and src/server; static fonts and the offline worker live in public. GitHub Pages now provides a migration page for exporting the old origin’s workspace.
 
+### Detached Pip worker (optional)
+
+Pip’s replies can run on a separate process instead of inside the web request. Set `PIP_RUNS_DETACHED=1` in the web app and start the worker with `npm run worker` (or `npm run worker:once` from cron). It needs only the database and encryption secrets — there is no queue service and no paid runtime; Turso holds the job rows and the worker can run on a home server, a free container tier or a scheduled CI job. See [services/pip/README.md](services/pip/README.md).
+
 ## Android build and downloads
 
 Use JDK 17 and Android SDK 35. Set the SDK path in an untracked local.properties, or open the project in Android Studio.
