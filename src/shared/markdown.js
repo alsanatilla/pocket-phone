@@ -6,6 +6,8 @@ const CACHE_KEY = 'pocket:markdown-cache:v1', MAX_CACHE = 600000, MAX_ENTRIES = 
 const TAGS = new Set('P BR STRONG EM DEL CODE PRE A UL OL LI BLOCKQUOTE H2 H3 H4 H5 H6 HR TABLE THEAD TBODY TR TH TD DIV SPAN SECTION SUP'.split(' '));
 const ATTRS = new Set('class data-align start title href target rel id aria-describedby aria-label role data-top data-bottom'.split(' '));
 const PAGE = /^#\/(?:notes|tasks|thoughts|gym|movement|calendar)(?:\/[A-Za-z0-9_:.~%-]{1,120})?$/;
+// Every class token must match; a value may hold several ("pocket-tr pocket-thead pocket-c3").
+const ALLOWED_CLASS = /^(?:language-[\w#+.-]{1,24}|tasks|md-table|thought-line|accent|meta muted|footnotes|footnote-backref|footnote-ref|sr-only|pocket-.*)$/;
 const FOOTNOTE = /^md-[A-Za-z0-9_%~.-]{1,1000}$/;
 let owner = null, cache = [], pending = new Map(), serial = 0;
 const key = (source, options) => JSON.stringify([source, !!options.inline, options.annotations || []]);
@@ -49,7 +51,7 @@ function fragment(html, namespace) {
       if (!ATTRS.has(attr.name)) throw new Error('Invalid Markdown attribute.');
       if (attr.name === 'href' && (node.tagName !== 'A' || !safeHref(attr.value))) throw new Error('Invalid Markdown link.');
       if (attr.name === 'id' && !FOOTNOTE.test(attr.value)) throw new Error('Invalid Markdown id.');
-      if (attr.name === 'class' && !/^(?:language-[\w#+.-]{1,24}|tasks|md-table|thought-line|accent|meta muted|footnotes|footnote-backref|footnote-ref|sr-only|pocket-card|pocket-bar|pocket-title|pocket-sub|pocket-progress|pocket-row|pocket-k|pocket-v|pocket-on|pocket-off)$/.test(attr.value)) throw new Error('Invalid Markdown class.');
+      if (attr.name === 'class' && !attr.value.split(/\s+/).filter(Boolean).every(token => ALLOWED_CLASS.test(token))) throw new Error('Invalid Markdown class.');
       if (attr.name === 'target' && attr.value !== '_blank' || attr.name === 'rel' && attr.value !== 'noopener noreferrer') throw new Error('Invalid Markdown target.');
       if (attr.name === 'data-align' && !/^(left|right|center)$/.test(attr.value)) throw new Error('Invalid Markdown alignment.');
       if (attr.name === 'start' && !/^\d{1,9}$/.test(attr.value)) throw new Error('Invalid list start.');

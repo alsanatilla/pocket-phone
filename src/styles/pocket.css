@@ -1037,3 +1037,25 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 .pocket-row:first-of-type { margin-top: 8px; }
 .pocket-k { font: 11px/1.6 var(--mono); color: var(--dim); letter-spacing: .06em; text-transform: lowercase; }
 .pocket-v { font: 14px/1.5 var(--mono); color: var(--text); }
+/* The rest of the card catalog: prose, notes, dividers, tables and a ten-step bar chart (no inline styles). */
+.pocket-card.pocket-nested { margin: 10px 0 0; padding: 0; border: 0; }
+.pocket-body > * + * { margin-top: 8px; }
+.pocket-text { font: 14px/1.5 var(--mono); color: var(--text); }
+.pocket-note { font: 12px/1.5 var(--mono); color: var(--dim); border-left: 2px solid var(--line); padding-left: 10px; }
+.pocket-divider { height: 1px; background: var(--line); }
+.pocket-table { display: grid; gap: 4px; }
+.pocket-tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.pocket-tr.pocket-c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pocket-tr.pocket-c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pocket-tr.pocket-c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pocket-thead .pocket-th { font: 11px/1.5 var(--mono); color: var(--dim); letter-spacing: .06em; text-transform: lowercase; }
+.pocket-td { font: 14px/1.5 var(--mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.pocket-chart { display: grid; gap: 6px; }
+.pocket-label { font: 11px/1.4 var(--mono); color: var(--dim); letter-spacing: .06em; }
+.pocket-bars { display: flex; align-items: flex-end; gap: 3px; height: 44px; }
+.pocket-col { flex: 1 1 0; background: var(--line); }
+.pocket-col.pocket-h1 { height: 10%; background: var(--dim); } .pocket-col.pocket-h2 { height: 20%; }
+.pocket-col.pocket-h3 { height: 30%; } .pocket-col.pocket-h4 { height: 40%; }
+.pocket-col.pocket-h5 { height: 50%; } .pocket-col.pocket-h6 { height: 60%; }
+.pocket-col.pocket-h7 { height: 70%; } .pocket-col.pocket-h8 { height: 80%; }
+.pocket-col.pocket-h9 { height: 90%; } .pocket-col.pocket-h10 { height: 100%; background: var(--accent); }

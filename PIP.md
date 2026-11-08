@@ -64,6 +64,8 @@ Protocol references: [Anthropic tool use](https://platform.claude.com/docs/en/ag
 
 The loader is the same pixel character on phone and web. It randomly waves, walks, juggles, reads, hops and plays a tiny gamepad, switching activities between short animation cycles. Both implementations draw the same 32-pixel geometry. It stops callbacks when hidden, paused or detached, and remains still with reduced motion or disabled Android animations. Geometric signal marks and short loading labels give the chat an early-console feel without adding explanatory copy, sound or a background animation loop.
 
+A reply can also carry a card. A fenced block tagged `pocket` holds a small JSON spec that the browser and the markdown endpoint render as components instead of code: `card`/`section` containers with `title`, `subtitle` and `children`, plus `text`, `note`, `fields` (`items` of `k`/`v`), `table` (`columns`, `rows`), `chart` (`values`, optional `label`), `progress` (0–1) and `divider`. Unknown types are skipped, every string is escaped, and the client still accepts only its allowlist of tags and `pocket-` classes — there are no inline styles, so the gradient bar, the ten-step bars and the progress strip are pure CSS. The nightly brief ends its prose with one card so the chat opens with something scannable.
+
 The chat has the same static pixel glow on phone and web: only the upper-corner bloom, fading to black before the middle of the page. Sparks stay inside the light, and the conversation and composer sit on black. The artwork is cached by size on Android and painted only on resize in the browser; changing chats disconnects the old canvas observer.
 
 ## Pip on its own
