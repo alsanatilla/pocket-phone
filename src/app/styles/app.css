@@ -57,6 +57,29 @@ button:disabled { opacity: .5; }
 .prose p { margin: 0 0 10px; }
 .pip .composer { position: sticky; bottom: 0; margin-top: 20px; }
 
+/* notes */
+.head { display: flex; align-items: baseline; gap: 12px; }
+.head h1 { margin-right: auto; }
+.button { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); color: var(--accent); text-decoration: none; font-size: 13px; }
+.search { width: 100%; min-height: 44px; margin: 14px 0 6px; padding: 0 12px; background: var(--plane); color: var(--text); border: 1px solid var(--line); font: 15px var(--mono); outline: none; }
+.search:focus, .note-text:focus { border-color: var(--accent); }
+.rows { display: flex; flex-direction: column; }
+.row { display: flex; flex-direction: column; gap: 2px; padding: 12px 0; border-top: 1px dotted var(--line); text-decoration: none; min-height: 44px; }
+.row-title { color: var(--text); }
+.row-sub { color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pin { color: var(--accent); font-size: 11px; margin-right: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chip { font-size: 11px; color: var(--muted); border: 1px solid var(--line); padding: 1px 6px; }
+.chip.done { color: var(--dim); text-decoration: line-through; }
+.chip.back { color: var(--accent); border-color: var(--accent); }
+.editor-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; top: 54px; background: var(--ink); z-index: 4; }
+.editor-bar .spacer { flex: 1; }
+.link.danger { color: var(--overdue); }
+.note-text { display: block; width: 100%; min-height: 65vh; resize: vertical; padding: 14px; background: var(--plane); color: var(--text); border: 1px solid var(--line); font: 15px/1.6 var(--mono); outline: none; }
+.note-preview { border: 1px solid var(--line); padding: 14px 16px; min-height: 40vh; }
+.quiet a, .aside a { color: var(--muted); }
+.aside { color: var(--dim); font-size: 12px; margin-top: 22px; }
+
 /* cards from json-render */
 .pocket-card { margin: 14px 0 4px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
 .pocket-bar { height: 3px; background: linear-gradient(90deg, var(--accent), rgba(236,201,129,.12)); }

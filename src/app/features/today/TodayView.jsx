@@ -3,6 +3,7 @@ import { tasks, parking, taskDay, notes } from "../../../client/store.js";
 import { useStore } from "../../lib/useStore.js";
 import { dayTitle } from "../../lib/format.js";
 import { Composer } from "../../ui/Composer.jsx";
+import { href } from "../../router.js";
 
 // Today: one status line, one capture field, Pip's facts, what is due. Reads the same stores the classic app
 // writes, so nothing has to migrate for this route to be useful.
@@ -62,7 +63,7 @@ export default function TodayView() {
 
       <footer className="quiet">
         {parked ? <span>{parked} parked thoughts</span> : null}
-        <span>{noteCount} notes</span>
+        <a href={href("notes")}>{noteCount} notes</a>
       </footer>
     </main>
   );

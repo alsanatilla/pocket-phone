@@ -5,6 +5,7 @@ import { lazy } from "react";
 
 export const routes = [
   { name: "today", title: "today", View: lazy(() => import("./features/today/TodayView.jsx")) },
+  { name: "notes", title: "notes", View: lazy(() => import("./features/notes/NotesView.jsx")) },
   { name: "pip", title: "pip", View: lazy(() => import("./features/pip/PipView.jsx")) },
 ];
 
