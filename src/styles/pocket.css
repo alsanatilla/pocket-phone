@@ -122,7 +122,11 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 /* The row scrolls on a phone and fades at its own edge, so a clipped label reads as "there is more", not as a typo. */
 .tab-scroll { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain;
   mask-image: linear-gradient(90deg, #000 calc(100% - 22px), transparent); }
-.tab { font: 22px/1 var(--pixel); color: var(--muted); min-height: 48px; padding: 8px 12px; white-space: nowrap; }
+.tab { font: 22px/1 var(--pixel); color: var(--muted); min-height: 48px; padding: 8px 12px; white-space: nowrap; position: relative; }
+/* Pip working is worth knowing from any screen: a dot on its tab, pulsing quietly. */
+.pip-replying .tab[data-tool=pip]::after { content: ""; position: absolute; top: 8px; right: 4px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--accent); animation: pip-dot 1.4s ease-in-out infinite; }
+@keyframes pip-dot { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
 .tab .key { font-size: 16px; color: var(--disabled); margin-right: 6px; }
 .tab.active { color: var(--white); box-shadow: inset 0 -2px 0 var(--accent); }
 .pip-entry { color: var(--accent); font: 24px/1 var(--pixel); min-height: 48px; white-space: nowrap; }
@@ -893,10 +897,38 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 .pip-schedule .pip-run-head { overflow-wrap: anywhere; }
 
 @media (max-width: 600px) {
-  /* Seven labels do not fit one phone line, and a hidden destination is worse than a second line: wrap instead of
-     scrolling, so nothing — least of all Apps, which holds the brief and setup — sits off-screen. */
-  .tab { font-size: 16px; padding: 8px 6px; }
-  .tabs { flex-basis: 100%; order: 3; }
-  /* Four to a row reads as a deliberate grid; a 5 + 2 wrap looks like a mistake. */
-  .tab-scroll { display: grid; grid-template-columns: repeat(4, max-content); column-gap: 4px; overflow-x: visible; mask-image: none; }
+  /* Three destinations fit one line; the row keeps the fade for anything below 320 px. */
+  .tab { font-size: 18px; padding: 8px 10px; }
+  /* The composer stacks: a full-width field, then keep and ask side by side. */
+  .composer { grid-template-columns: 1fr 1fr; }
+  .composer-field { grid-column: 1 / -1; }
 }
+
+/* Today, the whole app: a status line, one composer, a feed. */
+.today-progress { display: block; height: 4px; margin: 12px 0 0; background: var(--line); }
+.today-progress i { display: block; height: 100%; background: var(--accent); transition: width .3s var(--ease-out); }
+.composer { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; margin: 18px 0 20px; }
+.composer-field { min-height: var(--control); padding: 10px 14px; background: var(--plane); border: 1px solid var(--line); color: var(--text); font: 16px/1.4 var(--mono); min-width: 0; }
+.composer-field::placeholder { color: var(--disabled); }
+.composer-field:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.composer button { min-height: var(--control); padding: 0 16px; }
+.composer-keep { background: var(--accent); color: var(--ink); border-color: var(--accent); }
+.composer-ask { color: var(--accent); border: 1px solid var(--line); }
+.feed { display: grid; gap: 12px; margin: 0 0 28px; }
+.feed-card { border: 1px solid var(--line); padding: 14px 16px; }
+.feed-card h2 { font: 13px/1 var(--mono); letter-spacing: .1em; color: var(--accent); margin: 0 0 10px; text-transform: lowercase; }
+.feed-card p { margin: 4px 0; }
+.feed-pip .feed-fact { display: block; width: 100%; text-align: left; padding: 7px 0; color: var(--text); font: 15px/1.45 var(--mono); }
+.feed-pip .feed-fact + .feed-fact { border-top: 1px solid var(--line); }
+.feed-actions { display: flex; gap: 16px; margin-top: 10px; }
+.feed-actions button, .feed-more, .feed-quiet button { font: 13px/1 var(--mono); color: var(--accent); min-height: 44px; }
+.feed-task { display: block; }
+.feed-card .warm-task:last-of-type { border-bottom: 0; }
+.feed-empty p { font: 14px/1.5 var(--mono); }
+.feed-quiet { display: flex; gap: 20px; align-items: center; justify-content: space-between; padding: 4px 2px; }
+.more-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.more-item { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; padding: 14px 16px; border: 1px solid var(--line); text-align: left; min-height: 76px; }
+.more-item:hover, .more-item:focus-visible { border-color: var(--accent); }
+.more-title { font: 17px/1.2 var(--mono); color: var(--text); }
+.more-note { font: 12px/1.4 var(--mono); color: var(--muted); }
+

@@ -64,7 +64,7 @@ input[type=checkbox] { accent-color: var(--accent); }
 /* Start board: one accent, square corners, no decorative outlines. */
 :root { --ease-out: cubic-bezier(.23, 1, .32, 1); }
 .tool-today .workspace-sky { min-height: 92px; padding: 22px 0 18px; }
-.tool-today .workspace-title { display: none; }
+.tool-today .workspace-title { font-size: clamp(28px, 6cqi, 38px); margin-bottom: 4px; }
 .live-tiles-frame { container-type: inline-size; }
 .live-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-flow: row dense; grid-auto-rows: calc((100cqi - 24px) / 4); gap: 8px; }
 .live-tile { --tile: var(--accent); display: flex; flex-direction: column; align-items: stretch; gap: 6px; grid-column: span 2; grid-row: span 2; min-width: 0; min-height: 0; border: 0; border-radius: 0; padding: clamp(12px, 2cqi, 20px); overflow: hidden; text-align: left; background: var(--tile); color: var(--ink); box-shadow: none; transform: perspective(800px) rotateX(0) rotateY(0); transition: transform 180ms var(--ease-out); touch-action: pan-y; }

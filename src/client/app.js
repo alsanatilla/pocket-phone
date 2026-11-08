@@ -37,7 +37,7 @@ import * as setup from './setup.js';
 import { parking, tasks, taskDay, receipt, dice, notes, journal, noteTitle, thought, thoughtStatus, thoughtParked, parkThought, when, meter, heckle, relative, daysOld, DELAYS, HECKLE, KIND, NOTE_LIMIT, dayKey, clock, longDate, load } from "./store.js";
 
 const root = document.getElementById("app"), dialogHost = document.getElementById("dialog");
-const TOOLS = ["today", "thoughts", "tasks", "notes", "movement", "gym", "apps"];
+const TOOLS = ["today", "pip", "more"];
 let content = null, notice = null, parkingDraft = "", parkingDraftOwner = activeAccount(), briefView = null, flushNote = null, todayBoard = null;
 
 // ── DOM helpers ──
@@ -69,10 +69,8 @@ function shell() {
     h("header", { class: "bar" },
       h("button", { class: "brand", onclick: () => go("/today"), title: "Today", text: "pocket" }),
       h("nav", { class: "tabs", "aria-label": "Workspace" }, h("div", { class: "tab-scroll" }, tabs)),
-      h("button", { class: "pip-entry", id: "pip-entry", "aria-label": "Pip", title: "Pip", onclick: () => go("/pip") }, mascot(true)),
       h("button", { class: "status", id: "sync-status", onclick: () => go("/sync"), title: "Sync settings" }, statusLabel())),
     content, notice);
-  pressMotion(document.getElementById('pip-entry'));
 }
 /** The sync state on two short lines: "SIGN IN" over "7 WAITING". */
 const statusLabel = () => describe().replace(" · ", "\n");
@@ -83,9 +81,10 @@ function view(tool, actions = []) {
   briefView?.(); briefView = null;
   zines.leave(); pip.leave(); travel.leave(); movement.leave(); shell(); closeDialog(); say("");
   content.querySelectorAll('.pixel-backdrop').forEach(canvas=>canvas.dispose?.());
-  const pipEntry = document.getElementById("pip-entry"); pipEntry.classList.toggle("selected", tool === "pip"); pipEntry.setAttribute("aria-current", tool === "pip" ? "page" : "false");
-  const inApps = ["receipt", "dice", "zines", "sync", "calendar", "clock", "travel", "account", "brief", "setup", "girder", "shadow"].includes(tool);
-  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "apps" && inApps; tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
+  const pipEntry = document.getElementById("pip-entry"); pipEntry?.classList.toggle("selected", tool === "pip"); pipEntry?.setAttribute("aria-current", tool === "pip" ? "page" : "false");
+  // Everything one level down marks More, so the header always says where you are.
+  const secondary = ["thoughts", "tasks", "notes", "movement", "gym", "apps", "receipt", "dice", "zines", "sync", "calendar", "clock", "travel", "account", "brief", "setup", "girder", "shadow", "search"];
+  document.querySelectorAll(".tab").forEach(tab => { const on = tab.dataset.tool === tool || tab.dataset.tool === "more" && secondary.includes(tool); tab.classList.toggle("active", on); tab.setAttribute("aria-current", on ? "page" : "false"); });
   const activeTab = document.querySelector(".tab.active"), tabs = activeTab?.parentElement;
   // A pinned tab is already in view; centring it would scroll the row for no reason.
   if (tabs && !activeTab.classList.contains("pinned")) tabs.scrollLeft = activeTab.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - activeTab.clientWidth) / 2;
@@ -363,16 +362,95 @@ function setupBanner(body) {
   add(body, h('div', { class: 'setup-banner' }, rowButton('finish setting up pocket', state.done + ' of ' + state.total + ' connected · next: ' + state.next, () => go('/setup')),
     h('button', { class: 'setup-hide', 'aria-label': 'Hide the setup reminder', onclick: () => { setup.hide(); route(); } }, 'hide')));
 }
+/**
+ * Today is the whole app: a status line, one composer and a feed. The other destinations are reached from an item
+ * or from More, never from a tab bar — the tabs only ever grew and each one cost a phone its navigation row.
+ */
 function todayView() {
-  const body = view("today", [["+ capture", capture], ["search", () => go("/search")]]);
-  workspaceTitle(body, "today", new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }));
-  // Today is the tile board, as on the phone: recovery sits on the movement tile, the next event on the calendar tile and the chosen task on the tasks tile.
-  // Adding and editing follow the tiles, so the board starts right under the header.
-  const board = tileBoard(); todayBoard = board;
-  add(body, board, h("div", { class: "keys today-tile-keys" }, h("button", { onclick: editTiles }, "+ add tile"), h("button", { onclick: editTiles }, "edit tiles")));
-  if (coros.connected()) Promise.allSettled([coros.activities(90), coros.cockpit(28)]).then(() => board.refresh());
+  const body = view("today"), now = Date.now(), today = taskDay();
+  const all = tasks.list(), open = all.filter(task => !task.done), chosen = load('tasks.json').next?.uid;
+  const start = new Date(today + "T00:00:00").getTime();
+  const dueToday = open.filter(task => task.due && task.due <= today), doneToday = all.filter(task => task.done && Number(task.updated) >= start);
+  const next = agenda.all().find(event => event.when + event.minutes * MINUTE >= now);
+  const settled = doneToday.length, planned = dueToday.length + settled;
+  workspaceTitle(body, new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "short" }), [
+    dueToday.length ? dueToday.length + " due" : "nothing due",
+    settled ? settled + " done" : ""
+  ].filter(Boolean).join(" · "));
+
+  // Progress reads left to right: how much of what today holds is actually finished.
+  if (planned) add(body, h("div", { class: "today-progress", role: "img", "aria-label": settled + " of " + planned + " done" },
+    h("i", { style: "width:" + Math.round(settled / planned * 100) + "%" })));
+
+  // One box for both verbs: keep it, or ask about it.
+  const field = h("input", { class: "composer-field", placeholder: "capture a thought, or ask pip…", "aria-label": "Capture a thought or ask Pip", maxlength: 500 });
+  const keep = text => guard(() => { parking.park(text); field.value = ""; say("Kept."); todayView(); })();
+  const ask = text => guard(() => go("/pip/" + pip.withContext({ kind: "today", uid: today, title: "Today", text, href: "/today" })))();
+  add(body, h("form", { class: "composer", onsubmit: event => { event.preventDefault(); const text = field.value.trim(); if (!text) return field.focus(); keep(text); } },
+    field,
+    h("button", { type: "submit", class: "composer-keep", text: "keep" }),
+    h("button", { type: "button", class: "composer-ask", text: "ask pip", onclick: () => { const text = field.value.trim(); if (!text) return field.focus(); ask(text); } })));
+
+  const feed = h("section", { class: "feed", "aria-label": "Today" });
+
+  // Pip's read of the day, first: three facts and a way in.
+  if (briefEnabled()) {
+    let facts = [];
+    try { facts = readBrief().facts.slice(0, 3); } catch { facts = []; }
+    if (facts.length) {
+      add(feed, h("article", { class: "feed-card feed-pip" },
+        h("h2", { text: "pip · today" }),
+        ...facts.map(fact => h("button", { class: "feed-fact", onclick: () => go(fact.href || "/brief"), text: fact.text })),
+        h("div", { class: "feed-actions" },
+          h("button", { onclick: () => go("/brief"), text: "open the brief" }),
+          h("button", { onclick: () => go("/pip/" + pip.withBrief(readBrief())), text: "ask about today" }))));
+    }
+  }
+
+  // What today actually holds: the chosen task, what is due, what is late.
+  const shown = [...dueToday.filter(task => task.uid !== chosen), ...dueToday.filter(task => task.uid === chosen)];
+  const tasksShown = shown.slice(0, 6);
+  if (tasksShown.length) {
+    add(feed, h("article", { class: "feed-card" }, h("h2", { text: "today · " + tasksShown.length }),
+      ...tasksShown.map(task => h("div", { class: "feed-task" }, taskRow(task, () => todayView()))),
+      tasksShown.length < dueToday.length ? h("button", { class: "feed-more", onclick: () => go("/tasks"), text: (dueToday.length - tasksShown.length) + " more today" }) : null));
+  } else if (!open.length) {
+    add(feed, h("article", { class: "feed-card feed-empty" }, h("h2", { text: "nothing due" }),
+      h("p", { class: "meta muted", text: "Nothing is due today. Capture something above, or pick a next action." })));
+  }
+
+  if (next) add(feed, h("article", { class: "feed-card feed-event" }, h("h2", { text: clockTime(next.when) }),
+    h("p", { text: next.title }), next.minutes ? h("p", { class: "meta muted", text: next.minutes + " min" }) : null));
+
+  const undecided = parking.open().length;
+  add(feed, h("div", { class: "feed-quiet" },
+    undecided ? h("button", { onclick: () => go("/thoughts"), text: undecided + " parked thoughts" }) : null,
+    h("button", { onclick: () => go("/more"), text: "more" })));
+
+  add(body, feed);
   setupBanner(body);
 }
+/** Everything that used to be a tab, plus what was buried in Apps. Reached from More or from a feed item. */
+function moreView() {
+  const body = view("more", [["search", () => go("/search")]]);
+  workspaceTitle(body, "more", "everything else, one level down");
+  const items = [
+    ["thoughts", "thoughts", "undecided things you parked"],
+    ["tasks", "tasks", tasks.list().filter(task => !task.done).length + " open"],
+    ["notes", "notes", notes.list().length + " kept"],
+    ["movement", "movement", coros.connected() ? "recovery, load and sessions" : "connect COROS"],
+    ["gym", "gym", "workouts you logged"],
+    ["brief", "daily brief", "what needs attention today"],
+    ["apps", "apps", "calendar, clock, travel, zines, games"],
+    ["account", "account & sync", "devices, sessions, storage"],
+    ["setup", "set up pocket", "account, phone, COROS, pip"]
+  ];
+  add(body, h("div", { class: "more-grid" }, ...items.map(([path, title, note]) =>
+    h("button", { class: "more-item", onclick: () => go("/" + path) },
+      h("span", { class: "more-title", text: title }), h("span", { class: "more-note", text: note })))));
+  setupBanner(body);
+}
+
 function parkingView(id) {
   // The list opens with "+ park a thought" right below, so the toolbar adds it only on a thought's own page.
   const body = view("thoughts", [...(id ? [["+ thought", () => { go("/thoughts"); setTimeout(() => document.getElementById("thought-capture")?.focus(), 0); }]] : []), ["search", () => go("/search")]]);
@@ -1111,7 +1189,7 @@ function route() {
   else if (name === "shadow") { const body = view("shadow"); workspaceTitle(body, "shadow protocol", "stealth against a commander that learns", "stars"); mountShadow(body, { confirm: confirmBox, go }); }
   else if (name === "brief") { const body=view('brief'); workspaceTitle(body,'daily brief'); briefView=mountBrief(body,briefApi); }
   else if (name === "gym") gymView.mount(view("gym"), arg, { h, add, say, section, rowButton, keys, split, go, ask, choose, confirm: confirmBox, title: workspaceTitle });
-  else if (name === "thoughts" || name === "parking") parkingView(arg); else if (name === "tasks") tasksView(arg); else if (name === "apps") appsView(); else if (name === "search") searchView(); else if (name === "today") todayView(); else { history.replaceState(null, "", "#/today"); todayView(); }
+  else if (name === "thoughts" || name === "parking") parkingView(arg); else if (name === "tasks") tasksView(arg); else if (name === "apps") appsView(); else if (name === "more") moreView(); else if (name === "search") searchView(); else if (name === "today") todayView(); else { history.replaceState(null, "", "#/today"); todayView(); }
 }
 addEventListener("hashchange", route);
 let lastState = status.state;

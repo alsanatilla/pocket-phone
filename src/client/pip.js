@@ -29,6 +29,8 @@ const runner = new ReplyRunner(store, { key: (value, chat) => trainingChatRoutin
   remote: { available: chat => trainingChatRoutine(chat.uid) ? false : serverRuns({ chat: chat.uid, config: chat.config }).then(state => state.available), stream: streamReplyRemote },
   stream: (chat, turn, options) => trainingChatRoutine(chat.uid) ? trainingReply(chat, turn, options) : streamReply(chat, turn, options), title: suggestTitle, onChange: event => {
   if (event.type === "finished" || event.type === "approval") noticeAway(event);
+  // The mascot left the header with the tab bar, so the Pip tab carries the activity cue now.
+  document.documentElement.classList.toggle("pip-replying", Boolean(runner.active));
   const entry = document.getElementById("pip-entry");
   if (entry) {
     entry.classList.toggle('replying', Boolean(runner.active));
