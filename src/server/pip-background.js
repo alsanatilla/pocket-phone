@@ -12,6 +12,7 @@ import { trainingChatRoutine } from '../shared/pip-training-chat.js';
 import { sweepRuns } from './pip-runs.js';
 import { notify } from './pip-notify.js';
 import { replyNotice } from '../shared/pip-notice.js';
+import { patternDigest } from './pip-patterns.js';
 
 // Pip on its own: routines that run on a schedule with the account's dedicated provider key, read the account's
 // server copy and reply in a synced Pip chat. Training routines have scoped writes; calendar appointments stay on the phone.
@@ -297,6 +298,11 @@ Remembered training brief: ${JSON.stringify(routine.prompt || 'Not set yet; lear
 Available weekdays (0=Sunday): ${JSON.stringify(routine.trainingDays)}
 Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '\n\nThis is the authorized proactive training routine. The training tools save automatically within its scope; no interactive confirmation is required. Calendar appointments are unavailable. ' : AWAY;
   if (digest) body.instructions += `\n\nRecords changed since your last brief, by collection: ${digest}. Use that only to know what is new; read the records themselves before quoting one.`;
+  if (routine.kind === 'brief') {
+    // Counted here, not by the model: these are facts the brief may quote, never a substitute for reading a record.
+    const facts = patternDigest(await readDocuments(userId), now);
+    if (facts.length) body.instructions += `\n\nCounted from the workspace (do not recount, do not contradict): ${facts.join(' ')}`;
+  }
   if (routine.kind === 'watch') body.instructions += '\n\nThis is a standing watch the user set up. If nothing new matches it, answer exactly SKIP.';
   if (training) body.messages.push({ role: 'user', content: training.prompt });
   const source = await serverSource(userId);
