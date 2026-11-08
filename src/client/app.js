@@ -16,15 +16,22 @@ import * as pip from "./pip.js";
 import { mascot } from './pip-pixels.js';
 import { scores } from './scores.js';
 import { backdrop } from "./pixel-backdrop.js";
-import * as zines from "./zines.js";
-import * as movement from "./movement.js";
-import * as gymView from "./gym.js";
+/** Loads a view's module the first time its route opens; today never waits for travel's map or the games. */
+function lazyModule(loader) {
+  let module = null, pending = null;
+  const load = () => (module ??= pending ??= loader().then(value => (module = value), error => { pending = null; throw error; }));
+  return { load, get: () => module };
+}
+
+const zines = lazyModule(() => import("./zines.js"));
+const movement = lazyModule(() => import("./movement.js"));
+const gymView = lazyModule(() => import("./gym.js"));
 import * as coros from "./coros.js";
 import { syncNow, describe, onStatus, status } from "./sync.js";
 import { gym, weekStart } from "./store.js";
 import { installRefresh } from "./retro-loading.js";
 import { initExtras, preferences, todayTiles, TODAY_CATALOG, TILE_SIZES, tileSize } from "./extras.js";
-import * as travel from "./travel.js";
+const travel = lazyModule(() => import("./travel.js"));
 import * as sharedTravel from './travel-store.js';
 import { INVITE_RESUME } from './travel-sharing.js';
 import { normalizeTrip } from '../shared/travel-data.js';
@@ -79,7 +86,7 @@ function view(tool, actions = []) {
   todayBoard?.dispose(); todayBoard = null;
   flushNote?.(); flushNote = null;
   briefView?.(); briefView = null;
-  zines.leave(); pip.leave(); travel.leave(); movement.leave(); shell(); closeDialog(); say("");
+  zines.get()?.leave(); pip.leave(); travel.get()?.leave(); movement.get()?.leave(); shell(); closeDialog(); say("");
   content.querySelectorAll('.pixel-backdrop').forEach(canvas=>canvas.dispose?.());
   const pipEntry = document.getElementById("pip-entry"); pipEntry?.classList.toggle("selected", tool === "pip"); pipEntry?.setAttribute("aria-current", tool === "pip" ? "page" : "false");
   // Everything one level down marks More, so the header always says where you are.
@@ -1175,21 +1182,21 @@ async function keySettings() {
 }
 const setupApi = { h, add, go, say, route, workspaceTitle, normalCode, linkPhone, signInForm: signedOutAccount };
 // ── Routing and keys ──
-function route() {
+async function route() {
   // A query string may ride along inside the hash (#/pip?engine=react); it is not part of the tool name.
   const [, rawName, arg, sub, leaf, deep] = (location.hash.replace(/^#/, "") || "/").split("/"), name = (rawName || "").split("?")[0];
   if (name === "notes") notesView(arg); else if (name === "receipt") receiptView(arg); else if (name === "dice") diceView(); else if (name === "sync" || name === "account" || name === "link") accountView(name === "link" ? arg || "" : "", name === "account" && arg === "new");
   else if (name === "pip") pip.mount(view("pip"), arg, pipHelpers);
-  else if (name === "zines") zines.mount(view("zines"), arg, { go, say, dialog, confirm: confirmBox });
-  else if (name === "movement") movement.mount(view("movement"), { say, go, arg, choose, askPip: text => go('/pip/' + pip.withMovement(text)) });
+  else if (name === "zines") (await zines.load()).mount(view("zines"), arg, { go, say, dialog, confirm: confirmBox });
+  else if (name === "movement") (await movement.load()).mount(view("movement"), { say, go, arg, choose, askPip: text => go('/pip/' + pip.withMovement(text)) });
   else if (name === "calendar") mountAgenda(view("calendar"), plannerApi);
   else if (name === "clock") mountClock(view("clock"), plannerApi);
-  else if (name === "travel") travel.mount(view("travel"), { tripId: arg || "", sub: sub || "", leaf: leaf || "", extra: deep || "" }, plannerApi);
+  else if (name === "travel") (await travel.load()).mount(view("travel"), { tripId: arg || "", sub: sub || "", leaf: leaf || "", extra: deep || "" }, plannerApi);
   else if (name === "setup") setup.mount(view("setup"), setupApi, arg === "new", arg || "");
   else if (name === "girder") { const body = view("girder"); workspaceTitle(body, "girder run", "a barrel-dodging roguelike", "iron"); mountGirder(body, { confirm: confirmBox, go }); }
   else if (name === "shadow") { const body = view("shadow"); workspaceTitle(body, "shadow protocol", "stealth against a commander that learns", "stars"); mountShadow(body, { confirm: confirmBox, go }); }
   else if (name === "brief") { const body=view('brief'); workspaceTitle(body,'daily brief'); briefView=mountBrief(body,briefApi); }
-  else if (name === "gym") gymView.mount(view("gym"), arg, { h, add, say, section, rowButton, keys, split, go, ask, choose, confirm: confirmBox, title: workspaceTitle });
+  else if (name === "gym") (await gymView.load()).mount(view("gym"), arg, { h, add, say, section, rowButton, keys, split, go, ask, choose, confirm: confirmBox, title: workspaceTitle });
   else if (name === "thoughts" || name === "parking") parkingView(arg); else if (name === "tasks") tasksView(arg); else if (name === "apps") appsView(); else if (name === "more") moreView(); else if (name === "search") searchView(); else if (name === "today") todayView(); else { history.replaceState(null, "", "#/today"); todayView(); }
 }
 addEventListener("hashchange", route);
