@@ -932,3 +932,94 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 .more-title { font: 17px/1.2 var(--mono); color: var(--text); }
 .more-note { font: 12px/1.4 var(--mono); color: var(--muted); }
 
+/* ── Pip: a transcript, not a chat room ─────────────────────────────────────────────────────────────────────── */
+/* Each turn is a fixed gutter (time, speaker) and a reading column, separated by one rule. No bubbles. */
+.pip-message { display: grid; gap: 20px; margin-bottom: 26px; }
+.pip-message:last-child { margin-bottom: 0; }
+.pip-turn { display: grid; grid-template-columns: 52px minmax(0, 1fr); column-gap: 14px; border-left: 2px solid var(--line); padding-left: 14px; }
+.pip-turn.pip { border-left-color: var(--accent); }
+.pip-who { display: flex; flex-direction: column; gap: 2px; }
+.pip-who time { font: 11px/1.3 var(--mono); color: var(--dim); }
+.pip-who b { font: 18px/1 var(--pixel); font-weight: normal; }
+.pip-turn.pip .pip-who b { color: var(--accent); }
+.pip-turn.you .pip-who b { color: var(--muted); }
+.pip-col { min-width: 0; }
+.pip-question { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pip-reply { margin: 0; }
+.pip-speaker { display: none; }
+/* A live reply ends in a block caret, the way a terminal does. */
+.pip-answer.streaming::after { content: ""; display: inline-block; width: 7px; height: 14px; margin-left: 2px;
+  background: var(--accent); vertical-align: -2px; animation: pip-caret 1s step-end infinite; }
+@keyframes pip-caret { 50% { opacity: 0; } }
+/* Tool activity reads as a ledger: dotted rules, rows that truncate, time on the right. */
+.pip-activity { margin: 12px 0; border-top: 1px dotted var(--line); border-bottom: 1px dotted var(--line); padding: 4px 0; }
+.pip-activity summary { list-style: none; cursor: pointer; font: 12px/1.9 var(--mono); color: var(--dim); }
+.pip-activity summary::-webkit-details-marker, .pip-tool summary::-webkit-details-marker { display: none; }
+.pip-tool { border: 0; }
+.pip-tool > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; font: 12px/1.9 var(--mono); color: var(--muted); }
+.pip-tool > summary > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pip-tool-status { font-size: 11px; color: var(--dim); white-space: nowrap; }
+.pip-tool.failed > summary, .pip-tool.stopped > summary { color: var(--overdue); }
+.pip-tool-details { padding: 4px 0 8px 14px; }
+/* An approval is a card, not a paragraph. */
+.pip-proposal { border: 1px solid var(--line); padding: 14px 16px; margin: 14px 0 0; }
+.pip-proposal button { min-height: 44px; }
+/* The chat head from the design: title, a chats chip, and a new chat. */
+.pip-heading { display: flex; align-items: baseline; gap: 14px; padding: 18px 0 10px; border-bottom: 1px solid var(--line); }
+.pip-heading .workspace-title { margin: 0; font-size: clamp(30px, 6cqi, 40px); }
+.pip-chip, .pip-new { font: 12px/1 var(--mono); color: var(--muted); border: 1px solid var(--line); background: none; padding: 9px 12px; min-height: 36px; }
+.pip-new { margin-left: auto; color: var(--accent); }
+.pip-chip:hover, .pip-chip:focus-visible, .pip-new:hover, .pip-new:focus-visible { border-color: var(--accent); }
+/* Composer: a plate with a prompt glyph, not a bare strip. */
+.pip-compose-line { display: flex; align-items: flex-start; gap: 10px;
+  border: 1px solid var(--line); background: var(--plane); padding: 6px 6px 6px 12px; }
+.pip-compose-line:focus-within { border-color: var(--accent); }
+.pip-glyph { flex: 0 0 auto; color: var(--accent); font: 18px/1 var(--pixel); line-height: 1; }
+#pip-prompt { background: none; border: 0; padding: 0; min-height: 44px; font: 15px/1.5 var(--mono); }
+#pip-prompt:focus-visible { outline: none; }
+.pip-compose-hint { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.pip-compose-scope, .pip-options-trigger { font: 11px/1.4 var(--mono); color: var(--dim); background: none; border: 0; padding: 6px 0; min-height: 32px; }
+.pip-compose-scope:hover, .pip-options-trigger:hover { color: var(--accent); }
+/* Empty state: the sprite beside one sentence, then what you could ask. */
+.pip-empty { display: grid; gap: 20px; padding: 26px 0; }
+.pip-intro { display: flex; align-items: center; gap: 16px; }
+.pip-intro .pip-mascot { width: 56px; height: 56px; flex: 0 0 auto; }
+.pip-intro-line { margin: 0; font: 16px/1.4 var(--mono); }
+.pip-empty .pip-starters { display: grid; gap: 8px; }
+.pip-empty .pip-starter { text-align: left; border: 1px solid var(--line); background: none; color: var(--text);
+  padding: 14px 16px; min-height: 56px; font: 15px/1.4 var(--mono); }
+.pip-empty .pip-starter:hover, .pip-empty .pip-starter:focus-visible { border-color: var(--accent); }
+
+/* The header owns the chat list now, so the sidebar's own summary never appears. */
+.pip-navigation > summary { display: none; }
+/* The empty state reads from the top, beside the sprite, not centred in a void. */
+.pip-empty { height: auto; justify-content: flex-start; max-width: none; padding: 20px 0 26px; }
+.pip-empty > p { margin: 0; }
+.pip-intro .pip-access-summary { font: 12px/1.4 var(--mono); color: var(--muted); border: 0; background: none; padding: 4px 0; min-height: 32px; text-align: left; }
+#pip-prompt { min-height: 44px; padding: 11px 0; }
+.pip-glyph { align-self: start; padding-top: 13px; }
+.pip-options-trigger, .pip-compose-scope { white-space: nowrap; }
+.pip-compose-hint { align-items: center; }
+#pip-prompt { flex: 1 1 auto; width: auto; }
+.pip-compose-line .pip-send { flex: 0 0 auto; align-self: flex-end; }
+.pip-compose-hint { justify-content: flex-start; gap: 18px; flex-wrap: wrap; }
+.pip-empty { min-height: 0; }
+
+/* The empty state is a block that starts at the top of the thread, beside the sprite. */
+.pip-panel .pip-empty { display: block; height: auto !important; min-height: 0 !important; max-width: none; padding: 8px 0 0; }
+.pip-panel .pip-empty .pip-intro { margin: 0 0 18px; }
+.pip-panel .pip-empty .pip-starters { display: grid; gap: 8px; }
+/* Higher specificity than .pip-composer button, which would otherwise win the font. */
+.pip-composer .pip-options-trigger, .pip-composer .pip-compose-scope { font: 11px/1.4 var(--mono); color: var(--dim); background: none; border: 0; padding: 6px 0; min-height: 32px; white-space: nowrap; }
+.pip-composer .pip-options-trigger:hover, .pip-composer .pip-compose-scope:hover { color: var(--accent); }
+/* Reply actions are small chips under the answer, not paragraphs. */
+.pip-reply-actions { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 12px; }
+.pip-composer .pip-reply-actions button, .pip-reply-actions button { font: 12px/1 var(--mono); color: var(--accent);
+  border: 1px solid var(--line); background: none; min-height: 36px; padding: 0 12px; }
+.pip-reply-actions button:hover, .pip-reply-actions button:focus-visible { border-color: var(--accent); }
+/* Sources and reasoning fold into the same quiet register. */
+.pip-sources summary, .pip-reasoning summary { font: 12px/1.8 var(--mono); color: var(--dim); }
+/* Chromium still draws a disclosure triangle for a list-item summary. */
+.pip-activity summary::marker, .pip-tool summary::marker, .pip-sources summary::marker, .pip-reasoning summary::marker { content: ""; }
+/* On a wide screen the sidebar already lists the chats, so the chip is redundant. */
+@media (min-width: 900px) { .pip-chip { display: none; } }

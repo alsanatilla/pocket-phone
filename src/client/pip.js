@@ -219,9 +219,14 @@ function replyComponent(turn, chat) {
   const replyStatus = ui.h("p", { class: "meta warn pip-reply-status", hidden: true });
   const actions = ui.h("div", { class: "pip-reply-actions" });
   const resumeHelp = ui.h("p", { class: "meta muted pip-resume-help", hidden: true, text: "Continue keeps completed lookups. Restart starts new research." });
-  const reply = ui.h("article", { class: "pip-reply", "aria-label": "pip reply" }, ui.h("div", { class: "pip-speaker", text: "pip" }), plan, toolGroup, reasoning, replyStatus, answer, proposals, sources, contextLine, usageLine, phase, actions, resumeHelp);
+  const reply = ui.h("article", { class: "pip-reply", "aria-label": "pip reply" }, plan, toolGroup, reasoning, replyStatus, answer, proposals, sources, contextLine, usageLine, phase, actions, resumeHelp);
+  // The transcript reads like a console: time and speaker in a fixed gutter, text in a column, only a rule between.
+  const at = new Date(Number(turn.created) || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const who = name => ui.h("div", { class: "pip-who" }, ui.h("time", { text: at }), ui.h("b", { text: name }));
   const message = ui.h("section", { class: "pip-message", "data-turn": turn.uid, tabindex: -1, "aria-label": "Conversation turn" },
-    ui.h("p", { class: "pip-question" }, ui.h("span", { class: "accent", text: "> " }), turn.text), contextCards(turn.context || []), reply);
+    ui.h("div", { class: "pip-turn you" }, who("you"),
+      ui.h("div", { class: "pip-col" }, ui.h("p", { class: "pip-question" }, turn.text), contextCards(turn.context || []))),
+    ui.h("div", { class: "pip-turn pip" }, who("pip"), ui.h("div", { class: "pip-col" }, reply)));
   mounted.replies.set(turn.uid, { answer, reasoning, reasoningText, tools, toolGroup, toolTitle, sources, sourceTitle, sourceList, usageLine, contextLine, replyStatus, phase, actions, resumeHelp, chat, plan, proposals });
   updateReply(turn); return message;
 }
@@ -269,7 +274,8 @@ function updateReply(turn) {
     parts.agentSignature = signature + active;
   }
   parts.toolGroup.hidden = !rows.length; parts.toolTitle.textContent = activityTitle(rows);
-  if (parts.lastStatus !== turn.status) { parts.toolGroup.open = active; parts.lastStatus = turn.status; }
+  // A short reply keeps its ledger visible; a long one folds it to the one-line summary.
+  if (parts.lastStatus !== turn.status) { parts.toolGroup.open = active || rows.length <= 4; parts.lastStatus = turn.status; }
   if (parts.activitySignature !== signature) {
     const expanded = new Set([...parts.tools.querySelectorAll("details[open]")].map(node => node.dataset.id));
     parts.tools.replaceChildren(...rows.map(row => ui.h("details", { class: "pip-tool " + row.state, "data-id": row.id, ...(expanded.has(row.id) ? { open: true } : {}) },
@@ -280,7 +286,8 @@ function updateReply(turn) {
   }
   for (const node of parts.tools.querySelectorAll('.pip-tool')) {
     const row = rows.find(item => item.id === node.dataset.id), status = node.querySelector('.pip-tool-status');
-    if (row && status) status.textContent = [row.state, row.ended ? elapsed(row) : row.started ? Math.max(0, Math.floor((Date.now() - row.started) / 1000)) + 's' : ''].filter(Boolean).join(' · ');
+    // A finished row only needs its time; the state word is noise next to the tick.
+    if (row && status) status.textContent = [row.state === 'done' ? '' : row.state, row.ended ? elapsed(row) : row.started ? Math.max(0, Math.floor((Date.now() - row.started) / 1000)) + 's' : ''].filter(Boolean).join(' · ');
   }
   const citations = JSON.stringify(turn.sources || []);
   if (parts.sourceSignature !== citations) { parts.sources.hidden = !turn.sources?.length; parts.sourceTitle.textContent = "△ sources [" + (turn.sources?.length || 0) + "]"; parts.sourceList.replaceChildren(...(turn.sources || []).map((item, index) => sourceLink(item, "[" + (index + 1) + "] " + item.title))); parts.sourceSignature = citations; }
@@ -300,6 +307,7 @@ function updateReply(turn) {
     const progress = mounted.root.querySelector(".pip-loading [role='status']");
     if (progress) progress.textContent = phaseLabel(turn.phase);
   }
+  parts.answer.classList.toggle('streaming', Boolean(active));
   parts.phase.textContent = label;
   parts.phase.classList.toggle("warn", !active && turn.status !== "done");
   const resumable = !active && turn.status !== "done" && parts.chat.turns.at(-1)?.uid === turn.uid;
@@ -559,7 +567,7 @@ function composer(chat) {
   const activeHere = runner.active?.chatId === chat.uid;
   const sendControl = activeHere ? button('stop', () => runner.stop(), { class: 'accent pip-send', id: 'pip-send' })
     : button('send', send, { class: 'accent pip-send', id: 'pip-send', disabled: Boolean(runner.active) || !field.value.trim() });
-  const options = button('+', () => composerOptions(chat.uid), { class: 'pip-options-trigger', 'aria-label': 'Pip options', 'aria-haspopup': 'dialog' });
+  const options = button('options', () => composerOptions(chat.uid), { class: 'pip-options-trigger', 'aria-label': 'Pip options', 'aria-haspopup': 'dialog' });
   pressMotion(options); pressMotion(sendControl);
   field.oninput = () => {
     try { store.update(chat.uid, c => { c.draft = field.value; }); draftStatus.textContent = ''; }
@@ -572,9 +580,12 @@ function composer(chat) {
       event.preventDefault(); if (!runner.active) { mounted.instantNext = true; void safely(send)(); }
     }
   };
+  const scope = button(access(chat.config).length ? 'reads ' + access(chat.config).join(' · ') : 'choose what pip can read',
+    () => pocketAccess(chat), { class: 'pip-compose-scope', 'aria-label': 'Choose what Pip can read' });
   const form = ui.h('form', { class: 'pip-composer', onsubmit: event => event.preventDefault() },
     contextCards(chat.context, i => { store.update(chat.uid, c => c.context.splice(i, 1)); render(); }),
-    ui.h('div', { class: 'pip-compose-line' }, options, field, sendControl), draftStatus);
+    ui.h('div', { class: 'pip-compose-line' }, ui.h('span', { class: 'pip-glyph', text: '▌', 'aria-hidden': 'true' }), field, sendControl),
+    ui.h('div', { class: 'pip-compose-hint' }, scope, options), draftStatus);
   requestAnimationFrame(() => { if (field.isConnected) resize(); });
   return form;
 }
@@ -597,7 +608,10 @@ function emptyChat(chat) {
   mounted.startersShown = true;
   const scope = training ? null : button(enabled.length ? CATEGORIES.filter(([key]) => enabled.includes(key)).map(([, title]) => title.toLowerCase()).join(' · ') : 'choose what Pip can read',
     () => pocketAccess(chat), { class: 'pip-access-summary', 'aria-label': 'Choose what Pip can read' });
-  return ui.h('div', { class: 'pip-empty' }, mascot(), scope, ui.h('div', { class: 'pip-starters' }, picks));
+  return ui.h('div', { class: 'pip-empty' },
+    ui.h('div', { class: 'pip-intro' }, mascot(),
+      ui.h('div', {}, ui.h('p', { class: 'pip-intro-line', text: 'Ask about anything you\'ve saved.' }), scope)),
+    ui.h('div', { class: 'pip-starters' }, picks));
 }
 
 function render() {
@@ -620,8 +634,11 @@ function render() {
   mounted.instantNext = false;
   const other = runner.active && runner.active.chatId !== chat.uid ? ui.h("div", { class: "pip-running" }, button("open reply", () => ui.go("/pip/" + runner.active.chatId)), button("stop", () => runner.stop())) : null;
   const progress=runner.active?.chatId===chat.uid ? ui.h("div",{class:"pip-loading"},mascot(true),ui.h("span",{class:"meta muted",text:phaseLabel(runner.active.turn.phase),role:"status"})) : null;
-  const header = ui.h("header", { class: "pip-heading" }, ui.h("div", {}, ui.h("h1", { class: "workspace-title", text: "pip" }),
-    chat.turns.length || chat.title.toLowerCase() !== 'new chat' ? caption(chat.title) : null));
+  const openChats = () => { const nav = mounted?.root.querySelector(".pip-navigation"); if (nav) { nav.open = !nav.open; nav.scrollIntoView({ block: "nearest" }); } };
+  const header = ui.h("header", { class: "pip-heading" },
+    ui.h("h1", { class: "workspace-title", text: "pip" }),
+    button("chats · " + store.list().length + " ▾", openChats, { class: "pip-chip", "aria-label": "Chats", "aria-haspopup": "true" }),
+    button("+ new", () => ui.go("/pip/new"), { class: "pip-new", "aria-label": "New chat" }));
   const panel = ui.h("div", { class: "pip-panel" }, backdrop("glow"), header, other, thread, progress, composer(chat));
   mounted.root.replaceChildren(ui.h("div", { class: "pip-layout" }, conversationNav(chat), panel));
   if (runner.active?.chatId === chat.uid) phaseTimer = setInterval(() => { if (!document.hidden && mounted?.thread === thread && runner.active) updateReply(runner.active.turn); }, 1000);

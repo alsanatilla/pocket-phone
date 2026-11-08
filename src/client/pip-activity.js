@@ -36,7 +36,11 @@ export const mark = state => ({ queued: "◇", running: "◌", awaiting: "◈", 
 export function activityTitle(rows) {
   const live = rows.find(row => row.state === "awaiting") || rows.find(row => row.state === "running") || rows.find(row => row.state === "queued");
   if (live) return mark(live.state) + " " + live.title + (live.state === "awaiting" ? " · waiting for your approval" : "");
-  const names = [...new Set(rows.map(row => row.kind === "web" ? "Web" : row.name.includes("note") ? "Notes" : row.name.includes("thought") ? "Thoughts" : row.name.includes("task") ? "Tasks" : row.name.includes("gym") ? "Gym" : row.name.includes("coros") ? "COROS" : row.title))];
+  // Group by what the person recognises, not by each lookup's own title: "Tasks + Calendar", never a paragraph.
+  const family = row => row.kind === "web" ? "Web"
+    : row.name.includes("note") ? "Notes" : row.name.includes("thought") ? "Thoughts" : row.name.includes("task") ? "Tasks"
+    : row.name.includes("gym") ? "Gym" : row.name.includes("coros") ? "COROS" : row.name.includes("calendar") ? "Calendar" : "Lookups";
+  const names = [...new Set(rows.map(family))];
   const failed = rows.some(row => row.state === "failed"), stopped = rows.some(row => row.state === "stopped");
   return (failed ? "△ " : stopped ? "− " : "□ ") + names.join(" + ") + " · " + rows.length + (rows.length === 1 ? " step" : " steps") + (failed ? " · failed" : stopped ? " · stopped" : "");
 }
