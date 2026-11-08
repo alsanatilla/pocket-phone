@@ -124,7 +124,7 @@ async function stop(signal) {
   log('info', { message: 'Stopping after the current stretch', signal });
   // A stretch can run for the full Pip deadline; give it that long before closing the database.
   const deadline = Date.now() + number(process.env.PIP_WORKER_STOP_MS, 180000, 5000, 600000);
-  while (state.active > 0 && Date.now() < deadline) await sleep(250);
+  while ((state.active > 0 || state.routineBusy) && Date.now() < deadline) await sleep(250);
   if (routineTimer) clearInterval(routineTimer);
   health?.close();
   try { database().close(); } catch { /* already closed */ }
@@ -138,6 +138,8 @@ process.on('unhandledRejection', error => log('error', { error: message(error), 
 const slots = Array.from({ length: concurrency }, (_, index) => slot(index));
 await Promise.allSettled(slots);
 if (once) {
+  // A cron that runs this once gets the schedules as well, unless it already calls /api/jobs/pip.
+  if (routinesEvery > 0) await routineTick();
   health?.close();
   try { database().close(); } catch { /* already closed */ }
   log('info', { message: 'Queue drained; worker exits', done: state.done, retried: state.retried });
