@@ -1,7 +1,0 @@
-.composer { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--plane); padding: 6px 6px 6px 12px; }
-.composer:focus-within { border-color: var(--accent); }
-.glyph { color: var(--accent); font: 18px/1 var(--pixel); }
-.input { flex: 1; min-width: 0; min-height: var(--control); background: none; border: 0; outline: none; }
-.action, .secondary { min-height: var(--control); padding: 0 14px; white-space: nowrap; }
-.action { background: var(--accent); color: var(--ink); }
-.secondary { border: 1px solid var(--line); color: var(--accent); }

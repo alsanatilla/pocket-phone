@@ -1,7 +1,7 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
+import { Button } from "@/components/ui/button";
+import { Toaster } from "@/components/ui/sonner";
 import { DialogHost } from "../ui/dialog/DialogHost.tsx";
-import { Toaster } from "../ui/toast/Toaster.tsx";
-import styles from "./Shell.module.css";
 
 // The frame around every page: brand, sections, a way back to the classic app for what has not moved yet.
 
@@ -14,36 +14,37 @@ const SECTIONS = [
 export function Shell() {
   const path = useRouterState({ select: state => state.location.pathname });
   return (
-    <div className={styles.shell}>
-      <header className={styles.bar}>
-        <Link to="/today" className={styles.brand}>pocket</Link>
-        <nav className={styles.tabs} aria-label="Sections">
+    <div className="mx-auto max-w-3xl px-4 pb-24">
+      <header className="sticky top-0 z-10 flex items-center gap-4 bg-background py-3.5">
+        <Link to="/today" className="font-pixel text-3xl leading-none text-primary no-underline">pocket</Link>
+        <nav aria-label="Sections" className="flex gap-3.5 font-pixel text-xl leading-none text-muted-foreground">
           {SECTIONS.map(section => (
-            <Link key={section.to} to={section.to} className={styles.tab} activeProps={{ className: styles.active, "aria-current": "page" }}>{section.label}</Link>
+            <Link key={section.to} to={section.to} className="py-1.5 no-underline hover:text-foreground"
+              activeProps={{ className: "text-foreground shadow-[inset_0_-2px_0_var(--primary)]", "aria-current": "page" }}>{section.label}</Link>
           ))}
         </nav>
-        <a className={styles.classic} href={"/#" + path}>classic</a>
+        <a href={"/#" + path} className="ml-auto border-b text-[11px] text-dim no-underline">classic</a>
       </header>
       <Outlet />
-      <Toaster />
+      <Toaster position="bottom-center" />
       <DialogHost />
     </div>
   );
 }
 
 export function NotFound() {
-  return <p className={styles.notice}>Nothing here. <Link to="/today">Back to today</Link></p>;
+  return <p className="text-sm text-muted-foreground">Nothing here. <Link to="/today" className="text-primary">Back to today</Link></p>;
 }
 
 export function RouteError({ error, reset }: { error: unknown; reset: () => void }) {
   return (
-    <div className={styles.error} role="alert">
+    <div role="alert" className="space-y-2 text-sm text-destructive">
       <p>This view failed: {error instanceof Error ? error.message : String(error)}</p>
-      <button onClick={reset}>try again</button>
+      <Button variant="outline" onClick={reset}>try again</Button>
     </div>
   );
 }
 
 export function Loading() {
-  return <p className={styles.notice}>loading…</p>;
+  return <p className="text-sm text-muted-foreground">loading…</p>;
 }

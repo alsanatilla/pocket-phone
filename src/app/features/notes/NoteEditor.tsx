@@ -6,7 +6,8 @@ import { Markdown } from "../../ui/Markdown.tsx";
 import { confirm } from "../../ui/dialog/dialog.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 import { useNoteEditor } from "./useNoteEditor.ts";
-import styles from "./Notes.module.css";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 let previewing = false; // kept across notes for this visit, like the classic editor
 
@@ -24,7 +25,7 @@ export function NoteEditor({ uid, fresh }: { uid: string; fresh: boolean }) {
   const [preview, setPreview] = useState(previewing && note.stored);
 
   if (!note.exists) {
-    return <main><p className={styles.muted}>This note was deleted.</p><Link to="/notes" className={styles.link}>‹ notes</Link></main>;
+    return <main className="space-y-2 pt-4"><p className="text-sm text-muted-foreground">This note was deleted.</p><Link to="/notes" className="text-sm text-primary">‹ notes</Link></main>;
   }
 
   const togglePreview = () => { note.flush(); previewing = !preview; setPreview(!preview); };
@@ -40,19 +41,20 @@ export function NoteEditor({ uid, fresh }: { uid: string; fresh: boolean }) {
 
   return (
     <main>
-      <div className={styles.editorBar}>
-        <Link to="/notes" className={styles.link}>‹ notes</Link>
-        <span className={styles.muted} aria-live="polite">{status}</span>
-        <span className={styles.spacer} />
-        <button className={styles.link} onClick={togglePreview}>{preview ? "edit" : "preview"}</button>
-        <button className={styles.link} onClick={note.togglePin} disabled={!note.stored}>{note.pinned ? "unpin" : "pin"}</button>
-        <button className={styles.link} onClick={remove}>delete</button>
+      <div className="sticky top-[60px] z-[5] flex flex-wrap items-center gap-1 bg-background py-1">
+        <Button asChild variant="link" className="px-0"><Link to="/notes">‹ notes</Link></Button>
+        <span className="ml-3 text-sm text-muted-foreground" aria-live="polite">{status}</span>
+        <span className="flex-1" />
+        <Button variant="ghost" onClick={togglePreview}>{preview ? "edit" : "preview"}</Button>
+        <Button variant="ghost" onClick={note.togglePin} disabled={!note.stored}>{note.pinned ? "unpin" : "pin"}</Button>
+        <Button variant="ghost" onClick={remove}>delete</Button>
       </div>
-      {note.error ? <p className={styles.error} role="alert">{note.error}</p> : null}
+      {note.error ? <p role="alert" className="text-sm text-destructive">{note.error}</p> : null}
       {preview
-        ? <Markdown text={note.text} options={{ annotations: thoughtAnnotations(note.stored ? uid : null, note.text) }} className={"prose " + styles.preview} />
-        : <textarea className={styles.text} value={note.text} maxLength={NOTE_LIMIT} spellCheck autoFocus aria-label="Note text"
+        ? <Markdown text={note.text} options={{ annotations: thoughtAnnotations(note.stored ? uid : null, note.text) }} className="prose min-h-[40vh] rounded-md border p-4" />
+        : <Textarea value={note.text} maxLength={NOTE_LIMIT} spellCheck autoFocus aria-label="Note text"
             placeholder={"# Title\n\nWrite in Markdown…  >> a thought @tomorrow parks it"}
+            className="min-h-[65vh] resize-y bg-card p-4 text-[15px] leading-relaxed"
             onChange={event => note.edit(event.target.value, cursorLine(event))}
             onKeyUp={onKeyUp} onBlur={note.flush} />}
     </main>

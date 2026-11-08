@@ -8,7 +8,8 @@ import { listNotes } from "../../data/notes.ts";
 import { withContext } from "../../data/chats.ts";
 import { Composer } from "../../ui/Composer.tsx";
 import { toast, toastError } from "../../ui/toast/toast.ts";
-import styles from "./Today.module.css";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageTitle } from "../../ui/PageTitle.tsx";
 
 // Today: the date and where the day stands, one field to keep a thought or ask Pip, Pip's read of the day,
 // and what is due.
@@ -41,39 +42,39 @@ export function TodayPage() {
   };
 
   return (
-    <main>
-      <div className={styles.status}>
-        <h1>{new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "short" })}</h1>
-        <p>{open.length} open · {due.length} due today · {done} done</p>
-      </div>
+    <main className="space-y-4">
+      <PageTitle title={new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "short" })}
+        meta={`${open.length} open · ${due.length} due today · ${done} done`} />
 
       <Composer label="Capture a thought or ask Pip" placeholder="capture a thought, or ask pip…" action="keep" onSubmit={keep}
         secondary={{ label: "ask pip", run: ask }} />
 
       {brief?.facts.length ? (
-        <article className={styles.card}>
-          <h2>pip · today</h2>
-          {brief.facts.slice(0, 3).map((fact, index) => <p key={index}>{fact.text}</p>)}
-        </article>
+        <Card>
+          <CardHeader><CardTitle className="text-xs tracking-widest text-primary">pip · today</CardTitle></CardHeader>
+          <CardContent className="space-y-1.5">{brief.facts.slice(0, 3).map((fact, index) => <p key={index}>{fact.text}</p>)}</CardContent>
+        </Card>
       ) : null}
 
-      <article className={styles.card}>
-        <h2>today · {due.length}</h2>
-        {due.length ? due.slice(0, 6).map(task => (
-          <div className={styles.task} key={task.uid}>
-            <button className={styles.check} aria-label={"Complete " + task.text}
-              onClick={() => { try { completeTask(task.uid); } catch (error) { toastError(error); } }} />
-            <div>
-              <p className={styles.taskText}>{task.text}</p>
-              <p className={styles.taskMeta}>{task.due}{task.important ? " · important" : ""}</p>
+      <Card>
+        <CardHeader><CardTitle className="text-xs tracking-widest text-primary">today · {due.length}</CardTitle></CardHeader>
+        <CardContent>
+          {due.length ? due.slice(0, 6).map(task => (
+            <div key={task.uid} className="flex items-start gap-3 border-t border-dashed py-2.5 first:border-t-0">
+              <button aria-label={"Complete " + task.text} className="-mt-1.5 size-11 shrink-0 rounded-sm border hover:border-primary"
+                onClick={() => { try { completeTask(task.uid); } catch (error) { toastError(error); } }} />
+              <div>
+                <p>{task.text}</p>
+                <p className="text-xs text-dim">{task.due}{task.important ? " · important" : ""}</p>
+              </div>
             </div>
-          </div>
-        )) : <p className={styles.muted}>Nothing due today.</p>}
-      </article>
+          )) : <p className="text-sm text-muted-foreground">Nothing due today.</p>}
+        </CardContent>
+      </Card>
 
-      <footer className={styles.quiet}>
+      <footer className="flex gap-4 pt-2 text-xs text-dim">
         {parked ? <span>{parked} parked thoughts</span> : null}
-        <Link to="/notes">{noteCount} notes</Link>
+        <Link to="/notes" className="text-muted-foreground">{noteCount} notes</Link>
       </footer>
     </main>
   );

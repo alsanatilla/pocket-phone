@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+vi.mock("./toast/toast.ts", () => ({ toast: vi.fn(), toastError: vi.fn(), clearToast: vi.fn() }));
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { DialogHost } from "./dialog/DialogHost.tsx";
 import { choose, confirm, prompt } from "./dialog/dialog.ts";
 import { Composer } from "./Composer.tsx";
-import { Toaster } from "./toast/Toaster.tsx";
+import { toastError } from "./toast/toast.ts";
 
 describe("dialogs", () => {
   it("confirm resolves true on its action and false on cancel", async () => {
@@ -43,7 +44,7 @@ describe("dialogs", () => {
 describe("Composer", () => {
   it("clears on success and keeps the text when the action fails", async () => {
     const onSubmit = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("No key."));
-    render(<><Composer label="Message" placeholder="…" action="send" onSubmit={onSubmit} /><Toaster /></>);
+    render(<Composer label="Message" placeholder="…" action="send" onSubmit={onSubmit} />);
     const field = screen.getByLabelText("Message") as HTMLInputElement;
 
     fireEvent.change(field, { target: { value: "hello" } });
@@ -54,6 +55,6 @@ describe("Composer", () => {
     fireEvent.change(field, { target: { value: "again" } });
     await act(async () => { fireEvent.submit(field.form!); });
     expect(field.value).toBe("again");
-    expect(screen.getByRole("status").textContent).toBe("No key.");
+    expect(toastError).toHaveBeenCalledWith(new Error("No key."));
   });
 });
