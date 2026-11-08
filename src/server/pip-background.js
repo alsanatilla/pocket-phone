@@ -86,10 +86,16 @@ export function backgroundRoutine(value) {
   const feedback = (Array.isArray(value.feedback) ? value.feedback : []).filter(item => Number.isSafeInteger(item.at) && typeof item.text === 'string').slice(-12).map(item => ({ at: item.at, text: item.text.slice(0, 1000) }));
   return { id, kind, title, prompt, time: value.time, days, enabled: value.enabled !== false, ...(kind === 'training' ? { trainingDays, feedback } : {}) };
 }
-/** The newest change in the records a brief reads. Chats are the brief's own output, so they never count as news. */
+/**
+ * The newest change in the records a brief reads. Content (notes, tasks, thoughts, gym, journal) is one document per
+ * collection in pocket_documents; chats are the brief's own output, so they never count as news. Missing either
+ * source would make the brief think nothing ever changes.
+ */
 export async function newestRecordAt(userId) {
-  const row = (await sql({ sql: `SELECT MAX(json_extract(payload, '$.updated')) AS changed FROM pocket_objects WHERE user_id = ? AND collection <> 'chats'`, args: [userId] })).rows[0];
-  return Number(row?.changed || 0);
+  const row = (await sql({ sql: `SELECT (SELECT MAX(updated_at) FROM pocket_documents WHERE user_id = ?) AS documents,
+    (SELECT MAX(json_extract(payload, '$.updated')) FROM pocket_objects WHERE user_id = ? AND collection <> 'chats') AS objects`,
+    args: [userId, userId] })).rows[0];
+  return Math.max(Number(row?.documents || 0), Number(row?.objects || 0));
 }
 const parse = raw => { try { return JSON.parse(String(raw)); } catch { return null; } };
 async function stored(userId) {
@@ -236,9 +242,12 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
       if (routine.kind === 'brief' && !newest) return { status: 'unchanged' };
       if (lastRun > 0 && newest <= lastRun) return { status: 'unchanged' };
       if (routine.kind === 'brief' && lastRun > 0) {
-        const rows = (await sql({ sql: `SELECT collection, COUNT(*) AS n FROM pocket_objects WHERE user_id = ? AND collection <> 'chats' AND json_extract(payload, '$.updated') > ? GROUP BY collection`,
-          args: [userId, lastRun] })).rows;
-        if (rows.length) digest = rows.map(row => `${row.collection}: ${Number(row.n)}`).join(', ');
+        const documents = (await sql({ sql: `SELECT name FROM pocket_documents WHERE user_id = ? AND updated_at > ?`,
+          args: [userId, lastRun] })).rows.map(row => String(row.name).replace(/\.json$/, ''));
+        const objects = (await sql({ sql: `SELECT collection, COUNT(*) AS n FROM pocket_objects WHERE user_id = ? AND collection <> 'chats' AND json_extract(payload, '$.updated') > ? GROUP BY collection`,
+          args: [userId, lastRun] })).rows.map(row => `${row.collection}: ${Number(row.n)}`);
+        const parts = [...documents, ...objects];
+        if (parts.length) digest = parts.join(', ');
       }
     } catch { /* an unreadable revision is no reason to skip the run */ }
   }
