@@ -26,7 +26,7 @@ retried stretch cannot create a second record.
 ## Run it
 
 ```sh
-# .env needs TURSO_DATABASE_URL, TURSO_AUTH_TOKEN and POCKET_ENCRYPTION_SECRET
+# .env needs TURSO_DATABASE_URL and TURSO_AUTH_TOKEN; POCKET_ENCRYPTION_SECRET is used when set
 npm run worker            # long-lived, with /healthz on :8787
 npm run worker:once       # drain the queue and exit (cron / free CI)
 ```
@@ -55,7 +55,7 @@ ingress at all.
 | Name | Default | Purpose |
 | --- | --- | --- |
 | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | — | The same database the web app uses |
-| `POCKET_ENCRYPTION_SECRET` (or `BETTER_AUTH_SECRET`) | — | Opens each account's sealed provider key |
+| `POCKET_ENCRYPTION_SECRET` (or `BETTER_AUTH_SECRET`) | `TURSO_AUTH_TOKEN` | Opens each account's sealed provider key. Without either, the database token is used, exactly as the web app does. |
 | `PIP_WORKER_CONCURRENCY` | `2` | Parallel stretches per process |
 | `PIP_WORKER_POLL_MS` | `1000` | Idle poll interval |
 | `PIP_WORKER_JOB_LEASE_MS` | `210000` | Claim length; must exceed one stretch |

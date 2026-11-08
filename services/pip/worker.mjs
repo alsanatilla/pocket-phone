@@ -34,8 +34,8 @@ if (!configured()) {
   process.exit(1);
 }
 if (!process.env.POCKET_ENCRYPTION_SECRET && !process.env.BETTER_AUTH_SECRET) {
-  log('error', { error: 'Set POCKET_ENCRYPTION_SECRET (the same value the web app uses) so sealed provider keys can be opened.' });
-  process.exit(1);
+  // secrets.js falls back to the database token, exactly as the web app does; no need to refuse to start.
+  log('warn', { message: 'No POCKET_ENCRYPTION_SECRET or BETTER_AUTH_SECRET set; sealed provider keys fall back to TURSO_AUTH_TOKEN like the web app. Set one explicitly to decouple them.' });
 }
 
 await ensureSchema();
