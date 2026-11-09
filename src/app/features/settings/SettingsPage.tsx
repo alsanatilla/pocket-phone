@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { CATEGORIES, type Category } from "../../../client/pip-tools.js";
-import { MODELS, PROVIDERS, TIERS, type Provider, type Tier } from "../../data/ai.ts";
+import { activeAccount } from "../../../client/workspace-storage.js";
+import { MODEL_NAMES, MODELS, PROVIDERS, TIERS, type Provider, type Tier } from "../../data/ai.ts";
 import { PageTitle } from "../../ui/PageTitle.tsx";
 import { useAiSettings, type Connection } from "./useAiSettings.ts";
 
@@ -22,13 +23,26 @@ const READS: Record<Category, string> = {
   coros: "Read recovery and training from COROS.",
 };
 
-/** "anthropic/claude-sonnet-5.5" → "Sonnet 5.5"; the free router says so. */
+/** "anthropic/claude-sonnet-5.5" → "Sonnet 5.5"; models Pocket picks have their own names. */
 export function modelLabel(id: string): string {
-  if (id === "openrouter/free") return "free models";
+  if (MODEL_NAMES[id]) return MODEL_NAMES[id];
   const match = /(haiku|sonnet|opus)[-.]?([\d.-]+)?/i.exec(id);
   if (!match) return id;
   return match[1]![0]!.toUpperCase() + match[1]!.slice(1) + (match[2] ? " " + match[2].replace(/-/g, ".") : "");
 }
+
+const LIGHT: Record<Provider, string> = {
+  opencode: "Fast and cheap: DeepSeek Flash for everything.",
+  openrouter: "Free models, nothing to pay.",
+  anthropic: "Fast and cheap: Haiku for everything.",
+  custom: "Your endpoint's model.",
+};
+
+const PROVIDER_NOTE: Record<Exclude<Provider, "custom">, string> = {
+  opencode: "one subscription, many open models; needs a Pocket account",
+  openrouter: "sign in, free models included",
+  anthropic: "use your Claude API key",
+};
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
@@ -79,25 +93,36 @@ export function SettingsPage() {
   const { profile, connection, granted, usage, busy } = ai;
   const providerName = profile.provider === "custom" ? "your endpoint" : PROVIDERS[profile.provider].name;
   const connected = connection.state === "connected";
+  // OpenCode Go is relay-only: without a Pocket account there is nowhere to keep its key that can reach it.
+  const needsAccount = profile.provider !== "custom" && PROVIDERS[profile.provider].relayOnly === true && !activeAccount();
 
   return (
     <main className="space-y-4">
       <PageTitle title="settings" meta="pip and the screens it arranges" />
 
       <Section title="connection" hint="Pip runs on your own model account; you pay your provider directly.">
-        <div role="radiogroup" aria-label="Provider" className="grid grid-cols-2 gap-2">
-          {(["openrouter", "anthropic"] as const).map(provider => (
+        <div role="radiogroup" aria-label="Provider" className="space-y-2">
+          {(["opencode", "openrouter", "anthropic"] as const).map(provider => (
             <Choice key={provider} label={PROVIDERS[provider].name} selected={profile.provider === provider} onSelect={() => ai.setProvider(provider)}>
-              <p className="text-sm font-medium">{PROVIDERS[provider].name}</p>
-              <p className="text-xs text-muted-foreground">{provider === "openrouter" ? "sign in, free models included" : "use your Claude API key"}</p>
+              <p className="text-sm font-medium">{PROVIDERS[provider].name}{provider === "opencode" ? <span className="ml-2 text-xs font-normal text-primary">recommended</span> : null}</p>
+              <p className="text-xs text-muted-foreground">{PROVIDER_NOTE[provider]}</p>
             </Choice>
           ))}
         </div>
         <ConnectionLine connection={connection} provider={providerName} />
-        {connected ? (
+        {needsAccount ? (
+          <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+            OpenCode Go only answers through Pocket's server. <a href="/#/account" className="text-primary">Sign in to Pocket</a>, then add your key here; it is stored encrypted on your account.
+          </p>
+        ) : connected ? (
           <Button variant="outline" size="sm" disabled={busy} onClick={() => void ai.disconnect()}>disconnect</Button>
         ) : profile.provider === "openrouter" ? (
           <Button className="w-full" size="lg" disabled={busy} onClick={() => void ai.signInOpenRouter()}>sign in with OpenRouter</Button>
+        ) : profile.provider === "opencode" ? (
+          <>
+            <KeyField busy={busy} onSave={ai.connectKey} placeholder="your OpenCode Go key" />
+            <p className="text-xs text-muted-foreground">Create one at <a href="https://opencode.ai/auth" target="_blank" rel="noopener noreferrer" className="text-primary">opencode.ai/auth</a>.</p>
+          </>
         ) : profile.provider === "anthropic" ? (
           <KeyField busy={busy} onSave={ai.connectKey} placeholder="sk-ant-…" />
         ) : (
@@ -114,7 +139,7 @@ export function SettingsPage() {
                 <p className="font-pixel text-2xl leading-none">{TIERS[tier].name.toLowerCase()}</p>
                 {models ? <p className="mt-1 text-xs text-muted-foreground">pip: {modelLabel(models.chat)} · screens: {modelLabel(models.surface)}</p> : null}
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {tier === "light" && profile.provider === "anthropic" ? "Fast and cheap: Haiku for everything." : TIERS[tier].blurb}
+                  {tier === "light" ? LIGHT[profile.provider] : TIERS[tier].blurb}
                 </p>
               </Choice>
             );

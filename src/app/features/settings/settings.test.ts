@@ -8,6 +8,18 @@ import { captureReturn, challengeFor, finish } from "./openrouter.ts";
 import { modelLabel } from "./SettingsPage.tsx";
 
 describe("AI profile", () => {
+  it("starts on OpenCode Go when nothing was chosen yet", () => {
+    expect(readProfile()).toMatchObject({ provider: "opencode", tier: "balanced" });
+    const chat = configFor(readProfile(), "chat");
+    expect(chat).toMatchObject({ provider: "compatible", baseUrl: "https://opencode.ai/inference/go/openai/v1", model: "glm-5.3" });
+    expect(configFor(readProfile(), "surface").model).toBe("deepseek-v4.1-flash");
+  });
+
+  it("recognises an OpenCode Go setup made in the classic settings", () => {
+    saveSettings({ provider: "compatible", baseUrl: "https://opencode.ai/inference/go/openai/v1", model: "kimi-k3.1-pro", maxTokens: 4096, thinking: false, webSearch: false });
+    expect(readProfile()).toMatchObject({ provider: "opencode", tier: "best" });
+  });
+
   it("reads what the classic settings imply", () => {
     saveSettings({ provider: "compatible", baseUrl: "https://openrouter.ai/api/v1", model: "openrouter/free", maxTokens: 4096, thinking: false, webSearch: true });
     expect(readProfile()).toMatchObject({ provider: "openrouter", tier: "light", web: true });
@@ -37,6 +49,8 @@ describe("AI profile", () => {
     expect(priceOf("mystery-model")).toBeNull();
     expect(modelLabel("anthropic/claude-sonnet-5.5")).toBe("Sonnet 5.5");
     expect(modelLabel("claude-haiku-5-5")).toBe("Haiku 5.5");
+    expect(modelLabel("deepseek-v4.1-flash")).toBe("DeepSeek V4.1 Flash");
+    expect(priceOf("glm-5.3")).toEqual([1.4, 4.4]);
   });
 });
 

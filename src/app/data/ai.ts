@@ -1,23 +1,31 @@
-import { config, saveSettings, settings, type PipConfig } from "../../client/pip-core.js";
+import { DEFAULT_CONFIG, config, saveSettings, settings, type PipConfig } from "../../client/pip-core.js";
 import { forget, save, status, type KeyStatus } from "../../client/pip-credentials.js";
 import { access, saveAccess, type Category } from "../../client/pip-tools.js";
+import { OPENCODE_GO } from "../../shared/pip-opencode.js";
 
 // Pocket's AI settings in the person's terms: who provides the model, how much AI to use, and what Pip may read.
 // Everything technical (endpoint, model IDs, which model does which job) is derived here, so the settings screen
 // never shows a model ID unless "advanced" is opened.
 
-export type Provider = "openrouter" | "anthropic" | "custom";
+export type Provider = "opencode" | "openrouter" | "anthropic" | "custom";
 export type Tier = "light" | "balanced" | "best";
 /** The jobs Pocket gives a model: a conversation with Pip, or arranging a screen (fast and frequent). */
 export type Job = "chat" | "surface";
 
-export const PROVIDERS: Record<Exclude<Provider, "custom">, { name: string; baseUrl: string; provider: PipConfig["provider"] }> = {
+export const PROVIDERS: Record<Exclude<Provider, "custom">, { name: string; baseUrl: string; provider: PipConfig["provider"]; relayOnly?: boolean }> = {
+  // OpenCode Go answers no CORS preflight, so a browser reaches it only through Pocket's relay (signed in).
+  opencode: { name: "OpenCode Go", baseUrl: OPENCODE_GO, provider: "compatible", relayOnly: true },
   openrouter: { name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", provider: "compatible" },
   anthropic: { name: "Anthropic", baseUrl: "https://api.anthropic.com/v1", provider: "anthropic" },
 };
 
 /** Which model does which job at each tier. */
 export const MODELS: Record<Exclude<Provider, "custom">, Record<Tier, Record<Job, string>>> = {
+  opencode: {
+    light: { chat: "deepseek-v4.1-flash", surface: "deepseek-v4.1-flash" },
+    balanced: { chat: "glm-5.3", surface: "deepseek-v4.1-flash" },
+    best: { chat: "kimi-k3.1-pro", surface: "glm-5.3" },
+  },
   openrouter: {
     light: { chat: "openrouter/free", surface: "openrouter/free" },
     balanced: { chat: "anthropic/claude-sonnet-5.5", surface: "anthropic/claude-haiku-5.5" },
@@ -31,20 +39,25 @@ export const MODELS: Record<Exclude<Provider, "custom">, Record<Tier, Record<Job
 };
 
 export const TIERS: Record<Tier, { name: string; blurb: string }> = {
-  light: { name: "Light", blurb: "Fast and cheap. Free models through OpenRouter." },
+  light: { name: "Light", blurb: "Fast and cheap." },
   balanced: { name: "Balanced", blurb: "Thoughtful replies, quick screens. The default." },
   best: { name: "Best", blurb: "The strongest model for every reply, with reasoning." },
 };
 
-/** US$ per million tokens [input, output] for the models above (same for Anthropic and OpenRouter). */
-export const PRICES: Record<string, [number, number]> = {
+/** Display names for the models Pocket picks. */
+export const MODEL_NAMES: Record<string, string> = {
+  "openrouter/free": "free models",
+  "deepseek-v4.1-flash": "DeepSeek V4.1 Flash", "glm-5.3": "GLM 5.3", "kimi-k3.1-pro": "Kimi K3.1 Pro",
+};
+
+/** US$ per million tokens [input, output], list prices (an OpenCode Go subscription covers its models up to its limits). */
+const PRICES: Record<string, [number, number]> = {
   "openrouter/free": [0, 0],
-  haiku: [0.1, 0.5],
-  sonnet: [2, 10],
-  opus: [4, 20],
+  "deepseek-v4.1-flash": [0.15, 0.6], "glm-5.3": [1.4, 4.4], "kimi-k3.1-pro": [2, 10],
+  haiku: [0.1, 0.5], sonnet: [2, 10], opus: [4, 20],
 };
 export function priceOf(model: string): [number, number] | null {
-  if (model === "openrouter/free") return PRICES["openrouter/free"]!;
+  if (PRICES[model]) return PRICES[model];
   const family = /haiku|sonnet|opus/.exec(model)?.[0];
   return family ? PRICES[family]! : null;
 }
@@ -61,11 +74,17 @@ export interface AiProfile {
 
 const PROFILE = "pocket:ai-profile";
 
-/** What the classic settings imply, for people who set Pip up before this screen existed. */
+/**
+ * What the classic settings imply, for people who set Pip up before this screen existed. Nothing chosen yet
+ * (Pip's built-in default) means OpenCode Go, Pocket's main provider.
+ */
 function inferred(current: PipConfig): AiProfile {
+  const untouched = JSON.stringify(current) === JSON.stringify(DEFAULT_CONFIG);
+  if (untouched) return { provider: "opencode", tier: "balanced", web: false, autoArrange: true };
   const host = new URL(current.baseUrl).hostname;
-  const provider: Provider = current.provider === "anthropic" ? "anthropic" : host === "openrouter.ai" ? "openrouter" : "custom";
-  const tier: Tier = /opus/.test(current.model) ? "best" : current.model === "openrouter/free" || /haiku/.test(current.model) ? "light" : "balanced";
+  const provider: Provider = current.provider === "anthropic" ? "anthropic" : host === "openrouter.ai" ? "openrouter" : current.baseUrl === OPENCODE_GO ? "opencode" : "custom";
+  const tierOf = (models: Record<Tier, Record<Job, string>>) => (Object.keys(models) as Tier[]).find(tier => models[tier].chat === current.model);
+  const tier: Tier = (provider !== "custom" && tierOf(MODELS[provider])) || (/opus|pro\b/.test(current.model) ? "best" : current.model === "openrouter/free" || /haiku|flash/.test(current.model) ? "light" : "balanced");
   return { provider, tier, web: current.webSearch, autoArrange: true, ...(provider === "custom" ? { custom: { baseUrl: current.baseUrl, model: current.model } } : {}) };
 }
 
