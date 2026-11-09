@@ -83,3 +83,26 @@ tab sends them as POSTs, follows a reply over its SSE stream and syncs on its us
 
 A message sent while a reply runs in the chat (another tab or device) is refused with code `run_active`: it goes
 back to the composer and the tab shows the running reply instead of recording a failed turn.
+
+## Cards are a tool call (show_card)
+
+Pip draws only by calling `show_card` (`src/client/pip-sdk-tools.js`, behaviour in `src/shared/pocket-card-tool.js`).
+The model never writes a card into its answer text; the system prompt says when to draw, the tool's description says
+what can be drawn.
+
+- **Checked before it shows.** `cardProblems` tests the card (known components and props, children that exist,
+  chart points that are numbers, table rows that match their columns, everything reachable from the root). An
+  invalid card is answered with those problems and the model calls again; nothing broken reaches the person.
+- **Placed where it was called.** A drawn card is inserted into the answer at that point as a `pocket` fence of
+  flat JSON Lines (`cardFence`), so every reader of a stored answer keeps working. Text before a card stays in the
+  answer; text before a lookup is still working notes.
+- **Builds while written.** The elements already complete in the streamed arguments stand in the answer as an open
+  fence (`draftLines`), replaced by the checked card when the call completes.
+- **Never replayed as a format.** History shows `[card drawn here with show_card: …]` (`cardsAsRecords`).
+- **Budget.** A round may use the reply's remaining tokens less the reserve for the closing text; a fixed 2,048 per
+  round cut thinking models off before their call. Each card costs one more model round (the tools and prompt are
+  sent again, about 3,400 input tokens with every tool offered; providers that cache the prefix bill most of it as
+  cached).
+
+Measured on 2026-11-09 with the real pipeline, four requests each (chart, table, choices, tiles): DeepSeek V4.1
+Flash 4/4, GLM 5.3 4/4 (two after one correction), Kimi K3.1 Pro 4/4.

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { z } from "zod";
-import { CARD_ACTIONS, CARD_COMPONENTS, CARDS_PROMPT } from "../../shared/pocket-cards.js";
+import { CARD_ACTIONS, CARD_COMPONENTS, CARD_TOOL_DESCRIPTION, CARDS_PROMPT } from "../../shared/pocket-cards.js";
 import { createTask } from "../data/tasks.ts";
 import { catalog } from "./catalog.ts";
 import { decodeSpec, isLegacySpec } from "./cards.tsx";
@@ -33,12 +33,14 @@ describe("the card prompt", () => {
   });
 
   it("is what Pip is told", () => {
-    expect(CARDS_PROMPT).toContain("Hero(eyebrow, value, unit, caption, tone)");
-    expect(CARDS_PROMPT).toContain("Chart(kind, title, data, series, unit, tone, note, source)");
-    expect(CARDS_PROMPT).toContain("Table(title, columns, rows, note, source)");
-    expect(CARDS_PROMPT).toMatch(/exactly where the picture belongs/);
+    // What can be drawn is the tool's description; when and how to draw is the system prompt.
+    expect(CARD_TOOL_DESCRIPTION).toContain("Hero(eyebrow, value, unit, caption, tone)");
+    expect(CARD_TOOL_DESCRIPTION).toContain("Chart(kind, title, data, series, unit, tone, note, source)");
+    expect(CARD_TOOL_DESCRIPTION).toContain("Table(title, columns, rows, note, source)");
+    expect(CARD_TOOL_DESCRIPTION).not.toMatch(/\bFields?\b|LinkButton|subtitle/);
+    expect(CARDS_PROMPT).toMatch(/only way to draw is the show_card tool/);
     expect(CARDS_PROMPT).toMatch(/Never invent/);
-    expect(CARDS_PROMPT).not.toMatch(/\bFields?\b|LinkButton|subtitle/);
+    expect(CARDS_PROMPT).not.toMatch(/json-render|\{"op"/);
   });
 });
 

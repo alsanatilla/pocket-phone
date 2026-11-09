@@ -5,3 +5,4 @@ export const CARD_COMPONENTS: Record<string, [string[], string]>;
 /** Action → [param, what it does]. */
 export const CARD_ACTIONS: Record<string, [string, string]>;
 export const CARDS_PROMPT: string;
+export const CARD_TOOL_DESCRIPTION: string;

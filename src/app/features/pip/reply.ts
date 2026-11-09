@@ -24,7 +24,9 @@ const json = (raw: string | undefined): Record<string, unknown> | null => {
 
 /** The ledger as it stands: a reply that stopped mid-way shows its open lookups as interrupted. */
 export function ledger(turn: ChatTurn, streaming: boolean): ActivityRow[] {
-  return !streaming && turn.status === "streaming" ? settle(turn.activity ?? [], "stopped", "Interrupted") : activity(turn.activity ?? []);
+  const rows = !streaming && turn.status === "streaming" ? settle(turn.activity ?? [], "stopped", "Interrupted") : activity(turn.activity ?? []);
+  // A drawn card stands in the answer itself; its tool call is not a lookup to list.
+  return rows.filter(row => row.name !== "show_card");
 }
 
 export const ledgerTitle = (rows: ActivityRow[]): string => activityTitle(rows);

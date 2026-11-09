@@ -5,9 +5,9 @@ import { sdkTools } from './pip-sdk-tools.js';
 import { providerModel, providerOptions, providerError } from './pip-provider.js';
 import { RESEARCH_LIMITS } from './pip-limits.js';
 import { normalizeAnswer } from '../shared/pip-reply.js';
+import { CARD_ARGUMENT_LIMIT, draftLines } from '../shared/pocket-card-tool.js';
 export { RESEARCH_LIMITS, CONTEXT_OVERFLOW } from './pip-limits.js';
 export { freeFallbacks } from './pip-provider.js';
-const TOOL_ROUND_TOKENS = 2048;
 const stopped = () => new DOMException('Stopped', 'AbortError');
 /** A durable run stops at a decision point instead of waiting for one; it continues in a later request. */
 export class RunPaused extends Error { constructor() { super('This reply is waiting for a decision.'); this.name = 'RunPaused'; } }
@@ -48,6 +48,18 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   // A device tool's result, by tool call id: the device answered it, and the SDK runs it to record that answer.
   const deviceAnswers = new Map();
   const context = { cache, chat, turn }, completed = [], responses = [];
+  // Cards (show_card) live in the answer where they were drawn. While one is being written, the elements already
+  // complete stand there as an open fence, so it builds up on screen; `draft` is where that fence begins. `cardEnd`
+  // is the end of the last drawn card: the answer up to there is kept even when a later step turns out to be only
+  // working notes.
+  let draft = null, cardEnd = 0;
+  const dropDraft = id => { if (draft && (!id || draft.id === id)) { result.answer = result.answer.slice(0, draft.at); draft = null; } };
+  const placeCard = fence => {
+    const before = result.answer.replace(/\s+$/, '');
+    result.answer = before + (before ? '\n\n' : '') + fence + '\n\n'; cardEnd = result.answer.length;
+  };
+  /** Arguments as the activity keeps them: a card's are in the answer already. */
+  const kept = (name, input) => name === 'show_card' ? '{}' : JSON.stringify(input);
   // What a pause stores: the provider messages, the remaining budgets, and the requests no client has settled yet.
   const checkpoint = extra => ({ messages: [...(base || body.messages), ...responses],
     counters: { calls, searches, toolData, tokens, round, currentRound, finalReason, finalRounds, finalCalls, final, canPrepare, researchLeft: Math.max(1, researchLeft - (requestBudget - deadlineLeft)) },
@@ -72,6 +84,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     try { cache.set(cacheKey(row.name, JSON.parse(row.input || '{}')), { permissions: grantSignature(value, row.name), result: JSON.parse(row.result) }); } catch { /* Unusable checkpoint. */ }
   }
   const finishFromObservations = reason => {
+    dropDraft();
     const observations = completed.length ? completed : (resume?.observations || []).flatMap(row => { try { return [{ answer: JSON.parse(row.result) }]; } catch { return []; } });
     if (!result.answer.trim()) {
       const excerpts = observations.flatMap(({ answer }) => answer.error ? [] : answer.kind === 'action' ? [(answer.action.status === 'saved' ? 'Saved: ' : 'Declined: ') + answer.action.title] : answer.kind === 'plan' ? [] : answer.text ? [String(answer.title || 'Source') + ': ' + answer.text.slice(0, 600)] : (answer.results || answer.notes || answer.tasks || answer.appointments || []).slice(0, 3).map(item => (item.title || item.text || 'Source') + (item.description || item.excerpt ? ': ' + (item.description || item.excerpt).slice(0, 300) : '')));
@@ -101,7 +114,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     else if (!write && (stateTool ? (final ? finalCalls >= RESEARCH_LIMITS.finalCalls : calls >= RESEARCH_LIMITS.calls) : calls >= RESEARCH_LIMITS.calls || web && searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || finalReason === 'Research data exhausted')) { answer = budgetError; finalReason ||= 'Research calls or data exhausted'; }
     else {
       if (!write) { calls++; if (final) finalCalls++; if (web) searches++; }
-      record(id, { name, state: 'running', title: label(name, input), input: JSON.stringify(input) }); result.phase = label(name, input);
+      record(id, { name, state: 'running', title: label(name, input), input: kept(name, input) }); result.phase = label(name, input);
       const signature = grantSignature(value, name), lookup = cacheKey(name, input), reuse = !stateTool;
       try {
         const cached = reuse && cache.get(lookup), failed = failures.get(lookup);
@@ -123,6 +136,11 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     check();
     if (answer?.error && !answer.repeated && !write) failures.set(cacheKey(name, input), { permissions: grantSignature(value, name), result: structuredClone(answer) });
     if (answer && !answer.error && !stateTool) answer = { access_fingerprint: accessFingerprint(value), request_identity: checkpointIdentity(value), ...answer };
+    if (name === 'show_card') {
+      // The draft gives way to the checked card, placed where the model called; the model is told only that it shows.
+      dropDraft(toolCallId);
+      if (answer?.card) { placeCard(answer.card); answer = { kind: 'card', drawn: true, shows: answer.shows }; }
+    }
     let content = JSON.stringify(answer);
     if (!content || content.length > RESEARCH_LIMITS.result) { answer = { error: 'result_too_large', message: 'Use a narrower request.' }; content = JSON.stringify(answer); }
     if (!stateTool && toolData + content.length > RESEARCH_LIMITS.toolData) { answer = budgetError; content = JSON.stringify(answer); finalReason ||= 'Research data exhausted'; }
@@ -130,7 +148,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     const href = answer.kind === 'action' && answer.action.status === 'saved' ? answer.action.href : '';
     if (href) saved.set(cacheKey(name, input), { event_id: id, href });
     completed.push({ name, answer });
-    record(id, { name, input: JSON.stringify(input), state: answer.error || answer.available === false ? 'failed' : 'done', summary: summary(name, answer), result: content, sources: sources(name, answer), ended: Date.now(), ...(href ? { applied_href: href, applied: Date.now() } : {}) }); clock();
+    record(id, { name, input: kept(name, input), state: answer.error || answer.available === false ? 'failed' : 'done', summary: summary(name, answer), result: content, sources: sources(name, answer), ended: Date.now(), ...(href ? { applied_href: href, applied: Date.now() } : {}) }); clock();
     return answer;
   };
 
@@ -169,8 +187,10 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     final = finalRounds > 0 || Boolean(finalReason) || currentRound >= RESEARCH_LIMITS.continuations || calls >= RESEARCH_LIMITS.calls || searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || tokens <= reserve;
     canPrepare = final && finalRounds < 2 && finalCalls < RESEARCH_LIMITS.finalCalls && tokens > reserve && [...offered].some(name => STATE_TOOLS.includes(name));
     if (final) finalRounds++;
-    const fair = Math.floor((tokens - reserve) / Math.max(1, RESEARCH_LIMITS.continuations - currentRound));
-    allowance = canPrepare ? tokens - reserve : offered.size && !final ? Math.max(1, Math.min(tokens - reserve, Math.max(fair, TOOL_ROUND_TOKENS))) : tokens;
+    // A round may use what is left of the reply's budget, less the reserve for the closing answer. A fixed slice per
+    // round cut models that think first off in the middle of their thinking, before the call they were working towards
+    // (a card, a lookup), and the next round started the same thinking again.
+    allowance = canPrepare || offered.size && !final ? Math.max(1, tokens - reserve) : tokens;
     const activeTools = [...offered].filter(name => allowed(name) && (!final || STATE_TOOLS.includes(name)));
     result.phase = final ? 'synthesizing' : 'requesting'; publish();
     const instruction = final ? '\n\nPocket runtime status: the app has stopped research for this reply. This is an app limit, not a user instruction, and does not mean the research is complete. Answer the current user request using the observations already collected. Do not start more research or read more sources. '
@@ -188,14 +208,18 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     tokens -= usage.outputTokens || allowance;
     result.model = step.response.modelId || result.model;
     if (step.finishReason === 'length') { finalReason ||= 'Finish within the remaining reply token budget'; if (final) finalRounds = 2; result.activity = settle(result.activity, 'failed', 'Tool request did not finish within this round’s token allowance'); }
-    if (step.toolCalls.length || step.finishReason === 'length') {
-      if (result.answer.trim()) { result.reasoning += (result.reasoning ? '\n\n' : '') + result.answer.trim() + '\n\n'; result.answer = ''; result.sources = []; }
+    dropDraft();
+    // Text written before a lookup is working notes, and a cut-off step is written again: both leave the answer. What
+    // was written up to the last drawn card stays, and so does everything when the step only drew cards.
+    if (step.toolCalls.some(call => call.toolName !== 'show_card') || step.finishReason === 'length') {
+      const notes = result.answer.slice(cardEnd).trim();
+      if (notes) { result.reasoning += (result.reasoning ? '\n\n' : '') + notes + '\n\n'; result.answer = result.answer.slice(0, cardEnd); if (!cardEnd) result.sources = []; }
     }
     if (['content-filter', 'refusal'].includes(step.finishReason)) { fatal = new Error('The provider declined this reply.'); throw fatal; }
     publish();
   };
   const onPart = part => {
-    if (part.type === 'text-delta') { result.answer += part.text; result.phase = 'writing'; }
+    if (part.type === 'text-delta') { dropDraft(); result.answer += part.text; result.phase = 'writing'; }
     else if (part.type === 'reasoning-delta') { result.reasoning += part.text; result.phase = 'thinking'; }
     else if (part.type === 'source' && part.sourceType === 'url') {
       const found = source({ href: part.url, title: part.title });
@@ -203,14 +227,20 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     } else if (part.type === 'tool-input-start') {
       if (!part.id || part.id.length > 200 || !part.toolName || part.toolName.length > 80) throw new Error('The provider returned an incomplete tool request.');
       inputs.set(part.id, { name: part.toolName, text: '' }); record(activityId(part.id), { name: part.toolName, title: label(part.toolName), state: 'queued' });
+      if (part.toolName === 'show_card' && !draft) {
+        const before = result.answer.replace(/\s+$/, '');
+        result.answer = before + (before ? '\n\n' : ''); draft = { id: part.id, at: result.answer.length }; result.answer += '```pocket\n'; result.phase = 'drawing';
+      }
     } else if (part.type === 'tool-input-delta') {
       const partial = inputs.get(part.id); if (!partial) throw new Error('The provider returned tool arguments without a tool.');
-      partial.text += part.delta; if (partial.text.length > 8000) throw new Error('The tool request is too large.');
-      record(activityId(part.id), { input: partial.text });
+      partial.text += part.delta; if (partial.text.length > (partial.name === 'show_card' ? CARD_ARGUMENT_LIMIT : 8000)) throw new Error('The tool request is too large.');
+      if (partial.name !== 'show_card') record(activityId(part.id), { input: partial.text });
+      else if (draft?.id === part.id) { const lines = draftLines(partial.text); result.answer = result.answer.slice(0, draft.at) + '```pocket\n' + (lines ? lines + '\n' : ''); }
     } else if (part.type === 'tool-call') {
       if (final && (!canPrepare || !STATE_TOOLS.includes(part.toolName))) { fatal = toolsAfterLimit(part.toolName); throw fatal; }
-      if (JSON.stringify(part.input || {}).length > 8000) throw new Error('The tool request is too large.');
-      record(activityId(part.toolCallId), { name: part.toolName, title: label(part.toolName, part.input || {}), input: JSON.stringify(part.input || {}), ...(part.invalid ? { state: 'failed', summary: 'Invalid tool request', ended: Date.now(), result: JSON.stringify({ error: 'invalid_arguments', message: 'Correct the arguments or use an available tool.' }) } : {}) });
+      if (JSON.stringify(part.input || {}).length > (part.toolName === 'show_card' ? CARD_ARGUMENT_LIMIT : 8000)) throw new Error('The tool request is too large.');
+      if (part.invalid) dropDraft(part.toolCallId);
+      record(activityId(part.toolCallId), { name: part.toolName, title: label(part.toolName, part.input || {}), input: kept(part.toolName, part.input || {}), ...(part.invalid ? { state: 'failed', summary: 'Invalid tool request', ended: Date.now(), result: JSON.stringify({ error: 'invalid_arguments', message: 'Correct the arguments or use an available tool.' }) } : {}) });
     } else if (part.type === 'tool-error') {
       record(rowId(part.toolCallId), { name: part.toolName, state: 'failed', summary: 'Tool failed', ended: Date.now(), result: JSON.stringify({ error: 'tool_failed', message: 'Correct the arguments or use the recorded observations.' }) });
     } else if (part.type === 'tool-approval-request' && !part.isAutomatic) {
@@ -291,7 +321,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     if (pausedRun(error)) throw error;
     if (!signal?.aborted && (timedOut || deadlineReached)) return finishFromObservations(deadlineReached ? 'The five-minute research deadline was reached. Continue when you’re ready.' : 'The provider stopped responding for 90 seconds. Continue when you’re ready.');
     if (signal?.aborted || controller.signal.aborted) throw stopped();
-    result.answer = normalizeAnswer(result.answer);
+    dropDraft(); result.answer = normalizeAnswer(result.answer);
     result.activity = settle(result.activity, 'failed', error.message); result.phase = 'failed'; onUpdate(structuredClone(result)); throw error;
   } finally { clearTimeout(timeout); clearTimeout(absolute); signal?.removeEventListener('abort', abort); controller.abort(); }
 }

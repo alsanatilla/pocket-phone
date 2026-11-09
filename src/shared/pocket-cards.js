@@ -1,7 +1,7 @@
 // What Pip may draw inside a reply: a subset of Pocket's surface catalog (src/app/surface/catalog.ts), described
-// for the model. The chat (pip-core.js), server runs and routines (pip-background.js) all use this one text, and
-// src/app/surface/cards.test.ts checks every component and prop named here against the real catalog, so the
-// prompt cannot drift from what the app can render.
+// for the model. Pip draws with one tool, show_card (pip-sdk-tools.js, src/shared/pocket-card-tool.js); the chat,
+// server runs and routines all use these texts, and src/app/surface/cards.test.tsx checks every component and prop
+// named here against the real catalog, so what the model is told cannot drift from what the app can render.
 
 export const TONES = ['accent', 'movement', 'calendar', 'thought', 'warning', 'muted'];
 
@@ -39,18 +39,20 @@ export const CARD_ACTIONS = {
 const list = Object.entries(CARD_COMPONENTS).map(([name, [props, use]]) => `${name}(${props.join(', ')}): ${use}`).join('; ');
 const actions = Object.entries(CARD_ACTIONS).map(([name, [param, use]]) => `${name}{${param}}: ${use}`).join('; ');
 
-/** The instruction appended to Pip's system prompt. */
-export const CARDS_PROMPT = 'Pocket can draw parts of a reply as a picture: readings, charts, tables, a schedule, choices, the person\'s tasks. '
-  + 'Write a fenced block tagged pocket exactly where the picture belongs in the prose, between paragraphs, not collected at the end; a reply may have up to four, each right after the sentence it illustrates. '
-  + 'Inside each block write JSON Lines: one json-render patch per line, so it draws while you write. '
-  + 'Start with {"op":"add","path":"/root","value":"main"}, then add each element as {"op":"add","path":"/elements/<id>","value":{"type":"<Component>","props":{…},"children":[…]}}. '
-  + 'The root id is an element too: add a Stack named main whose children are the top-level elements, or point /root at the single top-level element. Each line is one complete JSON object, braces included. '
-  + 'Ids only need to be unique within their block. Every element needs a children array, empty when it has none; only Stack, Grid and Card hold children. '
+/** show_card's description: what can be drawn. The model reads it with the tool, not in the system prompt. */
+export const CARD_TOOL_DESCRIPTION = 'Draw a picture at this point of your reply: readings, a chart, a table, a schedule, choices, the person\'s tasks. '
+  + 'elements is a flat list; each has an id, a type, its props and the ids of its children. root is the id of the top element: a single element, or a Stack that lists the others as children. Only Stack, Grid and Card hold children. '
   + 'Components: ' + list + '. Tone is one of ' + TONES.join(', ') + '. '
-  + 'A Button acts through "on" beside "props": {"on":{"press":{"action":"askPip","params":{"prompt":"…"}}}}. Actions: ' + actions + '. '
+  + 'A Button acts through on: {"press":{"action":"askPip","params":{"prompt":"…"}}}. Actions: ' + actions + '. '
+  + 'The result says whether the card was drawn; if it names problems, correct them and call show_card again.';
+
+/** When and how Pip draws, appended to its system prompt. What can be drawn is in show_card's own description. */
+export const CARDS_PROMPT = 'Pocket can draw parts of a reply as a picture: readings, charts, tables, a schedule, choices, the person\'s tasks. '
+  + 'The only way to draw is the show_card tool: write the sentence a picture illustrates, call show_card right there, then go on writing after it. A reply may have up to four cards, each where it belongs, not collected at the end. '
+  + 'Never write a card, JSON or a fenced block into your answer text; text like that is shown as text, not drawn. '
   + 'Figures you researched belong in a Chart or Table: put the real values you read (every point, in order), say the unit and the period, and give the source with its URL. '
   + 'For long ranges keep the shape with at most 60 points (weekly or monthly values, as the source reports them); compare places or groups with series. '
   + 'Never invent, estimate or fill in numbers; if a source gives only some points, chart only those and say so in the note. '
   + 'Show tasks and thoughts with TaskList or ThoughtList instead of retyping them. '
   + 'Every fact appears once: what the prose says needs no tile, and a Hero is not repeated by a Metric. Short labels, no emoji. Skip pictures when plain prose is enough. '
-  + 'The format above is the only card format: earlier replies may still hold cards written in an older shape, and that shape is retired. Never copy an earlier card; write every card now as the json-render patches described here.';
+  + 'Earlier replies show "[card drawn here with show_card: …]" where a card was; that line is a record of what the person saw, never something to write yourself.';

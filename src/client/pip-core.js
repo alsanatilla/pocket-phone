@@ -5,7 +5,7 @@ import { access, accessFingerprint, toolNames, historyPolicy, STATE_TOOLS } from
 import { conversationMemory, requestText as prompt } from './pip-memory.js';
 import { activity, settle, source } from "./pip-activity.js";
 import { CARDS_PROMPT } from '../shared/pocket-cards.js';
-import { withoutLegacyCards } from '../shared/pocket-spec.js';
+import { cardsAsRecords } from '../shared/pocket-card-tool.js';
 export const DEFAULT_CONFIG = Object.freeze({ provider: "anthropic", model: "claude-sonnet-5-5", baseUrl: "https://api.anthropic.com/v1", maxTokens: 4096, thinking: false, webSearch: false });
 const PREFIX = "pocket:pip-chat:", SETTINGS = "pocket:pip-settings";
 const copy = value => structuredClone(value);
@@ -142,9 +142,9 @@ const HISTORY_LIMIT = 60000, HISTORY_PAIRS = 20, PIN_LIMIT = 12000, COVERAGE_LIM
 // Unanswered turns keep their question but never their partial text: replayed partials once repeated themselves as answers.
 const UNANSWERED = { stopped: "[No answer: the user stopped this reply before it finished; its partial text is not repeated.]", failed: "[No answer: this reply failed before it finished; its partial text is not repeated.]" };
 const answerOf = turn => turn.status === "done" ? turn.answer : UNANSWERED[turn.status] || "[No answer: this reply did not finish; its partial text is not repeated.]";
-// A replayed answer is copied by the model. Cards in the retired format are removed first, or the next reply would
-// be written in that shape again; the prose around them is kept.
-const replay = turn => { const prepared = preparedSummary(turn); return [prompt(turn), withoutLegacyCards(answerOf(turn)) + (prepared ? "\n\n" + prepared : "")]; };
+// A replayed answer is copied by the model. A card is stored inside the answer, but a model draws only with
+// show_card: each card is replayed as one line that says what was drawn there, the prose around it kept.
+const replay = turn => { const prepared = preparedSummary(turn); return [prompt(turn), cardsAsRecords(answerOf(turn)) + (prepared ? "\n\n" + prepared : "")]; };
 const size = ([input, answer]) => input.length + answer.length;
 const head = (value, end) => { end = Math.max(0, end); return value.slice(0, /[\ud800-\udbff]/.test(value[end - 1] || "") ? end - 1 : end); }; // never split a surrogate pair
 const cut = (value, limit, marker) => value.length <= limit ? value : head(value, Math.max(0, limit - marker.length)) + marker;
@@ -158,7 +158,7 @@ function boundedReplay(turn, budget) {
   const prepared = preparedSummary(turn), tail = prepared ? "\n\n" + prepared : "", room = budget - input.length - tail.length;
   const more = n => "\n\n[Clipped for length: read the rest with read_chat_history using turn_id \"" + turn.uid + "\" and answer_offset " + n + ".]";
   if (turn.status !== "done" || room < more(0).length + 32) return [input, cut(whole[1], budget - input.length, "\n\n[Clipped for length.]")];
-  const answer = head(withoutLegacyCards(turn.answer), room - more(room).length);
+  const answer = head(cardsAsRecords(turn.answer), room - more(room).length);
   return [input, answer + more(answer.length) + tail];
 }
 /** Pins the first request, then fills newest-first with whole turns; a contiguous recent window is easier to follow than gaps. */
