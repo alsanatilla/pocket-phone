@@ -58,7 +58,8 @@ export function pocketSpec(text) {
     const value = JSON.parse(trimmed);
     // Only something that looks like a card is a spec; arbitrary JSON in the fence stays prose.
     if (value && typeof value === 'object' && ('root' in value || 'elements' in value || 'type' in value)) return value;
-    return null;
+    // A card of a single patch line is a patch stream too.
+    if (!value || typeof value !== 'object' || typeof value.op !== 'string') return null;
   } catch { /* not one object: try patches */ }
   let spec = null, applied = 0;
   for (const line of trimmed.split('\n')) {
@@ -75,11 +76,57 @@ export function pocketSpec(text) {
 }
 
 /**
+ * Some models write a card as one nested tree: {"type":"Stack","children":[{"type":"Chart",…}]}, either as the
+ * whole spec or as the value of /root, with text as {"text": "…"} children. That becomes the flat form json-render
+ * draws: each nested element gets an id (from its type, numbered in order, so ids stay the same as the tree grows
+ * while it streams), and text children become the element's text prop. Flat specs pass through unchanged.
+ */
+function flattenTree(spec) {
+  if (!spec || typeof spec !== 'object') return spec;
+  const nested = node => node && typeof node === 'object' && typeof node.type === 'string';
+  const tree = nested(spec) && !spec.elements ? spec : nested(spec.root) ? spec.root : null;
+  const existing = spec.elements && typeof spec.elements === 'object' ? spec.elements : {};
+  const inline = Object.values(existing).some(element => Array.isArray(element?.children) && element.children.some(child => child && typeof child === 'object'));
+  if (!tree && !inline) return spec;
+  const elements = { ...existing }, taken = new Set(Object.keys(elements));
+  const fresh = type => {
+    const base = String(type).toLowerCase().replace(/[^a-z0-9]/g, '') || 'element';
+    let id = base, count = 1;
+    while (taken.has(id)) id = base + '_' + ++count;
+    taken.add(id); return id;
+  };
+  const shape = node => {
+    const { type, props, children, ...rest } = node;
+    const element = { ...rest, type, props: props && typeof props === 'object' && !Array.isArray(props) ? { ...props } : {}, children: [] };
+    const words = [];
+    for (const child of Array.isArray(children) ? children : []) {
+      if (typeof child === 'string') element.children.push(child);
+      else if (nested(child)) element.children.push(place(child));
+      else if (child && typeof child.text === 'string') words.push(child.text);
+    }
+    if (words.length && element.props.text == null && element.props.label == null) element.props.text = words.join(' ');
+    // Text draws only its own text. Text wrapped around other elements is a group of them, so it becomes a Stack
+    // whose first child is that text (if it had any).
+    if (type === 'Text' && element.children.length) {
+      const own = element.props.text != null ? [place({ type: 'Text', props: { ...element.props } })] : [];
+      return { ...rest, type: 'Stack', props: { direction: 'vertical', gap: 'sm' }, children: [...own, ...element.children] };
+    }
+    return element;
+  };
+  const place = node => { const id = fresh(node.type); elements[id] = null; elements[id] = shape(node); return id; };
+  for (const [id, element] of Object.entries(existing)) if (nested(element)) elements[id] = shape(element);
+  const root = tree ? place(tree) : spec.root;
+  const { type: _type, props: _props, children: _children, ...meta } = tree === spec ? spec : { ...spec };
+  return { ...(tree === spec ? meta : spec), root, elements };
+}
+
+/**
  * json-render draws elements[root]. If the named root is missing,
  * one top-level element becomes the
  * root itself, several are wrapped in a Stack under the id the model named.
  */
 export function normalizeSpec(spec) {
+  spec = flattenTree(spec);
   const elements = spec && spec.elements;
   if (!elements || typeof elements !== 'object') return spec;
   const ids = Object.keys(elements);

@@ -124,3 +124,28 @@ test('an inferred root does not overwrite an existing main element', () => {
   assert.equal(normalized.elements.main, spec.elements.main);
   assert.deepEqual(normalized.elements[normalized.root].children, ['a', 'b']);
 });
+
+test('a card written as one nested tree becomes elements json-render can draw', () => {
+  const value = { type: 'Stack', props: { gap: 'md' }, children: [
+    { type: 'Chart', props: { kind: 'line', title: 'RDL', data: [{ label: 'W1', value: 110 }] } },
+    { type: 'Text', props: { variant: 'muted' }, children: [{ text: 'Wiederholen' }, { text: 'statt erzwingen.' }] },
+    { type: 'Button', props: { label: 'Plan anlegen' }, children: [{ type: 'Text', props: {}, children: [{ text: 'Erklärung' }] }] }] };
+  const fromPatch = normalizeSpec(pocketSpec(patch('add', '/root', value)));
+  assert.equal(fromPatch.root, 'stack');
+  assert.deepEqual(fromPatch.elements.stack.children, ['chart', 'text', 'button']);
+  assert.deepEqual(fromPatch.elements.text, { type: 'Text', props: { variant: 'muted', text: 'Wiederholen statt erzwingen.' }, children: [] });
+  assert.deepEqual(fromPatch.elements.button.children, ['text_2']);
+  // Text wrapped around elements groups them; its own words come first.
+  const wrapped = normalizeSpec(pocketSpec(JSON.stringify({ type: 'Text', props: { variant: 'body' }, children: [{ type: 'Text', props: {}, children: [{ text: 'Die Kurve steigt.' }] }] })));
+  assert.equal(wrapped.elements[wrapped.root].type, 'Stack');
+  assert.deepEqual(wrapped.elements[wrapped.root].children.map(id => wrapped.elements[id].props.text), ['Die Kurve steigt.']);
+  assert.equal(fromPatch.elements.chart.props.title, 'RDL');
+  // The same tree as the whole spec, and ids that do not move while the tree grows.
+  const whole = normalizeSpec(pocketSpec(JSON.stringify(value)));
+  assert.deepEqual(whole, fromPatch);
+  const partial = normalizeSpec(pocketSpec(patch('add', '/root', { ...value, children: value.children.slice(0, 1) })));
+  assert.deepEqual(partial.elements.chart, fromPatch.elements.chart);
+  // Flat specs are untouched.
+  const flat = { root: 'a', elements: { a: { type: 'Text', props: { text: 'hi' }, children: [] } } };
+  assert.equal(normalizeSpec(flat), flat);
+});

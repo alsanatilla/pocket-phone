@@ -53,3 +53,33 @@ describe("text still being written", () => {
     expect(pendingShape("```js\nconst a = 1")).toEqual({ kind: "code", text: "const a = 1" });
   });
 });
+
+describe("cards a model wrote without their fence", () => {
+  // What Gemma 4 sent: a lone "pocket" line, the whole card as one nested patch, and tool-call closing tags.
+  const tree = JSON.stringify({ op: "add", path: "/root", value: { type: "Stack", props: { direction: "vertical", gap: "md" }, children: [
+    { type: "Chart", props: { kind: "line", title: "RDL", data: [{ label: "Woche 1", value: 110 }], unit: "kg" } },
+    { type: "Text", props: { variant: "muted" }, children: [{ text: "Wiederholen statt erzwingen." }] }] } });
+  const reply = `Fortschrittskurve:\n\npocket\n\n${tree}\n</parameter>\n</function>\n\nViel Erfolg!`;
+
+  it("draws them as cards and never shows the JSON, the marker or the tags", () => {
+    const segments = segmentAnswer(reply);
+    expect(segments.map(segment => segment.kind)).toEqual(["prose", "card", "prose"]);
+    expect(segments[1]).toMatchObject({ kind: "card", source: tree });
+    const prose = segments.filter(segment => segment.kind === "prose").map(segment => segment.text).join("\n");
+    expect(prose).not.toMatch(/pocket|parameter|function|"op"/);
+    expect(prose).toContain("Viel Erfolg!");
+  });
+
+  it("holds a lone pocket line while streaming, and gives it back when no card follows", () => {
+    expect(segmentAnswer("Hier:\n\npocket")).toEqual([{ kind: "prose", key: "p0", text: "Hier:\n" }]);
+    expect(segmentAnswer("Hier:\n\npocket\n" + tree.slice(0, 30))).toMatchObject([{ kind: "prose" }, { kind: "card", closed: false }]);
+    const kept = segmentAnswer("The word\npocket\nis a noun.");
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatchObject({ kind: "prose", text: "The word\npocket\nis a noun." });
+  });
+
+  it("leaves JSON inside code blocks alone", () => {
+    const code = "```json\n" + tree + "\n```";
+    expect(segmentAnswer(code)).toEqual([{ kind: "prose", key: "p0", text: code }]);
+  });
+});

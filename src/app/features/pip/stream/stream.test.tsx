@@ -94,3 +94,23 @@ describe("malformed model cards", () => {
     expect(screen.getByText("Reported totals")).toBeTruthy();
   });
 });
+
+describe("a card a model wrote without its fence, as one nested tree", () => {
+  const tree = JSON.stringify({ op: "add", path: "/root", value: { type: "Stack", props: { direction: "vertical", gap: "md" }, children: [
+    { type: "Text", props: { variant: "body" }, children: [{ type: "Text", props: {}, children: [{ text: "Die Kurve steigt gleichmäßig." }] }] },
+    { type: "Button", props: { label: "Plan als Aufgabe anlegen", variant: "primary" } }] } });
+  const gemma = "Fortschrittskurve:\n\npocket\n\n" + tree + "\n</parameter>\n</function>\n\nViel Erfolg!";
+
+  it("streams without JSON on screen, draws the card, and its button asks Pip", () => {
+    const asked: string[] = [];
+    const view = render(<Answer text="" streaming onAsk={prompt => asked.push(prompt)} />);
+    for (let end = 1; end <= gemma.length; end += 11) {
+      view.rerender(<Answer text={gemma.slice(0, end)} streaming onAsk={prompt => asked.push(prompt)} />);
+      expect(view.container.textContent ?? "", "at " + end).not.toMatch(/"op"|\{"|<\/?(parameter|function)|^pocket|\npocket/);
+    }
+    view.rerender(<Answer text={gemma} streaming={false} onAsk={prompt => asked.push(prompt)} />);
+    expect(screen.getByText("Die Kurve steigt gleichmäßig.")).toBeTruthy();
+    act(() => { screen.getByRole("button", { name: "Plan als Aufgabe anlegen" }).click(); });
+    expect(asked).toEqual(["Plan als Aufgabe anlegen"]);
+  });
+});

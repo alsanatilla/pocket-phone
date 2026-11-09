@@ -17,6 +17,16 @@ import { openPath } from "../../../lib/classic.ts";
 
 type Elements = Record<string, unknown>;
 
+/**
+ * A button the model wrote without an action would do nothing. In a reply, a button is a choice for the next
+ * message, so it asks Pip what it says.
+ */
+function withDefaultPress(element: unknown): unknown {
+  const value = element as { type?: unknown; on?: unknown; props?: { label?: unknown } } | null;
+  if (!value || value.type !== "Button" || value.on || typeof value.props?.label !== "string" || !value.props.label.trim()) return element;
+  return { ...value, on: { press: { action: "askPip", params: { prompt: value.props.label.trim() } } } };
+}
+
 /** The spec compiled from complete lines, with unchanged elements keeping the same object between updates. */
 export function useStreamingSpec(source: string, closed: boolean): Spec | null {
   const previous = useRef<{ elements: Elements; json: Map<string, string> }>({ elements: {}, json: new Map() });
@@ -25,7 +35,8 @@ export function useStreamingSpec(source: string, closed: boolean): Spec | null {
     const spec = complete.trim() ? normalizeSpec(pocketSpec(complete)) : null;
     if (!spec || typeof spec.root !== "string" || !spec.elements || typeof spec.elements !== "object") return null;
     const elements: Elements = {}, json = new Map<string, string>();
-    for (const [id, element] of Object.entries(spec.elements)) {
+    for (const [id, written] of Object.entries(spec.elements)) {
+      const element = withDefaultPress(written);
       const text = JSON.stringify(element);
       json.set(id, text);
       elements[id] = previous.current.json.get(id) === text ? previous.current.elements[id] : element;
@@ -64,7 +75,8 @@ function Placeholder() {
 }
 
 export const Card = memo(function Card({ source, closed, streaming, onAsk }: { source: string; closed: boolean; streaming: boolean; onAsk: (prompt: string) => void }) {
-  const spec = useStreamingSpec(source, closed);
+  // Once the reply is finished, its last line is complete even without a newline after it.
+  const spec = useStreamingSpec(source, closed || !streaming);
   const handlers = useHandlers(onAsk);
   // Containers alone draw nothing: until the first visible element has arrived, the placeholder holds the place.
   if (!spec || !visible(spec)) return streaming && !closed ? <Placeholder /> : null;
