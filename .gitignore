@@ -37,3 +37,9 @@ signing.properties
 *.aab
 .worker.log
 .dev.log
+
+# Agent skills: skills-lock.json pins them. The taste skill ships 40 MB of photographs and scripts, so it is
+# restored instead of committed: npx skills experimental_install
+.agents/skills/design-taste-frontend/
+.claude/skills/design-taste-frontend
+.taste-skill/
