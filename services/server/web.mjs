@@ -2,8 +2,10 @@
 //
 // One WebSocket per open tab carries what happens in the account as it happens (src/server/pocket-events.js): a
 // reply starting, growing and ending, a decision it waits for, records changed on another device, a job's result.
-// Commands (send, decide, stop) stay ordinary POSTs. A tab without the socket falls back to the run's SSE stream and
-// to polling, so nothing depends on it; it only makes everything immediate.
+// Pip's run commands (send, decide, stop, continue) travel over the same socket as requests ({ type: 'req', id,
+// method: 'pip.runs', params } → { type: 'res', id, ok, payload | error }). Each is handed to the same endpoint a POST
+// reaches (/api/pip/runs), with the socket's session and origin, so authentication, checks and logic live in one
+// place. A tab without the socket sends the same commands as POSTs and follows replies over SSE.
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer } from 'ws';
@@ -42,7 +44,8 @@ const server = createServer((req, res) => {
   handler(req, res);
 });
 
-const sockets = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+// A message may carry a whole question with its attached sources, as a POST may (256 kB).
+const sockets = new WebSocketServer({ noServer: true, maxPayload: 300 * 1024 });
 
 /** The signed-in account of an upgrade request from Pocket's own pages, or null. */
 async function accountOf(req) {
@@ -60,10 +63,23 @@ server.on('upgrade', async (req, socket, head) => {
   if (!req.url?.startsWith('/api/live')) { socket.destroy(); return; }
   const userId = await accountOf(req).catch(() => null);
   if (!userId) { socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); socket.destroy(); return; }
-  sockets.handleUpgrade(req, socket, head, ws => open(ws, userId));
+  // What a command needs to pass as this tab: its session cookie and Pocket's origin.
+  const as = { cookie: String(req.headers.cookie || ''), origin: String(req.headers.origin || '') };
+  sockets.handleUpgrade(req, socket, head, ws => open(ws, userId, as));
 });
 
-function open(ws, userId) {
+/** A command from a tab, through the endpoint its POST would reach. Resolves to the response a POST would get. */
+async function command(path, params, as) {
+  const response = await fetch('http://127.0.0.1:' + PORT + path, { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(120_000),
+    headers: { 'content-type': 'application/json', cookie: as.cookie, origin: as.origin, 'x-forwarded-proto': as.origin.startsWith('https:') ? 'https' : 'http' }, body: JSON.stringify(params ?? {}) });
+  const text = await response.text();
+  let value = null; try { value = JSON.parse(text); } catch { /* not JSON: an error page */ }
+  return { status: response.status, value };
+}
+/** The commands a tab may send over its socket, and where each goes. Nothing else is reachable this way. */
+const COMMANDS = { 'pip.runs': '/api/pip/runs' };
+
+function open(ws, userId, as) {
   let alive = true;
   const send = message => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message)); };
   // Per reply: what this socket already has (for deltas), and the latest progress waiting for its frame.
@@ -107,6 +123,14 @@ function open(ws, userId) {
     // A round trip, which tells the tab the connection is really there.
     if (message.method === 'ping') send({ type: 'res', id: message.id, ok: true });
     // A tab that started following a reply mid-way, or missed a frame, gets the whole state in the next frame.
+    if (Object.hasOwn(COMMANDS, message.method)) {
+      command(COMMANDS[message.method], message.params, as)
+        .then(({ status, value }) => send(status < 400
+          ? { type: 'res', id: message.id, ok: true, payload: value }
+          : { type: 'res', id: message.id, ok: false, error: { status, message: String(value?.error || 'Pocket did not answer.'), ...(typeof value?.code === 'string' ? { code: value.code } : {}) } }))
+        .catch(() => send({ type: 'res', id: message.id, ok: false, error: { status: 503, message: 'Pocket did not answer. Try again.' } }));
+      return;
+    }
     if (message.method === 'resync' && typeof message.params?.runId === 'string') {
       const state = runs.get(message.params.runId);
       if (state) { state.sent = {}; state.pending ||= state.latest; clearTimeout(state.timer); state.timer = null; flush(message.params.runId); }

@@ -9,3 +9,4 @@ export function connected(): boolean;
 export function start(accountId: string): void;
 export function stop(): void;
 export function request(method: string, params?: Record<string, unknown>): boolean;
+export function call<T = unknown>(method: string, params?: Record<string, unknown>, ms?: number): Promise<T>;

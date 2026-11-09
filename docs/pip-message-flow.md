@@ -76,8 +76,10 @@ cookie and Pocket's own origin. The server pushes what happens in the account (`
 | `objects`, `documents` | a chat, note, task … was written by any device | pulls within 250 ms |
 
 The worker runs in its own process and forwards its events to the web process over a loopback endpoint with a
-per-boot secret (reply progress at most every 400 ms). Commands stay POSTs. Without the socket (Vercel, dev
-server, a dropped connection) a tab follows a reply over its SSE stream and syncs on its usual schedule.
+per-boot secret (reply progress at most every 400 ms). Pip's run commands (submit, decide, continue, stop) go over
+the socket too, as requests (`pip.runs`) that the web process hands to `/api/pip/runs` with the socket's session and
+origin, so they are checked exactly like a POST. Without the socket (Vercel, dev server, a dropped connection) a
+tab sends them as POSTs, follows a reply over its SSE stream and syncs on its usual schedule.
 
 A message sent while a reply runs in the chat (another tab or device) is refused with code `run_active`: it goes
 back to the composer and the tab shows the running reply instead of recording a failed turn.

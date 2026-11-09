@@ -24,6 +24,21 @@ export async function serverRuns({ chat = '', config = null, force = false } = {
 }
 export const forgetServerRuns = () => { cache = null; };
 
+/**
+ * A run command (submit, decide, continue, stop): over the account's live socket when it is connected, else as a
+ * POST. Each command is safe to repeat (a submit is keyed by its request id, a decision settles only a pending
+ * request, a stop or continue of a settled run does nothing), so one the socket could not deliver is sent again.
+ */
+async function command(body) {
+  const value = { ...body };
+  if (live.connected()) {
+    try { return await live.call('pip.runs', value, 30_000); }
+    // Not delivered, or the session ended (the POST then signs this tab out the usual way): send it as a POST.
+    catch (error) { if (error?.name !== 'LiveUnavailable' && error?.status !== 401) throw error; }
+  }
+  return post('/api/pip/runs', value);
+}
+
 /** A stable device id, the same one the local runner writes, so the server can tell who sent and decided what. */
 function deviceId(storage = globalThis.localStorage) {
   let value = storage?.getItem('pocket:device-id');
@@ -102,7 +117,7 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
 
   // The chat's own access and timezone travel with the request: a run on a vaulted key has no server settings of its
   // own, so what this chat may read and where the user's day starts come from the tab they typed in.
-  if (!attach) send(() => post('/api/pip/runs', { action: 'submit', accountId: owner.id, requestId, device, chatUid: chat.uid, text: turn.text,
+  if (!attach) send(() => command({ action: 'submit', accountId: owner.id, requestId, device, chatUid: chat.uid, text: turn.text,
     attempt: turn.attempt, turnUid: turn.uid, context: turn.context || [], grants: access(chat.config, storage),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     chat: { uid: chat.uid, title: chat.title, titled: Boolean(chat.titled), created: chat.created, config: chat.config } }));
@@ -131,7 +146,7 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
     if (run.status === 'awaiting') {
       const open = (view.requests || []).filter(item => item.state === 'pending'), asking = open.filter(item => !decided.has(item.id));
       // Every request is settled but the request that would continue the run ended first: continue it from here.
-      if (!open.length) { if (!sending) send(() => post('/api/pip/runs', { action: 'continue', accountId: owner.id, runId: run.runId })); }
+      if (!open.length) { if (!sending) send(() => command({ action: 'continue', accountId: owner.id, runId: run.runId })); }
       else if (asking.length) {
         if (!approve) throw new Error('This reply is waiting for your approval, but approval is unavailable here.');
         // The same review cards the tab uses: the row id ties each request to its activity line.
@@ -143,7 +158,7 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
         send(async () => {
           for (const item of asking) {
             const decision = decisions.get(item.id) || {};
-            await post('/api/pip/runs', { action: 'decide', accountId: owner.id, runId: run.runId, requestId: item.id, device,
+            await command({ action: 'decide', accountId: owner.id, runId: run.runId, requestId: item.id, device,
               approved: decision.approved === true, ...(decision.approved && decision.input ? { input: decision.input } : {}) });
           }
         });
@@ -230,7 +245,7 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
     if (!signal?.aborted) throw error;
     // Stop the run itself, not only this tab's view of it: a run left going would sync its answer back over the stop.
     const id = runId || (await look().catch(() => null))?.run?.runId;
-    if (id) await post('/api/pip/runs', { action: 'stop', accountId: owner.id, runId: id, device }).catch(() => {});
+    if (id) await command({ action: 'stop', accountId: owner.id, runId: id, device }).catch(() => {});
     throw new DOMException('Stopped', 'AbortError');
   }
 }
