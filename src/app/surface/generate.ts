@@ -1,65 +1,21 @@
-import { streamText } from "ai";
-import { autoFixSpec, buildUserPrompt, createSpecStreamCompiler, validateSpec, type Spec } from "@json-render/core";
-import { configFor, readProfile } from "../data/ai.ts";
+import { defaultConfig } from "../data/models.ts";
 import { resolve } from "../../client/pip-credentials.js";
-import { providerError, providerModel } from "../../client/pip-provider.js";
-import { catalog } from "./catalog.ts";
-import type { Moment } from "./context.ts";
-
-// Arranges a surface for the moment with the person's own model, through the same provider layer and keys Pip
-// uses (a browser key, or the server relay when the key is stored on the account). The model streams JSON Patch
-// lines; the compiler turns them into a spec as they arrive, so the screen builds up while it writes.
-
+import { activeAccount } from "../../client/workspace-storage.js";
+import { generateSurface, type StreamOptions } from "./engine.ts";
+import { remoteSurface } from "./remote.ts";
+import { momentKey, type Moment } from "./context.ts";
+export { systemPrompt, userPrompt } from "./engine.ts";
 export class NoModel extends Error {
-  constructor() { super("Connect a model in settings to let Pip arrange this screen."); this.name = "NoModel"; }
+  constructor() { super("Connect a model in settings."); this.name = "NoModel"; }
 }
-
-const SYSTEM = [
-  "You arrange the home screen of Pocket, a personal organiser, for one person at one moment.",
-  "Build a calm, glanceable screen for a phone: one Hero at the top, then the few things that matter now.",
-  "Every fact appears once. If the Hero shows the next event, no Metric or Timeline repeats it; if a TaskList shows what is due, no Metric counts it.",
-  "Metrics carry readings that have no block of their own. Put them in a Grid with columns 2, in pairs (2 or 4), and leave out readings that are 0 or empty.",
-  "Order: Hero, the Grid of Metrics, then lists, the timeline and charts, then one Capture last. At most 6 top-level blocks.",
-  "Keep text short: a Metric label is one or two words, its hint at most four words, the Hero caption one short line.",
-  "Bind every number, list and series to state with {\"$state\": \"/path\"} or {\"$template\": \"…${/path}…\"}; never copy values into props.",
-  "Use TaskList and ThoughtList for the person's tasks and thoughts; never invent or retype items.",
-  "Write short, plain, kind text. No emoji. Do not give medical advice.",
-  "Leave out what is empty: no chart without data, no timeline without events.",
-].join("\n");
-
-export const systemPrompt = (): string => catalog.prompt({ system: SYSTEM, mode: "standalone" });
-
-/** The request: the moment as state (paths the spec binds to) plus what to emphasise. */
-export function userPrompt(moment: Moment): string {
-  const focus = moment.agenda.next && moment.agenda.next.inMinutes >= 0 && moment.agenda.next.inMinutes <= 45
-    ? "An event starts soon; lead with it."
-    : moment.now.phase === "morning" ? "It is morning: help plan the day."
-    : moment.now.phase === "evening" || moment.now.phase === "night" ? "It is evening: review the day and settle what is left."
-    : "It is the middle of the day: what to do next.";
-  return buildUserPrompt({ prompt: `Arrange the home screen for now. ${focus}`, state: moment as unknown as Record<string, unknown> });
-}
-
-export interface StreamOptions { signal: AbortSignal; onSpec: (spec: Spec) => void }
-
-/** Streams a surface for `moment`. Resolves with the final, validated spec; rejects with NoModel or a safe error. */
-export async function streamSurface(moment: Moment, { signal, onSpec }: StreamOptions): Promise<Spec> {
-  const value = configFor(readProfile(), "surface");
+export async function streamSurface(moment: Moment, options: StreamOptions, force = false) {
+  const value = defaultConfig();
   const credential = await resolve(value);
   if (!credential) throw new NoModel();
-  const compiler = createSpecStreamCompiler<Spec>();
-  try {
-    const model = await providerModel(value, credential, { fetcher: (...args) => fetch(...args), signal, clock: () => {} });
-    const result = streamText({ model, system: systemPrompt(), prompt: userPrompt(moment), abortSignal: signal, maxOutputTokens: 4000 });
-    for await (const chunk of result.textStream) {
-      const { result: spec, newPatches } = compiler.push(chunk);
-      if (newPatches.length && spec?.root) onSpec(spec);
-    }
-  } catch (error) {
-    throw providerError(error);
+  if (activeAccount() && "relay" in credential) {
+    const spec = await remoteSurface(momentKey(moment), options, { moment, config: value, force });
+    if (!spec) throw new Error("Today could not be arranged.");
+    return spec;
   }
-  const { spec } = autoFixSpec(compiler.getResult());
-  const unknown = Object.values(spec.elements ?? {}).some(element => !catalog.componentNames.includes(element.type));
-  const issues = validateSpec(spec).issues.filter(issue => issue.severity === "error");
-  if (!spec.root || unknown || issues.length) throw new Error("The model's screen did not fit Pocket's components; showing the standard one.");
-  return spec;
+  return generateSurface(moment, value, credential, options);
 }

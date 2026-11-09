@@ -1,3 +1,4 @@
+import { focusSession, focusRemaining } from "../data/today.ts";
 import { agenda } from "../../client/planner.js";
 import * as coros from "../../client/coros.js";
 import { scores } from "../../client/scores.js";
@@ -15,6 +16,7 @@ export type Phase = "night" | "morning" | "midday" | "afternoon" | "evening";
 
 export interface Moment {
   now: { phase: Phase; time: string; weekday: string; date: string; greeting: string };
+  focus?: { uid: string; taskUid: string; title: string; state: "running" | "paused" | "done" } | null;
   tasks: {
     open: number; due: number; overdue: number; doneToday: number;
     chosen: { uid: string; text: string } | null;
@@ -22,7 +24,7 @@ export interface Moment {
   };
   thoughts: { open: number; ready: number; list: { id: number; text: string; ready: boolean }[] };
   agenda: {
-    next: { title: string; time: string; inMinutes: number; minutes: number } | null;
+    next: { uid?: string; taskUid?: string; title: string; time: string; inMinutes: number; minutes: number } | null;
     today: { time: string; title: string; minutes: number; past: boolean; now: boolean }[];
   };
   movement: {
@@ -101,7 +103,9 @@ export function readMoment(now: number = Date.now()): Moment {
 
   const notes = listNotes();
 
+  const session = focusSession(now);
   return {
+    focus: session ? { uid: session.uid, taskUid: session.task_uid, title: session.title, state: focusRemaining(session, now) <= 0 ? "done" : session.enabled ? "running" : "paused" } : null,
     now: { phase, time: clock(now), weekday: date.toLocaleDateString([], { weekday: "long" }), date: date.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }), greeting: GREETING[phase] },
     tasks: {
       open: open.length, due: due.length, overdue: due.filter(task => task.due < day).length,
@@ -114,7 +118,7 @@ export function readMoment(now: number = Date.now()): Moment {
       list: [...ready, ...thoughts.filter(item => !ready.includes(item))].slice(0, 5).map(item => ({ id: item.id, text: item.text, ready: ready.includes(item) })),
     },
     agenda: {
-      next: next ? { title: next.title, time: clock(next.when), inMinutes: Math.round((next.when - now) / MINUTE), minutes: next.minutes } : null,
+      next: next ? { uid: next.uid, taskUid: next.task_uid, title: next.title, time: clock(next.when), inMinutes: Math.round((next.when - now) / MINUTE), minutes: next.minutes } : null,
       today: todays.map(event => ({
         time: clock(event.when), title: event.title, minutes: event.minutes,
         past: event.when + event.minutes * MINUTE < now, now: event.when <= now && now < event.when + event.minutes * MINUTE,
@@ -130,5 +134,5 @@ export function readMoment(now: number = Date.now()): Moment {
  * what is due and next. Ticking a task off changes the data the surface shows, not this key.
  */
 export function momentKey(moment: Moment, day: string = today()): string {
-  return [day, moment.now.phase, moment.tasks.due > 0, moment.tasks.overdue > 0, moment.agenda.next?.title ?? "", moment.thoughts.ready > 0, moment.movement.recovery != null].join("|");
+  return ["today-actions-v1", day, moment.now.phase, Boolean(moment.focus), moment.tasks.due > 0, moment.tasks.overdue > 0, moment.agenda.next?.title ?? "", moment.thoughts.ready > 0, moment.movement.recovery != null].join("|");
 }

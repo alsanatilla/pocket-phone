@@ -22,9 +22,10 @@ class Builder {
 }
 
 const open = (to: string) => ({ on: { press: { action: "open", params: { to } } } });
-type Lead = "event" | "due" | "review" | "clear";
+type Lead = "focus" | "event" | "due" | "review" | "clear";
 
 export function leadOf(moment: Moment): Lead {
+  if (moment.focus) return "focus";
   const next = moment.agenda.next;
   if (next && next.inMinutes >= 0 && next.inMinutes <= 45) return "event";
   if (moment.now.phase === "evening" || moment.now.phase === "night") return "review";
@@ -38,19 +39,20 @@ export function fallbackSurface(moment: Moment): Spec {
   const blocks: string[] = [];
 
   // 1. The lead.
-  if (lead === "event") {
-    blocks.push(b.add("Hero", { eyebrow, value: { $state: "/agenda/next/time" }, unit: null, caption: { $template: "${/agenda/next/title} · in ${/agenda/next/inMinutes} min" }, tone: "calendar" }));
+  if (lead === "focus") {
+    blocks.push(b.add("Hero", { eyebrow, value: "focus", unit: null, caption: null, tone: "accent" }));
+  } else if (lead === "event") {
+    blocks.push(b.add("Hero", { eyebrow, value: "up next", unit: null, caption: null, tone: "calendar" }));
   } else if (lead === "review") {
-    blocks.push(b.add("Hero", { eyebrow, value: { $state: "/tasks/doneToday" }, unit: "done", caption: moment.tasks.due ? "The rest can wait for tomorrow." : "Nothing left for today.", tone: "movement" }));
-  } else if (lead === "due") {
-    blocks.push(b.add("Hero", { eyebrow, value: { $state: "/tasks/due" }, unit: "due today", caption: moment.tasks.overdue ? { $template: "${/tasks/overdue} overdue" } : null, tone: moment.tasks.overdue ? "warning" : "accent" }));
+    blocks.push(b.add("Hero", { eyebrow, value: "close the day", unit: null, caption: null, tone: "movement" }));
   } else {
-    blocks.push(b.add("Hero", { eyebrow, value: "clear", unit: null, caption: "Nothing due today.", tone: "accent" }));
+    blocks.push(b.add("Hero", { eyebrow, value: "one thing first", unit: null, caption: null, tone: "accent" }));
   }
+  blocks.push(b.add(lead === "event" ? "EventPrep" : lead === "review" ? "DayReview" : "FocusSession", { title: null }));
 
   // What gets its own block decides what the tiles may not repeat.
-  const showTimeline = moment.agenda.today.length >= 2 || (moment.agenda.today.length === 1 && lead !== "event");
-  const showDue = moment.tasks.due > 0;
+  const showTimeline = lead !== "event" && lead !== "focus" && moment.agenda.today.length > 0;
+  const showDue = lead === "event" && moment.tasks.due > 0;
   const showThoughts = moment.thoughts.ready > 0;
 
   // 2. Tiles: readings without a block of their own.
@@ -64,21 +66,21 @@ export function fallbackSurface(moment: Moment): Spec {
   if (moment.tasks.doneToday > 0 && lead !== "review") {
     tiles.push(b.add("Metric", { label: "done today", value: { $state: "/tasks/doneToday" }, unit: null, hint: null, tone: "movement" }));
   }
-  if (!showDue && moment.tasks.open > 0) {
+  if (lead !== "review" && !showDue && moment.tasks.open > 0) {
     tiles.push(b.add("Metric", { label: "open tasks", value: { $state: "/tasks/open" }, unit: null, hint: "none due today", tone: "accent" }, [], open("/tasks")));
   }
   if (!showThoughts && moment.thoughts.open > 0) {
     tiles.push(b.add("Metric", { label: "parked", value: { $state: "/thoughts/open" }, unit: null, hint: "thoughts", tone: "thought" }, [], open("/thoughts")));
   }
   // Pairs only: an odd tile out would leave a hole in the two-column grid.
-  const paired = tiles.slice(0, tiles.length >= 4 ? 4 : tiles.length >= 2 ? 2 : 0);
+  const paired = (lead === "focus" ? [] : tiles).slice(0, tiles.length >= 4 ? 4 : tiles.length >= 2 ? 2 : 0);
   if (paired.length) blocks.push(b.add("Grid", { columns: 2, gap: "md" }, paired));
 
   // 3. Detail.
-  if (showDue) blocks.push(b.add("TaskList", { title: lead === "review" ? "still open" : null, source: "due", limit: 6 }));
+  if (showDue) blocks.push(b.add("TaskList", { title: null, source: "due", limit: 6 }));
   if (showTimeline) blocks.push(b.add("Timeline", { title: "today", items: { $state: "/agenda/today" } }));
-  if (showThoughts) blocks.push(b.add("ThoughtList", { title: null, source: "ready", limit: 4 }));
-  if (moment.movement.recoveryTrend.length >= 2 && (moment.now.phase === "morning" || lead === "review")) {
+  if (showThoughts && lead !== "focus") blocks.push(b.add("ThoughtList", { title: null, source: "ready", limit: 4 }));
+  if (moment.movement.recoveryTrend.length >= 2 && lead !== "focus" && (moment.now.phase === "morning" || lead === "review")) {
     blocks.push(b.add("Chart", { kind: "area", title: "recovery · 14 days", data: { $state: "/movement/recoveryTrend" }, unit: "%", tone: "movement" }));
   }
   blocks.push(b.add("Capture", { mode: "thought", placeholder: lead === "review" ? "for tomorrow…" : null }));

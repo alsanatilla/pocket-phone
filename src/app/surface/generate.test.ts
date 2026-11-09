@@ -41,7 +41,10 @@ describe("streamSurface", () => {
     const partials: number[] = [];
     const spec = await streamSurface(readMoment(), { signal: new AbortController().signal, onSpec: partial => partials.push(Object.keys(partial.elements ?? {}).length) });
     expect(spec.root).toBe("main");
-    expect(Object.keys(spec.elements)).toEqual(["main", "hero", "tasks"]);
+    expect(Object.keys(spec.elements)).toEqual(["main", "hero", "tasks", "today-action"]);
+    // The action card is Pocket's, not the model's: it is added to the root after the Hero.
+    expect((spec.elements[spec.root] as { children: string[] }).children).toEqual(["hero", "today-action", "tasks"]);
+    expect(["FocusSession", "EventPrep", "DayReview"]).toContain((spec.elements["today-action"] as { type: string }).type);
     expect(partials.length).toBeGreaterThan(1);
     expect(partials.at(-1)).toBe(3);
   });

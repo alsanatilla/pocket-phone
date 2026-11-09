@@ -1,3 +1,4 @@
+import { FocusSession, EventPrep, DayReview } from "./TodayActions.tsx";
 import { defineRegistry, useActions } from "@json-render/react";
 import * as controls from "./controls.tsx";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,9 @@ export const { registry } = defineRegistry(catalog, {
     Collapsible: controls.Collapsible,
     Button: controls.Button,
 
+    FocusSession: ({ props }) => <FocusSession {...props} />,
+    EventPrep: ({ props }) => <EventPrep {...props} />,
+    DayReview: ({ props }) => <DayReview {...props} />,
     Hero: ({ props }) => <Hero {...props} />,
     Metric: ({ props, on }) => {
       const press = on("press");

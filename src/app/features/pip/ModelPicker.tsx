@@ -5,9 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { Chat } from "../../data/chats.ts";
 import { chats } from "../../data/chats.ts";
-import { selectFreeModel } from "../../data/chat-models.ts";
+import { chooseModel, providerOf, connectionOf, isConnected, customEndpoint, CURATED, PROVIDER_KEYS, PROVIDER_NAMES, modelLabel, type ModelChoice, type ProviderKey } from "../../data/models.ts";
 import { FREE_ROUTER, loadFreeModels, tokenSize, type FreeModel } from "../../data/openrouter-models.ts";
-import { modelLabel } from "../settings/SettingsPage.tsx";
 import { toastError } from "../../ui/toast/toast.ts";
 
 export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
@@ -15,25 +14,39 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
   const [models, setModels] = useState<FreeModel[]>([FREE_ROUTER]);
   const [loading, setLoading] = useState(false), [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
+  const [connections, setConnections] = useState<Partial<Record<ProviderKey, boolean>>>({});
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    Promise.all(PROVIDER_KEYS.map(async provider => [provider, await connectionOf(provider).then(isConnected).catch(() => false)] as const))
+      .then(entries => { if (!cancelled) setConnections(Object.fromEntries(entries)); });
+    return () => { cancelled = true; };
+  }, [open, attempt]);
   const isOpenRouter = chat.config.baseUrl === "https://openrouter.ai/api/v1";
   useEffect(() => {
     if (!open && !isOpenRouter) return;
     let cancelled = false;
     setLoading(true); setError("");
     loadFreeModels().then(value => { if (!cancelled) setModels(value); })
-      .catch(() => { if (!cancelled) setError("Model list unavailable. Auto is still available; retry to load specific models."); })
+      .catch(() => { if (!cancelled) setError("Model list unavailable."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [open, isOpenRouter, attempt]);
   const selected = isOpenRouter ? models.find(model => model.id === chat.config.model) : undefined;
   const free = isOpenRouter && (chat.config.model === "openrouter/free" || chat.config.model.endsWith(":free"));
   const name = selected?.name ?? modelLabel(chat.config.model);
-  const choose = (model: FreeModel) => {
+  const choose = (model: ModelChoice) => {
     if (busy) return;
-    try { selectFreeModel(chat.uid, model); setOpen(false); setQuery(""); } catch (error) { toastError(error); }
+    try { chooseModel(chat.uid, model); setOpen(false); setQuery(""); } catch (error) { toastError(error); }
   };
-  const filtered = models.filter(model => (model.name + " " + model.id).toLowerCase().includes(query.toLowerCase().trim()));
-  const providerName = isOpenRouter ? "OpenRouter" : chat.config.provider === "anthropic" ? "Anthropic" : chat.config.baseUrl.startsWith("https://opencode.ai/") ? "OpenCode Go" : "Custom provider";
+  const custom = customEndpoint();
+  const choices: ModelChoice[] = [
+    ...CURATED.opencode, ...CURATED.anthropic,
+    ...models.map(model => ({ ...model, provider: "openrouter" as const, free: true })), ...CURATED.openrouter,
+    ...(custom ? [{ provider: "custom" as const, id: custom.model, name: custom.model }] : []),
+  ];
+  const filtered = choices.filter(model => (model.name + " " + model.id + " " + PROVIDER_NAMES[model.provider]).toLowerCase().includes(query.toLowerCase().trim()));
+  const providerName = PROVIDER_NAMES[providerOf(chat.config)];
   const current = [providerName, selected?.context ? `${tokenSize(selected.context)} context` : "", `${tokenSize(chat.config.maxTokens)} reply limit`, chat.config.thinking ? "reasoning on" : ""].filter(Boolean).join(" · ");
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3 text-xs text-muted-foreground">
@@ -51,38 +64,38 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
           </button>
         </Popover.Trigger>
         <Popover.Portal>
-          <Popover.Content side="top" align="end" sideOffset={10} aria-label="OpenRouter free models"
+          <Popover.Content side="top" align="end" sideOffset={10} aria-label="Chat models"
             className="z-50 flex max-h-[min(34rem,75dvh)] w-[min(26rem,calc(100vw-1.5rem))] flex-col rounded-lg border bg-popover text-popover-foreground shadow-xl">
             <div className="space-y-1 border-b p-3.5">
-              <h2 className="text-sm font-medium">Free models · OpenRouter</h2>
-              <p className="text-xs leading-relaxed text-muted-foreground">Now: {current}. A choice applies to this chat and new ones. Needs OpenRouter connected in <a href="/#/settings" className="text-primary">settings</a>.</p>
+              <h2 className="text-sm font-medium">Choose a model</h2>
+              <a href="/#/settings" className="text-xs text-primary">connections ↗</a>
             </div>
             <div className="p-3 pb-2">
-              <Input aria-label="Search free models" placeholder="search models…" value={query} onChange={event => setQuery(event.target.value)} />
-              {loading ? <p role="status" className="pt-2 text-xs text-muted-foreground">Loading current models…</p> : null}
+              <Input aria-label="Search models" placeholder="search models…" value={query} onChange={event => setQuery(event.target.value)} />
+              {loading ? <p role="status" className="pt-2 text-xs text-muted-foreground">Loading…</p> : null}
               {error ? <div role="alert" className="flex items-center gap-2 pt-2 text-xs text-destructive">{error}<Button type="button" size="sm" variant="ghost" onClick={() => setAttempt(value => value + 1)}>retry</Button></div> : null}
             </div>
             <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2" aria-label="Available models">
               {filtered.map(model => {
-                const chosen = isOpenRouter && chat.config.model === model.id;
+                const chosen = providerName === PROVIDER_NAMES[model.provider] && chat.config.model === model.id;
                 const traits = [model.reasoning && "reasoning", model.vision && "images"].filter(Boolean) as string[];
                 return (
-                  <button type="button" key={model.id} disabled={busy || !model.tools} aria-pressed={chosen} onClick={() => choose(model)}
+                  <button type="button" key={model.provider + model.id} disabled={busy || model.tools === false || !connections[model.provider]} aria-pressed={chosen} onClick={() => choose(model)}
                     className={"w-full rounded-md border-l-2 px-3 py-2.5 text-left hover:bg-accent disabled:opacity-40 " + (chosen ? "border-primary bg-accent" : "border-transparent")}>
                     <span className="flex items-baseline gap-2">
                       <span className="min-w-0 flex-1 truncate text-sm text-foreground">{model.name}</span>
-                      {chosen ? <Check className="size-4 shrink-0 self-center text-primary" /> : <span className="shrink-0 text-xs text-muted-foreground">{model.context ? `${Math.round(model.context / 1000)}k context` : "picks for you"}</span>}
+                      {chosen ? <Check className="size-4 shrink-0 self-center text-primary" /> : <span className="shrink-0 text-xs text-muted-foreground">{model.context ? `${Math.round(model.context / 1000)}k context` : model.id === "openrouter/free" ? "auto" : ""}</span>}
                     </span>
                     <span className="mt-1 flex flex-wrap gap-1">
-                      {!model.tools ? <span className="text-xs text-muted-foreground">no tools · Pip can't use it</span>
+                      <span className="text-xs text-muted-foreground">{PROVIDER_NAMES[model.provider]}{!connections[model.provider] ? " · not connected" : model.free ? " · free" : ""}</span>
+                      {model.tools === false ? <span className="text-xs text-muted-foreground">unsupported</span>
                         : traits.map(trait => <span key={trait} className="rounded-sm bg-secondary px-1.5 py-px text-xs text-muted-foreground">{trait}</span>)}
                     </span>
                   </button>
                 );
               })}
-              {!filtered.length && !loading ? <p className="p-3 text-xs text-muted-foreground">No matching free models.</p> : null}
+              {!filtered.length && !loading ? <p className="p-3 text-xs text-muted-foreground">No matching models.</p> : null}
             </div>
-            <p className="border-t px-3.5 py-2.5 text-xs leading-relaxed text-muted-foreground">Free, with OpenRouter's limits. When a model is busy, Pip falls back to Auto.</p>
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>

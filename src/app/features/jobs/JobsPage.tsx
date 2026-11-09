@@ -1,3 +1,4 @@
+import { defaultConfig, providerOf, PROVIDER_NAMES } from "../../data/models.ts";
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { ChevronRight, Play } from "lucide-react";
@@ -5,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { configFor, readAccess, readProfile, PROVIDERS } from "../../data/ai.ts";
+import { readAccess } from "../../data/ai.ts";
 import { nextLabel, PRESETS, scheduleLabel, STATUS_LABEL, type Job, type JobDraft, type JobsState } from "../../data/jobs.ts";
 import { classicHref } from "../../lib/classic.ts";
 import { confirm } from "../../ui/dialog/dialog.ts";
@@ -33,11 +34,10 @@ function Section({ title, children, action }: { title: string; children: React.R
 
 /** Turning Pip on its own on: the model Pip uses already, the key the account keeps, a daily limit. */
 function Setup({ state, onSetup, busy }: { state: JobsState; onSetup: ReturnType<typeof useJobs>["setup"]; busy: boolean }) {
-  const profile = readProfile();
   const [limit, setLimit] = useState(state.settings?.dailyTokens ?? 200_000);
-  let config: ReturnType<typeof configFor> | null = null;
-  try { config = configFor(profile, "chat"); } catch { config = null; }
-  const provider = profile.provider === "custom" ? "your endpoint" : PROVIDERS[profile.provider].name;
+  let config: ReturnType<typeof defaultConfig> | null = null;
+  try { config = defaultConfig(); } catch { config = null; }
+  const provider = config ? PROVIDER_NAMES[providerOf(config)] : "your provider";
   const turnOn = () => config && void onSetup({
     ...config, grants: readAccess().filter(grant => BACKGROUND_GRANTS.includes(grant)), dailyTokens: limit,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, enabled: true, useAccountKey: true,

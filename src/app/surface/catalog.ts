@@ -38,6 +38,18 @@ export const catalog = defineCatalog(schema, {
     Collapsible: withoutClassName(shadcn.Collapsible),
     Button: withoutClassName(shadcn.Button),
 
+    FocusSession: {
+      props: z.object({ title: z.string().nullable() }),
+      description: "Live focus session: choose a real task, start/pause/resume a persistent timer, check its steps and open its source note. Include once on daytime screens or whenever /focus is present. Reads live data; never supply invented tasks or durations.",
+    },
+    EventPrep: {
+      props: z.object({ title: z.string().nullable() }),
+      description: "Live next calendar event with time, linked preparation task, editable checklist, source note and open-event action. Include once when an event is near. Do not duplicate this event in a Hero or timeline.",
+    },
+    DayReview: {
+      props: z.object({ title: z.string().nullable() }),
+      description: "Evening wrap-up: real completed tasks, unfinished due tasks with tomorrow/later/done actions, tomorrow's first task, and a saved daily note. Include once in the evening. Replaces TaskList and done-count metrics.",
+    },
     Hero: {
       props: z.object({
         eyebrow: z.string().nullable().describe("A short line above, e.g. the time or a greeting"),

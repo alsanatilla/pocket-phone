@@ -1,11 +1,13 @@
+import { defaultConfig } from "../data/models.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Spec, StateStore } from "@json-render/core";
 import { activeAccount } from "../../client/workspace-storage.js";
-import { configFor, readProfile } from "../data/ai.ts";
+import { readProfile } from "../data/ai.ts";
 import { resolve } from "../../client/pip-credentials.js";
 import { momentKey, type Moment } from "./context.ts";
 import { currentMoment, momentStore, onMoment } from "./moment.ts";
 import { fallbackSurface } from "./fallback.ts";
+import { remoteSurface } from "./remote.ts";
 import { NoModel, streamSurface } from "./generate.ts";
 
 // The home surface's life cycle:
@@ -25,8 +27,9 @@ const readCache = (key: string): Spec | null => {
     return cached && cached.key === key && cached.owner === activeAccount() ? cached.spec : null;
   } catch { return null; }
 };
-const writeCache = (key: string, spec: Spec) => {
-  try { localStorage.setItem(CACHE, JSON.stringify({ key, owner: activeAccount(), spec, at: Date.now() } satisfies Cached)); } catch { /* full or blocked */ }
+const writeCache = (key: string, spec: Spec, owner: string) => {
+  if (owner !== activeAccount()) return;
+  try { localStorage.setItem(CACHE, JSON.stringify({ key, owner, spec, at: Date.now() } satisfies Cached)); } catch { /* full or blocked */ }
 };
 
 /** The shared live moment (moment.ts) and its store; re-renders when the moment changes. */
@@ -40,7 +43,7 @@ function useMomentStore(): { store: StateStore; moment: Moment } {
 async function mayArrange(): Promise<boolean> {
   try {
     const profile = readProfile();
-    return profile.autoArrange && Boolean(await resolve(configFor(profile, "surface")));
+    return profile.autoArrange && Boolean(await resolve(defaultConfig()));
   } catch { return false; }
 }
 
@@ -59,44 +62,65 @@ export function useSurface() {
   const momentRef = useRef(moment);
   momentRef.current = moment;
 
-  const arrange = useCallback(async () => {
+  const owner = activeAccount();
+  const standardKey = "pocket:surface-standard:" + owner;
+  const arrange = useCallback(async (force = true) => {
     running.current?.abort();
     const controller = new AbortController();
     running.current = controller;
+    const snapshot = momentRef.current, startedKey = momentKey(snapshot), startedOwner = activeAccount();
+    if (force) localStorage.removeItem(standardKey);
     setStatus("arranging"); setError("");
     try {
-      // The standard surface stays until the arranged one has substance (its root and two blocks), so the screen
-      // never empties while the model starts writing; from then on it builds up block by block.
-      const final = await streamSurface(momentRef.current, { signal: controller.signal, onSpec: partial => {
-        if (!controller.signal.aborted && enough(partial)) setSpec(partial);
-      } });
-      if (controller.signal.aborted) return;
-      writeCache(momentKey(momentRef.current), final);
+      const final = await streamSurface(snapshot, { signal: controller.signal, onSpec: partial => {
+        if (!controller.signal.aborted && activeAccount() === startedOwner && enough(partial)) setSpec(partial);
+      } }, force);
+      if (controller.signal.aborted || activeAccount() !== startedOwner) return;
+      writeCache(startedKey, final, startedOwner);
       setSpec(final); setStatus("arranged");
     } catch (failure) {
-      if (controller.signal.aborted) return;
-      setSpec(fallbackSurface(momentRef.current));
+      if (controller.signal.aborted || activeAccount() !== startedOwner) return;
+      setSpec(readCache(startedKey) ?? fallbackSurface(snapshot));
       setStatus(failure instanceof NoModel ? "standard" : "failed");
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
       if (running.current === controller) running.current = null;
     }
-  }, []);
+  }, [standardKey]);
 
   const standard = useCallback(() => {
     running.current?.abort();
+    localStorage.setItem(standardKey, momentKey(momentRef.current));
     setSpec(fallbackSurface(momentRef.current)); setStatus("standard"); setError("");
-  }, []);
+  }, [standardKey]);
 
-  // A new moment: show what was arranged for it before, or the standard surface, and arrange if possible.
   useEffect(() => {
+    running.current?.abort();
+    const controller = new AbortController();
+    running.current = controller;
     const cached = readCache(key);
-    if (cached) { setSpec(cached); setStatus("arranged"); return; }
-    setSpec(fallbackSurface(momentRef.current)); setStatus("standard");
-    let live = true;
-    void mayArrange().then(ok => { if (live && ok) void arrange(); });
-    return () => { live = false; };
-  }, [key, arrange]);
+    const preferStandard = localStorage.getItem(standardKey) === key;
+    setSpec(!preferStandard && cached ? cached : fallbackSurface(momentRef.current));
+    setStatus(!preferStandard && cached ? "arranged" : "standard"); setError("");
+    if (preferStandard) return () => controller.abort();
+    void (async () => {
+      try {
+        // Restore server work even with auto-arrange off or a key disconnected since it finished.
+        if (owner) {
+          const saved = await remoteSurface(key, { signal: controller.signal, onRunning: () => { if (!controller.signal.aborted) setStatus("arranging"); }, onSpec: partial => {
+            if (!controller.signal.aborted && enough(partial)) setSpec(partial);
+          } });
+          if (controller.signal.aborted) return;
+          if (saved) { writeCache(key, saved, owner); setSpec(saved); setStatus("arranged"); return; }
+        }
+        if (!cached && !controller.signal.aborted && await mayArrange() && !controller.signal.aborted) void arrange(false);
+      } catch (failure) {
+        if (controller.signal.aborted) return;
+        setStatus("failed"); setError(failure instanceof Error ? failure.message : String(failure));
+      }
+    })();
+    return () => { controller.abort(); running.current?.abort(); };
+  }, [key, owner, standardKey, arrange]);
 
   useEffect(() => () => running.current?.abort(), []);
 

@@ -12,11 +12,11 @@ export function TodayPage() {
       <Surface spec={spec} store={store} loading={status === "arranging"} />
       <footer className="flex flex-wrap items-center gap-2 pt-2 text-xs text-dim">
         <span className={status === "arranging" ? "animate-pulse text-primary" : ""}>
-          {status === "arranging" ? "pip is arranging this screen…" : status === "arranged" ? "arranged by pip for this moment" : status === "failed" ? error : "standard layout"}
+          {status === "arranging" ? "arranging…" : status === "arranged" ? "arranged" : status === "failed" ? error : "standard layout"}
         </span>
         <span className="flex-1" />
         {status === "arranged" || status === "failed" ? <Button size="sm" variant="ghost" onClick={standard}>standard</Button> : null}
-        {status !== "arranging" ? <Button size="sm" variant="ghost" onClick={() => void arrange()}>{status === "arranged" ? "rearrange" : "arrange with pip"}</Button> : null}
+        {status !== "arranging" ? <Button size="sm" variant="ghost" onClick={() => void arrange()}>{status === "arranged" ? "rearrange" : "arrange"}</Button> : null}
       </footer>
       {status === "standard" && error ? <p className="text-xs text-dim">{error}</p> : null}
     </main>

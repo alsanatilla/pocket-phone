@@ -28,6 +28,8 @@ export const tasks: {
   create(text: string, source?: unknown, fields?: Partial<Task>): Task;
   /** The uid chosen as "do next". */
   chosen(): string | null;
+  next(uid: string): void;
+  edit(uid: string, change: (task: Task) => void): Task;
 };
 export interface Workout { id: string; started: number; ended?: number }
 export const gym: { all(): Workout[]; active(): Workout | null };

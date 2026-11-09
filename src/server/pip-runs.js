@@ -1,3 +1,4 @@
+import { settledSurfaces } from './surfaces.js';
 import { randomUUID } from 'node:crypto';
 import { database, execute as sql } from './database.js';
 import { open } from './secrets.js';
@@ -49,7 +50,7 @@ export const settledRuns = () => Promise.allSettled([...executing]);
 // longer ends like a closed request, and the person continues it from where it stopped.
 if (inProcess()) process.once('SIGTERM', () => {
   const limit = new Promise(resolve => setTimeout(resolve, 25000).unref());
-  Promise.race([settledRuns(), limit]).finally(() => process.exit(0));
+  Promise.race([Promise.allSettled([settledRuns(), settledSurfaces()]), limit]).finally(() => process.exit(0));
 });
 /** Executes a stretch: in this process without waiting when the server runs on, inside the request otherwise. */
 function executeStretch(userId, run, leaseId, options) {

@@ -7,7 +7,7 @@ import { readMoment, type Moment } from "./context.ts";
 // reply and on Today tick together.
 
 /** The collections readMoment() reads ("*" covers sync merges and COROS). */
-const MOMENT_SOURCES: Collection[] = ["tasks.json", "parking.json", "agenda.json", "notes.json", "gym.json"];
+const MOMENT_SOURCES: Collection[] = ["tasks.json", "parking.json", "agenda.json", "notes.json", "gym.json", "clock.json"];
 
 let store: StateStore | null = null;
 let moment: Moment | null = null;

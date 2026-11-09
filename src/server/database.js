@@ -11,6 +11,7 @@ export function database() {
   return client;
 }
 export const TABLES = [
+  `CREATE TABLE IF NOT EXISTS pocket_surfaces (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, moment_key TEXT NOT NULL, run_id TEXT NOT NULL, status TEXT NOT NULL, spec TEXT, error TEXT NOT NULL DEFAULT '', started INTEGER NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY(user_id, moment_key))`,
   `CREATE TABLE IF NOT EXISTS pocket_user (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, emailVerified INTEGER NOT NULL DEFAULT 0, image TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS pocket_session (id TEXT PRIMARY KEY, expiresAt INTEGER NOT NULL, token TEXT NOT NULL UNIQUE, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, ipAddress TEXT, userAgent TEXT, userId TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE)`,
   `CREATE INDEX IF NOT EXISTS pocket_session_user ON pocket_session(userId)`,

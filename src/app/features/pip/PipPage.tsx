@@ -1,9 +1,10 @@
+import { defaultConfig } from "../../data/models.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { ChevronDown, Clock3, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { starters } from "../../../client/pip-presentation.js";
-import { configFor, readAccess, readProfile } from "../../data/ai.ts";
+import { readAccess } from "../../data/ai.ts";
 import { useCollection } from "../../data/bus.ts";
 import { createChat, listChats, readChat } from "../../data/chats.ts";
 import { daySummary, listTasks, today } from "../../data/tasks.ts";
@@ -77,8 +78,7 @@ export function PipPage() {
   useEffect(() => (watched ? watchChat(watched) : undefined), [watched]);
   useLayoutEffect(() => { following.current = true; window.scrollTo({ top: document.documentElement.scrollHeight }); }, [chat?.uid, chat?.turns.length]);
 
-  const profile = readProfile();
-  const model = (() => { try { return modelLabel(chat?.config.model ?? configFor(profile, "chat").model); } catch { return "no model"; } })();
+  const model = (() => { try { return modelLabel(chat?.config.model ?? defaultConfig().model); } catch { return "no model"; } })();
   const reads = readAccess();
   const locked = Boolean(live) || runnerBusy();
 
