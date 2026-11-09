@@ -13,6 +13,7 @@ import { objectId, validObject } from '../shared/objects.js';
 import { replyNotice, waitingNotice } from '../shared/pip-notice.js';
 import { notify, watched, watching, unwatch, forgetWatches } from './pip-notify.js';
 import { enqueue, claimJob, finishJob, releaseJob } from './pip-queue.js';
+import * as live from './pip-live.js';
 
 // Pip's shared conversations: the account's server runs each turn once for every device. A run holds its own
 // provider messages and budgets, so it can stop at a change waiting for approval and continue in a later
@@ -25,12 +26,35 @@ import { enqueue, claimJob, finishJob, releaseJob } from './pip-queue.js';
 //
 // One request runs one stretch of a reply within the function's 300-second limit. A stop from another device takes
 // effect within a heartbeat; the lease outlives several missed ones, so a request that died is noticed within 20 seconds.
-const RUN_DEADLINE = 150000, HEARTBEAT = 2000, LEASE = 20000, PROGRESS = 700, WAIT_TTL = 12 * 3600000, DEVICE_ANSWER = 16000;
+const RUN_DEADLINE = 150000, HEARTBEAT = 2000, LEASE = 20000, PROGRESS_REQUEST = 700, PROGRESS_LIVE = 2500, WAIT_TTL = 12 * 3600000, DEVICE_ANSWER = 16000;
 /** A chat run on a vaulted key has no dedicated daily budget; this bounds a runaway day without a settings page. */
 const VAULT_TOKENS = 200000;
 const ACTIVE = ['queued', 'running', 'awaiting', 'stopping'];
 /** Detached runs are queued in Turso and executed by a worker process (services/pip), not by the request. */
-const detached = () => process.env.PIP_RUNS_DETACHED === '1';
+const detached = () => process.env.PIP_RUNS_DETACHED === '1' && !inProcess();
+/**
+ * On a long-running server (PIP_RUNS_MODE=inprocess, the Fly.io deployment) a run executes in the web process that
+ * received it, detached from that request: followers connected to the same process get every change at once
+ * (pip-live.js), and the database keeps checkpoints. Elsewhere a request executes its stretch (Vercel) or a worker
+ * picks it from the queue (PIP_RUNS_DETACHED=1).
+ */
+const inProcess = () => process.env.PIP_RUNS_MODE === 'inprocess';
+/** Runs executing in this process, so a test or a shutdown can wait for them. */
+const executing = new Set();
+export const settledRuns = () => Promise.allSettled([...executing]);
+// A deploy or restart stops the process: replies executing here get up to 25 seconds to finish first. One that runs
+// longer ends like a closed request, and the person continues it from where it stopped.
+if (inProcess()) process.once('SIGTERM', () => {
+  const limit = new Promise(resolve => setTimeout(resolve, 25000).unref());
+  Promise.race([settledRuns(), limit]).finally(() => process.exit(0));
+});
+/** Executes a stretch: in this process without waiting when the server runs on, inside the request otherwise. */
+function executeStretch(userId, run, leaseId, options) {
+  if (!inProcess()) return drive(userId, run, leaseId, options);
+  const work = drive(userId, run, leaseId, options).catch(error => console.error(JSON.stringify({ level: 'error', message: 'Pip run failed', run: String(run.run_id), error: String(error?.message || error).slice(0, 300) })));
+  executing.add(work); work.finally(() => executing.delete(work));
+  return Promise.resolve();
+}
 /** How long a queued run may wait for a worker before the sweep ends it as failed. */
 const QUEUE_TTL = (() => {
   const value = Number(process.env.PIP_QUEUE_TTL_MS);
@@ -216,7 +240,7 @@ export async function submitRun(userId, body, { fetcher, now = Date.now() } = {}
     await event(userId, runId, 'queued', { chat: uid, turn: turn.uid, device }, now);
   } else {
     await event(userId, runId, 'started', { chat: uid, turn: turn.uid, device }, now);
-    await drive(userId, inserted, leaseId, { fetcher });
+    await executeStretch(userId, inserted, leaseId, { fetcher });
   }
   return view(userId, await runRow(userId, runId), 0);
 }
@@ -269,7 +293,7 @@ export async function continueRun(userId, runId, { fetcher } = {}) {
     args: [leaseId, now + LEASE, now, userId, runId] })).rows[0];
   if (!claimed) return false;
   await event(userId, runId, 'continued', {}, now);
-  await drive(userId, claimed, leaseId, { fetcher });
+  await executeStretch(userId, claimed, leaseId, { fetcher });
   return true;
 }
 
@@ -326,10 +350,11 @@ async function drive(userId, run, leaseId, { fetcher }) {
   };
   const timer = setInterval(() => { beating = beat().catch(() => { /* The next beat retries; the lease outlives a missed one. */ }); }, HEARTBEAT);
   const quiet = async () => { clearInterval(timer); clearTimeout(trailing); trailing = null; await beating; await writing; };
+  live.publish(runId, turn);
   // Live progress for watching devices: at most every PROGRESS ms, one write at a time, never failing the reply. An
   // update inside that window is written when the window ends, so a tool that starts and then works quietly still shows.
   const progress = () => {
-    const early = PROGRESS - (Date.now() - lastWrite);
+    const early = (inProcess() ? PROGRESS_LIVE : PROGRESS_REQUEST) - (Date.now() - lastWrite);
     if (early > 0) { trailing ||= setTimeout(() => { trailing = null; progress(); }, early); return; }
     lastWrite = Date.now();
     writing = writing.then(() => sql({ sql: `UPDATE pocket_pip_runs SET turn = ?, updated = ? WHERE ${owned}`, args: [JSON.stringify(turn), Date.now(), ...ownedArgs] })).catch(() => {});
@@ -403,7 +428,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
       .map(row => ({ name: row.name, input: row.input || '{}', result: row.result })).slice(-24);
     const { streamChat } = await import('../client/pip-stream.js');
     const reply = await streamChat(conversationView, turn, { value, body, key, fetcher, deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
-      onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server' } }); progress(); },
+      onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server' } }); live.publish(runId, turn); progress(); },
       resume: { reasoning: turn.reasoning || '', activity: turn.activity || [], observations },
       durable: { checkpoint: resumed, settled: resumed ? settlementMap(requests) : null, pause },
       executeTool: (value, name, input, signal, context) => WRITE_TOOLS.includes(name)
@@ -419,6 +444,8 @@ async function drive(userId, run, leaseId, { fetcher }) {
     else await end('failed', String(error?.message || 'The reply could not be completed.').slice(0, 500));
   } finally {
     await quiet();
+    // Its record is final now; followers read it from there.
+    live.close(runId);
     const spent = (Number(segment.input_tokens) || 0) + (Number(segment.output_tokens) || 0);
     if (saved && spent) await chargeTokens(userId, saved.settings.timezone, spent).catch(() => { /* The run's own usage still shows it. */ });
   }
@@ -497,30 +524,83 @@ const idle = (ms, signal) => new Promise(resolve => {
  */
 export async function* runFrames(userId, { runId = '', request = '', chat = '', after = 0, ttl = STREAM_TTL, signal = null } = {}) {
   let cursor = Number.isSafeInteger(Number(after)) && Number(after) > 0 ? Number(after) : 0;
-  const started = Date.now(), expected = Boolean(request && !runId);
-  let seen = '', sent = Date.now(), marked = 0, followed = '';
+  const started = Date.now(), expected = Boolean(request && !runId), sent = {};
+  let seen = '', pinged = Date.now(), marked = 0, followed = '';
+  const watch = async run => {
+    // While a follower reads a run, what it shows is not also pushed to the account's devices.
+    if (ACTIVE.includes(String(run.status)) && Date.now() - marked >= WATCH_REFRESH) { marked = Date.now(); followed = run.runId; await watching(userId, run.runId).catch(() => {}); }
+  };
   try {
     for (;;) {
       const current = await runView(userId, { runId, request, chat, after: cursor });
       const run = current.run;
       if (!run && !expected) { yield current; return; }
       if (run) {
-        // While a follower reads a run, what it shows is not also pushed to the account's devices.
-        if (ACTIVE.includes(String(run.status)) && Date.now() - marked >= WATCH_REFRESH) { marked = Date.now(); followed = run.runId; await watching(userId, run.runId).catch(() => {}); }
+        await watch(run);
         cursor = Number(current.cursor) || cursor;
         const mark = JSON.stringify([run.status, run.turn, current.requests]);
-        if (mark !== seen) { seen = mark; sent = Date.now(); yield current; }
+        if (mark !== seen) { seen = mark; pinged = Date.now(); yield compactFrame(current, sent); }
         if (!ACTIVE.includes(String(run.status))) return;
+        // Executing in this process: every change comes from memory as it happens, until the stretch ends here.
+        if (live.executing(run.runId)) {
+          // The database frame above may be older than memory: the first live frame is the state as it is now.
+          let version = -2, last = 0;
+          for (;;) {
+            if (Date.now() - started >= ttl || signal?.aborted) return;
+            const next = await live.changed(run.runId, version, STREAM_PING, signal);
+            if (signal?.aborted) return;
+            if (next === -1) break;
+            if (next === version) { pinged = Date.now(); yield null; continue; }
+            // Token deltas arrive in bursts; one frame per LIVE_FRAME ms carries all of them.
+            const wait = LIVE_FRAME - (Date.now() - last);
+            if (wait > 0) await idle(wait, signal);
+            const now = live.current(run.runId);
+            if (!now) break;
+            version = now.version; last = Date.now(); pinged = last;
+            await watch(run);
+            yield compactFrame({ ...current, run: { ...run, status: 'running', turn: now.turn }, events: [] }, sent);
+          }
+          seen = '';
+          continue;
+        }
       }
       if (Date.now() - started >= ttl) return;
       await idle(STREAM_TICK, signal);
       if (signal?.aborted) return;
-      if (Date.now() - sent >= STREAM_PING) { sent = Date.now(); yield null; }
+      if (Date.now() - pinged >= STREAM_PING) { pinged = Date.now(); yield null; }
     }
   } finally {
     // A follower that went away no longer counts as watching; one that reached the time limit reconnects at once.
     if (followed && signal?.aborted) await unwatch(userId, followed).catch(() => {});
   }
+}
+
+/** At most one live frame per this many ms: smooth to read, and a burst of tokens costs one frame. */
+const LIVE_FRAME = 33;
+
+/**
+ * A frame without what this follower already has: the answer and reasoning as the text added since its last frame
+ * (`append`), and the activity and sources only when they changed. A field left out is unchanged. A text that no
+ * longer starts with what was sent (it moved into the reasoning, or restarted) is sent whole.
+ */
+export function compactFrame(frame, sent) {
+  const turn = frame?.run?.turn;
+  if (!turn || typeof turn !== 'object') return frame;
+  const out = { ...turn }, append = {};
+  for (const field of ['answer', 'reasoning']) {
+    const value = String(turn[field] ?? ''), before = sent[field];
+    if (typeof before === 'string' && value.length >= before.length && value.startsWith(before)) {
+      delete out[field];
+      if (value.length > before.length) append[field] = value.slice(before.length);
+    }
+    sent[field] = value;
+  }
+  for (const field of ['activity', 'sources']) {
+    const text = JSON.stringify(turn[field] ?? []);
+    if (sent[field] === text) delete out[field];
+    sent[field] = text;
+  }
+  return { ...frame, run: { ...frame.run, turn: out }, ...(Object.keys(append).length ? { append } : {}) };
 }
 
 /** runView for a client that is following the run (the polling fallback), which counts as watching it. */

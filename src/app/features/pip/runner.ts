@@ -1,13 +1,14 @@
 import { useSyncExternalStore } from "react";
 import { ReplyRunner, streamReply, type Decision, type RunnerEvent } from "../../../client/pip-core.js";
 import { resolve } from "../../../client/pip-credentials.js";
-import { serverRuns, streamReplyRemote } from "../../../client/pip-remote.js";
+import { streamReplyRemote } from "../../../client/pip-remote.js";
+import { connected } from "../../../client/cloud.js";
 import { suggestTitle } from "../../../client/pip-title.js";
 import { trainingChatRoutine, trainingReply } from "../../../client/pip-training-chat.js";
 import { chats, type ChatTurn } from "../../data/chats.ts";
 
 // One reply runner for the whole app, wired like the classic chat's:
-// - a reply runs on Pocket's server when the account offers it (it then survives a closed tab), else here;
+// - a signed-in chat always runs on Pocket's server (it survives a closed tab); a guest's runs in this tab;
 // - a COROS training routine's chat answers through its own path with the account's key;
 // - a fresh chat names itself after its first answer;
 // - writes Pip asks for wait for the person's decision (approvals).
@@ -32,7 +33,8 @@ function flush() { frame = 0; emit(); }
 const runner = new ReplyRunner(chats, {
   key: (value, chat) => trainingChatRoutine(chat.uid) ? "account-key" : resolve(value),
   remote: {
-    available: chat => trainingChatRoutine(chat.uid) ? Promise.resolve(false) : serverRuns({ chat: chat.uid, config: chat.config }).then(state => state.available),
+    // One rule, no lookup first: a signed-in chat runs on Pocket's server. A missing key is the server's clear answer.
+    available: chat => Promise.resolve(!trainingChatRoutine(chat.uid) && connected()),
     stream: streamReplyRemote,
   },
   stream: (chat, turn, options) => trainingChatRoutine(chat.uid) ? trainingReply(chat, turn, options) : streamReply(chat, turn, options),

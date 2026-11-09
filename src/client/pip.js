@@ -19,6 +19,7 @@ import { pipAway, openTraining } from './pip-away.js';
 import { pipScheduled, scheduledState } from './pip-scheduled.js';
 import { routineCaption, sortRoutines } from './pip-routine-model.js';
 import { serverRuns, streamReplyRemote } from './pip-remote.js';
+import { connected } from './cloud.js';
 import { trainingChatRoutine, trainingReply } from './pip-training-chat.js';
 import { suggestTitle } from './pip-title.js';
 import { resolve as resolveCredential, status as credentialStatus, save as saveCredential, forget as forgetCredential } from './pip-credentials.js';
@@ -26,7 +27,7 @@ import { resolve as resolveCredential, status as credentialStatus, save as saveC
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, viewportCleanup = null;
 const runner = new ReplyRunner(store, { key: (value, chat) => trainingChatRoutine(chat.uid) ? 'account-key' : resolveCredential(value),
-  remote: { available: chat => trainingChatRoutine(chat.uid) ? false : serverRuns({ chat: chat.uid, config: chat.config }).then(state => state.available), stream: streamReplyRemote },
+  remote: { available: chat => !trainingChatRoutine(chat.uid) && connected(), stream: streamReplyRemote },
   stream: (chat, turn, options) => trainingChatRoutine(chat.uid) ? trainingReply(chat, turn, options) : streamReply(chat, turn, options), title: suggestTitle, onChange: event => {
   if (event.type === "finished" || event.type === "approval") noticeAway(event);
   // The mascot left the header with the tab bar, so the Pip tab carries the activity cue now.

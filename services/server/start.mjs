@@ -5,7 +5,8 @@ import { spawn } from 'node:child_process';
 
 const children = [
   spawn(process.execPath, ['dist/server/entry.mjs'], { stdio: 'inherit', env: { ...process.env, HOST: process.env.HOST || '0.0.0.0', PORT: process.env.PORT || '8080' } }),
-  spawn(process.execPath, ['services/pip/worker.mjs'], { stdio: 'inherit', env: process.env }),
+  // Replies run in the web process (PIP_RUNS_MODE); the worker executes what it claims itself, inside its own loop.
+  spawn(process.execPath, ['services/pip/worker.mjs'], { stdio: 'inherit', env: { ...process.env, PIP_RUNS_MODE: '' } }),
 ];
 let stopping = false;
 const stop = (signal = 'SIGTERM') => {

@@ -69,6 +69,21 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
   if (!owner) throw new Error('Sign in to Pocket to run this reply on the server.');
   const device = deviceId(storage), requestId = turn.attempt || crypto.randomUUID();
   let runId = '', cursor = 0, changed = Date.now(), seen = '', failure = null, sending = 0, unwatch = () => {};
+  /**
+   * The reply as this tab has it. A streamed frame carries only what changed (pip-runs.js compactFrame): text added
+   * to the answer and reasoning in `append`, and no activity or sources when they did not change.
+   */
+  const shown = { answer: '', reasoning: '', activity: [], sources: [] };
+  const merge = view => {
+    const turn = view.run?.turn;
+    if (!turn) return null;
+    for (const field of ['answer', 'reasoning']) {
+      if (typeof turn[field] === 'string') shown[field] = turn[field];
+      if (typeof view.append?.[field] === 'string') shown[field] += view.append[field];
+    }
+    for (const field of ['activity', 'sources']) if (Array.isArray(turn[field])) shown[field] = turn[field];
+    return { ...turn, ...shown };
+  };
   /** Requests this tab has decided: a frame read before a decision landed still shows it pending. */
   const decided = new Set();
   const look = () => request('/api/pip/runs?request=' + encodeURIComponent(requestId) + '&after=' + cursor);
@@ -88,22 +103,24 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
     chat: { uid: chat.uid, title: chat.title, titled: Boolean(chat.titled), created: chat.created, config: chat.config } }));
 
   /** What one snapshot means for this reply: progress to show, a settled answer, or a question to answer. */
-  const step = async view => {
+  const step = async (view, streamed = false) => {
     const run = view.run;
     // Until the submit has created the run there is nothing to show yet.
     if (!run) { if (runId) throw new Error('This reply is no longer available on the server.'); return null; }
     runId = run.runId;
+    const turnNow = merge(view);
     // Live progress: the run's own turn carries the answer so far, its tool activity and its phase. The runtime
     // marker is what the chat shows as “on the server”, so a reply can be told apart from a tab-run one.
-    const mark = JSON.stringify([run.status, run.turn, view.requests]);
-    if (mark !== seen) {
+    // A streamed frame is a change by construction; a polled view may repeat the last one.
+    const mark = streamed ? '' : JSON.stringify([run.status, turnNow, view.requests]);
+    if (streamed || mark !== seen) {
       seen = mark; changed = Date.now();
-      if (run.turn) onUpdate({ answer: run.turn.answer || '', reasoning: run.turn.reasoning || '', activity: run.turn.activity || [],
-        sources: run.turn.sources || [], usage: { ...(run.turn.usage || {}), runtime: 'pocket-server' }, model: run.turn.model || turn.model, phase: run.turn.phase || 'requesting' });
+      if (turnNow) onUpdate({ answer: turnNow.answer || '', reasoning: turnNow.reasoning || '', activity: turnNow.activity || [],
+        sources: turnNow.sources || [], usage: { ...(turnNow.usage || {}), runtime: 'pocket-server' }, model: turnNow.model || turn.model, phase: turnNow.phase || 'requesting' });
     }
-    if (run.status === 'done') return { ...run.turn, phase: 'done' };
-    if (run.status === 'failed') throw new Error(run.turn?.error || 'The server reply failed.');
-    if (run.status === 'stopped') throw Object.assign(new Error(run.turn?.error || 'Stopped. Continue or retry when you’re ready.'), { name: 'RunStopped' });
+    if (run.status === 'done') return { ...turnNow, phase: 'done' };
+    if (run.status === 'failed') throw new Error(turnNow?.error || 'The server reply failed.');
+    if (run.status === 'stopped') throw Object.assign(new Error(turnNow?.error || 'Stopped. Continue or retry when you’re ready.'), { name: 'RunStopped' });
     if (run.status === 'awaiting') {
       const open = (view.requests || []).filter(item => item.state === 'pending'), asking = open.filter(item => !decided.has(item.id));
       // Every request is settled but the request that would continue the run ended first: continue it from here.
@@ -143,7 +160,7 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
       if (!response?.ok || !response.body || !type.includes('text/event-stream')) return { live: watch.signal.aborted };
       for await (const view of frames(response.body)) {
         if (Number.isSafeInteger(view.cursor) && view.cursor) cursor = view.cursor;
-        const done = await step(view);
+        const done = await step(view, true);
         if (done) return { live: true, done };
         if (watch.signal.aborted) break;
       }

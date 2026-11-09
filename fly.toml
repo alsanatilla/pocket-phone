@@ -12,8 +12,9 @@ kill_timeout = "30s"
   NODE_ENV = "production"
   PORT = "8080"
   BETTER_AUTH_URL = "https://pocket-phone.fly.dev"
-  # Replies are queued and answered by the worker in this same machine, on the same code.
-  PIP_RUNS_DETACHED = "1"
+  # A reply runs in the web process that received it; followers get it live from memory (src/server/pip-live.js).
+  # The worker beside it runs scheduled jobs and anything another deployment queued.
+  PIP_RUNS_MODE = "inprocess"
   PIP_ROUTINES_EVERY_MS = "60000"
   PIP_WORKER_CONCURRENCY = "2"
 

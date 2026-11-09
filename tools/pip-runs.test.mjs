@@ -540,3 +540,40 @@ test('a matching background key uses the model explicitly selected for the chat'
   assert.equal(result.run.status, 'done', result.run.turn.error);
   assert.equal(sent[0].model, selected.model);
 });
+
+test('on a long-running server a run executes in the process, and followers get it live from memory', async () => {
+  const userId = await account(), before = process.env.PIP_RUNS_MODE;
+  process.env.PIP_RUNS_MODE = 'inprocess';
+  try {
+    let release; const held = new Promise(resolve => { release = resolve; });
+    const fetcher = async () => { await held; return response(compatibleMessage({ text: 'The blue car costs 21,000 euros, as your note says.' })); };
+    // The submit answers at once: the reply runs on in this process, not inside the request.
+    const submitted = await runs.submitRun(userId, { requestId: 'req-inprocess', chat: header('chat-inprocess'), text: 'Blue car?', device: 'browser-1' }, { fetcher });
+    assert.equal(submitted.run.status, 'running');
+    const frames = [];
+    const following = (async () => { for await (const frame of runs.runFrames(userId, { request: 'req-inprocess', ttl: 5000 })) { if (frame) frames.push(frame); if (frame?.run && frame.run.status === 'done') break; } })();
+    release();
+    await runs.settledRuns(); await following;
+    // Put together the way a tab does it, the frames give exactly the finished reply.
+    const shown = { answer: '' };
+    for (const frame of frames) { if (typeof frame.run.turn.answer === 'string') shown.answer = frame.run.turn.answer; if (frame.append?.answer) shown.answer += frame.append.answer; }
+    assert.equal(shown.answer, 'The blue car costs 21,000 euros, as your note says.');
+    assert.equal(frames.at(-1).run.status, 'done');
+    assert.equal((await chatOf(userId, 'chat-inprocess')).turns.at(-1).answer, 'The blue car costs 21,000 euros, as your note says.');
+  } finally { if (before === undefined) delete process.env.PIP_RUNS_MODE; else process.env.PIP_RUNS_MODE = before; }
+});
+
+test('a follower gets only what changed: text added, and activity only when it changed', () => {
+  const sent = {}, frame = turn => ({ run: { runId: 'r', status: 'running', turn }, requests: [] });
+  const activity = [{ id: 'a', name: 'search_notes', state: 'done', result: 'x'.repeat(5000) }];
+  const first = runs.compactFrame(frame({ answer: 'Hello', reasoning: '', activity, sources: [] }), sent);
+  assert.equal(first.run.turn.answer, 'Hello'); assert.equal(first.append, undefined);
+  const second = runs.compactFrame(frame({ answer: 'Hello world', reasoning: '', activity, sources: [] }), sent);
+  assert.equal(second.run.turn.answer, undefined); assert.deepEqual(second.append, { answer: ' world' });
+  assert.equal(second.run.turn.activity, undefined, 'unchanged activity is not sent again');
+  // A tool round moves the answer into the reasoning: the answer starts over and is sent whole.
+  const third = runs.compactFrame(frame({ answer: '', reasoning: 'Hello world', activity: [...activity, { id: 'b', state: 'running' }], sources: [] }), sent);
+  assert.equal(third.run.turn.answer, ''); assert.deepEqual(third.append, { reasoning: 'Hello world' });
+  assert.equal(third.run.turn.activity.length, 2);
+  assert.ok(JSON.stringify(second).length < 300, 'a text delta is a small frame even with large tool results');
+});
