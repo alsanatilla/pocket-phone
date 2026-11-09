@@ -1,5 +1,6 @@
-import { useState, type KeyboardEvent, type SyntheticEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type SyntheticEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { cn } from "@/lib/utils";
 import { NOTE_LIMIT } from "../../data/notes.ts";
 import { thoughtAnnotations } from "../../data/thoughts.ts";
 import { Markdown } from "../../ui/Markdown.tsx";
@@ -9,8 +10,8 @@ import { useNoteEditor } from "./useNoteEditor.ts";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-// One note: the page is the page. One bar for where you are and what you can do with it, then the text at a
-// comfortable measure — editing and previewing share the same surface, so switching does not move the words.
+// One note: the page is the page. A quiet bar for where you are and what you can do with it, then the words at a
+// reading measure. Editing and previewing share that measure and that surface, so switching never moves the text.
 
 let previewing = false; // kept across notes for this visit, like the classic editor
 
@@ -26,6 +27,16 @@ export function NoteEditor({ uid, fresh }: { uid: string; fresh: boolean }) {
   const note = useNoteEditor(uid, fresh);
   // A new note always opens to type.
   const [preview, setPreview] = useState(previewing && note.stored);
+  const toggle = useRef(() => {});
+
+  // ⌘E / Ctrl+E toggles preview, the one shortcut a writing surface needs.
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "e") { event.preventDefault(); toggle.current(); }
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, []);
 
   if (!note.exists) {
     return <main className="pt-4">
@@ -34,7 +45,7 @@ export function NoteEditor({ uid, fresh }: { uid: string; fresh: boolean }) {
     </main>;
   }
 
-  const togglePreview = () => { note.flush(); previewing = !preview; setPreview(!preview); };
+  toggle.current = () => { note.flush(); previewing = !previewing; setPreview(previewing); };
   const remove = async () => {
     note.flush();
     if (!await confirm({ title: "Delete this note on all devices?", confirmLabel: "delete", danger: true })) return;
@@ -45,28 +56,36 @@ export function NoteEditor({ uid, fresh }: { uid: string; fresh: boolean }) {
   };
   const status = STATUS[note.status];
   const parked = note.parked ? `${note.parked} thought${note.parked === 1 ? "" : "s"} parked` : "";
+  const dot = note.error ? "bg-destructive" : note.status === "saving" ? "bg-primary animate-pulse" : note.status === "draft" ? "bg-muted-foreground" : "bg-movement";
 
   return (
     <main className="pb-4">
       <div className="sticky top-[60px] z-[5] -mx-1 flex flex-wrap items-center gap-1 bg-background/95 py-1 backdrop-blur">
         <Link to="/notes" className="px-1 py-2 text-sm text-muted-foreground no-underline hover:text-foreground">‹ notes</Link>
-        <span className="ml-2 text-[10px] uppercase tracking-[0.08em] text-dim" aria-live="polite">{status}{parked ? " · " + parked : ""}</span>
+        <span className="ml-2 flex items-center gap-1.5 text-[10px] uppercase tracking-[0.08em] text-dim" aria-live="polite">
+          <span aria-hidden="true" className={cn("size-1.5 rounded-full", dot)} />
+          {status}{parked ? " · " + parked : ""}
+        </span>
         <span className="flex-1" />
-        <Button variant="outline" className="h-10" onClick={togglePreview}>{preview ? "edit" : "preview"}</Button>
+        <Button variant="outline" className="h-10" onClick={() => toggle.current()}>{preview ? "edit" : "preview"}</Button>
         <Button variant="ghost" className="h-10" onClick={note.togglePin} disabled={!note.stored}>{note.pinned ? "unpin" : "pin"}</Button>
         <Button variant="ghost" className="h-10 text-destructive" onClick={() => void remove()}>delete</Button>
       </div>
 
       {note.error ? <p role="alert" className="mt-2 text-sm text-destructive">{note.error}</p> : null}
 
-      {preview
-        ? <Markdown text={note.text} options={{ annotations: thoughtAnnotations(note.stored ? uid : null, note.text) }}
-            className="prose mt-2 min-h-[40vh] rounded-md border bg-card p-4" />
-        : <Textarea value={note.text} maxLength={NOTE_LIMIT} spellCheck autoFocus aria-label="Note text"
-            placeholder={"# Title\n\nWrite in Markdown…  >> a thought @tomorrow parks it"}
-            className="mt-2 min-h-[65vh] resize-y rounded-md border bg-card p-4 text-[15px] leading-relaxed"
-            onChange={event => note.edit(event.target.value, cursorLine(event))}
-            onKeyUp={onKeyUp} onBlur={note.flush} />}
+      <div className="group mt-2 rounded-md border bg-card transition-colors focus-within:border-ring">
+        {preview
+          ? <Markdown text={note.text} options={{ annotations: thoughtAnnotations(note.stored ? uid : null, note.text) }}
+              className="note-prose min-h-[40vh] px-4 py-4" />
+          : <Textarea value={note.text} maxLength={NOTE_LIMIT} spellCheck autoFocus aria-label="Note text"
+              placeholder={"# Title\n\nWrite in Markdown…  >> a thought @tomorrow parks it"}
+              className="min-h-[60vh] resize-y border-0 bg-transparent px-4 py-4 text-[15px] leading-[1.7] shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
+              onChange={event => note.edit(event.target.value, cursorLine(event))}
+              onKeyUp={onKeyUp} onBlur={note.flush} />}
+      </div>
+
+      <p className="mt-2 text-[11px] text-dim">» at the start of a line parks a thought · # makes a heading · saved as you type · ⌘E previews</p>
     </main>
   );
 }

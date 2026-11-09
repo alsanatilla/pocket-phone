@@ -145,6 +145,30 @@
 }
 
 /*
+ * A note's preview: the same measure and rhythm as the editor above it, so toggling never moves the words. Only
+ * the note uses this; Pip's replies keep the more compact .prose above.
+ */
+@layer components {
+  .note-prose { max-width: 62ch; margin: 0 auto; font-size: 15px; line-height: 1.7; }
+  .note-prose h1 { font-family: var(--font-pixel); font-size: 30px; line-height: 1.05; margin: 0 0 14px; }
+  .note-prose h2 { font-family: var(--font-pixel); font-size: 24px; line-height: 1.15; margin: 24px 0 8px; }
+  .note-prose h3, .note-prose h4 { font-family: var(--font-pixel); font-size: 19px; line-height: 1.2; margin: 20px 0 6px; }
+  .note-prose p { margin: 0 0 14px; }
+  .note-prose ul, .note-prose ol { margin: 0 0 14px; padding-left: 1.25rem; }
+  .note-prose ul { list-style: disc; }
+  .note-prose ol { list-style: decimal; }
+  .note-prose li + li { margin-top: 4px; }
+  .note-prose blockquote { margin: 0 0 14px; padding-left: 12px; border-left: 2px solid var(--border); color: var(--muted-foreground); }
+  .note-prose hr { border: 0; border-top: 1px dashed var(--border); margin: 24px 0; }
+  .note-prose code { font-size: 13px; padding: 1px 4px; border-radius: 2px; background: var(--muted); }
+  .note-prose pre { font-size: 13px; line-height: 1.55; padding: 12px; margin: 0 0 14px; border-radius: var(--radius-md); background: var(--muted); overflow-x: auto; }
+  .note-prose a { color: var(--primary); text-underline-offset: 2px; }
+  .note-prose strong { font-weight: 500; }
+  .note-prose .thought-line { color: var(--muted-foreground); }
+  .note-prose .thought-line .accent { color: var(--primary); }
+}
+
+/*
  * Cards inside Pip's answers: json-render markup from src/client/pip-cards.jsx (its own small catalog, which the
  * chat prompt describes). The markup is not ours to class, so it is styled here, in the same scale as the surfaces.
  */
