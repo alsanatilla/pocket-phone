@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createStateStore, type Spec, type StateStore } from "@json-render/core";
 import { activeAccount } from "../../client/workspace-storage.js";
-import { settings } from "../../client/pip-core.js";
+import { configFor, readProfile } from "../data/ai.ts";
 import { resolve } from "../../client/pip-credentials.js";
 import { subscribe } from "../data/bus.ts";
 import { readMoment, momentKey, type Moment } from "./context.ts";
@@ -46,8 +46,12 @@ function useMomentStore(): { store: StateStore; moment: Moment } {
   return { store, moment };
 }
 
-async function modelConnected(): Promise<boolean> {
-  try { return Boolean(await resolve(settings())); } catch { return false; }
+/** Arrange by itself only when the person allows it and a model is connected. */
+async function mayArrange(): Promise<boolean> {
+  try {
+    const profile = readProfile();
+    return profile.autoArrange && Boolean(await resolve(configFor(profile, "surface")));
+  } catch { return false; }
 }
 
 export function useSurface() {
@@ -91,7 +95,7 @@ export function useSurface() {
     if (cached) { setSpec(cached); setStatus("arranged"); return; }
     setSpec(fallbackSurface(momentRef.current)); setStatus("standard");
     let live = true;
-    void modelConnected().then(ok => { if (live && ok) void arrange(); });
+    void mayArrange().then(ok => { if (live && ok) void arrange(); });
     return () => { live = false; };
   }, [key, arrange]);
 

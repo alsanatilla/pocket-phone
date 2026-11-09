@@ -6,6 +6,9 @@ export interface PipConfig { provider: "anthropic" | "compatible"; model: string
 export const DEFAULT_CONFIG: Readonly<PipConfig>;
 /** Pocket's saved default; throws when the saved settings cannot be read. */
 export function settings(storage?: Storage): PipConfig;
+/** Validates and normalises a config; throws with a readable message when it is not usable. */
+export function config(value?: Partial<PipConfig>): PipConfig;
+export function saveSettings(value: PipConfig, storage?: Storage): void;
 
 export class ChatStore {
   constructor(storage?: Storage);

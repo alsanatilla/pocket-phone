@@ -1,6 +1,6 @@
 import { streamText } from "ai";
 import { autoFixSpec, buildUserPrompt, createSpecStreamCompiler, validateSpec, type Spec } from "@json-render/core";
-import { settings } from "../../client/pip-core.js";
+import { configFor, readProfile } from "../data/ai.ts";
 import { resolve } from "../../client/pip-credentials.js";
 import { providerError, providerModel } from "../../client/pip-provider.js";
 import { catalog } from "./catalog.ts";
@@ -11,7 +11,7 @@ import type { Moment } from "./context.ts";
 // lines; the compiler turns them into a spec as they arrive, so the screen builds up while it writes.
 
 export class NoModel extends Error {
-  constructor() { super("Connect a model in Pip's settings to let Pocket arrange this screen."); this.name = "NoModel"; }
+  constructor() { super("Connect a model in settings to let Pip arrange this screen."); this.name = "NoModel"; }
 }
 
 const SYSTEM = [
@@ -43,7 +43,7 @@ export interface StreamOptions { signal: AbortSignal; onSpec: (spec: Spec) => vo
 
 /** Streams a surface for `moment`. Resolves with the final, validated spec; rejects with NoModel or a safe error. */
 export async function streamSurface(moment: Moment, { signal, onSpec }: StreamOptions): Promise<Spec> {
-  const value = settings();
+  const value = configFor(readProfile(), "surface");
   const credential = await resolve(value);
   if (!credential) throw new NoModel();
   const compiler = createSpecStreamCompiler<Spec>();

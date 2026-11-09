@@ -40,7 +40,12 @@ const pip = createRoute({
   component: lazyRouteComponent(() => import("./features/pip/PipPage.tsx"), "PipPage"),
 });
 
-const routeTree = root.addChildren([index, today, notes, note, pip]);
+const settings = createRoute({
+  getParentRoute: () => root, path: "settings",
+  component: lazyRouteComponent(() => import("./features/settings/SettingsPage.tsx"), "SettingsPage"),
+});
+
+const routeTree = root.addChildren([index, today, notes, note, pip, settings]);
 
 export const router = createRouter({
   routeTree,

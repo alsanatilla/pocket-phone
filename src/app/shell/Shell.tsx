@@ -1,4 +1,5 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
+import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { DialogHost } from "../ui/dialog/DialogHost.tsx";
@@ -24,6 +25,8 @@ export function Shell() {
           ))}
         </nav>
         <a href={"/#" + path} className="ml-auto border-b text-[11px] text-dim no-underline">classic</a>
+        <Link to="/settings" aria-label="Settings" className="grid size-11 place-items-center text-muted-foreground hover:text-foreground"
+          activeProps={{ className: "text-primary", "aria-current": "page" }}><Settings className="size-5" /></Link>
       </header>
       <Outlet />
       <Toaster position="bottom-center" />
