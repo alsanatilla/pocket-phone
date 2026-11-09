@@ -6,7 +6,6 @@ import { preloadPages, router } from "./router.tsx";
 import { captureReturn } from "./features/settings/openrouter.ts";
 import { startRuntime } from "./runtime.ts";
 import { CLASSIC } from "./lib/classic.ts";
-import "@fontsource-variable/atkinson-hyperlegible-next";
 import "./styles/global.css";
 
 // Entry of the Pocket client. Data, sync and Pip's runtime come from src/client and src/shared; routing, views

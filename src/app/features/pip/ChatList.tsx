@@ -30,7 +30,7 @@ export function ChatList({ open, onOpenChange, current, onPick, onNew }: {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="left" className="w-[85vw] max-w-sm gap-0 p-0">
         <SheetHeader className="border-b">
-          <SheetTitle className="text-lg font-semibold">chats</SheetTitle>
+          <SheetTitle className="font-pixel text-2xl font-normal">chats</SheetTitle>
           <SheetDescription>{chats.length} conversations</SheetDescription>
         </SheetHeader>
         <div className="p-2"><Button className="w-full" onClick={onNew}><Plus /> new chat</Button></div>
@@ -38,8 +38,8 @@ export function ChatList({ open, onOpenChange, current, onPick, onNew }: {
           {chats.map(chat => (
             <li key={chat.uid} className={cn("group flex items-center rounded-md", chat.uid === current && "bg-accent")}>
               <button className="min-w-0 flex-1 px-2 py-2.5 text-left" onClick={() => onPick(chat.uid)} aria-current={chat.uid === current ? "page" : undefined}>
-                <p className="truncate text-sm">{chat.pinned ? <span className="mr-1.5 text-xs text-primary">pinned</span> : null}{chat.title || "untitled"}</p>
-                <p className="text-xs text-dim">{when(chat.updated)} · {chat.turns.length} {chat.turns.length === 1 ? "message" : "messages"}</p>
+                <p className="truncate text-sm">{chat.pinned ? <span className="mr-1.5 text-[11px] text-primary">pinned</span> : null}{chat.title || "untitled"}</p>
+                <p className="text-[11px] text-dim">{when(chat.updated)} · {chat.turns.length} {chat.turns.length === 1 ? "message" : "messages"}</p>
               </button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={"Options for " + chat.title}><MoreHorizontal /></Button></DropdownMenuTrigger>

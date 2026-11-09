@@ -16,7 +16,7 @@ function Frame({ title, description, children, footer, onSubmit }: { title: stri
   return (
     <form onSubmit={event => { event.preventDefault(); onSubmit?.(); }} className="grid gap-4">
       <AlertDialogHeader>
-        <AlertDialogTitle className="text-lg font-semibold leading-tight">{title}</AlertDialogTitle>
+        <AlertDialogTitle className="font-pixel text-2xl font-normal leading-tight">{title}</AlertDialogTitle>
         {description ? <AlertDialogDescription>{description}</AlertDialogDescription> : null}
       </AlertDialogHeader>
       {children}

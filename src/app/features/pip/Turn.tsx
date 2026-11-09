@@ -16,14 +16,6 @@ import { hrefFor } from "../../lib/classic.ts";
 // One exchange: the question, then Pip's reply with its parts in reading order: what it looked up (folded to one
 // line once the reply is done), its plan, its reasoning, the answer with its cards, sources, and what it offers.
 
-/** "rki.de" from a link; Pocket's own records keep their title. */
-const siteOf = (href: string) => { try { return new URL(href).hostname.replace(/^www\./, ""); } catch { return href; } };
-/** One line for a reply's sources: how many, and the first few sites. */
-export function sourceLine(sources: { href: string; title: string }[]): string {
-  const sites = [...new Set(sources.map(source => source.href.startsWith("/") ? source.title : siteOf(source.href)))];
-  return `${sources.length} ${sources.length === 1 ? "source" : "sources"} · ${sites.slice(0, 3).join(", ")}${sites.length > 3 ? " …" : ""}`;
-}
-
 const clock = (at: number) => new Date(Number(at) || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 
 function Fold({ title, open, children, tone = "text-muted-foreground" }: { title: string; open?: boolean; children: React.ReactNode; tone?: string }) {
@@ -83,7 +75,7 @@ function TurnView({ turn, live, chatId, latest, locked }: TurnProps) {
     <article className={cn("space-y-3", Date.now() - shown.created < 4000 && "arrive")}>
       <div className="ml-auto w-fit max-w-[85%] rounded-lg rounded-br-sm bg-secondary px-3.5 py-2">
         <p className="whitespace-pre-wrap text-sm">{shown.text}</p>
-        <p className="mt-1 text-right text-xs text-dim">{clock(shown.created)}</p>
+        <p className="mt-1 text-right text-[10px] text-dim">{clock(shown.created)}</p>
       </div>
 
       <div className="space-y-2.5 border-l-2 border-primary/60 pl-3.5">
@@ -119,17 +111,12 @@ function TurnView({ turn, live, chatId, latest, locked }: TurnProps) {
         {streaming && !shown.answer ? <Thinking label={phaseLabel(shown.phase || "thinking")} /> : null}
 
         {sources.length && !streaming ? (
-          <Fold title={sourceLine(sources)}>
-            <ul className="space-y-1.5">
-              {sources.map(source => (
-                <li key={source.href} className="text-sm">
-                  <a href={source.href.startsWith("/") ? hrefFor(source.href) : source.href} target={source.href.startsWith("/") ? undefined : "_blank"} rel="noopener noreferrer"
-                    className="text-foreground underline decoration-border underline-offset-4 hover:decoration-primary">{source.title}</a>
-                  {source.href.startsWith("/") ? null : <span className="text-xs text-muted-foreground"> · {siteOf(source.href)}</span>}
-                </li>
-              ))}
-            </ul>
-          </Fold>
+          <div className="flex flex-wrap gap-1.5">
+            {sources.map(source => (
+              <a key={source.href} href={source.href.startsWith("/") ? hrefFor(source.href) : source.href} target={source.href.startsWith("/") ? undefined : "_blank"} rel="noopener noreferrer"
+                className="max-w-full truncate rounded-sm border px-2 py-0.5 text-[11px] text-muted-foreground no-underline hover:border-primary hover:text-foreground">{source.title}</a>
+            ))}
+          </div>
         ) : null}
 
         {offers.length ? <div className="space-y-2">{offers.map(offer => <OfferCard key={offer.row.id} offer={offer} chatId={chatId} turnId={shown.uid} locked={locked && !streaming} />)}</div> : null}

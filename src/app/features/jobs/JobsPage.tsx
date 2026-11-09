@@ -25,7 +25,7 @@ const KIND_NAME: Record<string, string> = { checkin: "check-in", brief: "brief",
 function Section({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <section className="space-y-2">
-      <div className="flex items-center justify-between"><h2 className="text-sm font-semibold">{title}</h2>{action}</div>
+      <div className="flex items-center justify-between"><h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-primary">{title}</h2>{action}</div>
       {children}
     </section>
   );
@@ -44,7 +44,7 @@ function Setup({ state, onSetup, busy }: { state: JobsState; onSetup: ReturnType
   });
   return (
     <div className="arrive space-y-3 rounded-lg border bg-card p-4">
-      <p className="text-lg font-semibold">Let Pip work on its own</p>
+      <p className="font-pixel text-2xl leading-none">let pip work on its own</p>
       <p className="text-sm text-muted-foreground">Jobs run on Pocket's server, with {config ? modelLabel(config.model) : "your model"} through {provider} and the key you keep in your account. Pip reads only what you allow in settings and never saves anything without you.</p>
       <div className="flex items-center gap-2 text-sm">
         <span className="text-muted-foreground">at most</span>

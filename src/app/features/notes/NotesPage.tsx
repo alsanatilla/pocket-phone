@@ -53,7 +53,7 @@ export function NotesPage() {
             <Link key={note.uid} to="/notes/$noteId" params={{ noteId: note.uid }}
               className="group flex min-h-11 flex-col gap-0.5 border-t border-dashed py-3 no-underline">
               <span className="group-hover:text-primary">
-                {note.pinned ? <span className="mr-2 text-xs text-primary">pinned</span> : null}{noteTitle(note)}
+                {note.pinned ? <span className="mr-2 text-[11px] text-primary">pinned</span> : null}{noteTitle(note)}
               </span>
               <span className="truncate text-xs text-dim">{shortDate(note.updated)}{excerpt ? " · " + excerpt : ""}</span>
               <Chips note={note} />

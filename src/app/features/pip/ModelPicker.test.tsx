@@ -14,7 +14,7 @@ describe("composer model picker", () => {
     render(<ModelPicker chat={chat} busy={false} />);
     fireEvent.click(screen.getByRole("button", { name: "Choose model" }));
     const choice = await screen.findByRole("button", { name: /Tool model/ });
-    expect(choice.textContent).toContain("128k context");
+    expect(choice.textContent).toContain("128k"); expect(choice.textContent).toContain("reasoning");
     expect(screen.getByRole("button", { name: /No tools/ }).hasAttribute("disabled")).toBe(true);
     fireEvent.change(screen.getByRole("textbox", { name: "Search free models" }), { target: { value: "tool-model" } });
     expect(screen.queryByRole("button", { name: /No tools/ })).toBeNull();

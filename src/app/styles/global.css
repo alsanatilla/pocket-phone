@@ -30,7 +30,7 @@
   --secondary: #26231e;
   --secondary-foreground: #f0e9dd;
   --muted: #1e1c18;
-  --muted-foreground: #cdc3b3;
+  --muted-foreground: #b6ac9d;
   --accent: #2c2820;
   --accent-foreground: #ecc981;
   --destructive: #efa58e;
@@ -39,7 +39,7 @@
   --input: #3e392f;
   --ring: #ecc981;
   /* Pocket's own signal colours, also used by charts. */
-  --dim: #a39b8d;
+  --dim: #6b675e;
   --calendar: #a5bfdc;
   --thought: #c1aed5;
   --movement: #adbf9c;
@@ -61,12 +61,9 @@
 }
 
 @theme inline {
-  --font-sans: "Atkinson Hyperlegible Next Variable", "Atkinson Hyperlegible Next", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Atkinson Hyperlegible Mono", ui-monospace, Menlo, Consolas, monospace;
   --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, Menlo, Consolas, monospace;
   --font-pixel: "VT323", "Atkinson Hyperlegible Mono", monospace;
-  /* The smallest text in Pocket: notes under things, never below 13px. */
-  --text-xs: 0.8125rem;
-  --text-xs--line-height: 1.45;
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
@@ -115,10 +112,8 @@
 @layer base {
   * { @apply border-border outline-ring/50; }
   html, body { @apply bg-background text-foreground; }
-  body { font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased; font-synthesis-weight: none; }
-  b, strong { font-weight: 600; }
-  /* Figures line up in tables, metrics and times. */
-  table, time, .tabular { font-variant-numeric: tabular-nums; }
+  body { font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; font-synthesis-weight: none; }
+  b, strong { font-weight: 500; }
   :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; } }
 }
@@ -137,14 +132,14 @@
   .arrive { animation: var(--animate-rise); }
 
   .prose p { margin: 0 0 10px; }
-  .prose h2, .prose h3, .prose h4 { font-size: 17px; font-weight: 600; line-height: 1.35; margin: 16px 0 6px; }
+  .prose h2, .prose h3, .prose h4 { font-family: var(--font-pixel); font-size: 22px; line-height: 1.2; margin: 14px 0 6px; }
   .prose ul { list-style: disc; padding-left: 1.25rem; margin: 0 0 10px; }
   .prose ol { list-style: decimal; padding-left: 1.25rem; margin: 0 0 10px; }
-  .prose code { font-family: var(--font-mono); font-size: 0.9em; background: var(--muted); padding: 0 4px; }
-  .prose pre { font-family: var(--font-mono); font-size: 13px; background: var(--muted); padding: 10px 12px; overflow-x: auto; margin: 0 0 10px; }
+  .prose code { background: var(--muted); padding: 0 4px; }
+  .prose pre { background: var(--muted); padding: 10px 12px; overflow-x: auto; margin: 0 0 10px; }
   .prose blockquote { border-left: 2px solid var(--border); margin: 0 0 10px; padding-left: 12px; color: var(--muted-foreground); }
   .prose .thought-line .accent { color: var(--primary); }
-  .prose .meta, .prose .muted { color: var(--muted-foreground); font-size: 13px; }
+  .prose .meta, .prose .muted { color: var(--muted-foreground); font-size: 12px; }
   .prose a { color: var(--primary); }
   .prose .md-pending { white-space: pre-wrap; }
 }
@@ -156,24 +151,24 @@
 @layer components {
   .pocket-card { margin: 14px 0 6px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); padding: 14px 16px; overflow: hidden; }
   .pocket-bar { height: 3px; margin: -14px -16px 12px; background: linear-gradient(90deg, var(--primary), transparent); }
-  .pocket-title { font-size: 17px; font-weight: 600; line-height: 1.3; }
-  .pocket-sub { margin-top: 2px; font-size: 13px; color: var(--muted-foreground); }
+  .pocket-title { font-family: var(--font-pixel); font-size: 24px; line-height: 1; color: var(--primary); }
+  .pocket-sub { margin-top: 2px; font-size: 12px; color: var(--muted-foreground); }
   .pocket-body { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
   .pocket-section { display: flex; flex-direction: column; gap: 8px; }
-  .pocket-text { font-size: 15px; }
+  .pocket-text { font-size: 14px; }
   .pocket-muted { color: var(--muted-foreground); }
-  .pocket-label { font-size: 13px; color: var(--muted-foreground); }
+  .pocket-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-foreground); }
   .pocket-fields { display: flex; flex-direction: column; }
   .pocket-row { display: grid; grid-template-columns: minmax(72px, 35%) minmax(0, 1fr); gap: 12px; padding: 7px 0; border-top: 1px dashed var(--border); }
   .pocket-row:first-child { border-top: 0; }
-  .pocket-k { font-size: 13px; color: var(--muted-foreground); }
-  .pocket-v { font-size: 15px; }
-  .pocket-table { display: grid; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .pocket-k { font-size: 12px; color: var(--muted-foreground); }
+  .pocket-v { font-size: 14px; }
+  .pocket-table { display: grid; font-size: 13px; }
   .pocket-tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 7px 0; border-top: 1px dashed var(--border); }
   .pocket-tr.pocket-thead { border-top: 0; padding-top: 0; }
   .pocket-tr.pocket-c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .pocket-tr.pocket-c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .pocket-th { font-size: 13px; color: var(--muted-foreground); }
+  .pocket-th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-foreground); }
   .pocket-td { overflow: hidden; text-overflow: ellipsis; }
   .pocket-chart { display: flex; flex-direction: column; gap: 6px; }
   .pocket-bars { display: flex; align-items: flex-end; gap: 3px; height: 64px; }
@@ -184,7 +179,7 @@
   .pocket-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
   .pocket-button, .pocket-link {
     display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--radius-md);
-    font-size: 14px; color: var(--primary); cursor: pointer; text-decoration: none; transition: border-color .15s, background .15s;
+    font-size: 13px; color: var(--primary); cursor: pointer; text-decoration: none; transition: border-color .15s, background .15s;
   }
   .pocket-button:hover, .pocket-button:focus-visible, .pocket-link:hover { border-color: var(--primary); }
   .pocket-button.pocket-primary { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }

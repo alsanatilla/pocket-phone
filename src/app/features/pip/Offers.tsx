@@ -28,7 +28,7 @@ function Frame({ kind, title, children }: { kind: string; title: string; childre
   return (
     <section className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-card px-3 py-2">
       <div className="min-w-0 flex-1">
-        <p className="text-xs text-primary first-letter:uppercase">{kind}</p>
+        <p className="text-[11px] uppercase tracking-[0.08em] text-primary">{kind}</p>
         <p className="text-sm">{title}</p>
       </div>
       <div className="flex gap-1">{children}</div>
@@ -93,7 +93,7 @@ export function OfferCard({ offer, chatId, turnId, locked }: { offer: Offer; cha
         <Button size="sm" disabled={locked} onClick={() => setReviewing(true)}>review</Button>
         <Dialog open={reviewing} onOpenChange={setReviewing}>
           <DialogContent>
-            <DialogHeader><DialogTitle className="text-lg font-semibold">new {offer.proposal.kind}</DialogTitle><DialogDescription>Pip suggested this. Change anything, then save.</DialogDescription></DialogHeader>
+            <DialogHeader><DialogTitle className="font-pixel text-2xl font-normal">new {offer.proposal.kind}</DialogTitle><DialogDescription>Pip suggested this. Change anything, then save.</DialogDescription></DialogHeader>
             <ProposalForm proposal={offer.proposal} onSubmit={save} submitLabel={"save " + offer.proposal.kind} />
           </DialogContent>
         </Dialog>
@@ -137,7 +137,7 @@ export function OfferCard({ offer, chatId, turnId, locked }: { offer: Offer; cha
           {editable ? (
             <Dialog open={reviewing} onOpenChange={setReviewing}>
               <DialogContent>
-                <DialogHeader><DialogTitle className="text-lg font-semibold">{offer.title}</DialogTitle><DialogDescription>Pip wants to save this. Change anything, then approve.</DialogDescription></DialogHeader>
+                <DialogHeader><DialogTitle className="font-pixel text-2xl font-normal">{offer.title}</DialogTitle><DialogDescription>Pip wants to save this. Change anything, then approve.</DialogDescription></DialogHeader>
                 <ProposalForm proposal={offer.input as unknown as CreateProposal} submitLabel="approve"
                   onSubmit={value => { decide(turnId, offer.row.id, { approved: true, input: value }); setReviewing(false); }} />
               </DialogContent>

@@ -23,7 +23,8 @@ function Empty({ onAsk }: { onAsk: (prompt: string) => void }) {
   const { due } = daySummary(listTasks(), today());
   const ideas = starters({ enabled, overdue: due.filter(task => task.due < today()).length, thoughts: openThoughts().length });
   return (
-    <div className="space-y-4 py-6">
+    <div className="space-y-4 py-8">
+      <p className="font-pixel text-5xl leading-none text-primary">pip</p>
       <p className="max-w-prose text-sm text-muted-foreground">Ask about anything you keep in Pocket. Pip only reads what you allow in settings, and nothing is saved without you.</p>
       <div className="grid gap-2">
         {ideas.map(idea => (
@@ -82,13 +83,13 @@ export function PipPage() {
     <main className="flex min-h-[calc(100dvh-72px)] flex-col">
       <div className="sticky top-[60px] z-[5] flex items-center gap-2 bg-background py-1.5">
         <button onClick={() => setListOpen(true)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left" aria-label="All chats">
-          <span className="truncate text-lg font-semibold leading-tight">{chat?.title || "pip"}</span>
+          <span className="truncate font-pixel text-2xl leading-none">{chat?.title || "pip"}</span>
           <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
         </button>
         <Button asChild variant="ghost" size="icon" aria-label="Jobs: Pip on its own"><Link to="/jobs"><Clock3 /></Link></Button>
         <Button variant="ghost" size="icon" aria-label="New chat" onClick={start}><Plus /></Button>
       </div>
-      <Link to="/settings" className="mb-3 truncate text-xs text-dim no-underline hover:text-muted-foreground">
+      <Link to="/settings" className="mb-3 truncate text-[11px] text-dim no-underline hover:text-muted-foreground">
         {model} · {reads.length ? "reads " + reads.join(", ") : "reads nothing yet"}
       </Link>
 

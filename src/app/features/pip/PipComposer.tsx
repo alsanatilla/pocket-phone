@@ -44,7 +44,7 @@ export function PipComposer({ chat, busy, initial, onSend, onStop }: { chat: Cha
       {chat.context.length ? (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {chat.context.map((source, index) => (
-            <span key={source.kind + source.uid} className="flex items-center gap-1 rounded-sm border px-2 py-0.5 text-xs text-muted-foreground">
+            <span key={source.kind + source.uid} className="flex items-center gap-1 rounded-sm border px-2 py-0.5 text-[11px] text-muted-foreground">
               {source.kind} · {source.title}
               <button type="button" aria-label={"Remove " + source.title} className="hover:text-foreground"
                 onClick={() => { try { removeSource(chat.uid, index); } catch (error) { toastError(error); } }}><X className="size-3" /></button>
