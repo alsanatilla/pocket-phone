@@ -1,24 +1,20 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type SyntheticEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { Pin, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NOTE_LIMIT } from "../../data/notes.ts";
 import { thoughtAnnotations } from "../../data/thoughts.ts";
 import { Markdown } from "../../ui/Markdown.tsx";
 import { confirm } from "../../ui/dialog/dialog.ts";
 import { toastError } from "../../ui/toast/toast.ts";
+import { NoteText } from "./NoteText.tsx";
 import { useNoteEditor } from "./useNoteEditor.ts";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 
-// One note: the page is the page. A quiet bar for where you are and what you can do with it, then the words at a
-// reading measure. Editing and previewing share that measure and that surface, so switching never moves the text.
+// One note: the page is the page. A quiet bar for where you are and what you can do with it, then the words in one
+// reading column. Editing and previewing share that measure, so ⌘E never moves a line.
 
 let previewing = false; // kept across notes for this visit, like the classic editor
-
-const cursorLine = (event: SyntheticEvent<HTMLTextAreaElement>) => {
-  const area = event.currentTarget;
-  return area.value.slice(0, area.selectionStart).split("\n").length - 1;
-};
 
 const STATUS = { new: "new", draft: "draft", saving: "saving…", saved: "saved" } as const;
 
@@ -51,9 +47,6 @@ export function NoteEditor({ uid, fresh }: { uid: string; fresh: boolean }) {
     if (!await confirm({ title: "Delete this note on all devices?", confirmLabel: "delete", danger: true })) return;
     try { note.remove(); void navigate({ to: "/notes" }); } catch (error) { toastError(error); }
   };
-  const onKeyUp = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" || event.key.startsWith("Arrow")) note.nudge(cursorLine(event));
-  };
   const status = STATUS[note.status];
   const parked = note.parked ? `${note.parked} thought${note.parked === 1 ? "" : "s"} parked` : "";
   const dot = note.error ? "bg-destructive" : note.status === "saving" ? "bg-primary animate-pulse" : note.status === "draft" ? "bg-muted-foreground" : "bg-movement";
@@ -68,8 +61,8 @@ export function NoteEditor({ uid, fresh }: { uid: string; fresh: boolean }) {
         </span>
         <span className="flex-1" />
         <Button variant="outline" className="h-10" onClick={() => toggle.current()}>{preview ? "edit" : "preview"}</Button>
-        <Button variant="ghost" className="h-10" onClick={note.togglePin} disabled={!note.stored}>{note.pinned ? "unpin" : "pin"}</Button>
-        <Button variant="ghost" className="h-10 text-destructive" onClick={() => void remove()}>delete</Button>
+        <Button variant="ghost" size="icon" className="size-10" onClick={note.togglePin} disabled={!note.stored} aria-label={note.pinned ? "Unpin note" : "Pin note"} aria-pressed={note.pinned}><Pin className={cn("size-4", note.pinned && "text-primary")} /></Button>
+        <Button variant="ghost" size="icon" className="size-10 text-destructive" onClick={() => void remove()} aria-label="Delete note"><Trash2 className="size-4" /></Button>
       </div>
 
       {note.error ? <p role="alert" className="mt-2 text-sm text-destructive">{note.error}</p> : null}
@@ -78,11 +71,10 @@ export function NoteEditor({ uid, fresh }: { uid: string; fresh: boolean }) {
         {preview
           ? <Markdown text={note.text} options={{ annotations: thoughtAnnotations(note.stored ? uid : null, note.text) }}
               className="note-prose min-h-[40vh] px-4 py-6" />
-          : <Textarea value={note.text} maxLength={NOTE_LIMIT} spellCheck autoFocus aria-label="Note text"
-              placeholder={"# Title\n\nWrite in Markdown…  >> a thought @tomorrow parks it"}
-              className="mx-auto block min-h-[45vh] w-full max-w-[62ch] resize-y border-0 bg-transparent px-4 py-6 text-base leading-[1.75] caret-primary shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
-              onChange={event => note.edit(event.target.value, cursorLine(event))}
-              onKeyUp={onKeyUp} onBlur={note.flush} />}
+          : <div className="mx-auto w-full max-w-[62ch] px-4 py-6">
+              <NoteText value={note.text} autoFocus startAt={fresh ? "start" : "end"}
+                onChange={note.edit} onNudge={note.nudge} onBlur={note.flush} />
+            </div>}
       </div>
 
       <p className="mx-auto mt-2 max-w-[62ch] px-4 text-[11px] text-dim">» at the start of a line parks a thought · # makes a heading · saved as you type · ⌘E previews</p>

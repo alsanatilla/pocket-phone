@@ -169,6 +169,31 @@
 }
 
 /*
+ * The note write surface: CodeMirror drawn as the document. Markers sit on the cursor's line only; everywhere else
+ * the Markdown takes the shape it has in the preview above, so typing never looks like editing source.
+ */
+@layer components {
+  .cm-note { font-family: var(--font-mono); font-size: 16px; line-height: 1.75; cursor: text; }
+  .cm-note .cm-editor { background: transparent; }
+  .cm-note .cm-editor.cm-focused { outline: none; }
+  .cm-note .cm-scroller { font-family: inherit; line-height: inherit; overflow: visible; }
+  .cm-note .cm-content { padding: 0; caret-color: var(--primary); }
+  .cm-note .cm-line { padding: 0; }
+  .cm-note .cm-activeLine { background: transparent; }
+  .cm-note .cm-placeholder { color: var(--dim); white-space: pre-wrap; }
+  .cm-note .cm-h1 { font-family: var(--font-pixel); font-size: 32px; line-height: 1.15; }
+  .cm-note .cm-h2 { font-family: var(--font-pixel); font-size: 26px; line-height: 1.2; }
+  .cm-note .cm-h3 { font-family: var(--font-pixel); font-size: 21px; line-height: 1.25; }
+  .cm-note .cm-h4, .cm-note .cm-h5, .cm-note .cm-h6 { font-weight: 500; }
+  .cm-note .cm-strong { font-weight: 500; }
+  .cm-note .cm-code { font-size: 14px; padding: 1px 3px; border-radius: 2px; background: var(--muted); }
+  .cm-note .cm-link { color: var(--primary); }
+  .cm-note .cm-bullet { color: var(--primary); }
+  .cm-note .cm-thought { color: var(--thought); }
+  .cm-note .cm-quote { padding-left: 10px; border-left: 2px solid var(--border); color: var(--muted-foreground); }
+}
+
+/*
  * Cards inside Pip's answers: json-render markup from src/client/pip-cards.jsx (its own small catalog, which the
  * chat prompt describes). The markup is not ours to class, so it is styled here, in the same scale as the surfaces.
  */
