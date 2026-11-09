@@ -1,4 +1,5 @@
 import { activity } from './pip-activity.js';
+import { withoutLegacyCards } from '../shared/pocket-spec.js';
 
 export const MEMORY_LIMIT = 12000;
 const parse = raw => { try { const value = JSON.parse(raw || '{}'); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; } catch { return {}; } };
@@ -130,14 +131,14 @@ export function readChatHistory(chat, turn, policy, args = {}) {
   if (args.answer_offset != null || args.request_offset != null) {
     // Only a completed answer was the reply; stopped or failed partial text stays unreadable here too.
     const item = args.turn_id && priorTurns(chat, turn).find(prior => prior.uid === args.turn_id), kind = args.request_offset != null ? 'request' : 'answer';
-    const text = item && (kind === 'request' ? requestText(item) : item.status === 'done' ? String(item.answer || '') : '');
+    const text = item && (kind === 'request' ? requestText(item) : item.status === 'done' ? withoutLegacyCards(String(item.answer || '')) : '');
     if (!text) return { error: 'history_' + kind + '_not_found', message: kind === 'answer' ? 'Use answer_offset with the turn_id of a completed earlier reply in this conversation.' : 'Use request_offset with the turn_id of an earlier request in this conversation.' };
     return textPage(envelope, item.uid, kind, text, args[kind + '_offset']);
   }
   const query = String(args.query || '').trim(), pattern = query && literal(query), offset = args.offset || 0, limit = args.limit || 3, entries = [];
   for (const item of [...priorTurns(chat, turn)].reverse()) {
     if (args.turn_id && item.uid !== args.turn_id) continue;
-    const answer = item.status === 'done' ? String(item.answer || '') : '', request = requestText(item), cut = boundary(answer, 0, Math.min(answer.length, ANSWER_EXCERPT)), requestCut = boundary(request, 0, Math.min(request.length, 2000)), events = activity(item.activity).map(row => eventFact(policy, item, row));
+    const answer = item.status === 'done' ? withoutLegacyCards(String(item.answer || '')) : '', request = requestText(item), cut = boundary(answer, 0, Math.min(answer.length, ANSWER_EXCERPT)), requestCut = boundary(request, 0, Math.min(request.length, 2000)), events = activity(item.activity).map(row => eventFact(policy, item, row));
     // Match the full request and answer rather than their excerpts; a match past the excerpt says where to page.
     const at = pattern ? answer.search(pattern) : -1;
     const requestAt = pattern ? request.search(pattern) : -1;

@@ -51,4 +51,5 @@ export const CARDS_PROMPT = 'Pocket can draw parts of a reply as a picture: read
   + 'For long ranges keep the shape with at most 60 points (weekly or monthly values, as the source reports them); compare places or groups with series. '
   + 'Never invent, estimate or fill in numbers; if a source gives only some points, chart only those and say so in the note. '
   + 'Show tasks and thoughts with TaskList or ThoughtList instead of retyping them. '
-  + 'Every fact appears once: what the prose says needs no tile, and a Hero is not repeated by a Metric. Short labels, no emoji. Skip pictures when plain prose is enough.';
+  + 'Every fact appears once: what the prose says needs no tile, and a Hero is not repeated by a Metric. Short labels, no emoji. Skip pictures when plain prose is enough. '
+  + 'The format above is the only card format: earlier replies may still hold cards written in an older shape, and that shape is retired. Never copy an earlier card; write every card now as the json-render patches described here.';

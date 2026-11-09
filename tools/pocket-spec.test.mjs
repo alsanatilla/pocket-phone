@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pocketSpec } from '../src/shared/pocket-spec.js';
+import { pocketSpec, isLegacySpec, withoutLegacyCards } from '../src/shared/pocket-spec.js';
 
 // A reply can carry a finished spec or the JSONL patch stream json-render writes. The stream is what makes a card
 // appear while the model is still typing, so the parser must tolerate a line that is not finished yet.
@@ -55,4 +55,24 @@ test('remove deletes an element from the map', () => {
 test('prose is not a spec', () => {
   assert.equal(pocketSpec('just some words'), null);
   assert.equal(pocketSpec('{"not":"a patch"}'), null);
+});
+
+test('the retired card shape is told apart from the current one', () => {
+  const legacy = { root: 'c', elements: { c: { type: 'Card', props: { title: 'Alt', subtitle: 'x' }, children: [] } } };
+  const current = { root: 'c', elements: { c: { type: 'Card', props: { title: 'Neu', description: 'x' }, children: ['h'] }, h: { type: 'Hero', props: { value: '1' }, children: [] } } };
+  assert.equal(isLegacySpec(legacy), true);
+  assert.equal(isLegacySpec(current), false);
+  assert.equal(isLegacySpec(pocketSpec('{"root":"c","elements":{"t":{"type":"Chart","props":{"chart":{"data":[1,2]}},"children":[]}}}')), true);
+  assert.equal(isLegacySpec(pocketSpec('{"root":"c","elements":{"t":{"type":"Chart","props":{"kind":"bar","data":[{"label":"a","value":1}]},"children":[]}}}')), false);
+});
+
+test('a replayed answer keeps its prose but loses a retired-format card', () => {
+  const legacy = 'Before.\n\n```pocket\n{"root":"c","elements":{"c":{"type":"Card","props":{"subtitle":"x"},"children":[]}}}\n```\n\nAfter.';
+  const kept = 'Before.\n\n```pocket\n{"root":"c","elements":{"c":{"type":"Card","props":{"title":"x"},"children":[]}}}\n```\n\nAfter.';
+  const stripped = withoutLegacyCards(legacy);
+  assert.match(stripped, /Before\./);
+  assert.match(stripped, /After\./);
+  assert.match(stripped, /retired card format/);
+  assert.doesNotMatch(stripped, /subtitle/);
+  assert.equal(withoutLegacyCards(kept), kept);
 });

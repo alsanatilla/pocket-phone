@@ -54,3 +54,32 @@ export function pocketSpec(text) {
   return applied ? spec : null;
 }
 
+/** Types and props only the retired card format had; see src/app/surface/cards.tsx for the same test. */
+const LEGACY_TYPES = new Set(['Section', 'Fields', 'Field', 'Divider', 'Actions', 'LinkButton']);
+
+/** Whether a spec was written in the retired card format, which the current renderer cannot draw as intended. */
+export function isLegacySpec(spec) {
+  const elements = spec && spec.elements;
+  if (!elements || typeof elements !== 'object') return false;
+  return Object.values(elements).some(element => {
+    if (!element || typeof element !== 'object') return false;
+    const props = element.props;
+    return LEGACY_TYPES.has(String(element.type))
+      || (element.type === 'Chart' && props != null && 'chart' in props)
+      || (element.type === 'Table' && props != null && 'headers' in props)
+      || (element.type === 'Card' && props != null && 'subtitle' in props)
+      || (element.type === 'Button' && !element.on && props != null && ('value' in props || 'id' in props));
+  });
+}
+
+/**
+ * A replayed answer is history the model copies: a card in the retired format would teach it that shape again.
+ * The prose stays; only such a fence is replaced, and with a line that says the format is gone.
+ */
+export function withoutLegacyCards(text) {
+  return String(text ?? '').replace(/```pocket[ \t]*\r?\n([\s\S]*?)```/g, (block, body) => {
+    const spec = pocketSpec(body);
+    return spec && isLegacySpec(spec) ? '[card omitted: it used the retired card format; draw cards only in the current one]' : block;
+  });
+}
+

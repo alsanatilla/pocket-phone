@@ -39,6 +39,21 @@ test('current research requests receive the local date and timezone', t => {
   assert.match(body.instructions, /verify publication dates/);
 });
 
+test('a replayed reply in the retired card format cannot teach it again', t => {
+  const { chat } = workspace(t), turn = current();
+  const legacy = 'Before.\n\n```pocket\n{"root":"card","elements":{"card":{"type":"Card","props":{"title":"Alt","subtitle":"3 fällig"},"children":["f"]},"f":{"type":"Field","props":{"label":"next","value":"x"},"children":[]}}}\n```\n\nAfter.';
+  chat.turns = [prior('old', [], { answer: legacy }), turn];
+  const body = requestBody(chat, turn), replayed = String(body.messages[1].content);
+  assert.match(replayed, /Before\./);
+  assert.match(replayed, /After\./);
+  assert.match(replayed, /retired card format/);
+  assert.doesNotMatch(replayed, /"subtitle"|"Field"/);
+  // The instructions themselves carry the current catalog and the rule that it is the only format.
+  assert.match(body.instructions, /Chart\(kind, title, data, series, unit, tone, note, source\)/);
+  assert.match(body.instructions, /only card format/);
+  assert.match(body.instructions, /Never copy an earlier card/);
+});
+
 for (const provider of ['anthropic', 'compatible']) test(`${provider} synthesis preserves the actual stock question and attributes limits to the app`, async t => {
   const { chat } = workspace(t), turn = current();
   chat.config = config({ ...DEFAULT_CONFIG, provider, ...(provider === 'compatible' ? { model: 'fixture-model', baseUrl: 'https://model.example/v1' } : {}) });
