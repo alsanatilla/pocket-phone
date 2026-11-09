@@ -37,10 +37,11 @@ export const COROS_ARGUMENTS = { coros_read: 4000, coros_write: 6000 };
 // The grant each tool needs. Descriptions and input schemas live in pip-sdk-tools.js, which loads with the AI SDK.
 const TOOL_CATEGORIES = { search_notes: "notes", read_note: "notes", search_thoughts: "thoughts", search_tasks: "tasks", read_task: "tasks", search_calendar: "calendar", search_pocket: "pocket",
   read_chat_history: "universal", update_plan: "universal", create_record: "universal", change_record: "changes", gym_summary: "gym", update_training_preferences: "training",
-  coros_summary: "coros", coros_read: "coros", coros_format: "coros", coros_write: "coros", search_web: "web", read_web_page: "web" };
+  coros_summary: "coros", coros_read: "coros", coros_format: "coros", coros_write: "coros", search_web: "web", read_web_page: "web",
+  update_scratch: "job" };
 const pocketCategories = ["notes", "tasks", "thoughts", "calendar"];
 /** Tools that show or change something instead of reading: never cached, never replayed as observations. The propose_* names are earlier replies' review cards. */
-export const STATE_TOOLS = ["update_plan", "create_record", "change_record", "coros_write", "update_training_preferences", "propose_action", "propose_change", "propose_coros"];
+export const STATE_TOOLS = ["update_plan", "create_record", "change_record", "coros_write", "update_training_preferences", "update_scratch", "propose_action", "propose_change", "propose_coros"];
 /** Tools that write to Pocket or COROS. The AI SDK holds each call until the user approves or declines it. */
 export const WRITE_TOOLS = ["create_record", "change_record", "coros_write", "update_training_preferences"];
 const CHANGE_CATEGORY = { complete_task: "tasks", update_task: "tasks", append_note: "notes", move_appointment: "calendar" };
@@ -50,6 +51,8 @@ export const changeTarget = change => ({ tasks: "task", notes: "note", calendar:
 const permitted = (value, name) => {
   const category = TOOL_CATEGORIES[name];
   if (category === "training") return value.trainingConversation === true;
+  // A scheduled job's notes exist only in its own unattended runs, never in a conversation.
+  if (category === "job") return value.backgroundJob === true;
   if (category === "universal") return true;
   if (category === "changes") return access(value).some(c => ["tasks", "notes", "calendar"].includes(c));
   if (category === "pocket") return access(value).some(c => pocketCategories.includes(c));
@@ -346,6 +349,7 @@ export function label(name, input = {}) {
   if (name === "read_note") return "read note";
   if (name === "read_task") return "read task";
   if (name === "update_plan") return "update plan";
+  if (name === "update_scratch") return "update job notes";
   if (name === "create_record") return "save " + (input.kind || "record");
   if (name === "change_record") return changeName(input.change);
   if (name === "propose_action") return "prepare " + (input.kind || "action");
@@ -363,6 +367,7 @@ function resultSummary(name, result) {
   if (result.available === false) return result.message || "No cached data";
   if (name === "read_note" || name === "read_task") return result.title || "Record read";
   if (name === "update_plan") return result.plan.filter(step => step.status === "done").length + "/" + result.plan.length + " steps";
+  if (name === "update_scratch") return result.saved ? "notes kept for the next run" : "notes not saved";
   if (result.kind === "action") return result.action.title + " · " + (result.action.status === "saved" ? "saved" : "declined");
   if (name === "propose_action") return result.proposal.title + " · ready to review";
   if (name === "propose_change") return result.before.title + " · ready to review";

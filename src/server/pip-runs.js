@@ -4,7 +4,7 @@ import { open } from './secrets.js';
 import { writeObject } from './objects.js';
 import { serverRecordSource } from './pip-source.js';
 import { applyApprovedWrite } from './pip-writes.js';
-import { backgroundAccount, chargeTokens, localDay, tokensLeft, validTimezone, JOB_BUDGET } from './pip-background.js';
+import { backgroundAccount, keyOf, chargeTokens, localDay, tokensLeft, validTimezone, JOB_BUDGET } from './pip-background.js';
 import { readKey } from './pip-keys.js';
 import { config as pipConfig, requestBody, contextCoverage } from '../client/pip-core.js';
 import { execute as runTool, preview as previewTool, label, WRITE_TOOLS } from '../client/pip-tools.js';
@@ -52,7 +52,7 @@ const parse = raw => { try { return JSON.parse(String(raw)); } catch { return nu
  */
 async function account(userId, config = null, grants = [], timezone = '') {
   const saved = await backgroundAccount(userId);
-  if (saved?.credentials && saved.settings) return { ...saved, key: open(userId, saved.credentials).key, source: 'routines' };
+  if ((saved?.credentials || saved?.accountKey) && saved.settings) return { ...saved, key: await keyOf(userId, saved), source: 'routines' };
   if (!config) return null;
   const key = await readKey(userId, { provider: config.provider, baseUrl: config.baseUrl }).catch(() => '');
   if (!key) return null;

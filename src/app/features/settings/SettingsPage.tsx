@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -178,6 +179,10 @@ export function SettingsPage() {
           </Label>
           <Switch id="auto-arrange" checked={profile.autoArrange} onCheckedChange={ai.setAutoArrange} />
         </div>
+      </Section>
+
+      <Section title="pip on its own" hint="Jobs that run on Pocket's server while your phone is away: a morning check-in, a nightly brief, watches, reminders.">
+        <Button asChild variant="outline"><Link to="/jobs">open jobs</Link></Button>
       </Section>
 
       <Section title="this month">

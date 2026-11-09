@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { ChevronDown, Plus } from "lucide-react";
+import { ChevronDown, Clock3, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { starters } from "../../../client/pip-presentation.js";
 import { configFor, readAccess, readProfile, TIERS } from "../../data/ai.ts";
@@ -86,6 +86,7 @@ export function PipPage() {
           <span className="truncate font-pixel text-2xl leading-none">{chat?.title || "pip"}</span>
           <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
         </button>
+        <Button asChild variant="ghost" size="icon" aria-label="Jobs: Pip on its own"><Link to="/jobs"><Clock3 /></Link></Button>
         <Button variant="ghost" size="icon" aria-label="New chat" onClick={start}><Plus /></Button>
       </div>
       <Link to="/settings" className="mb-3 truncate text-[11px] text-dim no-underline hover:text-muted-foreground">

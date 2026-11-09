@@ -37,6 +37,7 @@ const DEFINITIONS = {
     answer_offset: integer('Completed answer offset with turn_id; use next_answer_offset or answer_match_offset.', 0, 200000),
     request_offset: integer('Original request and attached snapshot offset with turn_id; use next_request_offset or request_match_offset.', 0, 200000)
   })],
+  update_scratch: ['Replace this scheduled job\'s notes, which only you read and which its next run receives: what you already reported, figures to compare next time, threads still open. Short and factual; the whole text is replaced each time.', object({ notes: z.string().max(2000).meta({ description: 'The complete notes for the next run, up to 2000 characters.' }) })],
   update_plan: ['Show or update a short plan for this reply. Changes only the displayed plan; never saves Pocket records.', object({ steps: z.array(object({ text: z.string().min(1).max(160), status: z.enum(['pending', 'in_progress', 'done']) })).min(1).max(6) })],
   create_record: ['Save a new note, task or appointment in Pocket. The user reviews it first and may edit, approve or decline it; the result says whether it was saved. Appointments need when; task due is YYYY-MM-DD.', object({
     kind: z.enum(['note', 'task', 'appointment']), title: z.string().min(1).max(200), text: z.string().max(6000), due: optional(z.string().max(10)),
