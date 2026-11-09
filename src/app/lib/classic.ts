@@ -4,11 +4,11 @@
 export const CLASSIC = "/classic";
 
 /** Areas the new client draws itself. */
-export const NEW_AREAS = new Set(["today", "notes", "pip", "settings", "jobs"]);
+export const NEW_AREAS = new Set(["today", "notes", "tasks", "pip", "settings", "jobs"]);
 
 /** Areas only the classic app has so far. */
 export const CLASSIC_AREAS = new Set([
-  "tasks", "thoughts", "parking", "search", "receipt", "dice", "account", "sync", "link", "setup", "more", "apps",
+  "thoughts", "parking", "search", "receipt", "dice", "account", "sync", "link", "setup", "more", "apps",
   "calendar", "clock", "travel", "movement", "gym", "zines", "brief", "girder", "shadow",
 ]);
 

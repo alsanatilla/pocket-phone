@@ -2,7 +2,7 @@ import { CONTENT_FILES, CONTENT_EMPTY, validContent, mergeContent } from './pock
 const DAY = 86400000, KEEP_DAYS = 30, DAY_LIMIT = 300;
 const dayKey = time => { const d = new Date(time); return String(d.getFullYear()) + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); };
 export const FILES = ['parking.json','receipt.json','dice.json','notes.json','tasks.json','journal.json','gym.json',...CONTENT_FILES];
-export const EMPTY = { "gym.json": () => ({ v: 1, workouts: [] }), "parking.json": () => ({ v: 1, items: [] }), "receipt.json": () => ({ v: 1, days: {} }), "dice.json": () => ({ v: 1, list: "", updated: 0 }), "notes.json": () => ({ v: 1, notes: [] }), "tasks.json": () => ({ v: 1, tasks: [], next: { uid: "", updated: 0 } }), "journal.json": () => ({ v: 1, pages: [] }) };
+export const EMPTY = { "gym.json": () => ({ v: 1, workouts: [] }), "parking.json": () => ({ v: 1, items: [] }), "receipt.json": () => ({ v: 1, days: {} }), "dice.json": () => ({ v: 1, list: "", updated: 0 }), "notes.json": () => ({ v: 1, notes: [] }), "tasks.json": () => ({ v: 1, tasks: [], lists: [], next: { uid: "", updated: 0 } }), "journal.json": () => ({ v: 1, pages: [] }) };
 Object.assign(EMPTY, CONTENT_EMPTY);
 const arrays = { 'parking.json': 'items', 'notes.json': 'notes', 'tasks.json': 'tasks', 'journal.json': 'pages', 'gym.json': 'workouts' };
 export function validDocument(name, value) {
@@ -40,9 +40,11 @@ export const merge = {
   "dice.json": (local, remote) => (remote && (remote.updated || 0) > (local.updated || 0) ? { v: 1, list: remote.list || "", updated: remote.updated } : { v: 1, list: local.list || "", updated: local.updated || 0 }),
   // Keep deletion markers so a device returning after a long absence cannot revive old records.
   "notes.json": (local, remote, now) => ({ v: 1, notes: mergeById(local.notes, remote?.notes, "uid", "updated") }),
-  // Tasks use the same records and source links on the phone and the web.
+  // Tasks use the same records and source links on the phone and the web. Lists (and the templates they can become)
+  // live in the same document; a device that does not know them yet leaves them untouched.
   "tasks.json": (local, remote, now) => ({ v: 1,
     tasks: mergeById(local.tasks, remote?.tasks, "uid", "updated"),
+    lists: mergeById(local.lists, remote?.lists, "uid", "updated"),
     next: (remote?.next?.updated || 0) > (local.next?.updated || 0) ? remote.next : (local.next || { uid: "", updated: 0 }),
   }),
   // Journal pages are written by the phone; same rule as JournalStore.merge.

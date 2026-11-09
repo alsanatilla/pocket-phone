@@ -56,7 +56,20 @@ const jobs = createRoute({
   component: lazyRouteComponent(() => import("./features/jobs/JobsPage.tsx"), "JobsPage"),
 });
 
-const routeTree = root.addChildren([index, today, notes, note, pip, pipChat, settings, jobs]);
+/** Tasks: four views (inbox, today, next 7 days, done) and the person's lists, chosen with ?view=… */
+const tasks = createRoute({
+  getParentRoute: () => root, path: "tasks",
+  validateSearch: (search: Record<string, unknown>): { view?: string } => typeof search.view === "string" && search.view ? { view: search.view } : {},
+  component: lazyRouteComponent(() => import("./features/tasks/TasksPage.tsx"), "TasksPage"),
+});
+
+/** One task; "new" is the classic app's empty sheet (and the quick add may link here). */
+const task = createRoute({
+  getParentRoute: () => root, path: "tasks/$taskId",
+  component: lazyRouteComponent(() => import("./features/tasks/TaskPage.tsx"), "TaskPage"),
+});
+
+const routeTree = root.addChildren([index, today, notes, note, pip, pipChat, settings, jobs, tasks, task]);
 
 export const router = createRouter({
   routeTree,

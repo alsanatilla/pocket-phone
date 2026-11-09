@@ -4,6 +4,9 @@ import type { Note, Task, Thought } from "../app/data/types.ts";
 
 export const NOTE_LIMIT: number;
 export function onChange(listener: (collection: string) => void): () => void;
+export function changed(name: string): void;
+export function load(name: string): Record<string, any>;
+export function save(name: string, doc: unknown): void;
 export function taskDay(at?: number): string;
 export function noteTitle(note: { text: string }): string;
 
@@ -30,6 +33,7 @@ export const tasks: {
   chosen(): string | null;
   next(uid: string): void;
   edit(uid: string, change: (task: Task) => void): Task;
+  remove(uid: string): Task;
 };
 export interface Workout { id: string; started: number; ended?: number }
 export const gym: { all(): Workout[]; active(): Workout | null };

@@ -13,6 +13,7 @@ import { useSyncState } from "../runtime.ts";
 const SECTIONS = [
   { to: "/today", label: "today" },
   { to: "/notes", label: "notes" },
+  { to: "/tasks", label: "tasks" },
   { to: "/pip", label: "pip" },
 ] as const;
 

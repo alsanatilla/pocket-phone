@@ -24,7 +24,21 @@ export interface Task {
   created: number;
   updated: number;
   deleted: boolean;
+  /** The list it belongs to; "" or absent is the Inbox. */
+  list?: string;
+  /** Inside a template: days from the day the template is used, or null for no date. */
+  offset?: number | null;
   source?: TaskSource;
+}
+
+/** A list of tasks: a project in Todoist's terms, or a template to start one from. */
+export interface TaskList {
+  uid: string;
+  name: string;
+  template: boolean;
+  created: number;
+  updated: number;
+  deleted: boolean;
 }
 
 export type ThoughtState = "parked" | "cleared" | "killed" | "task";

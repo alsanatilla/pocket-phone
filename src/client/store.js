@@ -211,7 +211,8 @@ export const tasks = {
     const value = String(text||"").trim(); if(!value || value.length>500)throw new Error("Write an action, up to 500 characters.");
     if(source?.token){const existing=this.list().find(t=>t.source?.token===source.token);if(existing)return existing;}
     if(this.list().length+notes.list().length>=250)throw new Error("The workspace is full. Remove an old entry.");
-    const doc=load("tasks.json"), now=Date.now(), task={uid:crypto.randomUUID(),text:value,done:false,due:fields.due||"",important:Boolean(fields.important),steps:fields.steps||[],created:now,updated:now,deleted:false};
+    const doc=load("tasks.json"), now=Date.now(), task={uid:crypto.randomUUID(),text:value,done:false,due:fields.due||"",important:Boolean(fields.important),steps:fields.steps||[],list:fields.list||"",created:now,updated:now,deleted:false};
+    if(fields.offset!==undefined)task.offset=fields.offset;
     if(source)task.source=source;doc.tasks.push(task);save("tasks.json",doc);changed("tasks.json");return task;
   },
   edit(uid, change) { const doc=load("tasks.json"), item=doc.tasks.find(t=>t.uid===uid&&!t.deleted);if(!item)throw new Error("This task was removed.");change(item);item.updated=Math.max(Date.now(),item.updated+1);save("tasks.json",doc);changed("tasks.json");return item; },
