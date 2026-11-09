@@ -35,7 +35,7 @@ async function account(settings = SETTINGS, key = 'fixture-key-123456') {
 const CONFIG = { provider: 'anthropic', model: 'claude-sonnet-5-5', baseUrl: 'https://api.anthropic.com/v1', maxTokens: 4096, thinking: false, webSearch: false };
 /** A chat whose own settings point at the fixture's compatible endpoint, so a vaulted key can run it. */
 const VAULT_CONFIG = { provider: 'compatible', model: 'fixture-model', baseUrl: 'https://model.example/v1', maxTokens: 2048, thinking: false, webSearch: false };
-const header = (uid, title = 'Pip run', config = CONFIG) => ({ uid, title, created: Date.now(), config });
+const header = (uid, title = 'Pip run', config = VAULT_CONFIG) => ({ uid, title, created: Date.now(), config });
 const chatOf = async (userId, uid) => JSON.parse(String((await execute({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, uid] })).rows[0].payload));
 const notesOf = async userId => (await readDocuments(userId))['notes.json'].value.notes.filter(note => note.uid.startsWith('pip-'));
 const toolMessages = request => request.messages.filter(message => message.role === 'tool').map(message => String(message.content)).join('\n');
@@ -322,7 +322,7 @@ test('an Anthropic run pauses and continues with its tool results where the API 
     }
     return response(replies.shift());
   };
-  const submitted = await runs.submitRun(userId, { requestId: 'req-anthropic', chat: header('chat-anthropic'), text: 'Save the blue car price.', device: 'phone-1' },
+  const submitted = await runs.submitRun(userId, { requestId: 'req-anthropic', chat: header('chat-anthropic', 'Anthropic', CONFIG), text: 'Save the blue car price.', device: 'phone-1' },
     { fetcher: anthropic(anthropicMessage({ text: 'I will save it.', calls: [{ name: 'create_record', input: NOTE, id: 'toolu_write' }] })) });
   assert.equal(submitted.run.status, 'awaiting', submitted.run.turn.error);
   const decided = await runs.decideRun(userId, { runId: submitted.run.runId, requestId: submitted.requests[0].id, approved: true, device: 'browser-1' }, { fetcher: anthropic(anthropicMessage({ text: 'Saved your note.' })) });
@@ -498,4 +498,44 @@ test('a browser its push service no longer knows is forgotten, and only real pus
   assert.equal(await notices.devices(userId), 0); assert.equal(await notices.devices(other), 1);
   assert.equal(await notices.subscribed(userId, shared.subscription.endpoint), false); assert.equal(await notices.subscribed(other, shared.subscription.endpoint), true);
   assert.equal(await notices.subscribed(other, ''), false);
+});
+
+test('the chat vault provider wins over a different background-job provider', async () => {
+  const selected = { ...VAULT_CONFIG, baseUrl: 'https://openrouter.ai/api/v1', model: 'openrouter/free' };
+  const userId = await vaultAccount(selected);
+  await saveBackground(userId, SETTINGS, 'background-key-123456');
+  const state = await runs.serverRunState(userId, 'chat-selected', selected);
+  assert.equal(state.available, true);
+  assert.equal((await runs.serverRunState(userId, 'chat-selected', { provider: selected.provider, baseUrl: selected.baseUrl })).available, true);
+  const result = await runs.submitRun(userId, { requestId: 'req-selected', chat: header('chat-selected', 'Selected', selected), text: 'Hello' }, {
+    fetcher: async (url, options) => {
+      assert.equal(String(url), selected.baseUrl + '/chat/completions');
+      assert.equal(options.headers.authorization, 'Bearer fixture-key-123456');
+      assert.equal(JSON.parse(options.body).model, 'openrouter/free');
+      return response(compatibleMessage({ text: 'Free reply.' }));
+    },
+  });
+  assert.equal(result.run.status, 'done', result.run.turn.error);
+  assert.equal((await chatOf(userId, 'chat-selected')).config.model, 'openrouter/free');
+});
+
+test('a missing chat key cannot silently use a different background provider', async () => {
+  const userId = await account();
+  assert.equal((await runs.serverRunState(userId, 'chat-no-key', CONFIG)).available, false);
+  await assert.rejects(runs.submitRun(userId, { requestId: 'req-no-key', chat: header('chat-no-key', 'Missing', CONFIG), text: 'Hello' }, { fetcher: noProvider }), /not set up/);
+});
+
+test('an unreadable chat key reports reconnect instead of using background credentials', async () => {
+  const userId = await vaultAccount();
+  await saveBackground(userId, SETTINGS, 'background-key-123456');
+  await execute({ sql: 'UPDATE pocket_pip_keys SET sealed = ? WHERE user_id = ?', args: ['invalid-ciphertext', userId] });
+  await assert.rejects(runs.serverRunState(userId, 'chat-unreadable', VAULT_CONFIG), /stored key could not be read/);
+  await assert.rejects(runs.submitRun(userId, { requestId: 'req-unreadable', chat: header('chat-unreadable'), text: 'Hello' }, { fetcher: noProvider }), /stored key could not be read/);
+});
+
+test('a matching background key uses the model explicitly selected for the chat', async () => {
+  const userId = await account(), selected = { ...VAULT_CONFIG, model: 'another-model' }, sent = [];
+  const result = await runs.submitRun(userId, { requestId: 'req-model', chat: header('chat-model', 'Model', selected), text: 'Hello' }, { fetcher: provider(sent, compatibleMessage({ text: 'Hello.' })) });
+  assert.equal(result.run.status, 'done', result.run.turn.error);
+  assert.equal(sent[0].model, selected.model);
 });

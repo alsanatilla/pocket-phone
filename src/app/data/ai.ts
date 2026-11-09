@@ -67,6 +67,7 @@ export interface AiProfile {
   tier: Tier;
   /** Only for "custom": an OpenAI-compatible endpoint and its model. */
   custom?: { baseUrl: string; model: string };
+  freeModel?: string;
   web: boolean;
   /** Let a model arrange Today by itself when the moment changes. */
   autoArrange: boolean;
@@ -109,7 +110,7 @@ export function configFor(profile: AiProfile, job: Job): PipConfig {
     return config({ ...base, provider: "compatible", baseUrl: profile.custom.baseUrl, model: profile.custom.model, webSearch: profile.web, thinking: false });
   }
   const provider = PROVIDERS[profile.provider];
-  return config({ ...base, provider: provider.provider, baseUrl: provider.baseUrl, model: MODELS[profile.provider][profile.tier][job], webSearch: profile.web, thinking: profile.tier === "best" });
+  return config({ ...base, provider: provider.provider, baseUrl: provider.baseUrl, model: profile.provider === "openrouter" && profile.tier === "light" && profile.freeModel?.endsWith(":free") ? profile.freeModel : MODELS[profile.provider][profile.tier][job], webSearch: profile.web, thinking: profile.tier === "best" });
 }
 
 /**

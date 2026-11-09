@@ -45,18 +45,21 @@ const no = (message, status = 400) => Object.assign(new Error(message), { status
 const allowedId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value);
 const parse = raw => { try { return JSON.parse(String(raw)); } catch { return null; } };
 
-/**
- * Where a run's key and settings come from. The dedicated “on its own” key covers scheduled routines and shared
- * runs alike; without it, a signed-in chat may still run here with the key it stored in the account vault,
- * using the model that chat uses, the access its client asked for, and today's date in the client's timezone.
- */
+/** A chat selects its provider; background-job settings must never silently replace it. */
 async function account(userId, config = null, grants = [], timezone = '') {
+  if (config) {
+    let key;
+    try { key = await readKey(userId, config); }
+    catch (error) {
+      // Missing credentials can use a dedicated key for the SAME endpoint. Unreadable keys need reconnecting.
+      if (error.status !== 401) throw error;
+    }
+    if (key) return { key, source: 'vault', settings: { ...config, ...(config.model ? pipConfig(config) : {}), grants: serverGrants({ grants }), dailyTokens: VAULT_TOKENS, timezone: validTimezone(timezone) ? timezone : 'UTC', enabled: true } };
+  }
   const saved = await backgroundAccount(userId);
-  if ((saved?.credentials || saved?.accountKey) && saved.settings) return { ...saved, key: await keyOf(userId, saved), source: 'routines' };
-  if (!config) return null;
-  const key = await readKey(userId, { provider: config.provider, baseUrl: config.baseUrl }).catch(() => '');
-  if (!key) return null;
-  return { key, source: 'vault', settings: { ...pipConfig(config), grants: serverGrants({ grants }), dailyTokens: VAULT_TOKENS, timezone: validTimezone(timezone) ? timezone : 'UTC', enabled: true } };
+  if (!(saved?.credentials || saved?.accountKey) || !saved.settings) return null;
+  if (config && (config.provider !== saved.settings.provider || config.baseUrl !== saved.settings.baseUrl)) return null;
+  return { ...saved, settings: { ...saved.settings, ...(config ? config.model ? pipConfig(config) : config : {}) }, key: await keyOf(userId, saved), source: 'routines' };
 }
 /** What the server may read for a shared run: the account's server grants, and calendar from its synced copy. */
 export const serverGrants = settings => [...new Set([...(settings.grants || []), 'calendar'])];
@@ -73,14 +76,11 @@ function runValue(settings, requested) {
  * copy yet — and the account's key may live in the vault for exactly that endpoint.
  */
 export async function serverRunState(userId, chat = '', asked = null) {
-  const saved = await account(userId);
-  let available = Boolean(saved), settings = saved?.settings || null;
-  let target = chatEndpoint(asked);
-  if (!available && !target && chat && objectId(chat)) target = chatEndpoint((await chatObject(userId, chat))?.config);
-  if (!available && target) {
-    const key = await readKey(userId, target).catch(() => '');
-    if (key) { available = true; settings = { ...target, webSearch: Boolean(asked?.webSearch), grants: [], dailyTokens: VAULT_TOKENS, timezone: 'UTC', enabled: true }; }
-  }
+  let selected = asked;
+  if (!selected && chat && objectId(chat)) selected = (await chatObject(userId, chat))?.config;
+  const target = chatEndpoint(selected);
+  const saved = await account(userId, target ? selected : null);
+  const available = Boolean(saved), settings = saved?.settings || null;
   const row = chat && objectId(chat)
     ? (await sql({ sql: 'SELECT * FROM pocket_pip_runs WHERE user_id = ? AND chat_uid = ? ORDER BY created DESC LIMIT 1', args: [userId, chat] })).rows[0]
     : (await sql({ sql: 'SELECT * FROM pocket_pip_runs WHERE user_id = ? ORDER BY created DESC LIMIT 1', args: [userId] })).rows[0];
@@ -172,7 +172,7 @@ export async function submitRun(userId, body, { fetcher, now = Date.now() } = {}
   const clientConfig = (() => { try { return pipConfig(header?.config); } catch { return null; } })();
   const timezone = validTimezone(body.timezone) ? body.timezone : '';
   const saved = await account(userId, clientConfig, body.grants, timezone);
-  if (!saved) throw no('Pip on the server is not set up for this account. Turn it on in “on its own” first.', 409);
+  if (!saved) throw no('Pip on the server is not set up for the selected provider. Connect that provider in Pip settings.', 409);
   if (saved.source === 'routines' && tokensLeft(saved, now) <= 0) throw no('Today’s token limit for Pip on the server is used up.', 429);
   const value = { ...runValue(saved.settings, body.grants), timezone: saved.settings.timezone || 'UTC' }, chat = await conversation(userId, uid, header, value, now);
   if (chat.turns.length >= 1990) throw no('This chat is full. Start a new one.', 413);

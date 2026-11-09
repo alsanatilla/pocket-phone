@@ -41,12 +41,12 @@ async function loadAdapter(load) {
   catch (error) { if (CHUNK_ERROR.test(String(error?.message || error))) throw publicError(POCKET_UPDATED); throw error; }
 }
 
-// Live free endpoints with tool support; a dead entry costs one fallback attempt on a 429.
-const FREE_CHAIN = ['nvidia/nemotron-3-super-120b-a12b:free', 'google/gemma-4-31b-it:free', 'openrouter/free'];
+// Let OpenRouter select a currently available free model with the requested capabilities.
+// A named free model may fall back to the free router, never to a paid model.
 export function freeFallbacks(value) {
   const host = new URL(value.baseUrl).hostname;
   if (value.provider !== 'compatible' || host !== 'openrouter.ai' || !(value.model.endsWith(':free') || value.model === 'openrouter/free')) return null;
-  return (value.model === 'openrouter/free' ? FREE_CHAIN : [value.model, ...FREE_CHAIN.filter(model => model !== value.model)]).slice(0, 3);
+  return value.model === 'openrouter/free' ? ['openrouter/free'] : [value.model, 'openrouter/free'];
 }
 
 async function errorText(response, signal) {

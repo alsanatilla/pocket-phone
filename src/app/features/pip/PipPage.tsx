@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { ChevronDown, Clock3, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { starters } from "../../../client/pip-presentation.js";
-import { configFor, readAccess, readProfile, TIERS } from "../../data/ai.ts";
+import { configFor, readAccess, readProfile } from "../../data/ai.ts";
 import { useCollection } from "../../data/bus.ts";
 import { createChat, listChats, readChat } from "../../data/chats.ts";
 import { daySummary, listTasks, today } from "../../data/tasks.ts";
@@ -75,7 +75,7 @@ export function PipPage() {
   useLayoutEffect(() => { following.current = true; window.scrollTo({ top: document.documentElement.scrollHeight }); }, [chat?.uid, chat?.turns.length]);
 
   const profile = readProfile();
-  const model = (() => { try { return modelLabel(configFor(profile, "chat").model); } catch { return "no model"; } })();
+  const model = (() => { try { return modelLabel(chat?.config.model ?? configFor(profile, "chat").model); } catch { return "no model"; } })();
   const reads = readAccess();
   const locked = Boolean(live) || runnerBusy();
 
@@ -90,7 +90,7 @@ export function PipPage() {
         <Button variant="ghost" size="icon" aria-label="New chat" onClick={start}><Plus /></Button>
       </div>
       <Link to="/settings" className="mb-3 truncate text-[11px] text-dim no-underline hover:text-muted-foreground">
-        {model} · {TIERS[profile.tier].name.toLowerCase()} · {reads.length ? "reads " + reads.join(", ") : "reads nothing yet"}
+        {model} · {reads.length ? "reads " + reads.join(", ") : "reads nothing yet"}
       </Link>
 
       <div ref={thread} className="flex-1 space-y-8 pb-4">
