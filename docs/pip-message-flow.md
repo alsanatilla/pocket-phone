@@ -13,10 +13,10 @@ the rework proposed at the end, not a description of a target.
 | 4 | Build the request | `requestBody` in `src/client/pip-core.js`: system prompt (`SYSTEM` + `CARDS_PROMPT` from `src/shared/pocket-cards.js` + date), replayed history, tool names from `toolNames()` in `src/client/pip-tools.js`. Jobs add text in `runRoutine` (`src/server/pip-background.js`). | Same builder everywhere, extended by string concatenation per caller. |
 | 5 | Call the model | `streamChat` in `src/client/pip-stream.js` (AI SDK `ToolLoopAgent`), provider from `providerModel` in `src/client/pip-provider.js` | One engine. It runs in three runtimes: the browser bundle, Vercel functions, and the worker. |
 | 6 | Tools | `execute` / `preview` in `src/client/pip-tools.js`; writes wait for approval (`approve`), devices answer device tools | Shared. |
-| 7 | Output | `onPart` in `streamChat` appends raw `text-delta` to `result.answer` | **Raw model text is the stored answer.** Nothing checks or normalises it. |
+| 7 | Output | `onPart` in `streamChat` appends raw `text-delta` to `result.answer`; when the reply ends, `normalizeAnswer` (`src/shared/pip-reply.js`) stores it in one clean form | Every card becomes a ```pocket fence of flat JSON Lines; tool-call debris and empty cards go. Since the output-filter commit. |
 | 8 | Store | Tab: `this.store.save(chat)` → sync to the account. Server: `writeTurn` in `src/server/pip-runs.js` (Turso `pocket_objects`) | Two writers of the same chat object. |
 | 9 | Deliver | Tab: `onUpdate` → React. Server: SSE frames `runFrames` → `streamReplyRemote` in `src/client/pip-remote.js` | |
-| 10 | Read the answer | React chat (`stream/segments.ts`, `stream/Card.tsx`, `src/shared/pocket-spec.js`), classic chat (`src/client/pip.js` + `src/shared/markdown.js`), push text (`excerpt` in `src/shared/pip-notice.js`), search (`src/shared/search.js`), history replay (`withoutLegacyCards`, `src/client/pip-memory.js`) | **Each reader parses the raw text on its own.** |
+| 10 | Read the answer | React chat (`stream/segments.ts`, the same `segmentAnswer` from `src/shared/pip-reply.js`), classic chat (`src/client/pip.js` + `src/shared/markdown.js`), push text and search (`answerText`: prose only), history replay | Stored answers are clean; the chat still repairs replies while they stream and answers stored before the filter. |
 
 ## The four paths
 
@@ -45,6 +45,12 @@ which at the time of writing runs on a development sandbox and loads its code on
 4. **Errors translated four times.** Provider → relay → server run → client each rephrase; an unreadable vault key
    reached the user as "could not accept this request (409)" until `a3a74d3`.
 5. **The worker is a single process on a sandbox.** If it stops, signed-in Pip does not answer in production.
+
+## Measured (2026-11-09)
+
+A Turso round trip takes about 120 ms from the worker's sandbox in Oregon (database in AWS eu-west-1). Vercel sets
+no region, so its functions run in its default region. Each progress write, queue claim and follower poll pays
+that; the worker writes progress every 700 ms and followers poll every 250 ms with the whole turn in each frame.
 
 ## Proposed shape
 

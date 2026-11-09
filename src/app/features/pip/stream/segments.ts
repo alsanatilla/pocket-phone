@@ -3,73 +3,13 @@
 // A reply is prose with ```pocket blocks (cards) in between. Prose is drawn block by block: a block is settled
 // once a blank line follows it, then rendered once by Pocket's Markdown renderer and never touched again; the
 // block still being written is drawn directly with light inline formatting. Cards are compiled from their JSON
-// Lines as each line completes, so their raw JSON is never on screen.
+// Lines as each line completes, so their raw JSON is never on screen. Finding cards is shared with the server
+// (src/shared/pip-reply.js), which stores every finished reply in the same clean form.
 
-export type Segment =
-  | { kind: "prose"; key: string; text: string }
-  | { kind: "card"; key: string; source: string; closed: boolean };
+export type { Segment } from "../../../../shared/pip-reply.js";
+export { segmentAnswer } from "../../../../shared/pip-reply.js";
 
 const FENCE = /^[ \t]{0,3}(`{3,}|~{3,})(.*)$/;
-/** A JSON-render patch line, the start of a card even when the model forgot the fence. */
-const PATCH = /^\s*\{\s*"op"\s*:/;
-/** Closing tags of a tool call a model wrote as text; never meant for the reader. */
-const TOOL_DEBRIS = /^\s*<\/?(?:parameter|function|tool_call)\b[^>]*>\s*$/;
-
-/** Splits a reply into prose and card segments. Keys stay stable as the text grows. */
-export function segmentAnswer(text: string): Segment[] {
-  const segments: Segment[] = [];
-  let prose: string[] = [], card: string[] | null = null, code: string | null = null;
-  // A card some models write without its fence: an optional lone "pocket" line, then patch lines. It ends at the
-  // first line that is neither a patch nor blank. `held` keeps a lone "pocket" line (and blank lines after it) until
-  // the next line shows whether a card starts there.
-  let bare: string[] | null = null, held: string[] | null = null;
-  const endBare = () => {
-    if (bare) segments.push({ kind: "card", key: "c" + segments.length, source: bare.join("\n"), closed: true });
-    bare = null;
-  };
-  const flushProse = () => {
-    const value = prose.join("\n");
-    if (value.trim()) segments.push({ kind: "prose", key: "p" + segments.length, text: value.replace(/^\n+/, "") });
-    prose = [];
-  };
-  for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
-    const fence = FENCE.exec(line);
-    if (!card && !code) {
-      if (bare) {
-        if (PATCH.test(line) || !line.trim()) { bare.push(line); continue; }
-        endBare();
-      }
-      if (held) {
-        if (!line.trim()) { held.push(line); continue; }
-        if (PATCH.test(line)) { held = null; flushProse(); bare = [line]; continue; }
-        prose.push(...held); held = null;
-      }
-      if (line.trim() === "pocket") { held = [line]; continue; }
-      if (PATCH.test(line)) { flushProse(); bare = [line]; continue; }
-      if (TOOL_DEBRIS.test(line)) continue;
-    }
-    if (card) {
-      if (fence && !fence[2]!.trim() && fence[1]!.startsWith("`")) {
-        segments.push({ kind: "card", key: "c" + segments.length, source: card.join("\n"), closed: true });
-        card = null;
-      } else card.push(line);
-      continue;
-    }
-    if (code) {
-      prose.push(line);
-      if (fence && fence[1]!.startsWith(code[0]!) && fence[1]!.length >= code.length && !fence[2]!.trim()) code = null;
-      continue;
-    }
-    if (fence && fence[2]!.trim() === "pocket" && fence[1]!.startsWith("`")) { flushProse(); card = []; continue; }
-    if (fence) code = fence[1]!;
-    prose.push(line);
-  }
-  // A lone "pocket" at the very end may still become a card; it is not shown meanwhile.
-  if (card) segments.push({ kind: "card", key: "c" + segments.length, source: card.join("\n"), closed: false });
-  else if (bare) segments.push({ kind: "card", key: "c" + segments.length, source: (bare as string[]).join("\n"), closed: false });
-  else flushProse();
-  return segments;
-}
 
 /**
  * Prose as settled blocks plus the block still being written. Blocks are separated by blank lines outside code;

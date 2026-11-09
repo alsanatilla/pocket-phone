@@ -1,5 +1,6 @@
 // What a notification says about a Pip reply. The server pushes these to devices nobody is watching from; a tab
 // shows the same ones itself while it is hidden. Each chat has one tag, so a newer notice replaces the last one.
+import { answerText } from './pip-reply.js';
 
 /** A reply's first words, without Markdown, for a notification body. */
 export const excerpt = (text, limit = 160) => {
@@ -16,7 +17,7 @@ const place = chat => ({ href: '/pip/' + chat.uid, tag: 'pip-' + chat.uid });
 
 /** A finished or failed reply; nothing for one that was stopped. */
 export function replyNotice(chat, turn) {
-  if (turn?.status === 'done') return { title: titleOf(chat), body: excerpt(turn.answer) || 'Pip replied.', ...place(chat) };
+  if (turn?.status === 'done') return { title: titleOf(chat), body: excerpt(answerText(turn.answer)) || 'Pip replied.', ...place(chat) };
   if (turn?.status === 'failed') return { title: titleOf(chat), body: 'Pip could not finish: ' + excerpt(turn.error || 'the reply failed.', 120), ...place(chat) };
   return null;
 }

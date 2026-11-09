@@ -4,6 +4,7 @@ import { execute, access, accessFingerprint, checkpointIdentity, cacheKey, grant
 import { sdkTools } from './pip-sdk-tools.js';
 import { providerModel, providerOptions, providerError } from './pip-provider.js';
 import { RESEARCH_LIMITS } from './pip-limits.js';
+import { normalizeAnswer } from '../shared/pip-reply.js';
 export { RESEARCH_LIMITS, CONTEXT_OVERFLOW } from './pip-limits.js';
 export { freeFallbacks } from './pip-provider.js';
 const TOOL_ROUND_TOKENS = 2048;
@@ -76,7 +77,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       const excerpts = observations.flatMap(({ answer }) => answer.error ? [] : answer.kind === 'action' ? [(answer.action.status === 'saved' ? 'Saved: ' : 'Declined: ') + answer.action.title] : answer.kind === 'plan' ? [] : answer.text ? [String(answer.title || 'Source') + ': ' + answer.text.slice(0, 600)] : (answer.results || answer.notes || answer.tasks || answer.appointments || []).slice(0, 3).map(item => (item.title || item.text || 'Source') + (item.description || item.excerpt ? ': ' + (item.description || item.excerpt).slice(0, 300) : '')));
       result.answer = excerpts.length ? 'Collected observations:\n\n' + excerpts.slice(0, 8).map(item => '- ' + item).join('\n') : 'Research stopped before a final answer was available.';
     }
-    result.answer += '\n\n' + reason + ' Completed lookups remain in the activity.';
+    result.answer = normalizeAnswer(result.answer + '\n\n' + reason + ' Completed lookups remain in the activity.');
     result.activity = settle(result.activity, 'failed', reason); result.phase = 'failed'; onUpdate(structuredClone(result));
     throw new Error(reason);
   };
@@ -281,6 +282,8 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       if (lastFinish === 'length' && tokens > 0 && round <= RESEARCH_LIMITS.continuations + 2) continue;
       if (lastFinish === 'length') return finishFromObservations('The configured reply token limit was reached. Continue when you’re ready.');
       if (lastFinish === 'tool-calls') return finishFromObservations('The research continuation limit was reached.');
+      // The one place a finished reply leaves the model, on every path: it is stored in its clean form.
+      result.answer = normalizeAnswer(result.answer);
       if (!result.answer.trim()) throw new Error('The provider returned no answer. Check its model and reply limit.');
       result.activity = settle(result.activity, 'failed'); result.phase = 'done'; publish(); return result;
     }
@@ -288,6 +291,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     if (pausedRun(error)) throw error;
     if (!signal?.aborted && (timedOut || deadlineReached)) return finishFromObservations(deadlineReached ? 'The five-minute research deadline was reached. Continue when you’re ready.' : 'The provider stopped responding for 90 seconds. Continue when you’re ready.');
     if (signal?.aborted || controller.signal.aborted) throw stopped();
+    result.answer = normalizeAnswer(result.answer);
     result.activity = settle(result.activity, 'failed', error.message); result.phase = 'failed'; onUpdate(structuredClone(result)); throw error;
   } finally { clearTimeout(timeout); clearTimeout(absolute); signal?.removeEventListener('abort', abort); controller.abort(); }
 }

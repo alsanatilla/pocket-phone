@@ -1,4 +1,5 @@
 // The browser and account index use the same searchable text.
+import { answerText } from './pip-reply.js';
 export const SEARCH_KINDS = { 'notes.json': ['note'], 'tasks.json': ['task'], 'parking.json': ['thought'], 'journal.json': ['paper'] };
 const clip = (value, limit) => String(value || '').slice(0, limit);
 const firstLine = text => clip(String(text || '').split('\n').map(line => line.replace(/^#+\s*/, '').trim()).find(Boolean) || 'Untitled', 200);
@@ -12,7 +13,7 @@ export function documentRows(name, doc) {
 export function chatRows(chat) {
   if (!chat || chat.deleted) return [];
   // Synced conversations already have a 3 MiB payload bound. Keep every turn searchable.
-  const body = [chat.title, ...(chat.turns || []).map(turn => [turn.text, turn.answer].filter(Boolean).join('\n'))].filter(Boolean).join('\n\n');
+  const body = [chat.title, ...(chat.turns || []).map(turn => [turn.text, answerText(turn.answer)].filter(Boolean).join('\n'))].filter(Boolean).join('\n\n');
   return [{ kind: 'chat', uid: String(chat.uid), title: clip(chat.title || 'Chat', 200), body, updated: chat.updated || 0 }];
 }
 export const searchWords = query => (String(query || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).slice(0, 8);
