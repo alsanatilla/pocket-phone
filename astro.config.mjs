@@ -1,14 +1,19 @@
 import { defineConfig } from 'astro/config';
 import vercel from '@astrojs/vercel';
+import node from '@astrojs/node';
 import react from '@astrojs/react';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 
 const root = dir => fileURLToPath(new URL('./' + dir + '/**', import.meta.url));
 
+// Two deploy targets: Vercel (the default) and one long-running Node server (POCKET_TARGET=node, used on Fly.io),
+// where the web app and Pip's worker run side by side from the same build.
+const target = process.env.POCKET_TARGET === 'node' ? node({ mode: 'standalone' }) : vercel({ maxDuration: 300 });
+
 export default defineConfig({
   output: 'server',
-  adapter: vercel({ maxDuration: 300 }),
+  adapter: target,
   integrations: [react()],
   trailingSlash: 'never',
   // Astro refuses a POST whose Origin does not match the request URL, which a TLS terminator breaks: the server

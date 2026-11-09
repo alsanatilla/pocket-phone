@@ -21,6 +21,7 @@
     "@ai-sdk/anthropic": "4.0.78",
     "@ai-sdk/openai": "4.0.91",
     "@ai-sdk/openai-compatible": "3.0.67",
+    "@astrojs/node": "11.1.11",
     "@astrojs/react": "^7.1.0",
     "@astrojs/vercel": "11.0.12",
     "@better-auth/drizzle-adapter": "1.7.7",
