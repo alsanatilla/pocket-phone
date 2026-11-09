@@ -21,7 +21,8 @@ const INLINE = /(\*\*[^*\n]+\*\*)|(`[^`\n]+`)|(\[[^\]\n]+\]\([^)\n]+\))/g;
 /** The Markdown drawn as the document, on every line the cursor is not on. */
 function decorations(view: EditorView): DecorationSet {
   const ranges: { from: number; to: number; value: Decoration }[] = [];
-  const active = view.state.doc.lineAt(view.state.selection.main.head).number;
+  // Markers show only where someone is writing: the cursor's line, while the editor has focus.
+  const active = view.hasFocus ? view.state.doc.lineAt(view.state.selection.main.head).number : -1;
   const bullet = Decoration.replace({ widget: new Bullet() });
   for (const { from, to } of view.visibleRanges) {
     let pos = from;
@@ -68,7 +69,7 @@ const livePreview = ViewPlugin.fromClass(class {
   decorations: DecorationSet;
   constructor(view: EditorView) { this.decorations = decorations(view); }
   update(update: ViewUpdate) {
-    if (update.docChanged || update.selectionSet || update.viewportChanged) this.decorations = decorations(update.view);
+    if (update.docChanged || update.selectionSet || update.viewportChanged || update.focusChanged) this.decorations = decorations(update.view);
   }
 }, { decorations: plugin => plugin.decorations });
 
@@ -104,7 +105,7 @@ export function NoteText({ value, onChange, onNudge, onBlur, autoFocus = false, 
             ".cm-content": { caretColor: "var(--primary)" },
           }),
           EditorView.lineWrapping,
-          EditorView.contentAttributes.of({ "aria-label": "Note text", "aria-multiline": "true", spellcheck: "true" }),
+          EditorView.contentAttributes.of({ "aria-label": "Note text", "aria-multiline": "true", spellcheck: "false", autocorrect: "off" }),
           placeholder("# Title\n\nWrite in Markdown…  >> a thought @tomorrow parks it"),
           livePreview,
           EditorView.updateListener.of(update => {
@@ -134,5 +135,6 @@ export function NoteText({ value, onChange, onNudge, onBlur, autoFocus = false, 
     instance.dispatch({ changes: { from: 0, to: current.length, insert: value } });
   }, [value]);
 
-  return <div ref={host} className="cm-note min-h-64" onClick={() => view.current?.focus()} />;
+  // The whole column below the text is part of the page: a click there writes at the end.
+  return <div ref={host} className="cm-note min-h-[50vh]" onClick={() => view.current?.focus()} />;
 }

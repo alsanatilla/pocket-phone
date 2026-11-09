@@ -149,7 +149,7 @@
  * the note uses this; Pip's replies keep the more compact .prose above.
  */
 @layer components {
-  .note-prose { max-width: 62ch; margin: 0 auto; font-size: 16px; line-height: 1.75; }
+  .note-prose { font-size: 16px; line-height: 1.75; }
   .note-prose h1 { font-family: var(--font-pixel); font-size: 30px; line-height: 1.05; margin: 0 0 14px; }
   .note-prose h2 { font-family: var(--font-pixel); font-size: 24px; line-height: 1.15; margin: 24px 0 8px; }
   .note-prose h3, .note-prose h4 { font-family: var(--font-pixel); font-size: 19px; line-height: 1.2; margin: 20px 0 6px; }
@@ -163,7 +163,7 @@
   .note-prose code { font-size: 13px; padding: 1px 4px; border-radius: 2px; background: var(--muted); }
   .note-prose pre { font-size: 13px; line-height: 1.55; padding: 12px; margin: 0 0 14px; border-radius: var(--radius-md); background: var(--muted); overflow-x: auto; }
   .note-prose a { color: var(--primary); text-underline-offset: 2px; }
-  .note-prose strong { font-weight: 500; }
+  .note-prose strong { font-weight: 700; font-synthesis-weight: auto; }
   .note-prose .thought-line { color: var(--muted-foreground); }
   .note-prose .thought-line .accent { color: var(--primary); }
 }
@@ -181,11 +181,12 @@
   .cm-note .cm-line { padding: 0; }
   .cm-note .cm-activeLine { background: transparent; }
   .cm-note .cm-placeholder { color: var(--dim); white-space: pre-wrap; }
-  .cm-note .cm-h1 { font-family: var(--font-pixel); font-size: 32px; line-height: 1.15; }
-  .cm-note .cm-h2 { font-family: var(--font-pixel); font-size: 26px; line-height: 1.2; }
-  .cm-note .cm-h3 { font-family: var(--font-pixel); font-size: 21px; line-height: 1.25; }
+  .cm-note .cm-h1 { font-family: var(--font-pixel); font-size: 32px; line-height: 1.15; padding-bottom: 6px; }
+  .cm-note .cm-h2 { font-family: var(--font-pixel); font-size: 26px; line-height: 1.2; padding-top: 14px; padding-bottom: 2px; }
+  .cm-note .cm-h3 { font-family: var(--font-pixel); font-size: 21px; line-height: 1.25; padding-top: 10px; }
   .cm-note .cm-h4, .cm-note .cm-h5, .cm-note .cm-h6 { font-weight: 500; }
-  .cm-note .cm-strong { font-weight: 500; }
+  /* The mono face ships regular and medium only: **bold** in a note is drawn bold, so it reads as emphasis. */
+  .cm-note .cm-strong { font-weight: 700; font-synthesis-weight: auto; }
   .cm-note .cm-code { font-size: 14px; padding: 1px 3px; border-radius: 2px; background: var(--muted); }
   .cm-note .cm-link { color: var(--primary); }
   .cm-note .cm-bullet { color: var(--primary); }
