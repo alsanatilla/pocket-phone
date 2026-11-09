@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ArrowRight, ChevronDown } from "lucide-react";
 import { useBoundProp, type BaseComponentProps } from "@json-render/react";
 import { Accordion as AccordionRoot, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Alert as AlertBox, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -116,6 +116,14 @@ export function Collapsible({ props, children }: Props<{ title: string; defaultO
 }
 
 export function Button({ props, emit }: Props<{ label: string; variant?: "primary" | "secondary" | "danger" | null; disabled?: boolean | null }>) {
-  const variant = props.variant === "danger" ? "destructive" : props.variant === "secondary" ? "outline" : "default";
-  return <ButtonBase variant={variant} disabled={props.disabled ?? false} onClick={() => emit("press")} className="w-full sm:w-auto">{props.label}</ButtonBase>;
+  // A reply's buttons are choices for the next step: equal rows, read from the left, an arrow where they lead. A
+  // filled button would read as the recommended one, which a model does not mean by "primary"; it gets amber text.
+  if (props.variant === "danger") return <ButtonBase variant="destructive" disabled={props.disabled ?? false} onClick={() => emit("press")} className="w-full sm:w-auto">{props.label}</ButtonBase>;
+  return (
+    <ButtonBase variant="outline" disabled={props.disabled ?? false} onClick={() => emit("press")}
+      className={cn("group/choice h-auto min-h-11 w-full justify-between gap-3 whitespace-normal px-3.5 py-2.5 text-left font-normal", props.variant === "primary" && "border-primary/50 text-primary")}>
+      <span>{props.label}</span>
+      <ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-hover/choice:translate-x-0.5" />
+    </ButtonBase>
+  );
 }

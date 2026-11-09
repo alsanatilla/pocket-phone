@@ -22,9 +22,11 @@ function SyncLine() {
   const sync = useSyncState();
   const tone = sync.state === "error" ? "text-destructive" : !sync.signedIn && !sync.local ? "text-primary" : "text-dim";
   return (
-    <a href={classicHref("/account")} title="Account and sync"
-      className={cn("ml-auto max-w-[9rem] truncate text-right text-[10px] uppercase leading-tight tracking-wider no-underline", tone, sync.state === "syncing" && "animate-pulse")}>
-      {sync.label}
+    <a href={classicHref("/account")} title={"Account and sync: " + sync.label.toLowerCase()} aria-label={"Account and sync: " + sync.label.toLowerCase()}
+      className={cn("ml-auto flex min-h-11 min-w-11 items-center justify-end no-underline", tone, sync.state === "syncing" && "animate-pulse")}>
+      {/* A phone has no room for the words beside the sections: the state is a dot there, the line from sm up. */}
+      <span aria-hidden="true" className="size-2 rounded-full bg-current sm:hidden" />
+      <span className="hidden max-w-[9rem] truncate text-right text-[10px] uppercase leading-tight tracking-wider sm:block">{sync.label}</span>
     </a>
   );
 }

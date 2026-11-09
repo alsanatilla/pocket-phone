@@ -92,7 +92,7 @@ export function PipPage() {
         <Button asChild variant="ghost" size="icon" aria-label="Jobs: Pip on its own"><Link to="/jobs"><Clock3 /></Link></Button>
         <Button variant="ghost" size="icon" aria-label="New chat" onClick={start}><Plus /></Button>
       </div>
-      <Link to="/settings" className="mb-3 truncate text-[11px] text-dim no-underline hover:text-muted-foreground">
+      <Link to="/settings" className="mb-1 flex min-h-11 items-center truncate text-xs text-dim no-underline hover:text-muted-foreground sm:mb-3 sm:min-h-0">
         {model} · {reads.length ? "reads " + reads.join(", ") : "reads nothing yet"}
       </Link>
 

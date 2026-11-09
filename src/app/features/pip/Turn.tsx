@@ -1,9 +1,9 @@
 import { memo, useCallback, useRef, type KeyboardEvent, type MouseEvent } from "react";
-import { ChevronRight } from "lucide-react";
+import { Check, ChevronRight, Circle, LoaderCircle, Minus, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { elapsed, mark, phaseLabel } from "../../../client/pip-activity.js";
+import { elapsed, phaseLabel } from "../../../client/pip-activity.js";
 import type { ChatTurn } from "../../data/chats.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 import { OfferCard } from "./Offers.tsx";
@@ -18,11 +18,19 @@ import { hrefFor } from "../../lib/classic.ts";
 
 const clock = (at: number) => new Date(Number(at) || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 
+/** A step's state as an icon: the ledger's text glyphs (□ △ ◌) read as missing characters. */
+const STATE_ICON = { done: Check, running: LoaderCircle, awaiting: Circle, queued: Circle, failed: TriangleAlert, stopped: Minus } as const;
+function StateIcon({ state }: { state: string }) {
+  const Icon = STATE_ICON[state as keyof typeof STATE_ICON] ?? Circle;
+  return <Icon aria-label={state} className={cn("inline size-3 shrink-0 align-[-2px]", state === "failed" ? "text-destructive" : state === "done" ? "text-movement" : "text-muted-foreground", state === "running" && "animate-spin")} />;
+}
+
 function Fold({ title, open, children, tone = "text-muted-foreground" }: { title: string; open?: boolean; children: React.ReactNode; tone?: string }) {
   return (
     <Collapsible defaultOpen={open} className="group/fold">
-      <CollapsibleTrigger className={cn("flex items-center gap-1.5 text-xs hover:text-foreground", tone)}>
-        <ChevronRight className="size-3.5 transition-transform group-data-[state=open]/fold:rotate-90" />{title}
+      {/* 44px to tap on a phone, the same small line to look at. */}
+      <CollapsibleTrigger className={cn("-my-3 flex min-h-11 items-center gap-1.5 text-xs hover:text-foreground sm:my-0 sm:min-h-0", tone)}>
+        <ChevronRight className="size-3.5 transition-transform duration-150 ease-out group-data-[state=open]/fold:rotate-90" />{title.replace(/^[□△−◇◌◈]\s*/, "")}
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-2 border-l pl-3">{children}</CollapsibleContent>
     </Collapsible>
@@ -84,7 +92,7 @@ function TurnView({ turn, live, chatId, latest, locked }: TurnProps) {
             <ul className="space-y-1">
               {rows.map(row => (
                 <li key={row.id} className="text-xs">
-                  <span className="text-muted-foreground">{mark(row.state)} </span>{row.title}
+                  <StateIcon state={row.state} /> {row.title}
                   {row.summary ? <span className="text-muted-foreground"> · {row.summary}</span> : null}
                   {elapsed(row) ? <span className="text-dim"> · {elapsed(row)}</span> : null}
                 </li>

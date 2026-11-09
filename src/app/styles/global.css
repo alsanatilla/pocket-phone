@@ -39,7 +39,7 @@
   --input: #3e392f;
   --ring: #ecc981;
   /* Pocket's own signal colours, also used by charts. */
-  --dim: #6b675e;
+  --dim: #8a8478; /* 5.1:1 on the ground, 4.7:1 on a card: small text stays readable */
   --calendar: #a5bfdc;
   --thought: #c1aed5;
   --movement: #adbf9c;
@@ -101,7 +101,7 @@
 @theme {
   --animate-rise: pocket-rise var(--duration-base) var(--ease-out) both;
   --animate-fade: pocket-fade var(--duration-base) var(--ease-out) both;
-  --animate-shimmer: pocket-shimmer 1.6s var(--ease-in-out) infinite;
+  --animate-shimmer: pocket-shimmer 1.6s linear infinite;
   --animate-caret: pocket-caret 1.1s steps(1, end) infinite;
   @keyframes pocket-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   @keyframes pocket-fade { from { opacity: 0; } to { opacity: 1; } }
@@ -115,7 +115,14 @@
   body { font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; font-synthesis-weight: none; }
   b, strong { font-weight: 500; }
   :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; } }
+  /* Reduced motion means no movement, not no change: things still fade in and out, nothing slides, scales or loops. */
+  @media (prefers-reduced-motion: reduce) {
+    /* The enter/exit classes set these on the element itself; only !important outranks a class from `*`. */
+    *, *::before, *::after { --tw-enter-translate-x: 0 !important; --tw-enter-translate-y: 0 !important; --tw-exit-translate-x: 0 !important; --tw-exit-translate-y: 0 !important; --tw-enter-scale: 1 !important; --tw-exit-scale: 1 !important; --tw-enter-rotate: 0 !important; --tw-exit-rotate: 0 !important; --tw-enter-blur: 0 !important; --tw-exit-blur: 0 !important; scroll-behavior: auto !important; }
+    .arrive { animation: var(--animate-fade); }
+    .shimmer, .caret::after, .animate-pulse { animation: none; }
+    *, *::before, *::after { transition-property: color, background-color, border-color, opacity !important; }
+  }
 }
 
 /* Markdown from the shared renderer (src/shared/markdown.js): server-rendered and sanitized, not ours to class. */

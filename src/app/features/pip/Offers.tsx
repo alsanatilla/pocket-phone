@@ -28,7 +28,7 @@ function Frame({ kind, title, children }: { kind: string; title: string; childre
   return (
     <section className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-card px-3 py-2">
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] uppercase tracking-[0.08em] text-primary">{kind}</p>
+        <p className="text-xs font-medium text-primary first-letter:uppercase">{kind}</p>
         <p className="text-sm">{title}</p>
       </div>
       <div className="flex gap-1">{children}</div>

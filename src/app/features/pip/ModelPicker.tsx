@@ -64,9 +64,10 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3 text-xs text-muted-foreground">
       <button type="button" disabled={busy} aria-label="Web search" aria-pressed={chat.config.webSearch}
-        className="flex items-center gap-1.5 rounded px-1 py-1.5 hover:text-foreground disabled:opacity-50"
+        title={chat.config.webSearch ? "Web search on" : "Web search off"}
+        className={cn("flex min-h-10 shrink-0 items-center gap-1.5 rounded px-1.5 hover:text-foreground disabled:opacity-50", chat.config.webSearch && "text-primary")}
         onClick={() => { try { chats.update(chat.uid, value => { value.config.webSearch = !value.config.webSearch; }); } catch (error) { toastError(error); } }}>
-        <Globe className="size-4" /> web {chat.config.webSearch ? "on" : "off"}
+        <Globe className="size-4" /><span className="hidden whitespace-nowrap sm:inline">web {chat.config.webSearch ? "on" : "off"}</span>
       </button>
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger asChild>
@@ -78,7 +79,7 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
         </Popover.Trigger>
         <Popover.Portal>
           <Popover.Content side="top" align="end" sideOffset={10} aria-label="Chat models"
-            className="z-50 flex max-h-[min(34rem,75dvh)] w-[min(27rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-xl">
+            className="z-50 flex max-h-[min(34rem,75dvh)] w-[min(27rem,calc(100vw-1.5rem))] origin-(--radix-popover-content-transform-origin) flex-col overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-xl duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-[0.97] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-[0.97]">
             <div className="flex items-baseline justify-between gap-3 border-b px-4 pt-3 pb-2.5">
               <h2 className="font-pixel text-2xl leading-none">choose a model</h2>
               <a href="/#/settings" className="text-[11px] uppercase tracking-[0.08em] text-primary no-underline hover:underline">connections ↗</a>

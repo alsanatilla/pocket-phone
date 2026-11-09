@@ -23,7 +23,8 @@ export const toneColor = (tone: Tone) => TONE_VAR[tone ?? "accent"];
 
 /** The small caps line that names a block. */
 function Label({ children, tone }: { children: ReactNode; tone?: Tone }) {
-  return <p className="text-[11px] font-medium uppercase tracking-[0.08em]" style={{ color: tone ? toneColor(tone) : "var(--muted-foreground)" }}>{children}</p>;
+  // One quiet line names a block; capitals on every block made a reply shout.
+  return <p className="text-xs font-medium first-letter:uppercase" style={{ color: tone ? toneColor(tone) : "var(--muted-foreground)" }}>{children}</p>;
 }
 
 /** A block's frame: the same border, ground and padding everywhere. */
@@ -40,11 +41,11 @@ function readingSize(value: string | number, sizes: [string, string, string]): s
 export function Hero({ eyebrow, value, unit, caption, tone }: { eyebrow?: string | null; value: string | number; unit?: string | null; caption?: string | null; tone?: Tone }) {
   return (
     <section className="arrive pt-1 pb-1">
-      {eyebrow ? <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{eyebrow}</p> : null}
+      {eyebrow ? <p className="text-xs font-medium text-muted-foreground first-letter:uppercase">{eyebrow}</p> : null}
       <p className={cn("mt-1.5 font-pixel leading-none", readingSize(value, ["text-7xl", "text-6xl", "text-4xl"]))} style={{ color: toneColor(tone) }}>
         {value}{unit ? <span className="ml-2 text-2xl text-muted-foreground">{unit}</span> : null}
       </p>
-      {caption ? <p className="mt-2 text-[15px] leading-snug">{caption}</p> : null}
+      {caption ? <p className="mt-2 text-sm leading-snug text-muted-foreground">{caption}</p> : null}
     </section>
   );
 }
@@ -131,7 +132,7 @@ export function Chart({ kind, title, data, series, unit, tone, note, source }: {
   if (rows.length < 2) return null;
   return (
     <Block>
-      {title ? <Label tone={lines.length === 1 ? tone : null}>{title}{unit ? <span className="normal-case tracking-normal text-dim"> · {unit}</span> : null}</Label> : null}
+      {title ? <Label tone={lines.length === 1 ? tone : null}>{title}{unit ? <span className="text-dim"> · {unit}</span> : null}</Label> : null}
       {lines.length > 1 ? (
         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
           {lines.map((line, index) => <span key={index} className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className="size-2 rounded-full" style={{ background: colors[index] }} />{line.name}</span>)}
@@ -160,7 +161,7 @@ export function Table({ title, columns, rows, note, source }: { title?: string |
       {title ? <Label>{title}</Label> : null}
       <table className="mt-2 w-full border-collapse text-sm">
         <thead>
-          <tr>{head.map((name, column) => <th key={column} className={cn("whitespace-nowrap pb-1.5 pr-3 align-bottom text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground last:pr-0", right[column] ? "text-right" : "text-left")}>{name}</th>)}</tr>
+          <tr>{head.map((name, column) => <th key={column} className={cn("whitespace-nowrap pb-1.5 pr-3 align-bottom text-xs font-medium text-muted-foreground last:pr-0", right[column] ? "text-right" : "text-left")}>{name}</th>)}</tr>
         </thead>
         <tbody>
           {body.map((row, index) => (
