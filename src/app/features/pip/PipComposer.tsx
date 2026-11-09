@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ModelPicker } from "./ModelPicker.tsx";
-import { X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ArrowUp, Square, X } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { removeSource, setDraft, type Chat } from "../../data/chats.ts";
 import { toastError } from "../../ui/toast/toast.ts";
@@ -40,7 +39,7 @@ export function PipComposer({ chat, busy, initial, onSend, onStop }: { chat: Cha
   };
 
   return (
-    <form onSubmit={submit} className="rounded-lg border bg-card p-2 focus-within:border-primary">
+    <form onSubmit={submit} className="rounded-xl border bg-card p-1.5 transition-colors duration-150 focus-within:border-primary/50">
       {chat.context.length ? (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {chat.context.map((source, index) => (
@@ -52,16 +51,22 @@ export function PipComposer({ chat, busy, initial, onSend, onStop }: { chat: Cha
           ))}
         </div>
       ) : null}
-      <div>
-        <Textarea ref={area} rows={1} value={text} onChange={event => edit(event.target.value)} onKeyDown={onKeyDown} maxLength={16000}
-          placeholder="message pip…" aria-label="Message Pip"
-          className="max-h-60 min-h-10 resize-none border-0 bg-transparent px-1 py-2 text-[15px] shadow-none focus-visible:ring-0 dark:bg-transparent" />
-      </div>
-      <div className="mt-2 flex items-end gap-2 border-t pt-2">
+      <Textarea ref={area} rows={1} value={text} onChange={event => edit(event.target.value)} onKeyDown={onKeyDown} maxLength={16000}
+        placeholder="message pip…" aria-label="Message Pip"
+        className="max-h-60 min-h-11 resize-none border-0 bg-transparent px-2.5 py-2.5 text-[15px] shadow-none focus-visible:ring-0 dark:bg-transparent" />
+      {/* One quiet row: what the reply may use on the left, the one action on the right. */}
+      <div className="flex items-center gap-1">
         <ModelPicker chat={chat} busy={busy} />
+        <span className="flex-1" />
         {busy
-          ? <Button type="button" onClick={onStop}>stop</Button>
-          : <Button type="submit" disabled={!text.trim()}>send</Button>}
+          ? <button type="button" onClick={onStop} aria-label="Stop the reply" title="Stop"
+              className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform duration-150 ease-out active:scale-[0.94]">
+              <Square className="size-3.5 fill-current" />
+            </button>
+          : <button type="submit" disabled={!text.trim()} aria-label="Send" title="Send (Enter)"
+              className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.94] disabled:bg-secondary disabled:text-dim">
+              <ArrowUp className="size-4" />
+            </button>}
       </div>
     </form>
   );

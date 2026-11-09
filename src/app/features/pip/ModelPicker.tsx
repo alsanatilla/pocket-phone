@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Popover } from "radix-ui";
-import { Check, ChevronDown, Globe } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { ArrowUpRight, Brain, Check, ChevronDown, Globe, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Chat } from "../../data/chats.ts";
@@ -10,8 +9,9 @@ import { chooseModel, providerOf, connectionOf, isConnected, customEndpoint, CUR
 import { FREE_ROUTER, loadFreeModels, tokenSize, type FreeModel } from "../../data/openrouter-models.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 
-// The model picker: one list, grouped by the account it comes from, with what the model is good for and what a
-// chat would get. Search filters names, ids and providers; a disconnected account is shown, disabled, and says so.
+// The model picker: the search is its head, then one line per model, grouped by the account it comes from. A line
+// says only what tells models apart (name, context, reasoning, free); the group already says the account. An
+// account that is not connected is one line that leads to connecting it, not a list of models that cannot be used.
 
 const GROUPS: { provider: ProviderKey; label: string }[] = [
   { provider: "opencode", label: "OpenCode Go" },
@@ -61,67 +61,65 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
   const groups = GROUPS.map(group => ({ ...group, models: filtered.filter(model => model.provider === group.provider) })).filter(group => group.models.length);
   const providerName = PROVIDER_NAMES[providerOf(chat.config)];
   const current = [providerName, selected?.context ? `${tokenSize(selected.context)} context` : "", `${tokenSize(chat.config.maxTokens)} reply limit`, chat.config.thinking ? "reasoning on" : ""].filter(Boolean).join(" · ");
+  const connectedGroups = groups.filter(group => connections[group.provider] !== false);
+  const unconnected = GROUPS.filter(group => connections[group.provider] === false && (group.provider !== "custom" || custom));
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-3 text-xs text-muted-foreground">
+    <div className="flex min-w-0 items-center gap-0.5 text-xs text-muted-foreground">
       <button type="button" disabled={busy} aria-label="Web search" aria-pressed={chat.config.webSearch}
         title={chat.config.webSearch ? "Web search on" : "Web search off"}
-        className={cn("flex min-h-10 shrink-0 items-center gap-1.5 rounded px-1.5 hover:text-foreground disabled:opacity-50", chat.config.webSearch && "text-primary")}
+        className={cn("flex size-9 shrink-0 items-center justify-center rounded-md transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:opacity-50", chat.config.webSearch && "text-primary hover:text-primary")}
         onClick={() => { try { chats.update(chat.uid, value => { value.config.webSearch = !value.config.webSearch; }); } catch (error) { toastError(error); } }}>
-        <Globe className="size-4" /><span className="hidden whitespace-nowrap sm:inline">web {chat.config.webSearch ? "on" : "off"}</span>
+        <Globe className="size-4" />
       </button>
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger asChild>
           <button type="button" disabled={busy} aria-label="Choose model" title={current}
-            className="ml-auto flex min-w-0 max-w-full items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-sm text-foreground hover:border-primary disabled:opacity-50">
-            <span className="max-w-48 truncate">{name}</span>
-            {free && !/free/i.test(name) ? <span className="text-xs text-movement">free</span> : null}<ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+            className="flex h-9 min-w-0 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:opacity-50 data-[state=open]:bg-accent data-[state=open]:text-foreground">
+            <span className="truncate">{name}</span>
+            {free && !/free/i.test(name) ? <span className="text-movement">free</span> : null}<ChevronDown className="size-3.5 shrink-0" />
           </button>
         </Popover.Trigger>
         <Popover.Portal>
-          <Popover.Content side="top" align="end" sideOffset={10} aria-label="Chat models"
-            className="z-50 flex max-h-[min(34rem,75dvh)] w-[min(27rem,calc(100vw-1.5rem))] origin-(--radix-popover-content-transform-origin) flex-col overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-xl duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-[0.97] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-[0.97]">
-            <div className="flex items-baseline justify-between gap-3 border-b px-4 pt-3 pb-2.5">
-              <h2 className="font-pixel text-2xl leading-none">choose a model</h2>
-              <a href="/#/settings" className="text-[11px] uppercase tracking-[0.08em] text-primary no-underline hover:underline">connections ↗</a>
-            </div>
+          <Popover.Content side="top" align="start" sideOffset={8} collisionPadding={12} aria-label="Chat models"
+            className="z-50 flex max-h-[min(30rem,70dvh)] w-[min(22rem,calc(100vw-1.5rem))] origin-(--radix-popover-content-transform-origin) flex-col overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-xl duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-[0.97] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-[0.97]">
+            <label className="flex items-center gap-2 border-b px-3">
+              <Search className="size-4 shrink-0 text-muted-foreground" />
+              <input aria-label="Search models" placeholder="search models" value={query} onChange={event => setQuery(event.target.value)} autoFocus
+                className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-dim" />
+            </label>
+            {loading || error ? <div role={error ? "alert" : "status"} className={cn("flex items-center gap-2 px-3 pt-2 text-xs", error ? "text-destructive" : "text-muted-foreground")}>
+              {error || "Loading models…"}{error ? <Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => setAttempt(value => value + 1)}>retry</Button> : null}
+            </div> : null}
 
-            <div className="px-4 pt-3 pb-2">
-              <Input aria-label="Search models" placeholder="search models…" value={query} onChange={event => setQuery(event.target.value)}
-                className="h-10 bg-transparent focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-transparent" />
-              {loading ? <p role="status" className="pt-2 text-[11px] text-muted-foreground">Loading models…</p> : null}
-              {error ? <div role="alert" className="flex items-center gap-2 pt-2 text-[11px] text-destructive">{error}<Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => setAttempt(value => value + 1)}>retry</Button></div> : null}
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3" aria-label="Available models">
-              {groups.map(group => <section key={group.provider} className="pt-3 first:pt-1">
-                <h3 className="flex items-baseline justify-between px-2 pb-1 text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
-                  {group.label}<span className="text-dim">{group.models.length}</span>
-                </h3>
+            <div className="min-h-0 flex-1 overflow-y-auto p-1.5 [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin]" aria-label="Available models">
+              {connectedGroups.map(group => <section key={group.provider} className="pt-2 first:pt-0.5">
+                <h3 className="px-2 pb-1 text-xs text-dim">{group.label}</h3>
                 {group.models.map(model => {
                   const chosen = providerName === PROVIDER_NAMES[model.provider] && chat.config.model === model.id;
-                  const traits = [model.reasoning && "reasoning", model.vision && "images"].filter(Boolean) as string[];
-                  const connected = connections[model.provider];
+                  const size = model.context ? `${Math.round(model.context / 1000)}k` : "";
                   return (
-                    <button type="button" key={model.provider + model.id} disabled={busy || model.tools === false || !connected} aria-pressed={chosen} onClick={() => choose(model)}
-                      className={cn("flex min-h-11 w-full flex-col justify-center rounded-md border-l-2 px-3 py-2 text-left transition-colors hover:bg-accent disabled:opacity-40",
-                        chosen ? "border-primary bg-accent" : "border-transparent")}>
-                      <span className="flex items-baseline gap-2">
-                        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{model.name}</span>
-                        <span className="shrink-0 text-[11px] text-dim">{model.context ? `${Math.round(model.context / 1000)}k` : model.id === "openrouter/free" ? "auto" : ""}</span>
-                        {chosen ? <Check className="size-4 shrink-0 self-center text-primary" /> : null}
-                      </span>
-                      <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-dim">
-                        <span>{PROVIDER_NAMES[model.provider]}{!connected ? " · not connected" : model.free ? " · free" : ""}</span>
-                        {model.tools === false ? <span className="uppercase tracking-wide">no tools</span>
-                          : traits.map(trait => <span key={trait} className="rounded-sm border border-border/70 px-1 py-px text-[10px] uppercase tracking-wide">{trait}</span>)}
-                      </span>
+                    <button type="button" key={model.provider + model.id} disabled={busy || model.tools === false} aria-pressed={chosen} onClick={() => choose(model)}
+                      title={model.note ? model.name + " · " + model.note : model.name}
+                      className={cn("flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors duration-100 hover:bg-accent disabled:opacity-40", chosen && "text-primary")}>
+                      <span className="min-w-0 flex-1 truncate">{model.name.replace(/^[^:·]{1,30}:\s+/, "")}</span>
+                      {model.reasoning ? <Brain aria-label="reasons first" className="size-3.5 shrink-0 text-dim" /> : null}
+                      {model.free && model.id !== "openrouter/free" ? <span className="shrink-0 text-xs text-movement">free</span> : null}
+                      {model.tools === false ? <span className="shrink-0 text-xs text-dim">no tools</span> : size ? <span className="w-9 shrink-0 text-right text-xs tabular-nums text-dim">{size}</span> : null}
+                      <Check className={cn("size-4 shrink-0", chosen ? "text-primary" : "invisible")} />
                     </button>
                   );
                 })}
               </section>)}
-              {!groups.length && !loading ? <p className="px-3 py-6 text-sm text-muted-foreground">
-                No model matches “{query.trim()}”. <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => setQuery("")}>clear the search</button>
+              {!connectedGroups.length && !loading ? <p className="px-2 py-5 text-sm text-muted-foreground">
+                {query.trim() ? <>No model matches “{query.trim()}”. <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => setQuery("")}>clear</button></> : "No account connected yet."}
               </p> : null}
+              {unconnected.length && !query.trim() ? <div className="mt-2 border-t pt-1.5">
+                {unconnected.map(group => (
+                  <a key={group.provider} href="/#/settings" className="flex h-9 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground no-underline transition-colors duration-100 hover:bg-accent hover:text-foreground">
+                    <span className="flex-1">{group.label}</span><span className="text-xs">connect</span><ArrowUpRight className="size-3.5" />
+                  </a>
+                ))}
+              </div> : null}
             </div>
           </Popover.Content>
         </Popover.Portal>

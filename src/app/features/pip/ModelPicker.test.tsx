@@ -10,14 +10,18 @@ const model = { id: "example/tool-model:free", name: "Tool model", context: 1280
 beforeEach(async () => { await connect("openrouter", "test-key-12345678"); vi.mocked(loadFreeModels).mockResolvedValue([FREE_ROUTER, model, { ...model, id: "example/no-tools:free", name: "No tools", tools: false }]); });
 
 describe("composer model picker", () => {
-  it("offers connected providers and disables disconnected ones", async () => {
+  it("offers connected accounts' models, and one line to connect each other account", async () => {
     await connect("opencode", "test-key-12345678");
     const chat = chats.create();
     render(<ModelPicker chat={chat} busy={false} />);
     fireEvent.click(screen.getByRole("button", { name: "Choose model" }));
     const choice = await screen.findByRole("button", { name: /GLM 5.3/ });
     await waitFor(() => expect(choice.hasAttribute("disabled")).toBe(false));
-    expect(screen.getByRole("button", { name: /Claude Sonnet 5.5.*Anthropic/ }).hasAttribute("disabled")).toBe(true);
+    // Anthropic is not connected: no models from it, one line that leads to connecting it.
+    // (Claude through OpenRouter, which is connected, stays: only the Anthropic account's own group goes.)
+    expect(screen.queryByRole("heading", { name: "Anthropic" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /Claude Sonnet 5.5/ })).toHaveLength(1);
+    expect((await screen.findByRole("link", { name: /Anthropic.*connect/ })).getAttribute("href")).toBe("/#/settings");
     fireEvent.click(choice);
     expect(chats.get(chat.uid)?.config.model).toBe("glm-5.3");
   });
@@ -26,7 +30,7 @@ describe("composer model picker", () => {
     render(<ModelPicker chat={chat} busy={false} />);
     fireEvent.click(screen.getByRole("button", { name: "Choose model" }));
     const choice = await screen.findByRole("button", { name: /Tool model/ });
-    expect(choice.textContent).toContain("128k"); expect(choice.textContent).toContain("reasoning");
+    expect(choice.textContent).toContain("128k"); expect(choice.querySelector('[aria-label="reasons first"]')).toBeTruthy();
     expect(screen.getByRole("button", { name: /No tools/ }).hasAttribute("disabled")).toBe(true);
     fireEvent.change(screen.getByRole("textbox", { name: "Search models" }), { target: { value: "tool-model" } });
     expect(screen.queryByRole("button", { name: /No tools/ })).toBeNull();
