@@ -29,8 +29,8 @@ function TaskSteps({ task }: { task: Task }) {
       <span className={step.done ? "text-muted-foreground line-through" : ""}>{step.text}</span>
     </label>)}
     {!task.done ? <form className="flex gap-2" onSubmit={event => { event.preventDefault(); attempt(() => { addStep(task.uid, text); setText(""); }); }}>
-      <Input aria-label="New step" placeholder="add a step…" maxLength={500} value={text} onChange={event => setText(event.target.value)} />
-      <Button type="submit" size="sm" variant="ghost" disabled={!text.trim()}>add</Button>
+      <Input aria-label="New step" placeholder="add a step…" maxLength={500} value={text} onChange={event => setText(event.target.value)} className="h-9" />
+      <Button type="submit" size="sm" variant="ghost" className="h-9" disabled={!text.trim()}>add</Button>
     </form> : null}
   </div>;
 }
@@ -64,7 +64,7 @@ export function FocusSession({ title }: { title?: string | null }) {
       </div>
       {task ? <>
         <TaskSteps key={task.uid} task={task} /><TaskNote task={task} />
-        {!task.done ? <Button variant="ghost" size="sm" aria-label={"Complete " + task.text} onClick={() => attempt(() => { if (!getTask(task.uid)?.done) completeTask(task.uid); if (session) endFocus(session.uid); toast("Done."); })}>complete task</Button> : <p className="text-xs text-muted-foreground">Task completed</p>}
+        {!task.done ? <Button variant="outline" size="sm" className="h-9" aria-label={"Complete " + task.text} onClick={() => attempt(() => { if (!getTask(task.uid)?.done) completeTask(task.uid); if (session) endFocus(session.uid); toast("Done."); })}>complete task</Button> : <p className="text-xs text-muted-foreground">Task completed</p>}
       </> : null}
     </> : null}
   </Block>;

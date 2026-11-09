@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Surface } from "../../surface/Surface.tsx";
 import { useSurface } from "../../surface/useSurface.ts";
@@ -7,18 +8,25 @@ import { useSurface } from "../../surface/useSurface.ts";
 
 export function TodayPage() {
   const { spec, store, status, error, arrange, standard } = useSurface();
+  const arranged = status === "arranged";
+  const failed = status === "failed";
   return (
-    <main className="space-y-4 pt-2">
+    <main className="pt-3">
       <Surface spec={spec} store={store} loading={status === "arranging"} />
-      <footer className="flex flex-wrap items-center gap-2 pt-2 text-xs text-dim">
-        <span className={status === "arranging" ? "animate-pulse text-primary" : ""}>
-          {status === "arranging" ? "arranging…" : status === "arranged" ? "arranged" : status === "failed" ? error : "standard layout"}
+
+      <footer className="mt-8 flex items-center gap-3 border-t border-dashed pt-3">
+        <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.08em] text-dim" aria-live="polite">
+          <span aria-hidden="true" className={cn("size-1.5 rounded-full",
+            status === "arranging" ? "animate-pulse bg-primary" : failed ? "bg-destructive" : arranged ? "bg-primary" : "bg-muted-foreground")} />
+          {status === "arranging" ? "arranging…" : arranged ? "arranged for now" : failed ? "standard layout" : "standard layout"}
         </span>
         <span className="flex-1" />
-        {status === "arranged" || status === "failed" ? <Button size="sm" variant="ghost" onClick={standard}>standard</Button> : null}
-        {status !== "arranging" ? <Button size="sm" variant="ghost" onClick={() => void arrange()}>{status === "arranged" ? "rearrange" : "arrange"}</Button> : null}
+        {arranged || failed ? <Button size="sm" variant="ghost" className="h-9 text-dim" onClick={standard}>standard</Button> : null}
+        {status !== "arranging" ? <Button size="sm" variant="outline" className="h-9" onClick={() => void arrange()}>{arranged ? "rearrange" : "arrange"}</Button> : null}
       </footer>
-      {status === "standard" && error ? <p className="text-xs text-dim">{error}</p> : null}
+
+      {failed && error ? <p className="mt-2 text-[11px] text-dim">{error}</p> : null}
+      {status === "standard" && error ? <p className="mt-2 text-[11px] text-dim">{error}</p> : null}
     </main>
   );
 }

@@ -39,12 +39,12 @@ function readingSize(value: string | number, sizes: [string, string, string]): s
 
 export function Hero({ eyebrow, value, unit, caption, tone }: { eyebrow?: string | null; value: string | number; unit?: string | null; caption?: string | null; tone?: Tone }) {
   return (
-    <section className="arrive pt-2 pb-1">
-      {eyebrow ? <p className="text-xs text-muted-foreground">{eyebrow}</p> : null}
-      <p className={cn("mt-1 font-pixel leading-none", readingSize(value, ["text-7xl", "text-6xl", "text-4xl"]))} style={{ color: toneColor(tone) }}>
+    <section className="arrive pt-1 pb-1">
+      {eyebrow ? <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{eyebrow}</p> : null}
+      <p className={cn("mt-1.5 font-pixel leading-none", readingSize(value, ["text-7xl", "text-6xl", "text-4xl"]))} style={{ color: toneColor(tone) }}>
         {value}{unit ? <span className="ml-2 text-2xl text-muted-foreground">{unit}</span> : null}
       </p>
-      {caption ? <p className="mt-1 text-base">{caption}</p> : null}
+      {caption ? <p className="mt-2 text-[15px] leading-snug">{caption}</p> : null}
     </section>
   );
 }
@@ -57,7 +57,7 @@ export function Metric({ label, value, unit, hint, tone, onPress }: { label: str
       <p className={cn("mt-2 truncate font-pixel leading-none", readingSize(value, ["text-5xl", "text-4xl", "text-2xl"]))} style={{ color: toneColor(tone) }}>
         {value}{unit ? <span className="ml-1 text-base text-muted-foreground">{unit}</span> : null}
       </p>
-      {hint ? <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{hint}</p> : null}
+      {hint ? <p className="mt-1 line-clamp-2 text-[11px] leading-tight text-muted-foreground">{hint}</p> : null}
     </Tag>
   );
 }
@@ -192,8 +192,8 @@ export function Timeline({ title, items }: { title?: string | null; items: Timel
             <span className="font-pixel text-xl leading-none" style={{ color: item.now ? "var(--primary)" : "var(--calendar)" }}>{item.time}</span>
             <span className="min-w-0 text-sm">
               {item.title}
-              {item.now ? <span className="ml-2 text-xs text-primary">now</span> : null}
-              {item.detail ? <span className="block text-xs text-muted-foreground">{item.detail}</span> : null}
+              {item.now ? <span className="ml-2 text-[11px] uppercase tracking-[0.08em] text-primary">now</span> : null}
+              {item.detail ? <span className="block text-[11px] leading-tight text-muted-foreground">{item.detail}</span> : null}
             </span>
           </li>
         ))}
@@ -226,12 +226,16 @@ export function TaskList({ title, source, limit }: { title?: string | null; sour
         {tasks.slice(0, limit ?? 6).map(task => {
           const overdue = Boolean(task.due) && task.due < day;
           return (
-            <li key={task.uid} className="flex items-start gap-3 border-t border-dashed py-3 first:border-t-0">
+            <li key={task.uid} className="flex min-h-11 items-start gap-3 border-t border-dashed py-2.5 first:border-t-0">
               <Check label={"Complete " + task.text} onCheck={() => { try { completeTask(task.uid); toast("Done."); } catch (error) { toastError(error); } }} />
               <div className="min-w-0">
-                <p className="text-sm">{task.text}</p>
-                <p className={cn("text-xs text-muted-foreground", overdue && "text-destructive")}>
-                  {overdue ? "overdue · " + task.due : task.due === day ? "today" : task.due || "no date"}{task.important ? " · important" : ""}
+                <p className="text-sm leading-snug">
+                  {task.important ? <span role="img" aria-label="Important" className="mr-1.5 text-primary">!</span> : null}{task.text}
+                </p>
+                <p className="mt-0.5 text-[11px] leading-tight text-dim">
+                  <span className={cn(overdue && "text-destructive", !overdue && task.due === day && "text-primary")}>
+                    {overdue ? "overdue · " + task.due : task.due === day ? "today" : task.due || "no date"}
+                  </span>
                 </p>
               </div>
             </li>
@@ -254,9 +258,9 @@ export function ThoughtList({ title, source, limit }: { title?: string | null; s
       <Label tone="thought">{title ?? (source === "ready" ? "to revisit" : "parked thoughts")} · {thoughts.length}</Label>
       <ul className="mt-2">
         {thoughts.slice(0, limit ?? 5).map(item => (
-          <li key={item.id} className="flex items-center gap-3 border-t border-dashed py-2.5 first:border-t-0">
-            <p className="min-w-0 flex-1 text-sm">{item.text}</p>
-            <Button size="sm" variant="ghost" className="text-thought" onClick={() => { try { createTask(item.text); toast("Made into a task."); } catch (error) { toastError(error); } }}>→ task</Button>
+          <li key={item.id} className="flex min-h-11 items-center gap-3 border-t border-dashed py-2 first:border-t-0">
+            <p className="min-w-0 flex-1 text-sm leading-snug">{item.text}</p>
+            <Button size="sm" variant="ghost" className="h-9 text-thought" onClick={() => { try { createTask(item.text); toast("Made into a task."); } catch (error) { toastError(error); } }}>→ task</Button>
           </li>
         ))}
       </ul>
@@ -280,11 +284,11 @@ export function Capture({ mode, placeholder, onAsk }: { mode: "thought" | "task"
   const label = mode === "thought" ? "keep" : mode === "task" ? "add" : "ask";
   const hint = placeholder ?? (mode === "thought" ? "a thought…" : mode === "task" ? "a task…" : "ask pip…");
   return (
-    <form onSubmit={submit} className="flex items-center gap-2 rounded-lg border bg-card py-1 pr-1 pl-3 focus-within:border-primary">
+    <form onSubmit={submit} className="flex items-center gap-2 rounded-lg border bg-card py-1 pr-1 pl-3 transition-colors focus-within:border-primary">
       <span aria-hidden="true" className="font-pixel text-lg text-primary">▌</span>
       <Input value={text} onChange={event => setText(event.target.value)} aria-label={hint} maxLength={500} placeholder={hint}
         className="h-10 min-w-0 flex-1 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0 dark:bg-transparent" />
-      <Button type="submit" disabled={!text.trim()}>{label}</Button>
+      <Button type="submit" className="h-10" disabled={!text.trim()}>{label}</Button>
     </form>
   );
 }

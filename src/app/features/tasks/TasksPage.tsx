@@ -221,7 +221,7 @@ export function TasksPage() {
         {templatesNow.map(template => <li key={template.uid} className="flex min-h-11 items-center gap-3 border-t border-dashed">
           <span className="min-w-0 flex-1 py-2">
             <span className="block truncate">{template.name}</span>
-            <span className="text-[11px] text-dim">{templateItemsOf(template.uid)} items · dated from today</span>
+            <span className="text-[11px] text-dim">{templateItemsOf(template.uid)} {templateItemsOf(template.uid) === 1 ? "item" : "items"} · dated from today</span>
           </span>
           <Button size="sm" variant="outline" onClick={() => startTemplate(template)}>use</Button>
         </li>)}

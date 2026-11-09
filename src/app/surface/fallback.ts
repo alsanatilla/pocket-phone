@@ -67,7 +67,9 @@ export function fallbackSurface(moment: Moment): Spec {
     tiles.push(b.add("Metric", { label: "done today", value: { $state: "/tasks/doneToday" }, unit: null, hint: null, tone: "movement" }));
   }
   if (lead !== "review" && !showDue && moment.tasks.open > 0) {
-    tiles.push(b.add("Metric", { label: "open tasks", value: { $state: "/tasks/open" }, unit: null, hint: "none due today", tone: "accent" }, [], open("/tasks")));
+    tiles.push(b.add("Metric", { label: "open tasks", value: { $state: "/tasks/open" }, unit: null,
+      hint: moment.tasks.overdue ? moment.tasks.overdue + " overdue" : moment.tasks.due ? "due today" : "none due today",
+      tone: moment.tasks.overdue ? "warning" : "accent" }, [], open("/tasks")));
   }
   if (!showThoughts && moment.thoughts.open > 0) {
     tiles.push(b.add("Metric", { label: "parked", value: { $state: "/thoughts/open" }, unit: null, hint: "thoughts", tone: "thought" }, [], open("/thoughts")));
