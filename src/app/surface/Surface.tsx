@@ -7,11 +7,10 @@ import { parkThoughtText } from "../data/thoughts.ts";
 import { withContext } from "../data/chats.ts";
 import { toast, toastError } from "../ui/toast/toast.ts";
 import { registry } from "./registry.tsx";
+import { openPath } from "../lib/classic.ts";
 
 // Draws a surface spec with Pocket's registry, bound to the live moment, with the catalog's actions wired to
 // the router and the stores. Areas that have not moved to this client yet open in the classic app.
-
-const HERE = new Set(["/today", "/notes", "/pip"]);
 
 export function Surface({ spec, store, loading = false }: { spec: Spec; store: StateStore; loading?: boolean }) {
   const navigate = useNavigate();
@@ -20,11 +19,7 @@ export function Surface({ spec, store, loading = false }: { spec: Spec; store: S
       try { run(params ?? {}); } catch (error) { toastError(error); }
     };
     return {
-      open: guard(({ to }) => {
-        const path = String(to || "/today");
-        if (HERE.has(path)) void navigate({ to: path });
-        else location.assign("/#" + path);
-      }),
+      open: guard(({ to }) => openPath(String(to || "/today"))),
       askPip: guard(({ prompt }) => {
         const text = String(prompt || "").slice(0, 2000);
         const chat = withContext({ kind: "today", uid: today(), title: "Today", text: JSON.stringify(store.getSnapshot()).slice(0, 6000), href: "/today" });

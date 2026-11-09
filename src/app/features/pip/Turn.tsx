@@ -11,6 +11,7 @@ import { Answer, Thinking } from "./stream/Answer.tsx";
 import { Prose } from "./stream/Prose.tsx";
 import { ledger, ledgerTitle, offersOf, planOf, sourcesOf } from "./reply.ts";
 import { resume, retry, send } from "./runner.ts";
+import { hrefFor } from "../../lib/classic.ts";
 
 // One exchange: the question, then Pip's reply with its parts in reading order: what it looked up (folded to one
 // line once the reply is done), its plan, its reasoning, the answer with its cards, sources, and what it offers.
@@ -112,7 +113,7 @@ function TurnView({ turn, live, chatId, latest, locked }: TurnProps) {
         {sources.length && !streaming ? (
           <div className="flex flex-wrap gap-1.5">
             {sources.map(source => (
-              <a key={source.href} href={source.href.startsWith("/") ? "/#" + source.href : source.href} target={source.href.startsWith("/") ? undefined : "_blank"} rel="noopener noreferrer"
+              <a key={source.href} href={source.href.startsWith("/") ? hrefFor(source.href) : source.href} target={source.href.startsWith("/") ? undefined : "_blank"} rel="noopener noreferrer"
                 className="max-w-full truncate rounded-sm border px-2 py-0.5 text-[11px] text-muted-foreground no-underline hover:border-primary hover:text-foreground">{source.title}</a>
             ))}
           </div>

@@ -119,7 +119,7 @@ export function hydrateCards(node) {
       <section className="pocket-card">
         <div className="pocket-bar" />
         <div className="pocket-sub">This reply has a card the new Pocket draws.</div>
-        <a className="pocket-link" href="/next#/pip">open in the new Pocket</a>
+        <a className="pocket-link" href="/#/pip">open in the new Pocket</a>
       </section>
     ) : (
       <JSONUIProvider registry={registry} initialState={spec.state ?? {}}>
@@ -149,7 +149,7 @@ export function LegacyCard({ spec }) {
     <section className="pocket-card">
       <div className="pocket-bar" />
       <div className="pocket-sub">This reply has a card the new Pocket draws.</div>
-      <a className="pocket-link" href="/next#/pip">open in the new Pocket</a>
+      <a className="pocket-link" href="/#/pip">open in the new Pocket</a>
     </section>
   );
   return (

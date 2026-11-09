@@ -40,12 +40,18 @@ const pip = createRoute({
   component: lazyRouteComponent(() => import("./features/pip/PipPage.tsx"), "PipPage"),
 });
 
+/** The classic URL for a chat (notifications, older links): /pip/<uid> → /pip?chat=<uid>. */
+const pipChat = createRoute({
+  getParentRoute: () => root, path: "pip/$chatId",
+  beforeLoad: ({ params }) => { throw redirect({ to: "/pip", search: { chat: params.chatId }, replace: true }); },
+});
+
 const settings = createRoute({
   getParentRoute: () => root, path: "settings",
   component: lazyRouteComponent(() => import("./features/settings/SettingsPage.tsx"), "SettingsPage"),
 });
 
-const routeTree = root.addChildren([index, today, notes, note, pip, settings]);
+const routeTree = root.addChildren([index, today, notes, note, pip, pipChat, settings]);
 
 export const router = createRouter({
   routeTree,

@@ -9,6 +9,7 @@ import { toast, toastError } from "../../../ui/toast/toast.ts";
 import { isLegacySpec } from "../../../surface/cards.tsx";
 import { momentStore } from "../../../surface/moment.ts";
 import { registry } from "../../../surface/registry.tsx";
+import { openPath } from "../../../lib/classic.ts";
 
 // A card inside a reply, built while it streams. Only complete JSON lines count (the line being written is held
 // back), each element appears as soon as its line is complete, and elements that did not change keep their
@@ -34,8 +35,6 @@ export function useStreamingSpec(source: string, closed: boolean): Spec | null {
   }, [source, closed]);
 }
 
-const IN_APP = new Set(["/today", "/notes", "/pip", "/settings"]);
-
 function useHandlers(onAsk: (prompt: string) => void) {
   const ask = useRef(onAsk);
   ask.current = onAsk;
@@ -45,7 +44,7 @@ function useHandlers(onAsk: (prompt: string) => void) {
     };
     return {
       askPip: guard(({ prompt }) => { const text = String(prompt ?? "").trim(); if (text) ask.current(text.slice(0, 2000)); }),
-      open: guard(({ to }) => { const path = String(to || "/today"); if (IN_APP.has(path)) location.hash = "#" + path; else location.assign("/#" + path); }),
+      open: guard(({ to }) => openPath(String(to || "/today"))),
       completeTask: guard(({ uid }) => { completeTask(String(uid)); toast("Done."); }),
       parkThought: guard(({ text }) => { parkThoughtText(String(text)); toast("Kept."); }),
     };

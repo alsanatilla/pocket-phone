@@ -11,6 +11,7 @@ import { activeAccount } from "../../../client/workspace-storage.js";
 import { MODEL_NAMES, MODELS, PROVIDERS, TIERS, type Provider, type Tier } from "../../data/ai.ts";
 import { PageTitle } from "../../ui/PageTitle.tsx";
 import { useAiSettings, type Connection } from "./useAiSettings.ts";
+import { classicHref } from "../../lib/classic.ts";
 
 // Pip's settings in plain terms. Changes apply as they are made; model IDs stay under "advanced".
 
@@ -112,7 +113,7 @@ export function SettingsPage() {
         <ConnectionLine connection={connection} provider={providerName} />
         {needsAccount ? (
           <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-            OpenCode Go only answers through Pocket's server. <a href="/#/account" className="text-primary">Sign in to Pocket</a>, then add your key here; it is stored encrypted on your account.
+            OpenCode Go only answers through Pocket's server. <a href={classicHref("/account")} className="text-primary">Sign in to Pocket</a>, then add your key here; it is stored encrypted on your account.
           </p>
         ) : connected ? (
           <Button variant="outline" size="sm" disabled={busy} onClick={() => void ai.disconnect()}>disconnect</Button>

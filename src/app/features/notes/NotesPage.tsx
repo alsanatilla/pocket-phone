@@ -9,6 +9,7 @@ import { listNotes, noteExcerpt, noteTitle, searchNotes } from "../../data/notes
 import { noteThoughts, thoughtDone } from "../../data/thoughts.ts";
 import type { Note } from "../../data/types.ts";
 import { PageTitle } from "../../ui/PageTitle.tsx";
+import { classicHref } from "../../lib/classic.ts";
 
 let lastQuery = ""; // the filter is still there when you come back
 
@@ -60,7 +61,7 @@ export function NotesPage() {
           );
         }) : <p className="text-sm text-muted-foreground">{query.trim() ? "No note matches." : "No notes yet."}</p>}
       </div>
-      <p className="pt-4 text-xs text-dim">Journal pages, history and recently deleted are still in the <a href="/#/notes" className="text-muted-foreground">classic notes</a>.</p>
+      <p className="pt-4 text-xs text-dim">Journal pages, history and recently deleted are still in the <a href={classicHref("/notes")} className="text-muted-foreground">classic notes</a>.</p>
     </main>
   );
 }

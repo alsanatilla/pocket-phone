@@ -10,6 +10,7 @@ import { chats } from "../../data/chats.ts";
 import { toast, toastError } from "../../ui/toast/toast.ts";
 import { approvalOf, decide } from "./runner.ts";
 import { changeLabel, type Offer } from "./reply.ts";
+import { classicHref, hrefFor } from "../../lib/classic.ts";
 
 // What Pip offers to put into Pocket. Nothing is saved without the person: a proposal opens for review first,
 // a change says what it will do, a write Pip asked for waits for approve or decline. Saving is idempotent, so a
@@ -20,7 +21,7 @@ function SavedLink({ href, label }: { href: string; label: string }) {
   const area = "/" + href.split("/")[1];
   return IN_APP.has(area)
     ? <Button asChild size="sm" variant="ghost" className="text-movement"><Link to={href}>✓ {label}</Link></Button>
-    : <Button asChild size="sm" variant="ghost" className="text-movement"><a href={"/#" + href}>✓ {label}</a></Button>;
+    : <Button asChild size="sm" variant="ghost" className="text-movement"><a href={hrefFor(href)}>✓ {label}</a></Button>;
 }
 
 function Frame({ kind, title, children }: { kind: string; title: string; children: React.ReactNode }) {
@@ -116,7 +117,7 @@ export function OfferCard({ offer, chatId, turnId, locked }: { offer: Offer; cha
   if (offer.type === "coros") {
     return (
       <Frame kind="COROS workout" title={offer.title}>
-        {offer.saved ? <SavedLink href={offer.saved} label="saved to COROS" /> : <Button asChild size="sm" variant="outline"><a href={"/#/pip/" + chatId}>review in classic</a></Button>}
+        {offer.saved ? <SavedLink href={offer.saved} label="saved to COROS" /> : <Button asChild size="sm" variant="outline"><a href={classicHref("/pip/" + chatId)}>review in classic</a></Button>}
       </Frame>
     );
   }

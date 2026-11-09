@@ -1,22 +1,15 @@
 ---
-// The new Pocket client (src/app), served beside the classic app while views move over route by route. Nothing
-// here shares the legacy bundle: one module entry (styles come with it), a chunk per route.
-import ReactPreamble from '../components/ReactPreamble.astro';
+// The new client used to live here while it was being built; it is Pocket's home now. Old links keep working:
+// the hash (the in-app path) travels along.
+export const prerender = true;
 ---
-
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
-    <title>pocket</title>
-    <link rel="preload" href="/fonts/VT323-Regular.ttf" as="font" type="font/ttf" crossorigin />
-    <link rel="preload" href="/fonts/AtkinsonHyperlegibleMono-Regular.woff2" as="font" type="font/woff2" crossorigin />
-    <ReactPreamble />
+    <meta name="robots" content="noindex" />
+    <script is:inline>location.replace('/' + location.search + location.hash);</script>
+    <noscript><meta http-equiv="refresh" content="0; url=/" /></noscript>
   </head>
-  <body>
-    <div id="app"></div>
-    <script>import "../app/main.tsx";</script>
-  </body>
+  <body></body>
 </html>
