@@ -74,18 +74,18 @@ export function NoteEditor({ uid, fresh }: { uid: string; fresh: boolean }) {
 
       {note.error ? <p role="alert" className="mt-2 text-sm text-destructive">{note.error}</p> : null}
 
-      <div className="group mt-2 rounded-md border bg-card transition-colors focus-within:border-ring">
+      <div className="group mt-2 rounded-md border bg-card transition-colors focus-within:border-primary/60">
         {preview
           ? <Markdown text={note.text} options={{ annotations: thoughtAnnotations(note.stored ? uid : null, note.text) }}
-              className="note-prose min-h-[40vh] px-4 py-4" />
+              className="note-prose min-h-[40vh] px-4 py-6" />
           : <Textarea value={note.text} maxLength={NOTE_LIMIT} spellCheck autoFocus aria-label="Note text"
               placeholder={"# Title\n\nWrite in Markdown…  >> a thought @tomorrow parks it"}
-              className="min-h-[60vh] resize-y border-0 bg-transparent px-4 py-4 text-[15px] leading-[1.7] shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
+              className="mx-auto block min-h-[45vh] w-full max-w-[62ch] resize-y border-0 bg-transparent px-4 py-6 text-base leading-[1.75] caret-primary shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
               onChange={event => note.edit(event.target.value, cursorLine(event))}
               onKeyUp={onKeyUp} onBlur={note.flush} />}
       </div>
 
-      <p className="mt-2 text-[11px] text-dim">» at the start of a line parks a thought · # makes a heading · saved as you type · ⌘E previews</p>
+      <p className="mx-auto mt-2 max-w-[62ch] px-4 text-[11px] text-dim">» at the start of a line parks a thought · # makes a heading · saved as you type · ⌘E previews</p>
     </main>
   );
 }

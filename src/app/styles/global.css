@@ -149,7 +149,7 @@
  * the note uses this; Pip's replies keep the more compact .prose above.
  */
 @layer components {
-  .note-prose { max-width: 62ch; margin: 0 auto; font-size: 15px; line-height: 1.7; }
+  .note-prose { max-width: 62ch; margin: 0 auto; font-size: 16px; line-height: 1.75; }
   .note-prose h1 { font-family: var(--font-pixel); font-size: 30px; line-height: 1.05; margin: 0 0 14px; }
   .note-prose h2 { font-family: var(--font-pixel); font-size: 24px; line-height: 1.15; margin: 24px 0 8px; }
   .note-prose h3, .note-prose h4 { font-family: var(--font-pixel); font-size: 19px; line-height: 1.2; margin: 20px 0 6px; }
