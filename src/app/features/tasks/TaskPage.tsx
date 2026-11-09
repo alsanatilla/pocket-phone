@@ -26,7 +26,7 @@ interface Draft { text: string; due: string; list: string; important: boolean; s
 
 const draftOf = (task: Task | null): Draft => ({ text: task?.text ?? "", due: task?.due ?? "", list: task?.list ?? "", important: Boolean(task?.important), steps: task?.steps ?? [] });
 
-const LABEL = "text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground";
+const LABEL = "text-xs font-medium text-muted-foreground first-letter:uppercase";
 
 export function TaskPage() {
   const { taskId } = useParams({ from: "/tasks/$taskId" });
@@ -90,7 +90,7 @@ export function TaskPage() {
         <Textarea id="task-text" value={draft.text} maxLength={500} rows={2} placeholder="one action, one line… “call the bank tomorrow !”"
           onChange={event => set("text", event.target.value)} className="mt-2" />
         {hint.labels.length ? <p className="mt-2 flex flex-wrap items-center gap-1.5" aria-live="polite">
-          {hint.labels.map((label, index) => <span key={index} className="rounded-sm border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>)}
+          {hint.labels.map((label, index) => <span key={index} className="rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground">{label}</span>)}
           <span className="text-[10px] text-dim">from the text, applied on save</span>
         </p> : null}
       </div>

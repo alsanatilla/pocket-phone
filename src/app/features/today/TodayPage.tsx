@@ -15,10 +15,10 @@ export function TodayPage() {
       <Surface spec={spec} store={store} loading={status === "arranging"} />
 
       <footer className="mt-8 flex items-center gap-3 border-t border-dashed pt-3">
-        <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.08em] text-dim" aria-live="polite">
+        <span className="flex items-center gap-1.5 text-xs text-dim" aria-live="polite">
           <span aria-hidden="true" className={cn("size-1.5 rounded-full",
             status === "arranging" ? "animate-pulse bg-primary" : failed ? "bg-destructive" : arranged ? "bg-primary" : "bg-muted-foreground")} />
-          {status === "arranging" ? "arranging…" : arranged ? "arranged for now" : failed ? "standard layout" : "standard layout"}
+          {status === "arranging" ? "Arranging…" : arranged ? "Arranged for now" : "Standard layout"}
         </span>
         <span className="flex-1" />
         {arranged || failed ? <Button size="sm" variant="ghost" className="h-9 text-dim" onClick={standard}>standard</Button> : null}

@@ -6,6 +6,7 @@ import { useCollection } from "../data/bus.ts";
 import { chosenTask, completeTask, createTask, listTasks, today } from "../data/tasks.ts";
 import { openThoughts, parkThoughtText } from "../data/thoughts.ts";
 import { toast, toastError } from "../ui/toast/toast.ts";
+import { BARE_INPUT, FIELD, SendButton } from "../ui/SendButton.tsx";
 
 // Pocket's own components for generated surfaces. One type scale for all of them:
 //   label   11px caps, slight tracking, muted (or the block's tone)
@@ -193,7 +194,7 @@ export function Timeline({ title, items }: { title?: string | null; items: Timel
             <span className="font-pixel text-xl leading-none" style={{ color: item.now ? "var(--primary)" : "var(--calendar)" }}>{item.time}</span>
             <span className="min-w-0 text-sm">
               {item.title}
-              {item.now ? <span className="ml-2 text-[11px] uppercase tracking-[0.08em] text-primary">now</span> : null}
+              {item.now ? <span className="ml-2 text-xs text-primary">now</span> : null}
               {item.detail ? <span className="block text-[11px] leading-tight text-muted-foreground">{item.detail}</span> : null}
             </span>
           </li>
@@ -285,11 +286,9 @@ export function Capture({ mode, placeholder, onAsk }: { mode: "thought" | "task"
   const label = mode === "thought" ? "keep" : mode === "task" ? "add" : "ask";
   const hint = placeholder ?? (mode === "thought" ? "a thought…" : mode === "task" ? "a task…" : "ask pip…");
   return (
-    <form onSubmit={submit} className="flex items-center gap-2 rounded-lg border bg-card py-1 pr-1 pl-3 transition-colors focus-within:border-primary">
-      <span aria-hidden="true" className="font-pixel text-lg text-primary">▌</span>
-      <Input value={text} onChange={event => setText(event.target.value)} aria-label={hint} maxLength={500} placeholder={hint}
-        className="h-10 min-w-0 flex-1 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0 dark:bg-transparent" />
-      <Button type="submit" className="h-10" disabled={!text.trim()}>{label}</Button>
+    <form onSubmit={submit} className={FIELD}>
+      <Input value={text} onChange={event => setText(event.target.value)} aria-label={hint} maxLength={500} placeholder={hint} className={BARE_INPUT} />
+      <SendButton label={label[0]!.toUpperCase() + label.slice(1)} disabled={!text.trim()} />
     </form>
   );
 }

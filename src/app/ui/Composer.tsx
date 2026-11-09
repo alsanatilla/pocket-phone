@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toastError } from "./toast/toast.ts";
+import { BARE_INPUT, FIELD, SendButton, StopButton } from "./SendButton.tsx";
 
 interface ComposerProps {
   label: string;
@@ -33,16 +34,13 @@ export function Composer({ label, placeholder, action, maxLength = 500, busy = f
   const submit = (event: FormEvent) => { event.preventDefault(); void run(onSubmit); };
 
   return (
-    <form onSubmit={submit} className="flex items-center gap-2 rounded-md border bg-card p-1.5 pl-3 focus-within:border-primary">
-      <span aria-hidden="true" className="font-pixel text-lg text-primary">▌</span>
+    <form onSubmit={submit} className={FIELD}>
       <Input value={text} onChange={event => setText(event.target.value)} placeholder={placeholder} aria-label={label} maxLength={maxLength}
-        className="h-11 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent" />
-      {busy && onCancel
-        ? <Button type="button" size="lg" onClick={onCancel}>{cancelLabel}</Button>
-        : <Button type="submit" size="lg" disabled={!text.trim() || busy}>{action}</Button>}
-      {secondary && !busy
-        ? <Button type="button" size="lg" variant="outline" disabled={!text.trim()} onClick={() => void run(secondary.run)}>{secondary.label}</Button>
+        className={BARE_INPUT} />
+      {secondary && !busy && text.trim()
+        ? <Button type="button" size="sm" variant="ghost" className="h-9 text-muted-foreground" onClick={() => void run(secondary.run)}>{secondary.label}</Button>
         : null}
+      {busy && onCancel ? <StopButton label={cancelLabel} onClick={onCancel} /> : <SendButton label={action} disabled={!text.trim() || busy} />}
     </form>
   );
 }

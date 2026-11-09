@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ModelPicker } from "./ModelPicker.tsx";
-import { ArrowUp, Square, X } from "lucide-react";
+import { X } from "lucide-react";
+import { SendButton, StopButton } from "../../ui/SendButton.tsx";
 import { Textarea } from "@/components/ui/textarea";
 import { removeSource, setDraft, type Chat } from "../../data/chats.ts";
 import { toastError } from "../../ui/toast/toast.ts";
@@ -58,15 +59,7 @@ export function PipComposer({ chat, busy, initial, onSend, onStop }: { chat: Cha
       <div className="flex items-center gap-1">
         <ModelPicker chat={chat} busy={busy} />
         <span className="flex-1" />
-        {busy
-          ? <button type="button" onClick={onStop} aria-label="Stop the reply" title="Stop"
-              className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform duration-150 ease-out active:scale-[0.94]">
-              <Square className="size-3.5 fill-current" />
-            </button>
-          : <button type="submit" disabled={!text.trim()} aria-label="Send" title="Send (Enter)"
-              className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.94] disabled:bg-secondary disabled:text-dim">
-              <ArrowUp className="size-4" />
-            </button>}
+        {busy ? <StopButton label="Stop the reply" onClick={onStop} /> : <SendButton label="Send (Enter)" disabled={!text.trim()} />}
       </div>
     </form>
   );

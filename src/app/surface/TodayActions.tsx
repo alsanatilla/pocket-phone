@@ -10,10 +10,11 @@ import { addStep, createPrep, dailyNote, dailyNoteText, deferTask, endFocus, foc
 import type { Task } from "../data/types.ts";
 import { hrefFor } from "../lib/classic.ts";
 import { toast, toastError } from "../ui/toast/toast.ts";
+import { BARE_INPUT, FIELD, SendButton } from "../ui/SendButton.tsx";
 
 const attempt = (work: () => unknown) => { try { work(); } catch (error) { toastError(error); } };
 function Block({ title, children }: { title: string; children: ReactNode }) {
-  return <section className="space-y-3 rounded-lg border bg-card p-4"><h2 className="text-[11px] uppercase tracking-wider text-primary">{title}</h2>{children}</section>;
+  return <section className="space-y-3 rounded-lg border bg-card p-4"><h2 className="text-xs font-medium text-primary first-letter:uppercase">{title}</h2>{children}</section>;
 }
 function useNow(period = 1000) {
   const [now, setNow] = useState(Date.now);
@@ -28,9 +29,9 @@ function TaskSteps({ task }: { task: Task }) {
       <input type="checkbox" className="mt-1 accent-primary" checked={step.done} onChange={event => attempt(() => toggleStep(task.uid, index, step.text, event.target.checked))} />
       <span className={step.done ? "text-muted-foreground line-through" : ""}>{step.text}</span>
     </label>)}
-    {!task.done ? <form className="flex gap-2" onSubmit={event => { event.preventDefault(); attempt(() => { addStep(task.uid, text); setText(""); }); }}>
-      <Input aria-label="New step" placeholder="add a step…" maxLength={500} value={text} onChange={event => setText(event.target.value)} className="h-9" />
-      <Button type="submit" size="sm" variant="ghost" className="h-9" disabled={!text.trim()}>add</Button>
+    {!task.done ? <form className={FIELD} onSubmit={event => { event.preventDefault(); attempt(() => { addStep(task.uid, text); setText(""); }); }}>
+      <Input aria-label="New step" placeholder="add a step…" maxLength={500} value={text} onChange={event => setText(event.target.value)} className={BARE_INPUT} />
+      <SendButton label="Add step" disabled={!text.trim()} small />
     </form> : null}
   </div>;
 }
@@ -51,7 +52,7 @@ export function FocusSession({ title }: { title?: string | null }) {
   return <Block title={title ?? "focus"}>
     {session ? <h3 className="text-base">{task?.text ?? session.title}</h3> : open.length ? <select aria-label="Focus task" className={selectClass} value={task?.uid ?? ""} onChange={event => attempt(() => selectTask(event.target.value))}>
       {open.map(item => <option key={item.uid} value={item.uid}>{item.text}</option>)}
-    </select> : <a href={hrefFor("/tasks/new")} className="text-sm text-primary">+ add a task</a>}
+    </select> : <p className="text-sm text-muted-foreground">No open task to focus on.</p>}
     {session || task ? <>
       <div className="py-2 text-center font-pixel text-7xl leading-none text-primary" role="timer" aria-label="Focus time remaining">{done ? "done" : clockText(remaining)}</div>
       {!session ? <div className="flex justify-center gap-2" aria-label="Focus duration">{[15, 25, 45].map(value => <Button key={value} size="sm" variant={minutes === value ? "secondary" : "ghost"} aria-pressed={minutes === value} onClick={() => setMinutes(value)}>{value} min</Button>)}</div> : null}
