@@ -30,6 +30,26 @@ function applyPatch(root, path, value, remove) {
   return base;
 }
 
+/**
+ * One JSONL patch. Repair missing closing brackets only; incomplete strings, values and mismatched
+ * brackets stay invalid so truncated data is not silently accepted.
+ */
+function parsePatch(text) {
+  try { return JSON.parse(text); } catch { /* try a repaired line */ }
+  const open = [];
+  let inString = false, escaped = false;
+  for (const ch of text) {
+    if (escaped) { escaped = false; continue; }
+    if (inString && ch === '\\') { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{' || ch === '[') open.push(ch === '{' ? '}' : ']');
+    else if ((ch === '}' || ch === ']') && open.pop() !== ch) return null;
+  }
+  if (!open.length || inString) return null;
+  try { return JSON.parse(text + open.reverse().join('')); } catch { return null; }
+}
+
 /** A finished spec, or the spec built so far from a patch stream. */
 export function pocketSpec(text) {
   const trimmed = text.trim();
@@ -44,14 +64,39 @@ export function pocketSpec(text) {
   for (const line of trimmed.split('\n')) {
     const candidate = line.trim();
     if (!candidate.startsWith('{')) continue;
-    let patch;
-    try { patch = JSON.parse(candidate); } catch { continue; }
+    const patch = parsePatch(candidate);
+    if (!patch) continue;
     const op = patch;
     if (typeof op.op !== 'string' || typeof op.path !== 'string' || !['add', 'replace', 'remove'].includes(op.op)) continue;
     spec = applyPatch(spec, String(op.path), op.value, op.op === 'remove');
     applied += 1;
   }
   return applied ? spec : null;
+}
+
+/**
+ * json-render draws elements[root]. If the named root is missing,
+ * one top-level element becomes the
+ * root itself, several are wrapped in a Stack under the id the model named.
+ */
+export function normalizeSpec(spec) {
+  const elements = spec && spec.elements;
+  if (!elements || typeof elements !== 'object') return spec;
+  const ids = Object.keys(elements);
+  if (!ids.length) return spec;
+  const named = typeof spec.root === 'string' && spec.root ? spec.root : null;
+  if (named && elements[named]) return spec;
+  const referenced = new Set();
+  for (const element of Object.values(elements)) {
+    if (!element || typeof element !== 'object') continue;
+    for (const child of Array.isArray(element.children) ? element.children : []) referenced.add(String(child));
+  }
+  const top = ids.filter(id => !referenced.has(id));
+  if (!top.length) return spec;
+  if (top.length === 1) return { ...spec, root: top[0] };
+  let id = named || 'main';
+  while (Object.hasOwn(elements, id)) id += '_';
+  return { ...spec, root: id, elements: { ...elements, [id]: { type: 'Stack', props: { direction: 'vertical', gap: 'md' }, children: top } } };
 }
 
 /** Types and props only the retired card format had; see src/app/surface/cards.tsx for the same test. */

@@ -44,6 +44,7 @@ export const CARDS_PROMPT = 'Pocket can draw parts of a reply as a picture: read
   + 'Write a fenced block tagged pocket exactly where the picture belongs in the prose, between paragraphs, not collected at the end; a reply may have up to four, each right after the sentence it illustrates. '
   + 'Inside each block write JSON Lines: one json-render patch per line, so it draws while you write. '
   + 'Start with {"op":"add","path":"/root","value":"main"}, then add each element as {"op":"add","path":"/elements/<id>","value":{"type":"<Component>","props":{…},"children":[…]}}. '
+  + 'The root id is an element too: add a Stack named main whose children are the top-level elements, or point /root at the single top-level element. Each line is one complete JSON object, braces included. '
   + 'Ids only need to be unique within their block. Every element needs a children array, empty when it has none; only Stack, Grid and Card hold children. '
   + 'Components: ' + list + '. Tone is one of ' + TONES.join(', ') + '. '
   + 'A Button acts through "on" beside "props": {"on":{"press":{"action":"askPip","params":{"prompt":"…"}}}}. Actions: ' + actions + '. '

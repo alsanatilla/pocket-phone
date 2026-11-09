@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pocketSpec, isLegacySpec, withoutLegacyCards } from '../src/shared/pocket-spec.js';
+import { pocketSpec, normalizeSpec, isLegacySpec, withoutLegacyCards } from '../src/shared/pocket-spec.js';
 
 // A reply can carry a finished spec or the JSONL patch stream json-render writes. The stream is what makes a card
 // appear while the model is still typing, so the parser must tolerate a line that is not finished yet.
@@ -75,4 +75,52 @@ test('a replayed answer keeps its prose but loses a retired-format card', () => 
   assert.match(stripped, /retired card format/);
   assert.doesNotMatch(stripped, /subtitle/);
   assert.equal(withoutLegacyCards(kept), kept);
+});
+
+test('a patch missing only closing brackets retains its chart data', () => {
+  const chart = { type: 'Chart', props: { kind: 'bar', data: [{ label: 'A', value: 403 }], note: 'brackets } ] and "quotes"' }, children: [] };
+  const source = patch('add', '/root', 'main') + '\n' + patch('add', '/elements/chart', chart).slice(0, -1);
+  const spec = normalizeSpec(pocketSpec(source));
+  assert.equal(spec.root, 'chart');
+  assert.deepEqual(spec.elements.chart, chart);
+});
+
+test('repair does not accept incomplete strings, missing values or mismatched brackets', () => {
+  for (const tail of ['{"type":"Text","props":{"content":"unfinished', '{"type":', '{"children":[}', '{"type":"Text",']) {
+    const source = patch('add', '/root', 'main') + '\n{"op":"add","path":"/elements/bad","value":' + tail;
+    assert.deepEqual(pocketSpec(source), { root: 'main' });
+  }
+});
+
+test('a missing root wraps only top-level elements, without mutating the input', () => {
+  const spec = { root: 'main', elements: {
+    hero: { type: 'Hero', props: { value: '42' }, children: [] },
+    grid: { type: 'Grid', props: {}, children: ['metric'] },
+    metric: { type: 'Metric', props: { value: '7' }, children: [] },
+  } };
+  const normalized = normalizeSpec(spec);
+  assert.equal(normalized.root, 'main');
+  assert.deepEqual(normalized.elements.main.children, ['hero', 'grid']);
+  assert.equal(normalized.elements.main.type, 'Stack');
+  assert.equal(normalized.elements.grid, spec.elements.grid);
+  assert.equal(spec.elements.main, undefined);
+});
+
+test('normalization preserves a valid root and leaves empty or cyclic trees alone', () => {
+  for (const spec of [null, { root: 'main' }, { elements: {} },
+    { root: 'main', elements: { main: { type: 'Text', children: [] }, extra: { type: 'Text', children: [] } } },
+    { elements: { a: { children: ['b'] }, b: { children: ['a'] } } },
+  ]) assert.equal(normalizeSpec(spec), spec);
+});
+
+test('an inferred root does not overwrite an existing main element', () => {
+  const spec = { elements: {
+    a: { type: 'Stack', children: ['main'] },
+    main: { type: 'Text', children: [] },
+    b: { type: 'Text', children: [] },
+  } };
+  const normalized = normalizeSpec(spec);
+  assert.notEqual(normalized.root, 'main');
+  assert.equal(normalized.elements.main, spec.elements.main);
+  assert.deepEqual(normalized.elements[normalized.root].children, ['a', 'b']);
 });

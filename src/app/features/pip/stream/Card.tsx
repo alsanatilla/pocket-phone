@@ -2,7 +2,7 @@ import { memo, useMemo, useRef } from "react";
 import { JSONUIProvider, Renderer } from "@json-render/react";
 import type { Spec } from "@json-render/core";
 import { LegacyCard } from "../../../../client/pip-cards.jsx";
-import { pocketSpec } from "../../../../shared/pocket-spec.js";
+import { pocketSpec, normalizeSpec } from "../../../../shared/pocket-spec.js";
 import { completeTask } from "../../../data/tasks.ts";
 import { parkThoughtText } from "../../../data/thoughts.ts";
 import { toast, toastError } from "../../../ui/toast/toast.ts";
@@ -22,7 +22,7 @@ export function useStreamingSpec(source: string, closed: boolean): Spec | null {
   const previous = useRef<{ elements: Elements; json: Map<string, string> }>({ elements: {}, json: new Map() });
   return useMemo(() => {
     const complete = closed ? source : source.slice(0, source.lastIndexOf("\n") + 1);
-    const spec = complete.trim() ? pocketSpec(complete) : null;
+    const spec = complete.trim() ? normalizeSpec(pocketSpec(complete)) : null;
     if (!spec || typeof spec.root !== "string" || !spec.elements || typeof spec.elements !== "object") return null;
     const elements: Elements = {}, json = new Map<string, string>();
     for (const [id, element] of Object.entries(spec.elements)) {

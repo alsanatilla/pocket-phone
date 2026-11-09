@@ -74,3 +74,23 @@ describe("a card's first lines", () => {
     expect(screen.getByText("rested")).toBeTruthy();
   });
 });
+
+describe("malformed model cards", () => {
+  it("renders sibling metrics even when the declared root element is absent", () => {
+    const source = card.split("\n").filter((_, index) => index !== 1).join("\n");
+    render(<Card source={source} closed streaming={false} onAsk={() => {}} />);
+    expect(screen.getByText("rested")).toBeTruthy();
+    expect(screen.getByText("light")).toBeTruthy();
+  });
+
+  it("renders a chart with a missing closing brace and missing root element", () => {
+    const source = P("/root", "main") + "\n" + P("/elements/chart", {
+      type: "Chart", props: { kind: "bar", title: "Weekly totals", data: [{ label: "Week 1", value: 403 }, { label: "Week 2", value: 596 }], note: "Reported totals", children: [] },
+    }).slice(0, -1);
+    const view = render(<Card source={source} closed={false} streaming onAsk={() => {}} />);
+    expect(screen.queryByText("Weekly totals")).toBeNull();
+    view.rerender(<Card source={source} closed streaming={false} onAsk={() => {}} />);
+    expect(screen.getByText("Weekly totals")).toBeTruthy();
+    expect(screen.getByText("Reported totals")).toBeTruthy();
+  });
+});
