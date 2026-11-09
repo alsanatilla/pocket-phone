@@ -159,7 +159,7 @@ export function Chart({ kind, title, data, series, unit, tone, note, source }: {
   );
 }
 
-const numeric = (value: unknown) => typeof value === "number" || (typeof value === "string" && /^[−-]?[\d.,\s]+%?$/.test(value.trim()) && /\d/.test(value));
+const numeric = (value: unknown) => typeof value === "number" || (typeof value === "string" && /^[+−-]?[\d.,\s]+%?$/.test(value.trim()) && /\d/.test(value));
 
 export function Table({ title, columns, rows, note, source }: { title?: string | null; columns: string[]; rows: (string | number | null)[][]; note?: string | null; source?: Source | null }) {
   const head = Array.isArray(columns) ? columns.slice(0, 6) : [];
