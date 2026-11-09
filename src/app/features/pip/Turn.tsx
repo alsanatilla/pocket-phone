@@ -5,6 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { cn } from "@/lib/utils";
 import { elapsed, mark, phaseLabel } from "../../../client/pip-activity.js";
 import { hydrateCards, releaseCards } from "../../../client/pip-cards.jsx";
+import { hydrateSurfaceCards, releaseSurfaceCards } from "../../surface/cards.tsx";
 import type { ChatTurn } from "../../data/chats.ts";
 import { Markdown } from "../../ui/Markdown.tsx";
 import { toastError } from "../../ui/toast/toast.ts";
@@ -88,7 +89,12 @@ export function Turn({ turn, live, chatId, latest, locked }: { turn: ChatTurn; l
 
         {shown.answer ? (
           <div {...cards}>
-            <Markdown text={shown.answer} options={{ streaming, onBeforeRender: releaseCards, onRender: node => { hydrateCards(node); } }} className="prose text-[15px]" />
+            <Markdown text={shown.answer} className="prose text-[15px]" options={{
+              streaming,
+              onBeforeRender: node => { releaseSurfaceCards(node); releaseCards(node); },
+              // New-catalog cards first; what is left is a card from before, drawn the classic way.
+              onRender: node => { hydrateSurfaceCards(node, { onAsk: prompt => { if (!locked) send(chatId, prompt).catch(toastError); } }); hydrateCards(node); },
+            }} />
           </div>
         ) : null}
 

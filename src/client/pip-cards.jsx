@@ -95,23 +95,37 @@ const { registry } = defineRegistry(catalog, {
 
 const roots = new WeakMap();
 
+/** The server encodes the spec's UTF-8 bytes; atob alone would turn every non-ASCII character into mojibake. */
 function decode(value) {
-  try { return JSON.parse(atob(value)); } catch { return null; }
+  try { return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(value), char => char.charCodeAt(0)))); } catch { return null; }
 }
 
-/** Mounts every spec the markdown renderer left as a placeholder. Idempotent per element. */
+const KNOWN = new Set(Object.keys(catalog.data.components));
+
+/**
+ * Mounts every spec the markdown renderer left as a placeholder. Idempotent per element. A placeholder the new
+ * client already drew (data-renderer) is left alone; a card in the new catalog, which this classic renderer cannot
+ * draw, becomes a link to the new client.
+ */
 export function hydrateCards(node) {
   for (const slot of node.querySelectorAll(".pocket-spec[data-spec]")) {
-    if (roots.has(slot)) continue;
+    if (roots.has(slot) || slot.dataset.renderer) continue;
     const spec = decode(slot.getAttribute("data-spec") || "");
     if (!spec || !spec.elements) continue;
     const root = createRoot(slot);
     roots.set(slot, root);
-    root.render(
+    const modern = Object.values(spec.elements).some(element => !KNOWN.has(element?.type));
+    root.render(modern ? (
+      <section className="pocket-card">
+        <div className="pocket-bar" />
+        <div className="pocket-sub">This reply has a card the new Pocket draws.</div>
+        <a className="pocket-link" href="/next#/pip">open in the new Pocket</a>
+      </section>
+    ) : (
       <JSONUIProvider registry={registry} initialState={spec.state ?? {}}>
         <Renderer spec={spec} registry={registry} />
       </JSONUIProvider>
-    );
+    ));
   }
 }
 

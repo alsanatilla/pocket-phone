@@ -95,11 +95,11 @@ export function Chart({ kind, title, data, unit, tone }: { kind: "area" | "bar" 
       <div className="mt-2 h-36 w-full">
         <ResponsiveContainer width="100%" height="100%">
           {kind === "bar" ? (
-            <BarChart data={points} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>{axis}{tooltip}<Bar dataKey="value" fill={color} radius={[2, 2, 0, 0]} /></BarChart>
+            <BarChart data={points} margin={{ top: 12, right: 0, bottom: 0, left: 0 }}>{axis}{tooltip}<Bar dataKey="value" fill={color} radius={[2, 2, 0, 0]} /></BarChart>
           ) : kind === "line" ? (
-            <LineChart data={points} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>{axis}{tooltip}<Line dataKey="value" stroke={color} strokeWidth={2} dot={false} /></LineChart>
+            <LineChart data={points} margin={{ top: 12, right: 4, bottom: 0, left: 4 }}>{axis}{tooltip}<Line dataKey="value" stroke={color} strokeWidth={2} dot={false} /></LineChart>
           ) : (
-            <AreaChart data={points} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+            <AreaChart data={points} margin={{ top: 12, right: 0, bottom: 0, left: 0 }}>
               <defs><linearGradient id="pocket-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={0.45} /><stop offset="100%" stopColor={color} stopOpacity={0} /></linearGradient></defs>
               {axis}{tooltip}<Area dataKey="value" stroke={color} strokeWidth={2} fill="url(#pocket-area)" />
             </AreaChart>

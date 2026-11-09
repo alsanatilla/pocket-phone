@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createStateStore, type Spec, type StateStore } from "@json-render/core";
+import type { Spec, StateStore } from "@json-render/core";
 import { activeAccount } from "../../client/workspace-storage.js";
 import { configFor, readProfile } from "../data/ai.ts";
 import { resolve } from "../../client/pip-credentials.js";
-import { subscribe } from "../data/bus.ts";
-import { readMoment, momentKey, type Moment } from "./context.ts";
+import { momentKey, type Moment } from "./context.ts";
+import { currentMoment, momentStore, onMoment } from "./moment.ts";
 import { fallbackSurface } from "./fallback.ts";
 import { NoModel, streamSurface } from "./generate.ts";
 
@@ -29,21 +29,11 @@ const writeCache = (key: string, spec: Spec) => {
   try { localStorage.setItem(CACHE, JSON.stringify({ key, owner: activeAccount(), spec, at: Date.now() } satisfies Cached)); } catch { /* full or blocked */ }
 };
 
-/** The moment as json-render state, kept current from the stores and the clock. */
+/** The shared live moment (moment.ts) and its store; re-renders when the moment changes. */
 function useMomentStore(): { store: StateStore; moment: Moment } {
-  const [store] = useState(() => createStateStore(readMoment() as unknown as Record<string, unknown>));
-  const [moment, setMoment] = useState(() => readMoment());
-  useEffect(() => {
-    const refresh = () => {
-      const next = readMoment();
-      store.update(Object.fromEntries(Object.entries(next).map(([key, value]) => ["/" + key, value])));
-      setMoment(next);
-    };
-    const unsubscribe = subscribe(refresh);
-    const minute = setInterval(refresh, 60_000);
-    return () => { unsubscribe(); clearInterval(minute); };
-  }, [store]);
-  return { store, moment };
+  const [moment, setMoment] = useState(currentMoment);
+  useEffect(() => onMoment(setMoment), []);
+  return { store: momentStore(), moment };
 }
 
 /** Arrange by itself only when the person allows it and a model is connected. */
