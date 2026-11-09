@@ -1,9 +1,11 @@
+import { useRef } from "react";
 import { MoreHorizontal, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
-import { pinChat, removeChat, renameChat, type Chat } from "../../data/chats.ts";
+import { useCollection } from "../../data/bus.ts";
+import { listChats, pinChat, removeChat, renameChat, type Chat } from "../../data/chats.ts";
 import { confirm, prompt } from "../../ui/dialog/dialog.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 
@@ -16,9 +18,13 @@ const when = (at: number) => {
     : date.toLocaleDateString([], { day: "numeric", month: "short" });
 };
 
-export function ChatList({ open, onOpenChange, chats, current, onPick, onNew }: {
-  open: boolean; onOpenChange: (open: boolean) => void; chats: Chat[]; current: string | null; onPick: (uid: string) => void; onNew: () => void;
+export function ChatList({ open, onOpenChange, current, onPick, onNew }: {
+  open: boolean; onOpenChange: (open: boolean) => void; current: string | null; onPick: (uid: string) => void; onNew: () => void;
 }) {
+  // Read only while the sheet is open (listing parses every chat); while it slides shut it keeps what it showed.
+  const shown = useRef<Chat[]>([]);
+  const chats: Chat[] = useCollection(["chats"], () => (open ? listChats() : shown.current), [open]);
+  shown.current = chats;
   const guard = (run: () => unknown) => async () => { try { await run(); } catch (error) { toastError(error); } };
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

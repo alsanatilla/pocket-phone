@@ -3,3 +3,5 @@
 export function hydrateCards(node: HTMLElement): void;
 /** Unmounts the cards inside `node` before it is replaced. */
 export function releaseCards(node: HTMLElement): void;
+/** One classic card as a React element. */
+export function LegacyCard(props: { spec: unknown }): import("react").ReactElement;

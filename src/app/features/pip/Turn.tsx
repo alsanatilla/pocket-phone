@@ -1,15 +1,14 @@
-import { useRef, type KeyboardEvent, type MouseEvent } from "react";
+import { memo, useCallback, useRef, type KeyboardEvent, type MouseEvent } from "react";
 import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { elapsed, mark, phaseLabel } from "../../../client/pip-activity.js";
-import { hydrateCards, releaseCards } from "../../../client/pip-cards.jsx";
-import { hydrateSurfaceCards, releaseSurfaceCards } from "../../surface/cards.tsx";
 import type { ChatTurn } from "../../data/chats.ts";
-import { Markdown } from "../../ui/Markdown.tsx";
 import { toastError } from "../../ui/toast/toast.ts";
 import { OfferCard } from "./Offers.tsx";
+import { Answer, Thinking } from "./stream/Answer.tsx";
+import { Prose } from "./stream/Prose.tsx";
 import { ledger, ledgerTitle, offersOf, planOf, sourcesOf } from "./reply.ts";
 import { resume, retry, send } from "./runner.ts";
 
@@ -44,17 +43,35 @@ function useCardButtons(chatId: string, locked: boolean) {
   };
 }
 
-export function Turn({ turn, live, chatId, latest, locked }: { turn: ChatTurn; live: Partial<ChatTurn> | null; chatId: string; latest: boolean; locked: boolean }) {
+interface TurnProps { turn: ChatTurn; live: Partial<ChatTurn> | null; chatId: string; latest: boolean; locked: boolean }
+
+/**
+ * Re-renders only when this exchange changed: its saved version (turns carry `updated`), its live copy while it
+ * streams, or whether it is the latest or locked. Every other exchange stays put while one reply streams.
+ */
+export const Turn = memo(TurnView, (before, after) =>
+  before.live === after.live && before.chatId === after.chatId && before.latest === after.latest && before.locked === after.locked
+  && sameTurn(before.turn, after.turn));
+
+/** The store re-parses chats on every read, so objects are always new; the store stamps a turn's content change. */
+function sameTurn(a: ChatTurn & { updated?: number }, b: ChatTurn & { updated?: number }): boolean {
+  if (a.uid !== b.uid) return false;
+  if (a.updated !== undefined && b.updated !== undefined) return a.updated === b.updated;
+  return a.status === b.status && a.answer === b.answer && JSON.stringify(a.activity) === JSON.stringify(b.activity);
+}
+
+function TurnView({ turn, live, chatId, latest, locked }: TurnProps) {
   const shown: ChatTurn = live ? { ...turn, ...live } as ChatTurn : turn;
   const streaming = Boolean(live);
   const rows = ledger(shown, streaming);
   const plan = planOf(rows), offers = offersOf(rows), sources = sourcesOf(shown, rows);
   const cards = useCardButtons(chatId, locked);
+  const ask = useCallback((prompt: string) => { if (!locked) send(chatId, prompt).catch(toastError); }, [chatId, locked]);
   const unfinished = !streaming && latest && ["stopped", "failed", "streaming"].includes(shown.status);
   const wasOpen = useRef(rows.length <= 4);
 
   return (
-    <article className="space-y-3">
+    <article className={cn("space-y-3", Date.now() - shown.created < 4000 && "arrive")}>
       <div className="ml-auto w-fit max-w-[85%] rounded-lg rounded-br-sm bg-secondary px-3.5 py-2">
         <p className="whitespace-pre-wrap text-sm">{shown.text}</p>
         <p className="mt-1 text-right text-[10px] text-dim">{clock(shown.created)}</p>
@@ -85,20 +102,12 @@ export function Turn({ turn, live, chatId, latest, locked }: { turn: ChatTurn; l
           </ol>
         ) : null}
 
-        {shown.reasoning ? <Fold title="reasoning"><Markdown text={shown.reasoning} options={{ streaming }} className="prose text-xs text-muted-foreground" /></Fold> : null}
+        {shown.reasoning ? <Fold title="reasoning"><Prose text={shown.reasoning} streaming={streaming && !shown.answer} className="text-xs text-muted-foreground" /></Fold> : null}
 
-        {shown.answer ? (
-          <div {...cards}>
-            <Markdown text={shown.answer} className="prose text-[15px]" options={{
-              streaming,
-              onBeforeRender: node => { releaseSurfaceCards(node); releaseCards(node); },
-              // New-catalog cards first; what is left is a card from before, drawn the classic way.
-              onRender: node => { hydrateSurfaceCards(node, { onAsk: prompt => { if (!locked) send(chatId, prompt).catch(toastError); } }); hydrateCards(node); },
-            }} />
-          </div>
-        ) : null}
+        {/* Classic cards' buttons answer through data attributes; the click is caught here. */}
+        {shown.answer ? <div {...cards}><Answer text={shown.answer} streaming={streaming} onAsk={ask} /></div> : null}
 
-        {streaming ? <p className="animate-pulse text-xs text-primary" role="status">{phaseLabel(shown.phase || "thinking")}</p> : null}
+        {streaming && !shown.answer ? <Thinking label={phaseLabel(shown.phase || "thinking")} /> : null}
 
         {sources.length && !streaming ? (
           <div className="flex flex-wrap gap-1.5">

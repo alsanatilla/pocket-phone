@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import { connect } from "./data/bus.ts";
-import { router } from "./router.tsx";
+import { preloadPages, router } from "./router.tsx";
 import { captureReturn } from "./features/settings/openrouter.ts";
 import "./styles/global.css";
 
@@ -19,3 +19,4 @@ createRoot(root).render(
     <RouterProvider router={router} />
   </StrictMode>,
 );
+preloadPages();

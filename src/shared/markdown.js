@@ -161,3 +161,17 @@ export function markdownNode(initial, initialOptions = {}) {
   });
   node.updateMarkdown(initial, initialOptions); return node;
 }
+
+/**
+ * The renderer without a live node: resolves with the sanitized HTML for `source` (server-rendered, cached and
+ * de-duplicated like markdownNode's). `persist` keeps it in the account's offline cache. A client that manages
+ * its own DOM (the React chat renders a reply block by block) pairs this with markdownFragment.
+ */
+export function renderMarkdown(source, options = {}, persist = true) {
+  return compile(String(source ?? '').replace(/\r\n?/g, '\n'), options, persist);
+}
+
+/** A checked fragment for HTML from renderMarkdown; ids are namespaced so several blocks can share a page. */
+export function markdownFragment(html, namespace = 'pocket-markdown-' + ++serial + '-') {
+  return fragment(html, namespace);
+}

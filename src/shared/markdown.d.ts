@@ -11,3 +11,7 @@ export interface MarkdownNode extends HTMLDivElement {
   disposeMarkdown(): void;
 }
 export function markdownNode(text: string, options?: MarkdownRenderOptions): MarkdownNode;
+/** Sanitized HTML for `source`, rendered by Pocket's server, cached and de-duplicated. */
+export function renderMarkdown(source: string, options?: { inline?: boolean; annotations?: unknown[] }, persist?: boolean): Promise<string>;
+/** A checked DOM fragment for HTML from renderMarkdown. */
+export function markdownFragment(html: string, namespace?: string): DocumentFragment;

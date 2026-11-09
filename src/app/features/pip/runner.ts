@@ -17,9 +17,17 @@ export interface LiveReply { chatId: string; turnId: string; turn: Partial<ChatT
 
 let live: LiveReply | null = null;
 let version = 0;
-let lastPaint = 0;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach(listener => listener());
+
+// Deltas arrive many times a second, in bursts. They are coalesced to one paint per animation frame: the screen
+// shows every frame's newest text, never more work than the display can show, and nothing waits on a timer.
+let frame = 0;
+const schedule = () => {
+  if (frame) return;
+  frame = typeof requestAnimationFrame === "function" ? requestAnimationFrame(flush) : (setTimeout(flush, 16) as unknown as number);
+};
+function flush() { frame = 0; emit(); }
 
 const runner = new ReplyRunner(chats, {
   key: (value, chat) => trainingChatRoutine(chat.uid) ? "account-key" : resolve(value),
@@ -32,12 +40,9 @@ const runner = new ReplyRunner(chats, {
   onChange: (event: RunnerEvent) => {
     const active = runner.active;
     live = active ? { chatId: active.chatId, turnId: active.turnId, turn: event.turn ?? live?.turn ?? active.turn, version: ++version } : null;
-    // Deltas arrive many times a second; a repaint every ~90 ms keeps the caret moving without thrashing.
-    // Approvals and the end of a reply always repaint.
-    const now = Date.now();
-    if (event.type === "delta" && now - lastPaint < 90) return;
-    lastPaint = now;
-    emit();
+    // A delta waits for the next frame; the start, approvals and the end of a reply paint at once.
+    if (event.type === "delta") schedule();
+    else { if (frame) { (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout)(frame); frame = 0; } emit(); }
   },
 });
 

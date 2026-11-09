@@ -24,6 +24,10 @@ export function listChats(): Chat[] {
 }
 export const createChat = (): Chat => chats.create();
 export const getChat = (uid: string): Chat | null => chats.get(uid);
+/** One chat, or null when it is missing or cannot be read. */
+export function readChat(uid: string): Chat | null {
+  try { return chats.get(uid); } catch (error) { console.warn("chat", error); return null; }
+}
 
 /**
  * Adds `source` to the current draft chat (up to three sources), like the classic "ask pip" buttons, and

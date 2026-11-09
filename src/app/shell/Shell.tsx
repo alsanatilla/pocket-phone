@@ -48,6 +48,14 @@ export function RouteError({ error, reset }: { error: unknown; reset: () => void
   );
 }
 
+/** A page on its way: the shape of a page, softly lit. Shown only if loading takes long enough to notice. */
 export function Loading() {
-  return <p className="text-sm text-muted-foreground">loading…</p>;
+  return (
+    <div className="arrive space-y-4 pt-4" role="status" aria-label="Loading">
+      <div className="shimmer h-9 w-2/5 rounded-md" />
+      <div className="shimmer h-4 w-3/5 rounded-sm" />
+      <div className="grid grid-cols-2 gap-3"><div className="shimmer h-24 rounded-lg" /><div className="shimmer h-24 rounded-lg" /></div>
+      <div className="shimmer h-40 rounded-lg" />
+    </div>
+  );
 }

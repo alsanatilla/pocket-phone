@@ -1,10 +1,13 @@
 import { createStateStore, type StateStore } from "@json-render/core";
-import { subscribe } from "../data/bus.ts";
+import { watch, type Collection } from "../data/bus.ts";
 import { readMoment, type Moment } from "./context.ts";
 
 // One live json-render state for the whole app: the moment (context.ts), refreshed whenever a store changes and
 // every minute. Today's surface and the cards inside Pip's answers bind to the same store, so a TaskList in a
 // reply and on Today tick together.
+
+/** The collections readMoment() reads ("*" covers sync merges and COROS). */
+const MOMENT_SOURCES: Collection[] = ["tasks.json", "parking.json", "agenda.json", "notes.json", "gym.json"];
 
 let store: StateStore | null = null;
 let moment: Moment | null = null;
@@ -21,7 +24,8 @@ export function momentStore(): StateStore {
   if (!store) {
     moment = readMoment();
     store = createStateStore(moment as unknown as Record<string, unknown>);
-    subscribe(refresh);
+    // Only what the moment reads; a chat saving while Pip writes is not a new moment.
+    watch(MOMENT_SOURCES, refresh);
     setInterval(refresh, 60_000);
   }
   return store;

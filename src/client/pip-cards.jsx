@@ -138,3 +138,23 @@ export function releaseCards(node) {
   }
   if (leaving.length) queueMicrotask(() => leaving.forEach(root => { try { root.unmount(); } catch { /* already gone */ } }));
 }
+
+/**
+ * One classic card as a React element, for clients that render replies in React (the new chat). A card in the
+ * new catalog, which this renderer cannot draw, becomes a link to the new client, as in hydrateCards.
+ */
+export function LegacyCard({ spec }) {
+  const modern = Object.values(spec?.elements || {}).some(element => !KNOWN.has(element?.type));
+  if (modern) return (
+    <section className="pocket-card">
+      <div className="pocket-bar" />
+      <div className="pocket-sub">This reply has a card the new Pocket draws.</div>
+      <a className="pocket-link" href="/next#/pip">open in the new Pocket</a>
+    </section>
+  );
+  return (
+    <JSONUIProvider registry={registry} initialState={spec.state ?? {}}>
+      <Renderer spec={spec} registry={registry} />
+    </JSONUIProvider>
+  );
+}

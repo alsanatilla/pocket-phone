@@ -1,5 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
-import { Area, AreaChart, Bar, BarChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
+import { lazy, Suspense, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -29,7 +28,7 @@ function Label({ children, tone }: { children: ReactNode; tone?: Tone }) {
 
 /** A block's frame: the same border, ground and padding everywhere. */
 function Block({ children, className }: { children: ReactNode; className?: string }) {
-  return <section className={cn("rounded-lg border bg-card p-4", className)}>{children}</section>;
+  return <section className={cn("arrive rounded-lg border bg-card p-4", className)}>{children}</section>;
 }
 
 /** Pixel readings shrink as they get longer: "2" can be huge, "22:46" cannot. */
@@ -40,7 +39,7 @@ function readingSize(value: string | number, sizes: [string, string, string]): s
 
 export function Hero({ eyebrow, value, unit, caption, tone }: { eyebrow?: string | null; value: string | number; unit?: string | null; caption?: string | null; tone?: Tone }) {
   return (
-    <section className="pt-2 pb-1">
+    <section className="arrive pt-2 pb-1">
       {eyebrow ? <p className="text-xs text-muted-foreground">{eyebrow}</p> : null}
       <p className={cn("mt-1 font-pixel leading-none", readingSize(value, ["text-7xl", "text-6xl", "text-4xl"]))} style={{ color: toneColor(tone) }}>
         {value}{unit ? <span className="ml-2 text-2xl text-muted-foreground">{unit}</span> : null}
@@ -53,7 +52,7 @@ export function Hero({ eyebrow, value, unit, caption, tone }: { eyebrow?: string
 export function Metric({ label, value, unit, hint, tone, onPress }: { label: string; value: string | number; unit?: string | null; hint?: string | null; tone?: Tone; onPress?: () => void }) {
   const Tag = onPress ? "button" : "div";
   return (
-    <Tag onClick={onPress} className={cn("flex min-w-0 flex-col rounded-lg border bg-card p-3 text-left", onPress && "transition-colors hover:border-primary focus-visible:border-primary")}>
+    <Tag onClick={onPress} className={cn("arrive flex min-w-0 flex-col rounded-lg border bg-card p-3 text-left", onPress && "transition-colors hover:border-primary focus-visible:border-primary")}>
       <Label>{label}</Label>
       <p className={cn("mt-2 truncate font-pixel leading-none", readingSize(value, ["text-5xl", "text-4xl", "text-2xl"]))} style={{ color: toneColor(tone) }}>
         {value}{unit ? <span className="ml-1 text-base text-muted-foreground">{unit}</span> : null}
@@ -117,19 +116,19 @@ function SourceLine({ source, note }: { source?: Source | null; note?: string | 
   );
 }
 
+const ChartPlot = lazy(() => import("./ChartPlot.tsx"));
+
 export function Chart({ kind, title, data, series, unit, tone, note, source }: {
   kind: "area" | "bar" | "line"; title?: string | null; data?: Point[] | null; series?: Series[] | null;
   unit?: string | null; tone?: Tone; note?: string | null; source?: Source | null;
 }) {
-  const lines: Series[] = Array.isArray(series) && series.length ? series.slice(0, 5) : [{ name: title ?? "", tone, data: Array.isArray(data) ? data : [] }];
-  const rows = mergeSeries(lines);
+  // Props arrive with the same identity while nothing changed (the streaming spec keeps unchanged elements), so
+  // these stay the same arrays and the plot does not redraw.
+  const lines = useMemo<Series[]>(() => Array.isArray(series) && series.length ? series.slice(0, 5) : [{ name: title ?? "", tone, data: Array.isArray(data) ? data : [] }], [series, data, title, tone]);
+  const rows = useMemo(() => mergeSeries(lines), [lines]);
+  const colors = useMemo(() => lines.map((line, index) => line.tone ? toneColor(line.tone) : lines.length === 1 ? toneColor(tone) : PALETTE[index]!), [lines, tone]);
+  const names = useMemo(() => lines.map(line => line.name || title || ""), [lines, title]);
   if (rows.length < 2) return null;
-  const colors = lines.map((line, index) => line.tone ? toneColor(line.tone) : lines.length === 1 ? toneColor(tone) : PALETTE[index]!);
-  const id = "area-" + Math.random().toString(36).slice(2, 8);
-  const axis = <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: "var(--muted-foreground)", fontSize: 10 }} interval="preserveStartEnd" minTickGap={24} />;
-  const tooltip = <Tooltip cursor={{ fill: "var(--accent)" }} contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 12 }}
-    formatter={(value: unknown, key: unknown) => [formatValue(Number(value)) + (unit ? " " + unit : ""), lines[Number(String(key).slice(1))]?.name || title || ""]} />;
-  const margin = { top: 12, right: 4, bottom: 0, left: 4 };
   return (
     <Block>
       {title ? <Label tone={lines.length === 1 ? tone : null}>{title}{unit ? <span className="normal-case tracking-normal text-dim"> · {unit}</span> : null}</Label> : null}
@@ -139,20 +138,9 @@ export function Chart({ kind, title, data, series, unit, tone, note, source }: {
         </div>
       ) : null}
       <div className="mt-2 h-44 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          {kind === "bar" ? (
-            <BarChart data={rows} margin={margin}>{axis}{tooltip}{lines.map((_, index) => <Bar key={index} dataKey={"s" + index} fill={colors[index]} radius={[2, 2, 0, 0]} />)}</BarChart>
-          ) : kind === "line" ? (
-            <LineChart data={rows} margin={margin}>{axis}{tooltip}{lines.map((_, index) => <Line key={index} dataKey={"s" + index} stroke={colors[index]} strokeWidth={2} dot={false} connectNulls />)}</LineChart>
-          ) : (
-            <AreaChart data={rows} margin={margin}>
-              <defs>{lines.map((_, index) => (
-                <linearGradient key={index} id={id + index} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={colors[index]} stopOpacity={lines.length > 1 ? 0.25 : 0.45} /><stop offset="100%" stopColor={colors[index]} stopOpacity={0} /></linearGradient>
-              ))}</defs>
-              {axis}{tooltip}{lines.map((_, index) => <Area key={index} dataKey={"s" + index} stroke={colors[index]} strokeWidth={2} fill={`url(#${id}${index})`} connectNulls />)}
-            </AreaChart>
-          )}
-        </ResponsiveContainer>
+        <Suspense fallback={<div className="shimmer h-full w-full rounded-md" aria-hidden="true" />}>
+          <ChartPlot kind={kind} rows={rows} colors={colors} names={names} unit={unit} format={formatValue} />
+        </Suspense>
       </div>
       <SourceLine source={source} note={note} />
     </Block>

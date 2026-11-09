@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { starters } from "../../../client/pip-presentation.js";
 import { configFor, readAccess, readProfile, TIERS } from "../../data/ai.ts";
 import { useCollection } from "../../data/bus.ts";
-import { createChat, listChats } from "../../data/chats.ts";
+import { createChat, listChats, readChat } from "../../data/chats.ts";
 import { daySummary, listTasks, today } from "../../data/tasks.ts";
 import { openThoughts } from "../../data/thoughts.ts";
 import { modelLabel } from "../settings/SettingsPage.tsx";
@@ -40,8 +40,14 @@ function Empty({ onAsk }: { onAsk: (prompt: string) => void }) {
 export function PipPage() {
   const { chat: picked, ask } = useSearch({ from: "/pip" });
   const navigate = useNavigate({ from: "/pip" });
-  const list = useCollection(["chats"], listChats);
-  const chat = list.find(item => item.uid === picked) ?? list[0] ?? null;
+  // Only the open chat is read on each change (a streaming reply saves several times a second); the list of all
+  // chats is read when the side sheet opens. Without a chat in the URL, the most recent one is opened once.
+  const chat = useCollection(["chats"], () => (picked ? readChat(picked) : null), [picked]);
+  useEffect(() => {
+    if (picked && chat) return;
+    const latest = listChats()[0];
+    if (latest) void navigate({ search: { chat: latest.uid, ...(ask ? { ask } : {}) }, replace: true });
+  }, [picked, chat, ask, navigate]);
   const live = useLiveReply();
   const [listOpen, setListOpen] = useState(false);
   const thread = useRef<HTMLDivElement>(null);
@@ -49,13 +55,24 @@ export function PipPage() {
   const open = (uid: string) => { setListOpen(false); void navigate({ search: { chat: uid } }); };
   const start = () => open(createChat().uid);
 
-  // Follow the reply while it streams, unless the person scrolled up to read.
+  // Follow the reply while it grows (text, cards, rendered blocks arriving), unless the person scrolled up to read.
+  // Growth is observed on the thread itself and followed once per frame, so a burst of changes is one scroll.
   useEffect(() => {
-    const onScroll = () => { following.current = window.innerHeight + window.scrollY >= document.body.scrollHeight - 120; };
+    const node = thread.current;
+    if (!node) return;
+    let frame = 0;
+    const onScroll = () => { following.current = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 120; };
+    const follow = () => {
+      if (frame || !following.current) return;
+      frame = requestAnimationFrame(() => { frame = 0; window.scrollTo({ top: document.documentElement.scrollHeight }); });
+    };
+    const observer = new ResizeObserver(follow);
+    observer.observe(node);
     addEventListener("scroll", onScroll, { passive: true });
-    return () => removeEventListener("scroll", onScroll);
+    return () => { observer.disconnect(); removeEventListener("scroll", onScroll); cancelAnimationFrame(frame); };
   }, []);
-  useLayoutEffect(() => { if (following.current) window.scrollTo({ top: document.body.scrollHeight }); }, [live?.version, chat?.turns.length]);
+  // A new message always brings the end into view.
+  useLayoutEffect(() => { following.current = true; window.scrollTo({ top: document.documentElement.scrollHeight }); }, [chat?.uid, chat?.turns.length]);
 
   const profile = readProfile();
   const model = (() => { try { return modelLabel(configFor(profile, "chat").model); } catch { return "no model"; } })();
@@ -90,7 +107,7 @@ export function PipPage() {
           : <Button className="w-full" onClick={start}>start a chat</Button>}
       </div>
 
-      <ChatList open={listOpen} onOpenChange={setListOpen} chats={list} current={chat?.uid ?? null} onPick={open} onNew={start} />
+      <ChatList open={listOpen} onOpenChange={setListOpen} current={chat?.uid ?? null} onPick={open} onNew={start} />
     </main>
   );
 }

@@ -49,6 +49,16 @@ export function phaseOf(hour: number): Phase {
 }
 const GREETING: Record<Phase, string> = { night: "late", morning: "good morning", midday: "midday", afternoon: "this afternoon", evening: "this evening" };
 
+// scores() walks 90 days of activities; its inputs only change when COROS data does, so its result is kept until then.
+let scored: { deck: unknown; cache: unknown; day: string; result: ReturnType<typeof scores> } | null = null;
+function cachedScores(deck: ReturnType<typeof coros.cachedCockpit>, cache: ReturnType<typeof coros.cached>) {
+  const day = today();
+  if (scored && scored.day === day && JSON.stringify(scored.deck) === JSON.stringify(deck) && (scored.cache as { at?: number } | null)?.at === cache?.at) return scored.result;
+  const result = scores({ activities: cache?.list ?? [], deck: deck ?? {}, profile: { ...deck?.profile, observedMax: coros.observedMaxHr() } });
+  scored = { deck, cache, day, result };
+  return result;
+}
+
 function movement(now: number): Moment["movement"] {
   const deck = coros.cachedCockpit(), cache = coros.cached();
   const start = weekStart(now), workouts = gym.all();
@@ -59,7 +69,7 @@ function movement(now: number): Moment["movement"] {
   const base = { connected: coros.connected(), recovery: null, zone: "", strain: null, condition: null, recoveryTrend: [], strainTrend: [], gymThisWeek: gymWeeks.at(-1)?.value ?? 0, gymWeeks };
   if (!deck && !cache) return base;
   try {
-    const result = scores({ activities: cache?.list ?? [], deck: deck ?? {}, profile: { ...deck?.profile, observedMax: coros.observedMaxHr() } });
+    const result = cachedScores(deck, cache);
     const fresh = Array.isArray(cache?.list) && today(cache?.at ?? 0) === today(now);
     return {
       ...base,

@@ -1,21 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { z } from "zod";
 import { CARD_ACTIONS, CARD_COMPONENTS, CARDS_PROMPT } from "../../shared/pocket-cards.js";
 import { createTask } from "../data/tasks.ts";
 import { catalog } from "./catalog.ts";
-import { decodeSpec, hydrateSurfaceCards, isLegacySpec, releaseSurfaceCards } from "./cards.tsx";
+import { decodeSpec, isLegacySpec } from "./cards.tsx";
+import { Card } from "../features/pip/stream/Card.tsx";
 import { mergeSeries } from "./components.tsx";
 
 vi.mock("recharts", async original => ({ ...(await original<typeof import("recharts")>()), ResponsiveContainer: ({ children }: { children: unknown }) => children }));
 
 const encode = (value: unknown) => btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(value))));
-const placeholder = (spec: unknown) => {
-  const host = document.createElement("div");
-  host.innerHTML = `<p>prose</p><div class="pocket-spec" data-spec="${encode(spec)}"></div>`;
-  document.body.append(host);
-  return host;
-};
+const lines = (spec: { root: string; elements: Record<string, unknown> }) =>
+  [JSON.stringify({ op: "add", path: "/root", value: spec.root }), ...Object.entries(spec.elements).map(([id, value]) => JSON.stringify({ op: "add", path: "/elements/" + id, value }))].join("\n") + "\n";
 
 describe("the card prompt", () => {
   const components = catalog.data.components as Record<string, { props: z.ZodObject<z.ZodRawShape> }>;
@@ -61,24 +58,17 @@ describe("cards in a reply", () => {
   it("draws a new-catalog card with live tasks, and its button asks Pip in the same chat", async () => {
     createTask("Fahrrad reparieren");
     const onAsk = vi.fn();
-    const host = placeholder(modern);
-    act(() => hydrateSurfaceCards(host, { onAsk }));
+    render(<Card source={lines(modern)} closed streaming={false} onAsk={onAsk} />);
     await waitFor(() => expect(screen.getByText("über dem Schnitt")).toBeTruthy());
     expect(screen.getByText("Fahrrad reparieren")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "plan tomorrow" }));
     await waitFor(() => expect(onAsk).toHaveBeenCalledWith("Plan tomorrow with me"));
-    await act(async () => { releaseSurfaceCards(host); await Promise.resolve(); });
-    host.remove();
   });
 
-  it("leaves a card from before the new catalog to the classic renderer", () => {
+  it("recognises a card from before the new catalog", () => {
     const legacy = { root: "card", elements: { card: { type: "Card", props: { title: "Week", subtitle: "3 due" }, children: ["f"] }, f: { type: "Field", props: { label: "next", value: "tax" }, children: [] } } };
     expect(isLegacySpec(legacy as never)).toBe(true);
     expect(isLegacySpec(modern as never)).toBe(false);
-    const host = placeholder(legacy);
-    hydrateSurfaceCards(host, { onAsk: () => {} });
-    expect((host.querySelector(".pocket-spec") as HTMLElement).dataset.renderer).toBeUndefined();
-    host.remove();
   });
 
   it("tells the new table from the classic one", () => {

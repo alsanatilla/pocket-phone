@@ -1,11 +1,11 @@
 import { defineRegistry, useActions } from "@json-render/react";
-import { shadcnComponents as shadcn } from "@json-render/shadcn";
+import * as controls from "./controls.tsx";
 import { cn } from "@/lib/utils";
 import { catalog } from "./catalog.ts";
 import { Capture, Chart, Gauge, Hero, Metric, Table, TaskList, ThoughtList, Timeline } from "./components.tsx";
 
-// Catalog entries → components. Most layout and controls are json-render's shadcn implementations; where their
-// defaults do not fit a phone-sized Pocket screen they are adjusted here, in one place:
+// Catalog entries → components: layout and controls from controls.tsx (Pocket's shadcn components), readings,
+// charts and live lists from components.tsx. Adjusted for a phone-sized Pocket screen, in one place:
 // - a vertical Stack fills the width;
 // - a Grid has at most two columns on a phone, its full count from sm up;
 // - Heading and Text use Pocket's type scale, so a generated title never outshouts the readings.
@@ -25,25 +25,25 @@ const TEXT: Record<string, string> = {
 
 export const { registry } = defineRegistry(catalog, {
   components: {
-    Stack: ({ props, ...rest }) => shadcn.Stack({ ...rest, props: { ...props, align: props.align ?? (props.direction === "horizontal" ? "start" : "stretch") } }),
+    Stack: controls.Stack,
     Grid: ({ props, children }) => {
       const columns = Math.max(1, Math.min(6, props.columns ?? 1));
       return <div className={cn("grid", GRID_COLUMNS[columns], GRID_GAP[props.gap ?? "md"] ?? "gap-3")}>{children}</div>;
     },
-    Card: shadcn.Card,
+    Card: controls.Card,
     Heading: ({ props }) => {
       const Tag = props.level ?? "h2";
       return <Tag className={HEADING[Tag]}>{props.text}</Tag>;
     },
     Text: ({ props }) => <p className={TEXT[props.variant ?? "body"]}>{props.text}</p>,
-    Badge: shadcn.Badge,
-    Alert: shadcn.Alert,
-    Progress: shadcn.Progress,
-    Separator: shadcn.Separator,
-    Tabs: shadcn.Tabs,
-    Accordion: shadcn.Accordion,
-    Collapsible: shadcn.Collapsible,
-    Button: shadcn.Button,
+    Badge: controls.Badge,
+    Alert: controls.Alert,
+    Progress: controls.Progress,
+    Separator: controls.Separator,
+    Tabs: controls.Tabs,
+    Accordion: controls.Accordion,
+    Collapsible: controls.Collapsible,
+    Button: controls.Button,
 
     Hero: ({ props }) => <Hero {...props} />,
     Metric: ({ props, on }) => {

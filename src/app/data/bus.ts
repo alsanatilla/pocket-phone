@@ -24,6 +24,15 @@ export function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };
 }
+/** Calls `listener` only when one of `names` (or "*") changed; returns an unsubscribe. */
+export function watch(names: readonly Collection[], listener: () => void): () => void {
+  let last = snapshot(names);
+  return subscribe(() => {
+    const next = snapshot(names);
+    if (next !== last) { last = next; listener(); }
+  });
+}
+
 export const snapshot = (names: readonly Collection[]): string => ["*", ...names].map(name => versions.get(name) ?? 0).join(":");
 
 /** Collection a localStorage key belongs to: "pocket:tasks.json" → tasks.json, chats by prefix, accounts stripped. */

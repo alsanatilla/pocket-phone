@@ -44,6 +44,11 @@ async function mayArrange(): Promise<boolean> {
   } catch { return false; }
 }
 
+const enough = (spec: Spec): boolean => {
+  const root = (spec.elements as Record<string, { children?: string[] }> | undefined)?.[spec.root];
+  return Boolean(root) && (root!.children ?? []).filter(id => Boolean((spec.elements as Record<string, unknown>)[id])).length >= 2;
+};
+
 export function useSurface() {
   const { store, moment } = useMomentStore();
   const key = momentKey(moment);
@@ -60,7 +65,11 @@ export function useSurface() {
     running.current = controller;
     setStatus("arranging"); setError("");
     try {
-      const final = await streamSurface(momentRef.current, { signal: controller.signal, onSpec: partial => { if (!controller.signal.aborted) setSpec(partial); } });
+      // The standard surface stays until the arranged one has substance (its root and two blocks), so the screen
+      // never empties while the model starts writing; from then on it builds up block by block.
+      const final = await streamSurface(momentRef.current, { signal: controller.signal, onSpec: partial => {
+        if (!controller.signal.aborted && enough(partial)) setSpec(partial);
+      } });
       if (controller.signal.aborted) return;
       writeCache(momentKey(momentRef.current), final);
       setSpec(final); setStatus("arranged");
