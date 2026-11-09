@@ -1,44 +1,39 @@
-import { useNavigate, useSearch } from "@tanstack/react-router";
-import { hydrateCards, releaseCards } from "../../../client/pip-cards.jsx";
-import { useCollection } from "../../data/bus.ts";
-import { createChat, listChats, type ChatTurn } from "../../data/chats.ts";
-import { Composer } from "../../ui/Composer.tsx";
-import { Markdown } from "../../ui/Markdown.tsx";
-import { send, stop, useLiveReply } from "./runner.ts";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { ChevronDown, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { starters } from "../../../client/pip-presentation.js";
+import { configFor, readAccess, readProfile, TIERS } from "../../data/ai.ts";
+import { useCollection } from "../../data/bus.ts";
+import { createChat, listChats } from "../../data/chats.ts";
+import { daySummary, listTasks, today } from "../../data/tasks.ts";
+import { openThoughts } from "../../data/thoughts.ts";
+import { modelLabel } from "../settings/SettingsPage.tsx";
+import { ChatList } from "./ChatList.tsx";
+import { PipComposer } from "./PipComposer.tsx";
+import { Turn } from "./Turn.tsx";
+import { busy as runnerBusy, send, stop, useLiveReply } from "./runner.ts";
+import { toastError } from "../../ui/toast/toast.ts";
 
-// Pip: the same store, runner and markdown pipeline as the classic chat. Cards inside answers are json-render
-// React roots mounted by pip-cards. Settings, sources and routines are still in the classic chat.
+// Pip: one conversation at a time, the list of all of them in a side sheet. The header says which model answers
+// and what Pip may read, both linking to settings. An empty chat offers questions that fit what Pip may read.
 
-const clock = (at: number) => new Date(Number(at) || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-
-function Answer({ text, streaming }: { text: string; streaming: boolean }) {
-  return <Markdown text={text} options={{ streaming, onBeforeRender: releaseCards, onRender: node => { hydrateCards(node); } }} />;
-}
-
-function Who({ at, name }: { at: number; name: string }) {
+function Empty({ onAsk }: { onAsk: (prompt: string) => void }) {
+  const enabled = readAccess();
+  const { due } = daySummary(listTasks(), today());
+  const ideas = starters({ enabled, overdue: due.filter(task => task.due < today()).length, thoughts: openThoughts().length });
   return (
-    <div className="col-start-1 flex flex-col">
-      <time className="text-[11px] text-dim">{clock(at)}</time>
-      <b className="font-pixel text-lg font-normal leading-none text-muted-foreground">{name}</b>
-    </div>
-  );
-}
-
-function Turn({ turn, live }: { turn: ChatTurn; live: Partial<ChatTurn> | null }) {
-  const answer = live?.answer ?? turn.answer;
-  return (
-    <section className={cn("mb-6 grid grid-cols-[52px_minmax(0,1fr)] gap-x-3.5 border-l-2 pl-3.5", answer && "border-l-primary")}>
-      <Who at={turn.created} name="you" />
-      <p>{turn.text}</p>
-      <Who at={turn.created} name="pip" />
-      <div className="mt-3 col-start-2">
-        {answer ? <Answer text={answer} streaming={Boolean(live)} /> : null}
-        {live ? <p className="text-sm text-muted-foreground">{live.phase || "thinking"}…</p> : null}
-        {!live && turn.error ? <p className="text-sm text-muted-foreground">{turn.error}</p> : null}
+    <div className="space-y-4 py-8">
+      <p className="font-pixel text-5xl leading-none text-primary">pip</p>
+      <p className="max-w-prose text-sm text-muted-foreground">Ask about anything you keep in Pocket. Pip only reads what you allow in settings, and nothing is saved without you.</p>
+      <div className="grid gap-2">
+        {ideas.map(idea => (
+          <button key={idea.label} onClick={() => onAsk(idea.prompt)} className="rounded-lg border bg-card px-3.5 py-3 text-left text-sm transition-colors hover:border-primary">
+            {idea.label}
+          </button>
+        ))}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -48,38 +43,54 @@ export function PipPage() {
   const list = useCollection(["chats"], listChats);
   const chat = list.find(item => item.uid === picked) ?? list[0] ?? null;
   const live = useLiveReply();
-  const open = (uid: string) => void navigate({ search: { chat: uid } });
+  const [listOpen, setListOpen] = useState(false);
+  const thread = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
+  const open = (uid: string) => { setListOpen(false); void navigate({ search: { chat: uid } }); };
+  const start = () => open(createChat().uid);
 
-  if (!chat) {
-    return (
-      <main className="space-y-2 pt-4">
-        <p className="text-sm text-muted-foreground">No conversation yet.</p>
-        <Button variant="outline" onClick={() => open(createChat().uid)}>+ new chat</Button>
-      </main>
-    );
-  }
+  // Follow the reply while it streams, unless the person scrolled up to read.
+  useEffect(() => {
+    const onScroll = () => { following.current = window.innerHeight + window.scrollY >= document.body.scrollHeight - 120; };
+    addEventListener("scroll", onScroll, { passive: true });
+    return () => removeEventListener("scroll", onScroll);
+  }, []);
+  useLayoutEffect(() => { if (following.current) window.scrollTo({ top: document.body.scrollHeight }); }, [live?.version, chat?.turns.length]);
+
+  const profile = readProfile();
+  const model = (() => { try { return modelLabel(configFor(profile, "chat").model); } catch { return "no model"; } })();
+  const reads = readAccess();
+  const locked = Boolean(live) || runnerBusy();
 
   return (
-    <main className="pt-2">
-      <div className="my-2 flex items-center gap-3">
-        <select value={chat.uid} onChange={event => open(event.target.value)} aria-label="Conversation"
-          className="h-11 min-w-0 flex-1 rounded-md border bg-card px-2.5">
-          {list.map(item => <option key={item.uid} value={item.uid}>{item.title || "untitled"}</option>)}
-        </select>
-        <Button variant="ghost" onClick={() => open(createChat().uid)}>+ new</Button>
+    <main className="flex min-h-[calc(100dvh-72px)] flex-col">
+      <div className="sticky top-[60px] z-[5] flex items-center gap-2 bg-background py-1.5">
+        <button onClick={() => setListOpen(true)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left" aria-label="All chats">
+          <span className="truncate font-pixel text-2xl leading-none">{chat?.title || "pip"}</span>
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        </button>
+        <Button variant="ghost" size="icon" aria-label="New chat" onClick={start}><Plus /></Button>
       </div>
-      {chat.context.length ? (
-        <p className="text-sm text-muted-foreground">with {chat.context.map(source => source.title).join(" · ")}</p>
-      ) : null}
-      <div className="mt-4 min-h-[50vh]">
-        {chat.turns.map(turn => (
-          <Turn key={turn.uid} turn={turn} live={live && live.chatId === chat.uid && live.turnId === turn.uid ? live.turn : null} />
-        ))}
+      <Link to="/settings" className="mb-3 truncate text-[11px] text-dim no-underline hover:text-muted-foreground">
+        {model} · {TIERS[profile.tier].name.toLowerCase()} · {reads.length ? "reads " + reads.join(", ") : "reads nothing yet"}
+      </Link>
+
+      <div ref={thread} className="flex-1 space-y-8 pb-4">
+        {!chat || !chat.turns.length
+          ? <Empty onAsk={prompt => { const target = chat ?? createChat(); if (!chat) open(target.uid); send(target.uid, prompt).catch(toastError); }} />
+          : chat.turns.map((turn, index) => (
+            <Turn key={turn.uid} turn={turn} chatId={chat.uid} latest={index === chat.turns.length - 1} locked={locked}
+              live={live && live.chatId === chat.uid && live.turnId === turn.uid ? live.turn : null} />
+          ))}
       </div>
-      <div className="sticky bottom-0 bg-background py-3">
-        <Composer key={chat.uid + (ask ?? "")} initialText={ask} label="Message Pip" placeholder="message pip…" action="send" maxLength={16000}
-          busy={Boolean(live)} onCancel={stop} onSubmit={text => send(chat.uid, text)} />
+
+      <div className="sticky bottom-0 bg-background pt-2 pb-3">
+        {chat
+          ? <PipComposer key={chat.uid + (ask ?? "")} chat={chat} busy={locked} initial={ask} onSend={text => send(chat.uid, text)} onStop={stop} />
+          : <Button className="w-full" onClick={start}>start a chat</Button>}
       </div>
+
+      <ChatList open={listOpen} onOpenChange={setListOpen} chats={list} current={chat?.uid ?? null} onPick={open} onNew={start} />
     </main>
   );
 }

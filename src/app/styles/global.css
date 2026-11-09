@@ -109,3 +109,44 @@
   .prose a { color: var(--primary); }
   .prose .md-pending { white-space: pre-wrap; }
 }
+
+/*
+ * Cards inside Pip's answers: json-render markup from src/client/pip-cards.jsx (its own small catalog, which the
+ * chat prompt describes). The markup is not ours to class, so it is styled here, in the same scale as the surfaces.
+ */
+@layer components {
+  .pocket-card { margin: 14px 0 6px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); padding: 14px 16px; overflow: hidden; }
+  .pocket-bar { height: 3px; margin: -14px -16px 12px; background: linear-gradient(90deg, var(--primary), transparent); }
+  .pocket-title { font-family: var(--font-pixel); font-size: 24px; line-height: 1; color: var(--primary); }
+  .pocket-sub { margin-top: 2px; font-size: 12px; color: var(--muted-foreground); }
+  .pocket-body { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+  .pocket-section { display: flex; flex-direction: column; gap: 8px; }
+  .pocket-text { font-size: 14px; }
+  .pocket-muted { color: var(--muted-foreground); }
+  .pocket-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-foreground); }
+  .pocket-fields { display: flex; flex-direction: column; }
+  .pocket-row { display: grid; grid-template-columns: minmax(72px, 35%) minmax(0, 1fr); gap: 12px; padding: 7px 0; border-top: 1px dashed var(--border); }
+  .pocket-row:first-child { border-top: 0; }
+  .pocket-k { font-size: 12px; color: var(--muted-foreground); }
+  .pocket-v { font-size: 14px; }
+  .pocket-table { display: grid; font-size: 13px; }
+  .pocket-tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 7px 0; border-top: 1px dashed var(--border); }
+  .pocket-tr.pocket-thead { border-top: 0; padding-top: 0; }
+  .pocket-tr.pocket-c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pocket-tr.pocket-c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .pocket-th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-foreground); }
+  .pocket-td { overflow: hidden; text-overflow: ellipsis; }
+  .pocket-chart { display: flex; flex-direction: column; gap: 6px; }
+  .pocket-bars { display: flex; align-items: flex-end; gap: 3px; height: 64px; }
+  .pocket-col { flex: 1 1 0; border-radius: 2px 2px 0 0; background: var(--primary); opacity: .85; }
+  .pocket-h1 { height: 10%; } .pocket-h2 { height: 20%; } .pocket-h3 { height: 30%; } .pocket-h4 { height: 40%; } .pocket-h5 { height: 50%; }
+  .pocket-h6 { height: 60%; } .pocket-h7 { height: 70%; } .pocket-h8 { height: 80%; } .pocket-h9 { height: 90%; } .pocket-h10 { height: 100%; }
+  .pocket-divider { height: 1px; background: var(--border); }
+  .pocket-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .pocket-button, .pocket-link {
+    display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--radius-md);
+    font-size: 13px; color: var(--primary); cursor: pointer; text-decoration: none; transition: border-color .15s, background .15s;
+  }
+  .pocket-button:hover, .pocket-button:focus-visible, .pocket-link:hover { border-color: var(--primary); }
+  .pocket-button.pocket-primary { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+}

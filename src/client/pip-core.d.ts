@@ -16,14 +16,30 @@ export class ChatStore {
   get(uid: string | null): Chat | null;
   create(): Chat;
   update(uid: string, edit: (chat: Chat) => void): Chat;
+  remove(uid: string): void;
+  recordApplied(uid: string, turnId: string, eventId: string, href: string, result?: unknown): Chat;
 }
 
 export interface ActiveReply { chatId: string; turnId: string; turn: Partial<ChatTurn> }
 export interface RunnerEvent { type: "started" | "delta" | "finished" | "approval"; chatId: string; turn?: Partial<ChatTurn> }
 
-export class ReplyRunner {
-  constructor(store: ChatStore, options?: { title?: (() => Promise<void>) | null; onChange?: (event: RunnerEvent) => void });
-  active: ActiveReply | null;
-  send(uid: string, options: { text: string; context?: unknown[] }): Promise<unknown>;
-  stop(): void;
+export interface RunnerOptions {
+  key?: (value: PipConfig, chat: Chat) => unknown;
+  stream?: (chat: Chat, turn: ChatTurn, options: Record<string, unknown>) => Promise<unknown>;
+  remote?: { available: (chat: Chat) => Promise<boolean>; stream: (chat: Chat, turn: ChatTurn, options: Record<string, unknown>) => Promise<unknown> } | null;
+  title?: ((value: PipConfig, credential: unknown, request: string, answer: string) => Promise<string>) | null;
+  onChange?: (event: RunnerEvent) => void;
 }
+export interface Decision { approved: boolean; input?: unknown }
+
+export class ReplyRunner {
+  constructor(store: ChatStore, options?: RunnerOptions);
+  active: ActiveReply | null;
+  /** A new message (text), or retry/resume (continue) of the latest unfinished turn. */
+  send(uid: string, options: { text?: string; context?: unknown[]; retry?: string | null; resume?: string | null }): Promise<unknown>;
+  stop(): void;
+  /** Whether a write still waits for the user, and the decision already taken. */
+  approvalOf(turnId: string, eventId: string): { decision?: Decision } | null;
+  decide(turnId: string, eventId: string, decision: Decision): void;
+}
+export function streamReply(chat: Chat, turn: ChatTurn, options?: Record<string, unknown>): Promise<unknown>;

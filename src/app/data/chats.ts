@@ -1,10 +1,20 @@
 import { ChatStore } from "../../client/pip-core.js";
+import type { ActivityRow } from "../../client/pip-activity.js";
+import type { PipConfig } from "../../client/pip-core.js";
 
 // Pip's conversations, kept in this browser (and synced by object sync when signed in).
 
-export interface ChatTurn { uid: string; text: string; answer: string; created: number; status: string; error?: string; phase?: string }
+export interface ChatTurn {
+  uid: string; text: string; answer: string; created: number;
+  status: "streaming" | "done" | "stopped" | "failed" | string;
+  error?: string; phase?: string; reasoning?: string;
+  activity?: ActivityRow[]; sources?: { href: string; title: string }[];
+}
 export interface ChatSource { kind: string; uid: string; title: string; text: string; href: string }
-export interface Chat { uid: string; title: string; updated: number; context: (ChatSource & { originalLength: number })[]; turns: ChatTurn[] }
+export interface Chat {
+  uid: string; title: string; titled?: boolean; pinned?: boolean; updated: number; draft: string; config: PipConfig;
+  context: (ChatSource & { originalLength: number })[]; turns: ChatTurn[];
+}
 
 export const chats = new ChatStore();
 const CURRENT = "pocket:pip-current";
@@ -27,3 +37,9 @@ export function withContext(source: ChatSource): string {
     chat.context.push({ ...source, originalLength: source.text.length, text: source.text.slice(0, 8000) });
   }).uid;
 }
+
+export const renameChat = (uid: string, title: string): Chat => chats.update(uid, chat => { chat.title = title.trim().slice(0, 100) || chat.title; chat.titled = true; });
+export const pinChat = (uid: string, pinned: boolean): Chat => chats.update(uid, chat => { chat.pinned = pinned; });
+export const removeChat = (uid: string): void => chats.remove(uid);
+export const removeSource = (uid: string, index: number): Chat => chats.update(uid, chat => { chat.context.splice(index, 1); });
+export const setDraft = (uid: string, draft: string): Chat => chats.update(uid, chat => { chat.draft = draft.slice(0, 16000); });
