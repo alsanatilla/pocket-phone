@@ -55,7 +55,7 @@ function Form({ draft, onSave, busy }: { draft: JobDraft; onSave: (draft: JobDra
   return (
     <form onSubmit={submit} className="grid gap-4">
       <DialogHeader>
-        <DialogTitle className="font-pixel text-2xl font-normal">{draft.id ? "edit job" : "new job"}</DialogTitle>
+        <DialogTitle className="text-lg font-semibold">{draft.id ? "edit job" : "new job"}</DialogTitle>
         <DialogDescription>{fixed ? "Pip knows what this job looks at; choose when it runs." : "Tell Pip what to do or look for; it keeps its own notes between runs."}</DialogDescription>
       </DialogHeader>
 

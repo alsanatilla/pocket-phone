@@ -65,8 +65,11 @@ export async function saveKey(userId, { provider, baseUrl, key }) {
 export async function keyStatus(userId, { provider, baseUrl }) {
   let target;
   try { target = endpoint(provider, baseUrl); } catch { return { saved: false }; }
-  const rows = (await sql({ sql: 'SELECT hint FROM pocket_pip_keys WHERE user_id = ? AND endpoint = ?', args: [userId, target] })).rows;
-  return rows.length ? { saved: true, hint: '…' + rows[0].hint, endpoint: target } : { saved: false, endpoint: target };
+  const rows = (await sql({ sql: 'SELECT hint, sealed FROM pocket_pip_keys WHERE user_id = ? AND endpoint = ?', args: [userId, target] })).rows;
+  if (!rows.length) return { saved: false, endpoint: target };
+  // A key sealed under another encryption secret (another deployment, a rotated secret) can never be used here.
+  try { open(userId, rows[0].sealed); } catch { return { saved: false, stale: true, hint: '…' + rows[0].hint, endpoint: target }; }
+  return { saved: true, hint: '…' + rows[0].hint, endpoint: target };
 }
 
 /** Decrypts one stored key. The sealed payload must still name the same user, provider and endpoint. */

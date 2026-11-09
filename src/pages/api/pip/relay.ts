@@ -8,7 +8,9 @@ import { OPENCODE_UA, opencodeSession } from '../../../shared/pip-opencode.js';
 // The browser runs the agent; this hop only replaces the provider credential.
 // The key is decrypted per request and never leaves the server.
 const MAX_BODY = 8 * 1024 * 1024;
-const text = (message: string, status: number) => new Response(JSON.stringify({ error: message }), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+const text = (message: string, status: number) => new Response(JSON.stringify({ error: message }), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Pocket-Relay': 'refused' } });
+/** Pocket's own refusal (no key, unreadable key, bad request), as opposed to the provider's answer passed through. */
+const refused = (response: Response) => { response.headers.set('X-Pocket-Relay', 'refused'); return response; };
 
 export const POST: APIRoute = async ({ request }) => {
   try {
@@ -70,5 +72,5 @@ export const POST: APIRoute = async ({ request }) => {
       if (value) out.set(name, value);
     }
     return new Response(response.body, { status: response.status, headers: out });
-  } catch (error) { return failure(error); }
+  } catch (error) { return refused(failure(error)); }
 };

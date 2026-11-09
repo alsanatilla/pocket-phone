@@ -14,7 +14,7 @@ const { ensureSchema, execute, database } = await import('../src/server/database
 const { syncDocuments, readDocuments } = await import('../src/server/workspace.js');
 const { saveBackground, backgroundState } = await import('../src/server/pip-background.js');
 const { seal } = await import('../src/server/secrets.js');
-const { endpoint } = await import('../src/server/pip-keys.js');
+const { endpoint, keyStatus } = await import('../src/server/pip-keys.js');
 const runs = await import('../src/server/pip-runs.js');
 const notices = await import('../src/server/pip-notify.js');
 await ensureSchema();
@@ -530,6 +530,7 @@ test('an unreadable chat key reports reconnect instead of using background crede
   await saveBackground(userId, SETTINGS, 'background-key-123456');
   await execute({ sql: 'UPDATE pocket_pip_keys SET sealed = ? WHERE user_id = ?', args: ['invalid-ciphertext', userId] });
   await assert.rejects(runs.serverRunState(userId, 'chat-unreadable', VAULT_CONFIG), /stored key could not be read/);
+  assert.deepEqual(await keyStatus(userId, VAULT_CONFIG), { saved: false, stale: true, hint: '…3456', endpoint: VAULT_CONFIG.baseUrl });
   await assert.rejects(runs.submitRun(userId, { requestId: 'req-unreadable', chat: header('chat-unreadable'), text: 'Hello' }, { fetcher: noProvider }), /stored key could not be read/);
 });
 

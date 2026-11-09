@@ -59,6 +59,16 @@ test('a stored account key is relayed, and the browser never sends the key itsel
   assert.equal(result.answer, 'Relayed answer.');
 });
 
+test('when Pocket refuses to relay, the reply says why instead of a bare status code', async t => {
+  const chat = workspace(t, { provider: 'compatible', model: 'openrouter/free', baseUrl: 'https://openrouter.ai/api/v1' });
+  const refusal = message => new Response(JSON.stringify({ error: message }), { status: 409, headers: { 'content-type': 'application/json', 'x-pocket-relay': 'refused' } });
+  await assert.rejects(streamReply(chat, turn(), { key: { relay: true }, fetcher: async () => refusal('The stored key could not be read. Save it again in Pip settings.') }),
+    /stored key could not be read/);
+  // The provider's own 409, passed through the relay, keeps the fixed wording: its body is never shown.
+  await assert.rejects(streamReply(chat, turn(), { key: { relay: true }, fetcher: async () => new Response('{"error":"secret upstream detail"}', { status: 409, headers: { 'content-type': 'application/json' } }) }),
+    error => /could not accept this request \(409\)/.test(error.message) && !error.message.includes('secret upstream detail'));
+});
+
 test('a direct OpenCode Go call names Pocket and carries the routing session, without the key in it', async t => {
   const chat = workspace(t, { provider: 'compatible', model: 'glm-5.3', baseUrl: 'https://opencode.ai/inference/go/openai/v1' });
   let call;

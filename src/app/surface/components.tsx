@@ -23,7 +23,7 @@ export const toneColor = (tone: Tone) => TONE_VAR[tone ?? "accent"];
 
 /** The small caps line that names a block. */
 function Label({ children, tone }: { children: ReactNode; tone?: Tone }) {
-  return <p className="text-[11px] font-medium uppercase tracking-[0.08em]" style={{ color: tone ? toneColor(tone) : "var(--muted-foreground)" }}>{children}</p>;
+  return <p className="text-xs font-medium first-letter:uppercase" style={{ color: tone ? toneColor(tone) : "var(--muted-foreground)" }}>{children}</p>;
 }
 
 /** A block's frame: the same border, ground and padding everywhere. */
@@ -41,7 +41,7 @@ export function Hero({ eyebrow, value, unit, caption, tone }: { eyebrow?: string
   return (
     <section className="arrive pt-2 pb-1">
       {eyebrow ? <p className="text-xs text-muted-foreground">{eyebrow}</p> : null}
-      <p className={cn("mt-1 font-pixel leading-none", readingSize(value, ["text-7xl", "text-6xl", "text-4xl"]))} style={{ color: toneColor(tone) }}>
+      <p className={cn("mt-1 font-semibold tabular-nums leading-none tracking-tight", readingSize(value, ["text-6xl", "text-5xl", "text-3xl"]))} style={{ color: toneColor(tone) }}>
         {value}{unit ? <span className="ml-2 text-2xl text-muted-foreground">{unit}</span> : null}
       </p>
       {caption ? <p className="mt-1 text-base">{caption}</p> : null}
@@ -54,7 +54,7 @@ export function Metric({ label, value, unit, hint, tone, onPress }: { label: str
   return (
     <Tag onClick={onPress} className={cn("arrive flex min-w-0 flex-col rounded-lg border bg-card p-3 text-left", onPress && "transition-colors hover:border-primary focus-visible:border-primary")}>
       <Label>{label}</Label>
-      <p className={cn("mt-2 truncate font-pixel leading-none", readingSize(value, ["text-5xl", "text-4xl", "text-2xl"]))} style={{ color: toneColor(tone) }}>
+      <p className={cn("mt-2 truncate font-semibold tabular-nums leading-none tracking-tight", readingSize(value, ["text-4xl", "text-3xl", "text-xl"]))} style={{ color: toneColor(tone) }}>
         {value}{unit ? <span className="ml-1 text-base text-muted-foreground">{unit}</span> : null}
       </p>
       {hint ? <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{hint}</p> : null}
@@ -109,7 +109,7 @@ function SourceLine({ source, note }: { source?: Source | null; note?: string | 
   if (!source && !note) return null;
   const safe = source?.url && /^https?:\/\//.test(source.url) ? source.url : null;
   return (
-    <p className="mt-2 text-[11px] text-muted-foreground">
+    <p className="mt-2 text-xs text-muted-foreground">
       {note}{note && source ? " · " : ""}
       {source ? <>source: {safe ? <a href={safe} target="_blank" rel="noopener noreferrer" className="text-primary underline-offset-2 hover:underline">{source.title}</a> : source.title}</> : null}
     </p>
@@ -134,7 +134,7 @@ export function Chart({ kind, title, data, series, unit, tone, note, source }: {
       {title ? <Label tone={lines.length === 1 ? tone : null}>{title}{unit ? <span className="normal-case tracking-normal text-dim"> · {unit}</span> : null}</Label> : null}
       {lines.length > 1 ? (
         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
-          {lines.map((line, index) => <span key={index} className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className="size-2 rounded-full" style={{ background: colors[index] }} />{line.name}</span>)}
+          {lines.map((line, index) => <span key={index} className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className="size-2 rounded-full" style={{ background: colors[index] }} />{line.name}</span>)}
         </div>
       ) : null}
       <div className="mt-2 h-44 w-full">
@@ -160,7 +160,7 @@ export function Table({ title, columns, rows, note, source }: { title?: string |
       {title ? <Label>{title}</Label> : null}
       <table className="mt-2 w-full border-collapse text-sm">
         <thead>
-          <tr>{head.map((name, column) => <th key={column} className={cn("whitespace-nowrap pb-1.5 pr-3 align-bottom text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground last:pr-0", right[column] ? "text-right" : "text-left")}>{name}</th>)}</tr>
+          <tr>{head.map((name, column) => <th key={column} className={cn("whitespace-nowrap pb-1.5 pr-3 align-bottom text-xs font-medium text-muted-foreground last:pr-0", right[column] ? "text-right" : "text-left")}>{name}</th>)}</tr>
         </thead>
         <tbody>
           {body.map((row, index) => (
@@ -189,7 +189,7 @@ export function Timeline({ title, items }: { title?: string | null; items: Timel
       <ol className="mt-3 space-y-3">
         {list.map((item, index) => (
           <li key={index} className={cn("grid grid-cols-[3.25rem_minmax(0,1fr)] items-baseline gap-3", item.past && "opacity-45")}>
-            <span className="font-pixel text-xl leading-none" style={{ color: item.now ? "var(--primary)" : "var(--calendar)" }}>{item.time}</span>
+            <span className="font-semibold tabular-nums leading-none" style={{ color: item.now ? "var(--primary)" : "var(--calendar)" }}>{item.time}</span>
             <span className="min-w-0 text-sm">
               {item.title}
               {item.now ? <span className="ml-2 text-xs text-primary">now</span> : null}

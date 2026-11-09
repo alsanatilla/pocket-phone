@@ -17,7 +17,7 @@ const GRID_COLUMNS: Record<number, string> = {
 const GRID_GAP: Record<string, string> = { sm: "gap-2", md: "gap-3", lg: "gap-4", xl: "gap-6" };
 
 const HEADING: Record<string, string> = {
-  h1: "font-pixel text-4xl leading-none", h2: "font-pixel text-3xl leading-none", h3: "font-pixel text-2xl leading-none", h4: "text-sm font-medium",
+  h1: "text-2xl font-semibold leading-tight", h2: "text-xl font-semibold leading-tight", h3: "text-[17px] font-semibold leading-snug", h4: "text-[15px] font-medium",
 };
 const TEXT: Record<string, string> = {
   body: "text-sm", lead: "text-base", caption: "text-xs text-muted-foreground", muted: "text-sm text-muted-foreground", code: "font-mono text-xs bg-muted px-1",

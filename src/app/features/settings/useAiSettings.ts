@@ -9,7 +9,7 @@ import * as openrouter from "./openrouter.ts";
 // The settings screen's behaviour: every change saves at once (there is no "save settings" button), the key
 // status follows the chosen provider, and an OpenRouter sign-in that just came back is finished here.
 
-export type Connection = { state: "checking" } | { state: "connected"; status: KeyStatus } | { state: "missing" } | { state: "unreachable" };
+export type Connection = { state: "checking" } | { state: "connected"; status: KeyStatus } | { state: "missing"; stale?: boolean } | { state: "unreachable" };
 
 export function useAiSettings() {
   const [profile, setProfile] = useState<AiProfile>(readProfile);
@@ -22,7 +22,7 @@ export function useAiSettings() {
     setConnection({ state: "checking" });
     try {
       const status = await keyStatus(value);
-      setConnection(status.unreachable && !status.tab ? { state: "unreachable" } : status.saved || status.tab ? { state: "connected", status } : { state: "missing" });
+      setConnection(status.unreachable && !status.tab ? { state: "unreachable" } : status.saved || status.tab ? { state: "connected", status } : { state: "missing", stale: Boolean(status.stale) });
     } catch { setConnection({ state: "missing" }); }
   }, []);
 

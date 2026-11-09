@@ -34,7 +34,7 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
   };
   const filtered = models.filter(model => (model.name + " " + model.id).toLowerCase().includes(query.toLowerCase().trim()));
   return (
-    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
       <button type="button" disabled={busy} aria-label="Web search" aria-pressed={chat.config.webSearch}
         className="flex items-center gap-1.5 rounded px-1 py-1 hover:text-foreground disabled:opacity-50"
         onClick={() => { try { chats.update(chat.uid, value => { value.config.webSearch = !value.config.webSearch; }); } catch (error) { toastError(error); } }}>
@@ -44,7 +44,7 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
         <Popover.Trigger asChild>
           <button type="button" disabled={busy} aria-label="Choose model" className="ml-auto flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50">
             <SlidersHorizontal className="size-3.5 shrink-0" /><span className="max-w-48 truncate">{name}</span>
-            {free ? <span className="text-movement">free</span> : null}<ChevronDown className="size-3 shrink-0" />
+            {free && !/free/i.test(name) ? <span className="text-movement">free</span> : null}<ChevronDown className="size-3 shrink-0" />
           </button>
         </Popover.Trigger>
         <Popover.Portal>
@@ -59,15 +59,15 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
               {filtered.map(model => <button type="button" key={model.id} disabled={busy || !model.tools} aria-pressed={isOpenRouter && chat.config.model === model.id}
                 onClick={() => choose(model)} className="w-full rounded-md p-2.5 text-left hover:bg-accent aria-pressed:bg-accent disabled:opacity-50">
                 <span className="flex items-center gap-2 text-sm"><span className="flex-1">{model.name}</span>{isOpenRouter && chat.config.model === model.id ? <Check className="size-4 text-primary" /> : null}</span>
-                <span className="mt-1 block text-[11px] text-muted-foreground">{model.context ? `${tokenSize(model.context)} context · ` : "Dynamic context · "}{model.tools ? "tools" : "No tools — unavailable for Pip"}{model.reasoning ? " · reasoning" : ""}{model.vision ? " · vision" : ""}{model.maxOutput ? ` · ${tokenSize(model.maxOutput)} max output` : ""}</span>
+                <span className="mt-1 block text-xs text-muted-foreground">{model.context ? `${tokenSize(model.context)} context · ` : "Dynamic context · "}{model.tools ? "tools" : "No tools — unavailable for Pip"}{model.reasoning ? " · reasoning" : ""}{model.vision ? " · vision" : ""}{model.maxOutput ? ` · ${tokenSize(model.maxOutput)} max output` : ""}</span>
               </button>)}
               {!filtered.length && !loading ? <p className="p-3 text-xs text-muted-foreground">No matching free models.</p> : null}
             </div>
-            <p className="mt-3 border-t pt-2 text-[11px] text-muted-foreground">$0 model tokens · OpenRouter limits and availability apply. A selected free model may fall back to another free model.</p>
+            <p className="mt-3 border-t pt-2 text-xs text-muted-foreground">$0 model tokens · OpenRouter limits and availability apply. A selected free model may fall back to another free model.</p>
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
-      <span className="w-full px-1 text-[10px] text-dim">{isOpenRouter ? "OpenRouter" : chat.config.provider === "anthropic" ? "Anthropic" : chat.config.baseUrl.startsWith("https://opencode.ai/") ? "OpenCode Go" : "Custom provider"}{selected?.context ? ` · ${tokenSize(selected.context)} context` : ""} · {tokenSize(chat.config.maxTokens)} reply limit{chat.config.thinking ? " · reasoning on" : ""}</span>
+      <span className="w-full px-1 text-xs text-dim">{isOpenRouter ? "OpenRouter" : chat.config.provider === "anthropic" ? "Anthropic" : chat.config.baseUrl.startsWith("https://opencode.ai/") ? "OpenCode Go" : "Custom provider"}{selected?.context ? ` · ${tokenSize(selected.context)} context` : ""} · {tokenSize(chat.config.maxTokens)} reply limit{chat.config.thinking ? " · reasoning on" : ""}</span>
     </div>
   );
 }

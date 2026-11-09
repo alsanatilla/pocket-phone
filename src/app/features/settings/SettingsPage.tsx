@@ -50,7 +50,7 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
   return (
     <section className="space-y-3 rounded-lg border bg-card p-4">
       <div>
-        <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-primary">{title}</h2>
+        <h2 className="text-base font-semibold first-letter:uppercase">{title}</h2>
         {hint ? <p className="mt-1 text-sm text-muted-foreground">{hint}</p> : null}
       </div>
       {children}
@@ -70,7 +70,9 @@ function Choice({ selected, onSelect, children, label }: { selected: boolean; on
 function ConnectionLine({ connection, provider }: { connection: Connection; provider: string }) {
   if (connection.state === "checking") return <p className="text-sm text-muted-foreground">Checking…</p>;
   if (connection.state === "unreachable") return <p className="text-sm text-destructive">Pocket could not reach your key vault. Check your connection.</p>;
-  if (connection.state === "missing") return <p className="text-sm text-muted-foreground">Not connected to {provider} yet.</p>;
+  if (connection.state === "missing") return connection.stale
+    ? <p className="text-sm text-destructive">The {provider} key stored on your account can no longer be read. Connect again.</p>
+    : <p className="text-sm text-muted-foreground">Not connected to {provider} yet.</p>;
   const { status } = connection;
   return (
     <p className="text-sm">
@@ -138,7 +140,7 @@ export function SettingsPage() {
             const models = profile.provider === "custom" ? null : MODELS[profile.provider][tier];
             return (
               <Choice key={tier} label={TIERS[tier].name} selected={profile.tier === tier} onSelect={() => ai.setTier(tier)}>
-                <p className="font-pixel text-2xl leading-none">{TIERS[tier].name.toLowerCase()}</p>
+                <p className="font-semibold">{TIERS[tier].name}</p>
                 {models ? <p className="mt-1 text-xs text-muted-foreground">pip: {modelLabel(models.chat)} · screens: {modelLabel(models.surface)}</p> : null}
                 <p className="mt-1 text-sm text-muted-foreground">
                   {tier === "light" ? LIGHT[profile.provider] : TIERS[tier].blurb}
@@ -204,8 +206,8 @@ const compact = (n: number) => n >= 1_000_000 ? (n / 1_000_000).toFixed(1) + "M"
 function Reading({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border p-2.5">
-      <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
-      <p className="mt-1 font-pixel text-3xl leading-none">{value}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tabular-nums leading-none">{value}</p>
     </div>
   );
 }
@@ -215,7 +217,7 @@ function Advanced({ current, onUse, active }: { current?: { baseUrl: string; mod
   const [model, setModel] = useState(current?.model ?? "");
   return (
     <Collapsible defaultOpen={active} className="rounded-lg border">
-      <CollapsibleTrigger className="group flex w-full items-center justify-between p-4 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+      <CollapsibleTrigger className="group flex w-full items-center justify-between p-4 text-sm font-medium text-muted-foreground">
         advanced <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
       </CollapsibleTrigger>
       <CollapsibleContent className="space-y-3 px-4 pb-4">

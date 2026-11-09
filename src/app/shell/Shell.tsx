@@ -22,7 +22,7 @@ function SyncLine() {
   const tone = sync.state === "error" ? "text-destructive" : !sync.signedIn && !sync.local ? "text-primary" : "text-dim";
   return (
     <a href={classicHref("/account")} title="Account and sync"
-      className={cn("ml-auto max-w-[9rem] truncate text-right text-[10px] uppercase leading-tight tracking-wider no-underline", tone, sync.state === "syncing" && "animate-pulse")}>
+      className={cn("ml-auto max-w-[9rem] truncate text-right text-xs leading-tight no-underline", tone, sync.state === "syncing" && "animate-pulse")}>
       {sync.label}
     </a>
   );
@@ -33,7 +33,7 @@ export function Shell() {
     <div className="mx-auto max-w-3xl px-4 pb-24">
       <header className="sticky top-0 z-10 flex items-center gap-4 bg-background py-3.5">
         <Link to="/today" className="font-pixel text-3xl leading-none text-primary no-underline">pocket</Link>
-        <nav aria-label="Sections" className="flex gap-3.5 font-pixel text-xl leading-none text-muted-foreground">
+        <nav aria-label="Sections" className="flex gap-3.5 text-[15px] leading-none text-muted-foreground">
           {SECTIONS.map(section => (
             <Link key={section.to} to={section.to} className="py-1.5 no-underline hover:text-foreground"
               activeProps={{ className: "text-foreground shadow-[inset_0_-2px_0_var(--primary)]", "aria-current": "page" }}>{section.label}</Link>

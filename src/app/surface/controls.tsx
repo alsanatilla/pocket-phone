@@ -36,7 +36,7 @@ export function Card({ props, children }: Props<{ title?: string | null; descrip
     <CardBox className={cn("arrive w-full gap-3 py-4", props.centered && "mx-auto")}>
       {props.title || props.description ? (
         <CardHeader className="px-4">
-          {props.title ? <CardTitle className="font-pixel text-2xl font-normal leading-none text-primary">{props.title}</CardTitle> : null}
+          {props.title ? <CardTitle className="text-[17px] font-semibold leading-snug">{props.title}</CardTitle> : null}
           {props.description ? <CardDescription className="text-xs">{props.description}</CardDescription> : null}
         </CardHeader>
       ) : null}

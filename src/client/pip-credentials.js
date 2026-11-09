@@ -35,7 +35,7 @@ export async function status(value) {
   const run = (async () => {
     try {
       const answer = await request('/api/pip/keys?provider=' + encodeURIComponent(value.provider) + '&baseUrl=' + encodeURIComponent(value.baseUrl || ''));
-      const result = { mode: 'account', saved: Boolean(answer.saved), hint: answer.hint || '' };
+      const result = { mode: 'account', saved: Boolean(answer.saved), hint: answer.hint || '', ...(answer.stale ? { stale: true } : {}) };
       cache.set(key, result);
       return result;
     } catch {

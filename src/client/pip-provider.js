@@ -139,6 +139,12 @@ function relayFetch(value, fetcher, signal, clock, onRetry) {
       redirect: 'error',
       signal,
     });
+    if (!response.ok && response.headers.get('x-pocket-relay') === 'refused') {
+      // Pocket refused before asking the provider; its message is fixed server text, safe to show as it is.
+      const raw = await errorText(response, signal); if (signal.aborted) throw new DOMException('Stopped', 'AbortError');
+      let message = ''; try { message = String(JSON.parse(raw).error || ''); } catch { /* not ours */ }
+      throw publicError(message.slice(0, 300) || 'Pocket could not use the key stored on your account. Connect your provider again in settings.');
+    }
     return streamResponse(response, endpoint, signal, clock, onRetry);
   };
 }
