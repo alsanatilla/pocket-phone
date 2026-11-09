@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useCollection } from "../../data/bus.ts";
 import { lists } from "../../data/lists.ts";
+import { parseTask } from "../../data/parse.ts";
 import { completeTask, createTask, getTask, today } from "../../data/tasks.ts";
 import { tasks as store } from "../../../client/store.js";
 import type { Step, Task } from "../../data/types.ts";
@@ -43,14 +44,17 @@ export function TaskPage() {
   </main>;
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft(current => ({ ...current, [key]: value }));
+  const hint = parseTask(draft.text, { lists: listsNow });
 
   function save(): boolean {
-    const text = draft.text.trim();
+    // "tomorrow", "!" and "#list" may be written in the text; a field the person set by hand wins over them.
+    const parsed = parseTask(draft.text, { lists: listsNow });
+    const text = parsed.text.trim();
     if (!text) { toastError(new Error("Write what you will do.")); return false; }
     if (text.length > 500) { toastError(new Error("Keep it under 500 characters.")); return false; }
     const steps = draft.steps.map(item => ({ text: item.text.trim(), done: item.done })).filter(item => item.text && item.text.length <= 160).slice(0, 32);
     attempt(() => {
-      const fields = { text, due: draft.due, list: draft.list, important: draft.important, steps };
+      const fields = { text, due: draft.due || parsed.due || "", list: draft.list || parsed.list || "", important: draft.important || Boolean(parsed.important), steps };
       if (task) store.edit(task.uid, current => Object.assign(current, fields));
       else createTask(text, fields);
       setSaved(true);
@@ -79,8 +83,12 @@ export function TaskPage() {
 
     <div className="space-y-3">
       <Label htmlFor="task-text" className="text-[11px] uppercase tracking-wider text-muted-foreground">what will you do?</Label>
-      <Textarea id="task-text" value={draft.text} maxLength={500} rows={2} placeholder="one action, one line…"
+      <Textarea id="task-text" value={draft.text} maxLength={500} rows={2} placeholder="one action, one line… “call the bank tomorrow !”"
         onChange={event => set("text", event.target.value)} />
+      {hint.labels.length ? <p className="-mt-1 flex flex-wrap gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground" aria-live="polite">
+        {hint.labels.map((label, index) => <span key={index} className="rounded-sm border px-1.5 py-0.5">{label}</span>)}
+        <span className="text-dim">taken from the text on save</span>
+      </p> : null}
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">

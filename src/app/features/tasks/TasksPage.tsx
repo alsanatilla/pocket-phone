@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { useCollection } from "../../data/bus.ts";
 import { completeTask, createTask, listTasks, today } from "../../data/tasks.ts";
 import { addDays, createList, dayOffset, getList, lists, removeList, renameList, saveAsTemplate, templates, useTemplate } from "../../data/lists.ts";
+import { parseTask } from "../../data/parse.ts";
 import type { Task, TaskList } from "../../data/types.ts";
 import { PageTitle } from "../../ui/PageTitle.tsx";
 import { confirm, prompt } from "../../ui/dialog/dialog.ts";
@@ -109,15 +110,19 @@ export function TasksPage() {
   const groups = useMemo(() => groupsFor(view, all, hidden, listsByUid), [view, all, hidden, listsByUid]);
   const open = all.filter(task => !task.done && !hidden.has(task.list ?? "")).length;
   const currentList = view.startsWith("list:") ? getList(view.slice(5)) : null;
+  const parsed = useMemo(() => parseTask(text, { lists: listsNow }), [text, listsNow]);
 
   const go = (next: string) => void navigate({ to: "/tasks", search: next === "today" ? {} : { view: next } });
 
   function add(event: React.FormEvent) {
     event.preventDefault();
-    const value = text.trim();
-    if (!value) return;
+    if (!parsed.text.trim()) return;
     attempt(() => {
-      createTask(value, { list: view.startsWith("list:") ? view.slice(5) : "", due: view === "today" ? today() : "" });
+      createTask(parsed.text, {
+        list: parsed.list ?? (view.startsWith("list:") ? view.slice(5) : ""),
+        due: parsed.due ?? (view === "today" ? today() : ""),
+        important: Boolean(parsed.important),
+      });
       setText("");
     });
   }
@@ -153,9 +158,12 @@ export function TasksPage() {
     </PageTitle>
 
     <form onSubmit={add} className="flex gap-2">
-      <Input ref={addRef} value={text} onChange={event => setText(event.target.value)} placeholder={view === "today" ? "add a task for today…" : "add a task…"} aria-label="New task" maxLength={500} className="h-11" />
-      <Button type="submit" disabled={!text.trim()} variant="secondary">add</Button>
+      <Input ref={addRef} value={text} onChange={event => setText(event.target.value)} placeholder="add a task… “call the bank tomorrow !”" aria-label="New task" maxLength={500} className="h-11" />
+      <Button type="submit" disabled={!parsed.text.trim()} variant="secondary">add</Button>
     </form>
+    {text.trim() && parsed.labels.length ? <p className="-mt-1 flex flex-wrap gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground" aria-live="polite">
+      {parsed.labels.map((label, index) => <span key={index} className="rounded-sm border px-1.5 py-0.5">{label}</span>)}
+    </p> : null}
 
     <nav aria-label="Task lists" className="flex flex-wrap gap-2">
       {views.map(item => <Button key={item.key} size="sm" variant={view === item.key ? "secondary" : "ghost"} onClick={() => go(item.key)} aria-pressed={view === item.key}>{item.label}</Button>)}
