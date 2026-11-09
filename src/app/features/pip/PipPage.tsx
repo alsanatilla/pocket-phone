@@ -85,7 +85,7 @@ export function PipPage() {
   return (
     <main className="flex min-h-[calc(100dvh-72px)] flex-col">
       <div className="sticky top-[60px] z-[5] flex items-center gap-2 bg-background py-1.5">
-        <button onClick={() => setListOpen(true)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left" aria-label="All chats">
+        <button onClick={() => setListOpen(true)} aria-expanded={listOpen} className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-foreground transition-colors hover:text-primary" aria-label="All chats">
           <span className="truncate font-pixel text-2xl leading-none">{chat?.title || "pip"}</span>
           <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
         </button>
