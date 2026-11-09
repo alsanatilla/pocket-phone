@@ -13,6 +13,8 @@ const FENCE = /^[ \t]{0,3}(`{3,}|~{3,})(.*)$/;
 const PATCH = /^\s*\{\s*"op"\s*:/;
 /** Closing tags of a tool call a model wrote as text; never meant for the reader. */
 const TOOL_DEBRIS = /^\s*<\/?(?:parameter|function|tool_call)\b[^>]*>\s*$/;
+/** A code fence a model may wrap a card in instead of ```pocket: no language, or JSON. */
+const CARD_LIKE = /^(?:json|jsonl|jsonc|json-render)?$/i;
 
 /** Splits a reply into prose and card segments. Keys stay stable as the text grows. */
 export function segmentAnswer(text) {
@@ -22,6 +24,9 @@ export function segmentAnswer(text) {
   // first line that is neither a patch nor blank. `held` keeps a lone "pocket" line (and blank lines after it) until
   // the next line shows whether a card starts there.
   let bare = null, held = null;
+  // A plain or JSON code fence holds a card when its first line is a patch: `opening` keeps the fence until that line
+  // shows which it is, so a card never flashes as code while it streams. `closer` is the fence a card must end with.
+  let opening = null, closer = '```';
   const endBare = () => {
     if (bare) segments.push({ kind: "card", key: "c" + segments.length, source: bare.join("\n"), closed: true });
     bare = null;
@@ -33,6 +38,12 @@ export function segmentAnswer(text) {
   };
   for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
     const fence = FENCE.exec(line);
+    if (opening) {
+      if (!line.trim()) { opening.lines.push(line); continue; }
+      if (PATCH.test(line)) { flushProse(); card = [line]; closer = opening.marker; opening = null; continue; }
+      // Ordinary code: the fence and what it held so far go back, and this line is its first.
+      prose.push(...opening.lines); code = opening.marker; opening = null;
+    }
     if (!card && !code) {
       if (bare) {
         if (PATCH.test(line) || !line.trim()) { bare.push(line); continue; }
@@ -48,7 +59,7 @@ export function segmentAnswer(text) {
       if (TOOL_DEBRIS.test(line)) continue;
     }
     if (card) {
-      if (fence && !fence[2].trim() && fence[1].startsWith("`")) {
+      if (fence && !fence[2].trim() && fence[1][0] === closer[0] && fence[1].length >= closer.length) {
         segments.push({ kind: "card", key: "c" + segments.length, source: card.join("\n"), closed: true });
         card = null;
       } else card.push(line);
@@ -59,11 +70,12 @@ export function segmentAnswer(text) {
       if (fence && fence[1].startsWith(code[0]) && fence[1].length >= code.length && !fence[2].trim()) code = null;
       continue;
     }
-    if (fence && fence[2].trim() === "pocket" && fence[1].startsWith("`")) { flushProse(); card = []; continue; }
+    if (fence && fence[2].trim() === "pocket" && fence[1].startsWith("`")) { flushProse(); card = []; closer = fence[1]; continue; }
+    if (fence && CARD_LIKE.test(fence[2].trim())) { opening = { marker: fence[1], lines: [line] }; continue; }
     if (fence) code = fence[1];
     prose.push(line);
   }
-  // A lone "pocket" at the very end may still become a card; it is not shown meanwhile.
+  // A lone "pocket", or a fence whose first line has not come yet, may still become a card; neither shows meanwhile.
   if (card) segments.push({ kind: "card", key: "c" + segments.length, source: card.join("\n"), closed: false });
   else if (bare) segments.push({ kind: "card", key: "c" + segments.length, source: bare.join("\n"), closed: false });
   else flushProse();

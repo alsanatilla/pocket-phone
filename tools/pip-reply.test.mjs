@@ -46,3 +46,19 @@ test('push text and search read the prose, never card JSON', () => {
   assert.match(notice.body, /Fortschrittskurve: Viel Erfolg!/);
   assert.equal(excerpt('a'), 'a');
 });
+
+test('a card wrapped in a plain or JSON code fence is a card; other code stays code', () => {
+  const patches = [P('/root', 'main'), P('/elements/main', { type: 'Metric', props: { label: 'Ziel', value: 150 }, children: [] })].join('\n');
+  for (const open of ['```', '```json', '~~~jsonl']) {
+    const close = open.startsWith('~') ? '~~~' : '```';
+    const reply = `Hier:\n\n${open}\n${patches}\n${close}\n\nFertig.`;
+    assert.deepEqual(segmentAnswer(reply).map(segment => segment.kind), ['prose', 'card', 'prose'], open);
+    assert.match(normalizeAnswer(reply), /^Hier:\n\n```pocket\n\{"op":"add","path":"\/root","value":"main"\}/, open);
+  }
+  const code = 'Beispiel:\n\n```json\n{"name": "Pocket", "op": 1}\n```';
+  assert.equal(normalizeAnswer(code), code, 'JSON that is not a card stays a code block');
+  assert.equal(normalizeAnswer('```js\nconst a = {"op":"add"};\n```'), '```js\nconst a = {"op":"add"};\n```');
+  // While it streams, the fence shows nothing until its first line says what it is, and a card never shows as code.
+  assert.deepEqual(segmentAnswer('Hier:\n\n```json\n').map(segment => segment.kind), ['prose']);
+  assert.deepEqual(segmentAnswer('Hier:\n\n```json\n{"op":"add","pa').map(segment => segment.kind), ['prose', 'card']);
+});

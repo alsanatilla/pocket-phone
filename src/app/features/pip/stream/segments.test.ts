@@ -78,8 +78,9 @@ describe("cards a model wrote without their fence", () => {
     expect(kept[0]).toMatchObject({ kind: "prose", text: "The word\npocket\nis a noun." });
   });
 
-  it("leaves JSON inside code blocks alone", () => {
-    const code = "```json\n" + tree + "\n```";
+  it("finds a card in a JSON code block, and leaves other JSON as code", () => {
+    expect(segmentAnswer("```json\n" + tree + "\n```")).toMatchObject([{ kind: "card", source: tree, closed: true }]);
+    const code = "```json\n{\"name\": \"Pocket\"}\n```";
     expect(segmentAnswer(code)).toEqual([{ kind: "prose", key: "p0", text: code }]);
   });
 });
