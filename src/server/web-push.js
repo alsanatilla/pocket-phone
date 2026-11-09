@@ -4,7 +4,7 @@ import { createCipheriv, createECDH, createHash, createHmac, createPrivateKey, h
 // signed with the server's VAPID key (RFC 8292), so only that browser can read it and only this server can send it.
 // The push service sees neither the text nor the account.
 const P256_ORDER = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');
-const RECORD = 4096, SUBJECT = () => process.env.BETTER_AUTH_URL || 'https://pocket-phone.vercel.app';
+const RECORD = 4096, SUBJECT = () => process.env.BETTER_AUTH_URL || 'https://pocket-phone.fly.dev';
 const b64 = value => Buffer.from(value).toString('base64url');
 const decode = value => Buffer.from(String(value || ''), 'base64url');
 

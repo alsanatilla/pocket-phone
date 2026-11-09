@@ -3,6 +3,7 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto
 import { betterAuth } from 'better-auth';
 import { bearer, deviceAuthorization } from 'better-auth/plugins';
 import { createAuthEndpoint, formCsrfMiddleware, sessionMiddleware, APIError } from 'better-auth/api';
+import { setSessionCookie } from 'better-auth/cookies';
 import { passkey } from '@better-auth/passkey';
 import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { drizzle } from 'drizzle-orm/libsql';
@@ -31,9 +32,52 @@ function registrationContext(secret, origin, value) {
     return claims;
   } catch { throw new APIError('BAD_REQUEST', { message: 'Start creating your passkey again.' }); }
 }
+/** The secret Pocket signs sessions and its own short-lived links with. */
+export function authSecret() {
+  const token = process.env.TURSO_AUTH_TOKEN;
+  const secret = process.env.BETTER_AUTH_SECRET || (token && createHash('sha256').update('pocket-auth-v1:' + token).digest('hex'));
+  if (!secret) throw new Error('Pocket authentication is not configured.');
+  return secret;
+}
+
+/**
+ * A one-time sign-in link for one account at one address, valid for `minutes`. For moving to a new address: a
+ * passkey belongs to the address it was made on, so the person signs in once with this link and adds a passkey
+ * there. Only someone with the server's secret can make one (scripts/sign-in-link.mjs).
+ */
+export function signInLink(userId, origin, { secret = authSecret(), minutes = 15, now = Date.now() } = {}) {
+  const payload = Buffer.from(JSON.stringify({ user: userId, origin, nonce: randomUUID(), expires: now + minutes * 60_000 })).toString('base64url');
+  const signature = createHmac('sha256', secret).update('pocket-handoff:' + payload).digest('base64url');
+  return origin + '/api/auth/pocket/handoff?token=' + payload + '.' + signature;
+}
+function handoffClaims(secret, origin, value) {
+  try {
+    if (typeof value !== 'string' || value.length > 1000) throw new Error();
+    const [payload, signature] = value.split('.');
+    const expected = createHmac('sha256', secret).update('pocket-handoff:' + payload).digest();
+    const supplied = Buffer.from(signature || '', 'base64url');
+    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) throw new Error();
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString());
+    if (claims.origin !== origin || typeof claims.user !== 'string' || typeof claims.nonce !== 'string' || !(claims.expires > Date.now())) throw new Error();
+    return claims;
+  } catch { throw new APIError('BAD_REQUEST', { message: 'This sign-in link is not valid here or has expired.' }); }
+}
+
 const pocketAccounts = (secret, origin) => ({
   id: 'pocket-accounts',
   endpoints: {
+    // Opens a session from a one-time link (signInLink) and leads to the account page to add a passkey.
+    handoff: createAuthEndpoint('/pocket/handoff', { method: 'GET' }, async ctx => {
+      const claims = handoffClaims(secret, origin, ctx.query?.token);
+      const used = await execute({ sql: 'INSERT INTO pocket_handoffs (nonce, user_id, used_at) VALUES (?, ?, ?) ON CONFLICT(nonce) DO NOTHING', args: [claims.nonce, claims.user, Date.now()] });
+      if (!Number(used.rowsAffected)) throw new APIError('BAD_REQUEST', { message: 'This sign-in link was already used.' });
+      const user = await ctx.context.internalAdapter.findUserById(claims.user);
+      if (!user) throw new APIError('BAD_REQUEST', { message: 'This account no longer exists.' });
+      const session = await ctx.context.internalAdapter.createSession(user.id);
+      if (!session) throw new APIError('INTERNAL_SERVER_ERROR', { message: 'The session could not be created.' });
+      await setSessionCookie(ctx, { session, user });
+      throw ctx.redirect(origin + '/classic#/account');
+    }),
     startAccount: createAuthEndpoint('/pocket/start-account', { method: 'POST', use: [formCsrfMiddleware] }, async ctx => {
       const email = String(ctx.body?.email || '').trim().toLowerCase();
       if (!EMAIL.test(email)) throw new APIError('BAD_REQUEST', { message: 'Enter a valid email address.' });
@@ -97,9 +141,7 @@ export async function authFor(request) {
   const requestUrl = new URL(request.url), claimed = request.headers.get('origin');
   const origin = process.env.BETTER_AUTH_URL || (claimed && sameHost(claimed, requestUrl.origin) ? claimed : requestUrl.origin);
   if (!instances.has(origin)) {
-    const token = process.env.TURSO_AUTH_TOKEN;
-    const secret = process.env.BETTER_AUTH_SECRET || (token && createHash('sha256').update('pocket-auth-v1:' + token).digest('hex'));
-    if (!secret) throw new Error('Pocket authentication is not configured.');
+    const secret = authSecret();
     // A TLS terminator (a tunnel, a proxy) forwards http while the browser sends https. Both belong to the same
     // host, so both are trusted; a foreign origin stays untrusted. POCKET_TRUSTED_ORIGINS adds more, comma separated.
     const trustedOrigins = [...new Set([
@@ -129,6 +171,7 @@ export async function authFor(request) {
         '/passkey/verify-authentication': { window: 60, max: 12 },
         '/passkey/verify-registration': { window: 60, max: 12 },
         '/device/token': { window: 60, max: 20 },
+        '/pocket/handoff': { window: 60, max: 10 },
       } },
     }));
   }

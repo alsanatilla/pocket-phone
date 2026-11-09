@@ -80,7 +80,7 @@ test('a direct OpenCode Go call names Pocket and carries the routing session, wi
     },
   });
   assert.equal(call.url, 'https://opencode.ai/inference/go/openai/v1/chat/completions');
-  assert.equal(call.headers['user-agent'], 'pocket-pip/1.0 (+https://pocket-phone.vercel.app)');
+  assert.equal(call.headers['user-agent'], 'pocket-pip/1.0 (+https://pocket-phone.fly.dev)');
   assert.match(call.headers['x-opencode-session'], /^pocket-[0-9a-f]{40}$/);
   assert.ok(!call.headers['x-opencode-session'].includes('oc_sk_fixture_key'), 'the session id is not the key');
   assert.equal(call.headers.authorization, 'Bearer oc_sk_fixture_key');

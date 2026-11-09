@@ -41,6 +41,8 @@ export const TABLES = [
   `CREATE TABLE IF NOT EXISTS pocket_pip_routines (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, id TEXT NOT NULL, payload TEXT NOT NULL, next_run INTEGER NOT NULL, lock_until INTEGER NOT NULL DEFAULT 0, last_run INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', last_chat TEXT NOT NULL DEFAULT '', PRIMARY KEY(user_id, id))`,
   `CREATE INDEX IF NOT EXISTS pocket_pip_routines_due ON pocket_pip_routines(next_run)`,
   // A job's own notes between its runs (its scratch), apart from the routine row so saving a routine never overwrites them.
+  // Sign-in links handed to a person by an operator (scripts/sign-in-link.mjs): each one works once.
+  `CREATE TABLE IF NOT EXISTS pocket_handoffs (nonce TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, used_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS pocket_pip_routine_memory (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, routine_id TEXT NOT NULL, scratch TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, PRIMARY KEY(user_id, routine_id))`,
   `CREATE TABLE IF NOT EXISTS pocket_pip_training_state (user_id TEXT NOT NULL, routine_id TEXT NOT NULL, workouts TEXT NOT NULL DEFAULT '{}', review_day TEXT NOT NULL DEFAULT '', PRIMARY KEY(user_id, routine_id), FOREIGN KEY(user_id, routine_id) REFERENCES pocket_pip_routines(user_id, id) ON DELETE CASCADE)`,
   `CREATE TABLE IF NOT EXISTS pocket_pip_training_slots (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, routine_id TEXT NOT NULL, slot TEXT NOT NULL, day TEXT NOT NULL, PRIMARY KEY(user_id, routine_id, slot))`,

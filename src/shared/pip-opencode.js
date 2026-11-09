@@ -6,7 +6,7 @@
 export const OPENCODE_GO = 'https://opencode.ai/inference/go/openai/v1';
 
 /** Their docs ask a client to identify itself by name and version, not as a generic HTTP library. */
-export const OPENCODE_UA = 'pocket-pip/1.0 (+https://pocket-phone.vercel.app)';
+export const OPENCODE_UA = 'pocket-pip/1.0 (+https://pocket-phone.fly.dev)';
 
 /** The upstream URL for a proxied path, or '' when the path is not the one chat endpoint Pip uses. */
 export function opencodeTarget(path) {
