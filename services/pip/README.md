@@ -31,6 +31,12 @@ npm run worker            # long-lived, with /healthz on :8787
 npm run worker:once       # drain the queue and exit (cron / free CI)
 ```
 
+**Restart the worker after every change to the server code.** It loads the run logic and the prompts once at
+startup and never reloads them. Because the queue is shared, this also covers replies submitted on the Vercel
+deployment: with `PIP_RUNS_DETACHED=1` a reply written on pocket-phone.vercel.app is answered by this process, so a
+worker started before a deploy keeps writing replies with the old code until it is restarted. `/healthz` reports the
+pid and uptime, which tells you whether the restart happened.
+
 With Docker:
 
 ```sh
