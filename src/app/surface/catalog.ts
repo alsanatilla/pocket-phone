@@ -20,6 +20,7 @@ const withoutClassName = <D extends Definition>(definition: D): D => {
 const tone = z.enum(["accent", "movement", "calendar", "thought", "warning", "muted"]).nullable()
   .describe("Pocket's signal colour: accent (amber, default), movement (green), calendar (blue), thought (violet), warning (coral), muted");
 const point = z.object({ label: z.string(), value: z.number() });
+const source = z.object({ title: z.string(), url: z.string().nullable().optional() }).describe("Where the figures come from: a name and, for the web, its URL");
 
 export const catalog = defineCatalog(schema, {
   components: {
@@ -66,11 +67,25 @@ export const catalog = defineCatalog(schema, {
       props: z.object({
         kind: z.enum(["area", "bar", "line"]),
         title: z.string().nullable(),
-        data: z.array(point).describe("Points in order; bind to a state path such as /movement/recoveryTrend"),
+        data: z.array(point).nullable().optional().describe("One series: points in order; or bind to a state path such as /movement/recoveryTrend"),
+        series: z.array(z.object({ name: z.string(), tone: tone.optional(), data: z.array(point) })).max(5).nullable().optional()
+          .describe("Several series to compare (up to 5), each with the same labels in the same order; shown with a legend"),
         unit: z.string().nullable(),
         tone,
+        note: z.string().nullable().optional().describe("One line under the chart: period, definition, caveat"),
+        source: source.nullable().optional(),
       }),
-      description: "A wide, tall chart of a series over time. Use for trends, not single numbers.",
+      description: "A wide chart of numbers over time or across categories. Use for trends and comparisons, not single numbers.",
+    },
+    Table: {
+      props: z.object({
+        title: z.string().nullable(),
+        columns: z.array(z.string()).min(1).max(6),
+        rows: z.array(z.array(z.union([z.string(), z.number(), z.null()]))).max(40).describe("One array per row, in column order"),
+        note: z.string().nullable().optional(),
+        source: source.nullable().optional(),
+      }),
+      description: "Rows of figures or facts that are read, not seen as a shape. Numbers align right.",
     },
     Timeline: {
       props: z.object({

@@ -13,7 +13,7 @@ import { registry } from "./registry.tsx";
 // classic card renderer (src/client/pip-cards.jsx), so old chats still read as they did.
 
 /** Types and props only the classic card catalog had. */
-const LEGACY_TYPES = new Set(["Section", "Fields", "Field", "Table", "Divider", "Actions", "LinkButton"]);
+const LEGACY_TYPES = new Set(["Section", "Fields", "Field", "Divider", "Actions", "LinkButton"]);
 
 type Element = { type?: string; props?: Record<string, unknown>; on?: unknown };
 
@@ -21,6 +21,7 @@ export function isLegacySpec(spec: Spec): boolean {
   return Object.values((spec.elements ?? {}) as Record<string, Element>).some(element =>
     LEGACY_TYPES.has(String(element.type))
     || (element.type === "Chart" && element.props != null && "chart" in element.props)
+    || (element.type === "Table" && element.props != null && "headers" in element.props)
     || (element.type === "Card" && element.props != null && "subtitle" in element.props)
     || (element.type === "Button" && !element.on && element.props != null && ("value" in element.props || "id" in element.props)));
 }
@@ -73,10 +74,15 @@ export function hydrateSurfaceCards(node: HTMLElement, context: CardContext): vo
   }
 }
 
-/** Unmounts the cards inside a node that is about to be replaced. */
+/**
+ * Unmounts the cards inside a node that is about to be replaced. Which roots go is read now (the node's contents
+ * are replaced right after); unmounting waits a microtask, because this can run while React is rendering.
+ */
 export function releaseSurfaceCards(node: HTMLElement): void {
+  const leaving: Root[] = [];
   for (const slot of node.querySelectorAll<HTMLElement>(".pocket-spec[data-spec]")) {
     const root = roots.get(slot);
-    if (root) { roots.delete(slot); try { root.unmount(); } catch { /* already gone */ } }
+    if (root) { roots.delete(slot); leaving.push(root); }
   }
+  if (leaving.length) queueMicrotask(() => leaving.forEach(root => { try { root.unmount(); } catch { /* already gone */ } }));
 }

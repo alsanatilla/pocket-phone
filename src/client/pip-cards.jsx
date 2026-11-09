@@ -129,10 +129,12 @@ export function hydrateCards(node) {
   }
 }
 
-/** Frees the React roots inside a node that is about to be replaced. */
+/** Frees the React roots inside a node that is about to be replaced; unmounting waits a microtask (it may run mid-render). */
 export function releaseCards(node) {
+  const leaving = [];
   for (const slot of node.querySelectorAll(".pocket-spec[data-spec]")) {
     const root = roots.get(slot);
-    if (root) { roots.delete(slot); try { root.unmount(); } catch { /* already gone */ } }
+    if (root) { roots.delete(slot); leaving.push(root); }
   }
+  if (leaving.length) queueMicrotask(() => leaving.forEach(root => { try { root.unmount(); } catch { /* already gone */ } }));
 }

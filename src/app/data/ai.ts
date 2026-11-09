@@ -80,7 +80,8 @@ const PROFILE = "pocket:ai-profile";
  */
 function inferred(current: PipConfig): AiProfile {
   const untouched = JSON.stringify(current) === JSON.stringify(DEFAULT_CONFIG);
-  if (untouched) return { provider: "opencode", tier: "balanced", web: false, autoArrange: true };
+  // Web on by default: research is half of what Pip is for; only search queries leave, and it can be switched off.
+  if (untouched) return { provider: "opencode", tier: "balanced", web: true, autoArrange: true };
   const host = new URL(current.baseUrl).hostname;
   const provider: Provider = current.provider === "anthropic" ? "anthropic" : host === "openrouter.ai" ? "openrouter" : current.baseUrl === OPENCODE_GO ? "opencode" : "custom";
   const tierOf = (models: Record<Tier, Record<Job, string>>) => (Object.keys(models) as Tier[]).find(tier => models[tier].chat === current.model);

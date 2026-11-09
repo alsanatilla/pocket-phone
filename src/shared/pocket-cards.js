@@ -20,7 +20,8 @@ export const CARD_COMPONENTS = {
   Hero: [['eyebrow', 'value', 'unit', 'caption', 'tone'], 'one huge reading or phrase at the top; at most one'],
   Metric: [['label', 'value', 'unit', 'hint', 'tone'], 'a compact reading tile; put 2 or 4 in a Grid'],
   Gauge: [['label', 'value', 'caption', 'tone'], 'a ring for a 0–100 score'],
-  Chart: [['kind', 'title', 'data', 'unit', 'tone'], 'a series over time; kind area|bar|line; data [{label, value}] in order'],
+  Chart: [['kind', 'title', 'data', 'series', 'unit', 'tone', 'note', 'source'], 'numbers over time or across categories; kind area|bar|line; data [{label, value}] for one series, or series [{name, data}] (up to 5, same labels) to compare; note is one line on period or definition; source {title, url}'],
+  Table: [['title', 'columns', 'rows', 'note', 'source'], 'figures or facts to read row by row; columns [names], rows [[cells]] in column order, up to 40 rows'],
   Timeline: [['title', 'items'], 'a schedule or the steps of a plan; items [{time, title, detail}]'],
   TaskList: [['title', 'source', 'limit'], "the person's real tasks, live and checkable; source due|open|chosen"],
   ThoughtList: [['title', 'source', 'limit'], "the person's parked thoughts, live; source ready|open"],
@@ -39,11 +40,15 @@ const list = Object.entries(CARD_COMPONENTS).map(([name, [props, use]]) => `${na
 const actions = Object.entries(CARD_ACTIONS).map(([name, [param, use]]) => `${name}{${param}}: ${use}`).join('; ');
 
 /** The instruction appended to Pip's system prompt. */
-export const CARDS_PROMPT = 'When a reply is easier to take in as a picture than as prose (a trend, a few readings, a schedule, a set of choices, the person\'s tasks), '
-  + 'put one fenced block tagged pocket after the prose. Inside it write JSON Lines: one json-render patch per line, so it draws while you write. '
+export const CARDS_PROMPT = 'Pocket can draw parts of a reply as a picture: readings, charts, tables, a schedule, choices, the person\'s tasks. '
+  + 'Write a fenced block tagged pocket exactly where the picture belongs in the prose, between paragraphs, not collected at the end; a reply may have up to four, each right after the sentence it illustrates. '
+  + 'Inside each block write JSON Lines: one json-render patch per line, so it draws while you write. '
   + 'Start with {"op":"add","path":"/root","value":"main"}, then add each element as {"op":"add","path":"/elements/<id>","value":{"type":"<Component>","props":{…},"children":[…]}}. '
-  + 'Every element needs a children array, empty when it has none; only Stack, Grid and Card hold children. '
+  + 'Ids only need to be unique within their block. Every element needs a children array, empty when it has none; only Stack, Grid and Card hold children. '
   + 'Components: ' + list + '. Tone is one of ' + TONES.join(', ') + '. '
   + 'A Button acts through "on" beside "props": {"on":{"press":{"action":"askPip","params":{"prompt":"…"}}}}. Actions: ' + actions + '. '
-  + 'Use values you actually read or were given; never invent numbers. Show tasks and thoughts with TaskList or ThoughtList instead of retyping them. '
-  + 'Every fact appears once: what the prose says needs no tile, and a Hero is not repeated by a Metric. At most 12 elements, short labels, no emoji. Skip the block when plain prose is enough.';
+  + 'Figures you researched belong in a Chart or Table: put the real values you read (every point, in order), say the unit and the period, and give the source with its URL. '
+  + 'For long ranges keep the shape with at most 60 points (weekly or monthly values, as the source reports them); compare places or groups with series. '
+  + 'Never invent, estimate or fill in numbers; if a source gives only some points, chart only those and say so in the note. '
+  + 'Show tasks and thoughts with TaskList or ThoughtList instead of retyping them. '
+  + 'Every fact appears once: what the prose says needs no tile, and a Hero is not repeated by a Metric. Short labels, no emoji. Skip pictures when plain prose is enough.';

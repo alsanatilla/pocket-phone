@@ -2,7 +2,7 @@ import { defineRegistry, useActions } from "@json-render/react";
 import { shadcnComponents as shadcn } from "@json-render/shadcn";
 import { cn } from "@/lib/utils";
 import { catalog } from "./catalog.ts";
-import { Capture, Chart, Gauge, Hero, Metric, TaskList, ThoughtList, Timeline } from "./components.tsx";
+import { Capture, Chart, Gauge, Hero, Metric, Table, TaskList, ThoughtList, Timeline } from "./components.tsx";
 
 // Catalog entries → components. Most layout and controls are json-render's shadcn implementations; where their
 // defaults do not fit a phone-sized Pocket screen they are adjusted here, in one place:
@@ -52,6 +52,7 @@ export const { registry } = defineRegistry(catalog, {
     },
     Gauge: ({ props }) => <Gauge {...props} />,
     Chart: ({ props }) => <Chart {...props} />,
+    Table: ({ props }) => <Table {...props} />,
     Timeline: ({ props }) => <Timeline {...props} />,
     TaskList: ({ props }) => <TaskList {...props} />,
     ThoughtList: ({ props }) => <ThoughtList {...props} />,

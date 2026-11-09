@@ -5,6 +5,7 @@ import { CARD_ACTIONS, CARD_COMPONENTS, CARDS_PROMPT } from "../../shared/pocket
 import { createTask } from "../data/tasks.ts";
 import { catalog } from "./catalog.ts";
 import { decodeSpec, hydrateSurfaceCards, isLegacySpec, releaseSurfaceCards } from "./cards.tsx";
+import { mergeSeries } from "./components.tsx";
 
 vi.mock("recharts", async original => ({ ...(await original<typeof import("recharts")>()), ResponsiveContainer: ({ children }: { children: unknown }) => children }));
 
@@ -36,7 +37,10 @@ describe("the card prompt", () => {
 
   it("is what Pip is told", () => {
     expect(CARDS_PROMPT).toContain("Hero(eyebrow, value, unit, caption, tone)");
-    expect(CARDS_PROMPT).toContain("Chart(kind, title, data, unit, tone)");
+    expect(CARDS_PROMPT).toContain("Chart(kind, title, data, series, unit, tone, note, source)");
+    expect(CARDS_PROMPT).toContain("Table(title, columns, rows, note, source)");
+    expect(CARDS_PROMPT).toMatch(/exactly where the picture belongs/);
+    expect(CARDS_PROMPT).toMatch(/Never invent/);
     expect(CARDS_PROMPT).not.toMatch(/\bFields?\b|LinkButton|subtitle/);
   });
 });
@@ -63,7 +67,7 @@ describe("cards in a reply", () => {
     expect(screen.getByText("Fahrrad reparieren")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "plan tomorrow" }));
     await waitFor(() => expect(onAsk).toHaveBeenCalledWith("Plan tomorrow with me"));
-    act(() => releaseSurfaceCards(host));
+    await act(async () => { releaseSurfaceCards(host); await Promise.resolve(); });
     host.remove();
   });
 
@@ -77,7 +81,24 @@ describe("cards in a reply", () => {
     host.remove();
   });
 
+  it("tells the new table from the classic one", () => {
+    expect(isLegacySpec({ root: "t", elements: { t: { type: "Table", props: { headers: ["a"], rows: [] }, children: [] } } } as never)).toBe(true);
+    expect(isLegacySpec({ root: "t", elements: { t: { type: "Table", props: { title: null, columns: ["a"], rows: [] }, children: [] } } } as never)).toBe(false);
+  });
+
   it("keeps non-ASCII text intact", () => {
     expect(decodeSpec(encode({ root: "a", elements: { a: { type: "Text", props: { text: "Grüße, Zürich" }, children: [] } } }))?.elements.a).toMatchObject({ props: { text: "Grüße, Zürich" } });
+  });
+});
+
+describe("charts of researched figures", () => {
+  it("lines series up by label, keeping the order labels first appear and gaps as gaps", () => {
+    const rows = mergeSeries([
+      { name: "DE", data: [{ label: "Jan", value: 120 }, { label: "Feb", value: 340 }, { label: "Mar", value: 210 }] },
+      { name: "AT", data: [{ label: "Jan", value: 90 }, { label: "Mar", value: 150 }, { label: "Apr", value: 80 }] },
+    ]);
+    expect(rows).toEqual([
+      { label: "Jan", s0: 120, s1: 90 }, { label: "Feb", s0: 340 }, { label: "Mar", s0: 210, s1: 150 }, { label: "Apr", s1: 80 },
+    ]);
   });
 });
