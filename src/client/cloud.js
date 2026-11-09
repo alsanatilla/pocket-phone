@@ -22,7 +22,8 @@ export async function request(path, options = {}) {
   const response = await fetch(path, { credentials: 'same-origin', ...options });
   if (response.status === 401) { user = null; throw new Expired(); }
   const value = await response.json();
-  if (!response.ok) throw new Error(value.error_description || value.message || (typeof value.error === 'string' ? value.error : '') || 'Pocket storage did not answer.');
+  if (!response.ok) throw Object.assign(new Error(value.error_description || value.message || (typeof value.error === 'string' ? value.error : '') || 'Pocket storage did not answer.'),
+    { status: response.status, ...(typeof value.code === 'string' ? { code: value.code } : {}) });
   return value;
 }
 export async function init() {

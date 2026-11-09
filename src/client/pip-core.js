@@ -221,6 +221,48 @@ export async function streamReply(chat, turn, options = {}) {
 
 export class ReplyRunner {
   constructor(store, { key = value => resolveCredential(value), stream = streamReply, remote = null, onChange = () => {}, title = null } = {}) { this.store = store; this.key = key; this.stream = stream; this.remote = remote; this.onChange = onChange; this.title = title; this.active = null; }
+  /**
+   * Shows a reply that runs on the server without this tab having sent it: another device or tab asked, or this tab
+   * was reloaded mid-reply. It is followed like one this tab sent (live text, approvals, stop), and the finished turn
+   * is kept here. Resolves to whether there was one. `follow(chat, options)` is the remote follower in attach mode.
+   */
+  async attach(uid, follow = this.remote?.attach) {
+    if (this.active || !follow) return false;
+    const chat = this.store.get(uid);
+    if (!chat) return false;
+    const active = { chatId: uid, turnId: null, attempt: null, turn: null, account: activeAccount(), controller: new AbortController(), attached: true };
+    this.active = active;
+    let shown = false;
+    // Deltas only redraw; the chat is saved when the reply starts and when it ends (the server keeps the record).
+    const update = (fields, save = false) => {
+      if (this.active !== active || active.controller.signal.aborted || !active.turn) return;
+      Object.assign(active.turn, fields);
+      if (save) this.store.update(uid, c => { const kept = c.turns.find(t => t.uid === active.turnId); if (kept) Object.assign(kept, active.turn); });
+      this.onChange({ type: "delta", chatId: uid, turn: copy(active.turn) });
+    };
+    try {
+      const reply = await follow(chat, null, { attach: true, signal: active.controller.signal, approve: (requests, signal) => this.waitForApproval(active, requests, signal),
+        onRun: run => {
+          // The run's turn: the one already in this chat (synced, or this tab's own before a reload), else added now.
+          const seed = run.turn || {};
+          const turn = { uid: run.turnUid, text: seed.text || "", context: seed.context || [], created: seed.created || run.created || Date.now(), owner: seed.owner || "", attempt: seed.attempt || run.requestId,
+            answer: "", reasoning: "", error: "", status: "streaming", usage: seed.usage || {}, activity: [], sources: [], phase: seed.phase || "requesting" };
+          this.store.update(uid, c => { if (!c.turns.some(t => t.uid === turn.uid)) c.turns.push(turn); else Object.assign(c.turns.find(t => t.uid === turn.uid), { status: "streaming", error: "" }); });
+          active.turnId = turn.uid; active.attempt = turn.attempt; active.turn = this.store.get(uid)?.turns.find(t => t.uid === turn.uid) || turn;
+          shown = true; this.onChange({ type: "started", chatId: uid });
+        },
+        onUpdate: fields => update(fields) });
+      if (reply?.none) return false;
+      update({ ...reply, status: "done" }, true);
+      return true;
+    } catch (error) {
+      const stopped = error?.name === "RunStopped" || error?.name === "AbortError" ? "stopped" : "failed";
+      if (shown && this.active === active && !active.controller.signal.aborted) update({ status: stopped, activity: settle(active.turn.activity, stopped, error.message), error: error.message || "The reply could not be completed." }, true);
+      return shown;
+    } finally {
+      if (this.active === active) { this.active = null; if (shown) this.onChange({ type: "finished", chatId: uid }); }
+    }
+  }
   async send(uid, { text, context = [], retry = null, resume = null } = {}) {
     if (this.active) throw new Error("Let the current reply finish, or stop it first.");
     const chat = this.store.get(uid);
@@ -286,7 +328,7 @@ export class ReplyRunner {
       if (force || Date.now() - lastSave >= 120) { this.store.update(uid, c => Object.assign(c.turns.find(t => t.uid === turn.uid), turn)); lastSave = Date.now(); }
       this.onChange({ type: "delta", chatId: uid, turn: copy(turn) });
     };
-    let outcome = null;
+    let outcome = null, refused = null;
     try {
       const reply = await (remote ? remote.stream : this.stream)(chat, turn, { key, signal: active.controller.signal, resume: checkpoint, approve: (requests, signal) => this.waitForApproval(active, requests, signal), onUpdate: fields => {
         let checkpointReady = false;
@@ -296,12 +338,20 @@ export class ReplyRunner {
       outcome = reply;
       update({ ...reply, status: "done" }, true);
     } catch (error) {
-      // A run stopped on the server (this device or another) is stopped, not failed.
-      const stopped = error?.name === "RunStopped" ? "stopped" : "failed";
-      if (this.active === active && !active.controller.signal.aborted) update({ status: stopped, activity: settle(turn.activity, stopped, error.message), error: error.message || "The reply could not be completed." }, true);
+      if (error?.code === "run_active" && !retry && !resume && this.active === active) {
+        // Pip is already answering in this chat, from another tab or device. This message was never sent: it goes
+        // back to the composer, and this tab shows the reply that is running instead.
+        this.store.update(uid, c => { c.turns = c.turns.filter(t => t.uid !== turn.uid); c.draft = turn.text; });
+        refused = error;
+      } else {
+        // A run stopped on the server (this device or another) is stopped, not failed.
+        const stopped = error?.name === "RunStopped" ? "stopped" : "failed";
+        if (this.active === active && !active.controller.signal.aborted) update({ status: stopped, activity: settle(turn.activity, stopped, error.message), error: error.message || "The reply could not be completed." }, true);
+      }
     } finally {
       if (this.active === active) { this.active = null; this.onChange({ type: "finished", chatId: uid }); }
     }
+    if (refused) { void this.attach(uid); throw refused; }
     // After its first answer a chat names itself, so the sidebar never keeps "New chat" or a whole pasted question.
     // It runs in the background, on its own credential, and never touches the reply the user already has.
     if (this.title && outcome?.answer && !outcome.error) {

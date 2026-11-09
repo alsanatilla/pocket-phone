@@ -3,16 +3,19 @@
 // A run's state lives in the database, so any device on any instance can follow it, decide for it or stop it. That
 // is the record. This is the shortcut: while a run executes here, each change is handed to the followers here the
 // moment it happens, instead of through a database write and a follower's next read. Followers on another instance
-// (or of a run executed elsewhere) keep reading the database.
+// (or of a run executed elsewhere) keep reading the database. The account's live sockets hear each change too.
+
+import { publish as announce } from './pocket-events.js';
 
 const runs = new Map();
 
 /** Every change of a run executing here: the turn as it is now (the executing code keeps mutating its own copy). */
-export function publish(runId, turn) {
+export function publish(runId, turn, meta = null) {
   let entry = runs.get(runId);
-  if (!entry) { entry = { turn, version: 0, closed: false, waiters: new Set() }; runs.set(runId, entry); }
-  entry.turn = turn; entry.version += 1;
+  if (!entry) { entry = { turn, version: 0, closed: false, waiters: new Set(), meta }; runs.set(runId, entry); }
+  entry.turn = turn; entry.version += 1; entry.meta = meta || entry.meta;
   wake(entry);
+  if (entry.meta?.userId) announce(entry.meta.userId, { type: 'run', runId, kind: 'progress', chat: entry.meta.chat, requestId: entry.meta.requestId, turn });
 }
 
 /** The run stopped executing here (finished, paused, failed, or handed off): followers read its record again. */

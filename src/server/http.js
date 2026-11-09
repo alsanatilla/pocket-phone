@@ -5,7 +5,9 @@ export function failure(error) {
   const status = [error?.statusCode, error?.status].find(value => Number.isInteger(value) && value >= 400 && value <= 599) || 500;
   if (status >= 500) console.error('Pocket API failed:', error?.code || error?.name || 'UnknownError');
   const message = typeof error?.message === 'string' && error.message ? error.message : 'Request failed.';
-  return json({ error: status >= 500 ? 'Pocket storage is unavailable. Try again.' : message }, status);
+  // A lowercase code is Pocket's own (run_active, …); database and library codes are not passed on.
+  const code = status < 500 && typeof error?.code === 'string' && /^[a-z][a-z_]{1,40}$/.test(error.code) ? error.code : '';
+  return json({ error: status >= 500 ? 'Pocket storage is unavailable. Try again.' : message, ...(code ? { code } : {}) }, status);
 }
 /** Compares hosts, not schemes: behind a TLS proxy the app sees http while the browser sends https. */
 export function sameHost(left, right) {

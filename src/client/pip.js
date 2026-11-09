@@ -27,7 +27,7 @@ import { resolve as resolveCredential, status as credentialStatus, save as saveC
 const store = new ChatStore();
 let ui = null, mounted = null, paintTimer = 0, phaseTimer = 0, viewportCleanup = null;
 const runner = new ReplyRunner(store, { key: (value, chat) => trainingChatRoutine(chat.uid) ? 'account-key' : resolveCredential(value),
-  remote: { available: chat => !trainingChatRoutine(chat.uid) && connected(), stream: streamReplyRemote },
+  remote: { available: chat => !trainingChatRoutine(chat.uid) && connected(), stream: streamReplyRemote, attach: (chat, _turn, options) => streamReplyRemote(chat, null, options) },
   stream: (chat, turn, options) => trainingChatRoutine(chat.uid) ? trainingReply(chat, turn, options) : streamReply(chat, turn, options), title: suggestTitle, onChange: event => {
   if (event.type === "finished" || event.type === "approval") noticeAway(event);
   // The mascot left the header with the tab bar, so the Pip tab carries the activity cue now.

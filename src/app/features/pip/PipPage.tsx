@@ -12,7 +12,7 @@ import { modelLabel } from "../settings/SettingsPage.tsx";
 import { ChatList } from "./ChatList.tsx";
 import { PipComposer } from "./PipComposer.tsx";
 import { Turn } from "./Turn.tsx";
-import { busy as runnerBusy, send, stop, useLiveReply } from "./runner.ts";
+import { busy as runnerBusy, send, stop, useLiveReply, watchChat } from "./runner.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 
 // Pip: one conversation at a time, the list of all of them in a side sheet. The header says which model answers
@@ -72,6 +72,9 @@ export function PipPage() {
     return () => { observer.disconnect(); removeEventListener("scroll", onScroll); cancelAnimationFrame(frame); };
   }, []);
   // A new message always brings the end into view.
+  // A reply running in this chat that this tab did not send (another device, or before a reload) shows here live.
+  const watched = chat?.uid;
+  useEffect(() => (watched ? watchChat(watched) : undefined), [watched]);
   useLayoutEffect(() => { following.current = true; window.scrollTo({ top: document.documentElement.scrollHeight }); }, [chat?.uid, chat?.turns.length]);
 
   const profile = readProfile();

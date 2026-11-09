@@ -1,5 +1,6 @@
 import { database } from './database.js';
 import { recordNoteVersions } from './history.js';
+import { publish } from './pocket-events.js';
 import { ensureSearch, reindexDocuments } from './search.js';
 import { FILES, EMPTY, merge, validDocument } from '../shared/workspace.js';
 export async function readDocuments(userId) {
@@ -38,6 +39,7 @@ export async function syncDocuments(userId, documents, onlyRequested = false) {
       }
       await reindexDocuments(tx, userId, indexed);
       await tx.commit();
+      if (Object.keys(indexed).length) publish(userId, { type: 'documents', names: Object.keys(indexed) });
       return output;
     } catch (error) {
       await tx?.rollback().catch(() => {});

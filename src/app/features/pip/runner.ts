@@ -3,6 +3,7 @@ import { ReplyRunner, streamReply, type Decision, type RunnerEvent } from "../..
 import { resolve } from "../../../client/pip-credentials.js";
 import { streamReplyRemote } from "../../../client/pip-remote.js";
 import { connected } from "../../../client/cloud.js";
+import * as liveSocket from "../../../client/live.js";
 import { suggestTitle } from "../../../client/pip-title.js";
 import { trainingChatRoutine, trainingReply } from "../../../client/pip-training-chat.js";
 import { chats, type ChatTurn } from "../../data/chats.ts";
@@ -36,6 +37,7 @@ const runner = new ReplyRunner(chats, {
     // One rule, no lookup first: a signed-in chat runs on Pocket's server. A missing key is the server's clear answer.
     available: chat => Promise.resolve(!trainingChatRoutine(chat.uid) && connected()),
     stream: streamReplyRemote,
+    attach: (chat, _turn, options) => streamReplyRemote(chat, null, options),
   },
   stream: (chat, turn, options) => trainingChatRoutine(chat.uid) ? trainingReply(chat, turn, options) : streamReply(chat, turn, options),
   title: suggestTitle,
@@ -64,6 +66,21 @@ export const resume = (chatId: string, turnId: string): Promise<void> => run(run
 
 /** Aborts the request itself; the runner marks the turn stopped and saves what arrived. */
 export function stop(): void { runner.stop(); live = null; emit(); }
+
+/**
+ * While a chat is open: show a reply that runs in it without this tab having sent it (another tab or device asked,
+ * or this tab was reloaded mid-reply). Looks once now, then whenever the account's socket says a reply started or
+ * grew in this chat. Returns the function that stops watching.
+ */
+export function watchChat(chatId: string): () => void {
+  if (!connected()) return () => {};
+  const look = () => { if (!runner.active) void runner.attach(chatId).catch(() => {}); };
+  look();
+  return liveSocket.on(message => {
+    if (message.type === "hello") look();
+    if (message.type === "event" && message.event === "run" && message.data.chat === chatId && ["queued", "started", "progress", "continued"].includes(message.data.kind)) look();
+  });
+}
 
 export const busy = (): boolean => Boolean(runner.active);
 export const approvalOf = (turnId: string, rowId: string) => runner.approvalOf(turnId, rowId);

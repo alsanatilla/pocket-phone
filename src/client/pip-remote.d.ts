@@ -2,4 +2,5 @@
 import type { Chat, ChatTurn } from "../app/data/chats.ts";
 import type { PipConfig } from "./pip-core.js";
 export function serverRuns(options: { chat?: string; config?: PipConfig | null; force?: boolean }): Promise<{ available: boolean }>;
-export function streamReplyRemote(chat: Chat, turn: ChatTurn, options: Record<string, unknown>): Promise<unknown>;
+/** Sends `turn` and follows its run; with `attach: true` (and no turn) follows the run already going in the chat. */
+export function streamReplyRemote(chat: Chat, turn: ChatTurn | null, options: Record<string, unknown>): Promise<unknown>;

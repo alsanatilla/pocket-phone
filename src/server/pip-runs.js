@@ -14,6 +14,9 @@ import { replyNotice, waitingNotice } from '../shared/pip-notice.js';
 import { notify, watched, watching, unwatch, forgetWatches } from './pip-notify.js';
 import { enqueue, claimJob, finishJob, releaseJob } from './pip-queue.js';
 import * as live from './pip-live.js';
+import { publish } from './pocket-events.js';
+import { compactFrame } from './pip-frames.js';
+export { compactFrame };
 
 // Pip's shared conversations: the account's server runs each turn once for every device. A run holds its own
 // provider messages and budgets, so it can stop at a change waiting for approval and continue in a later
@@ -65,7 +68,9 @@ const DEVICE_TOOLS = ['search_calendar'];
 const USAGE = ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'];
 const STOPPED = 'Stopped. Continue or retry when you’re ready.', INTERRUPTED = 'The server stopped while writing this reply. Retry when you’re ready.';
 const NOTE = '\n\nThis reply runs on your Pocket account\'s server and is shared by your devices: another device sees the same answer, tool activity and any change waiting for approval, and answers it once. Provider keys stay on the server for this chat. Notes, tasks, thoughts, calendar, gym and COROS come from your synced account copy.';
-const no = (message, status = 400) => Object.assign(new Error(message), { status });
+const no = (message, status = 400, code = '') => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
+/** A reply is already running in this chat (from this or another device): the client follows that one instead. */
+const RUN_ACTIVE = 'Pip is still answering in this chat. Wait for it, or stop it first.';
 const allowedId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value);
 const parse = raw => { try { return JSON.parse(String(raw)); } catch { return null; } };
 
@@ -128,8 +133,12 @@ async function conversation(userId, uid, header, value, now) {
     created: Number.isSafeInteger(header?.created) ? header.created : now,
     updated: now, draft: '', context: [], turns: [], config };
 }
-const event = (userId, runId, kind, data = {}, now = Date.now()) =>
-  sql({ sql: 'INSERT INTO pocket_pip_run_events (user_id, run_id, kind, data, created) VALUES (?, ?, ?, ?, ?)', args: [userId, runId, kind, JSON.stringify(data), now] });
+/** A run's recorded step (queued, started, awaiting, decision, done, …), announced to the account's open tabs. */
+async function event(userId, runId, kind, data = {}, now = Date.now()) {
+  const result = await sql({ sql: 'INSERT INTO pocket_pip_run_events (user_id, run_id, kind, data, created) VALUES (?, ?, ?, ?, ?)', args: [userId, runId, kind, JSON.stringify(data), now] });
+  publish(userId, { type: 'run', runId, kind, ...(typeof data.chat === 'string' && data.chat !== 'not_saved' ? { chat: data.chat } : {}) });
+  return result;
+}
 /** The turn as the synced chat shows it. A later stamp than any copy a device holds lets this version win the merge. */
 async function writeTurn(userId, uid, turn) {
   try {
@@ -212,7 +221,7 @@ export async function submitRun(userId, body, { fetcher, now = Date.now() } = {}
     answer: '', reasoning: '', error: '', status: 'streaming', usage: { runtime: 'pocket-server' }, activity: [], sources: [], phase: 'requesting', model: value.model };
   if (!validObject('chats', { ...chat, updated: now, turns: [turn] })) throw no('Check the message and its attached sources: up to three, each with a title and up to 8,000 characters.');
   const active = (await sql({ sql: `SELECT * FROM pocket_pip_runs WHERE user_id = ? AND chat_uid = ? AND status IN ('queued', 'running', 'awaiting', 'stopping')`, args: [userId, uid] })).rows[0];
-  if (active && ACTIVE.includes(String((await recover(userId, active))?.status))) throw no('Let the current reply finish, or stop it first.', 409);
+  if (active && ACTIVE.includes(String((await recover(userId, active))?.status))) throw no(RUN_ACTIVE, 409, 'run_active');
   const deviceTools = [...new Set((Array.isArray(body.deviceTools) ? body.deviceTools : []).filter(name => DEVICE_TOOLS.includes(name)))];
   const runId = randomUUID(), leaseId = randomUUID(), deferred = detached(), status = deferred ? 'queued' : 'running';
   let inserted;
@@ -222,7 +231,7 @@ export async function submitRun(userId, body, { fetcher, now = Date.now() } = {}
       args: [userId, runId, uid, requestId, turn.uid, device, status, JSON.stringify(turn), JSON.stringify(value), JSON.stringify(deviceTools), deferred ? '' : leaseId, deferred ? 0 : Date.now() + LEASE, now, now] })).rows[0];
   } catch (error) {
     // Another device started a reply in this conversation at the same moment.
-    if (/UNIQUE constraint failed/i.test(String(error?.message))) throw no('Let the current reply finish, or stop it first.', 409);
+    if (/UNIQUE constraint failed/i.test(String(error?.message))) throw no(RUN_ACTIVE, 409, 'run_active');
     throw error;
   }
   if (!inserted) return view(userId, await recover(userId, await requestRow(userId, requestId)), 0);
@@ -350,7 +359,8 @@ async function drive(userId, run, leaseId, { fetcher }) {
   };
   const timer = setInterval(() => { beating = beat().catch(() => { /* The next beat retries; the lease outlives a missed one. */ }); }, HEARTBEAT);
   const quiet = async () => { clearInterval(timer); clearTimeout(trailing); trailing = null; await beating; await writing; };
-  live.publish(runId, turn);
+  const meta = { userId, chat: chatUid, requestId: String(run.request_id || '') };
+  live.publish(runId, turn, meta);
   // Live progress for watching devices: at most every PROGRESS ms, one write at a time, never failing the reply. An
   // update inside that window is written when the window ends, so a tool that starts and then works quietly still shows.
   const progress = () => {
@@ -428,7 +438,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
       .map(row => ({ name: row.name, input: row.input || '{}', result: row.result })).slice(-24);
     const { streamChat } = await import('../client/pip-stream.js');
     const reply = await streamChat(conversationView, turn, { value, body, key, fetcher, deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
-      onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server' } }); live.publish(runId, turn); progress(); },
+      onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server' } }); live.publish(runId, turn, meta); progress(); },
       resume: { reasoning: turn.reasoning || '', activity: turn.activity || [], observations },
       durable: { checkpoint: resumed, settled: resumed ? settlementMap(requests) : null, pause },
       executeTool: (value, name, input, signal, context) => WRITE_TOOLS.includes(name)
@@ -578,30 +588,6 @@ export async function* runFrames(userId, { runId = '', request = '', chat = '', 
 /** At most one live frame per this many ms: smooth to read, and a burst of tokens costs one frame. */
 const LIVE_FRAME = 33;
 
-/**
- * A frame without what this follower already has: the answer and reasoning as the text added since its last frame
- * (`append`), and the activity and sources only when they changed. A field left out is unchanged. A text that no
- * longer starts with what was sent (it moved into the reasoning, or restarted) is sent whole.
- */
-export function compactFrame(frame, sent) {
-  const turn = frame?.run?.turn;
-  if (!turn || typeof turn !== 'object') return frame;
-  const out = { ...turn }, append = {};
-  for (const field of ['answer', 'reasoning']) {
-    const value = String(turn[field] ?? ''), before = sent[field];
-    if (typeof before === 'string' && value.length >= before.length && value.startsWith(before)) {
-      delete out[field];
-      if (value.length > before.length) append[field] = value.slice(before.length);
-    }
-    sent[field] = value;
-  }
-  for (const field of ['activity', 'sources']) {
-    const text = JSON.stringify(turn[field] ?? []);
-    if (sent[field] === text) delete out[field];
-    sent[field] = text;
-  }
-  return { ...frame, run: { ...frame.run, turn: out }, ...(Object.keys(append).length ? { append } : {}) };
-}
 
 /** runView for a client that is following the run (the polling fallback), which counts as watching it. */
 export async function followView(userId, query) {

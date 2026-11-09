@@ -210,7 +210,8 @@ test('a refused submit leaves no run behind', async () => {
 
 test('one unfinished reply per conversation; another device attaches instead', async () => {
   const userId = await account(), { submitted } = await waiting(userId, 'chat-one');
-  await assert.rejects(() => runs.submitRun(userId, { requestId: 'req-second', chat: header('chat-one'), text: 'Something else', device: 'browser-1' }, { fetcher: noProvider }), /current reply/);
+  await assert.rejects(() => runs.submitRun(userId, { requestId: 'req-second', chat: header('chat-one'), text: 'Something else', device: 'browser-1' }, { fetcher: noProvider }),
+    error => error.code === 'run_active' && error.status === 409 && /still answering/.test(error.message));
   assert.equal((await runs.runView(userId, { chat: 'chat-one' })).run.runId, submitted.run.runId);
   await runs.stopRun(userId, { runId: submitted.run.runId, device: 'browser-1' });
   const next = await runs.submitRun(userId, { requestId: 'req-second', chat: header('chat-one'), text: 'Something else', device: 'browser-1' }, { fetcher: provider([], compatibleMessage({ text: 'Sure.' })) });

@@ -26,7 +26,9 @@ export interface RunnerEvent { type: "started" | "delta" | "finished" | "approva
 export interface RunnerOptions {
   key?: (value: PipConfig, chat: Chat) => unknown;
   stream?: (chat: Chat, turn: ChatTurn, options: Record<string, unknown>) => Promise<unknown>;
-  remote?: { available: (chat: Chat) => Promise<boolean>; stream: (chat: Chat, turn: ChatTurn, options: Record<string, unknown>) => Promise<unknown> } | null;
+  remote?: { available: (chat: Chat) => Promise<boolean>; stream: (chat: Chat, turn: ChatTurn, options: Record<string, unknown>) => Promise<unknown>;
+    /** The same follower without sending: shows a reply already running in the chat. */
+    attach?: (chat: Chat, turn: null, options: Record<string, unknown>) => Promise<unknown> } | null;
   title?: ((value: PipConfig, credential: unknown, request: string, answer: string) => Promise<string>) | null;
   onChange?: (event: RunnerEvent) => void;
 }
@@ -38,6 +40,8 @@ export class ReplyRunner {
   /** A new message (text), or retry/resume (continue) of the latest unfinished turn. */
   send(uid: string, options: { text?: string; context?: unknown[]; retry?: string | null; resume?: string | null }): Promise<unknown>;
   stop(): void;
+  /** Shows a reply already running on the server in this chat (sent from another tab or device). Whether there was one. */
+  attach(uid: string): Promise<boolean>;
   /** Whether a write still waits for the user, and the decision already taken. */
   approvalOf(turnId: string, eventId: string): { decision?: Decision } | null;
   decide(turnId: string, eventId: string, decision: Decision): void;

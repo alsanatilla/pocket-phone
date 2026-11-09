@@ -1,5 +1,6 @@
 import { account, connected, post, request } from './cloud.js';
 import { access } from './pip-tools.js';
+import * as live from './live.js';
 
 // A signed-in chat can run on Pocket's server instead of this tab. The run keeps its own provider messages and
 // decisions, so the reply survives a closed tab, another device can settle an approval, and a reload reattaches
@@ -64,10 +65,10 @@ async function* frames(body) {
  * stretch has finished or paused, so the tab does not wait for it. It follows the run by its own request id, which it
  * knows before the run exists, and the answer, each tool call and an approval show while the server works on them.
  */
-export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {}, approve = null, storage = globalThis.localStorage } = {}) {
+export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {}, approve = null, storage = globalThis.localStorage, attach = false, onRun = () => {} } = {}) {
   const owner = account();
   if (!owner) throw new Error('Sign in to Pocket to run this reply on the server.');
-  const device = deviceId(storage), requestId = turn.attempt || crypto.randomUUID();
+  const device = deviceId(storage), requestId = attach ? '' : turn?.attempt || crypto.randomUUID();
   let runId = '', cursor = 0, changed = Date.now(), seen = '', failure = null, sending = 0, unwatch = () => {};
   /**
    * The reply as this tab has it. A streamed frame carries only what changed (pip-runs.js compactFrame): text added
@@ -77,6 +78,8 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
   const merge = view => {
     const turn = view.run?.turn;
     if (!turn) return null;
+    // A delta that does not start where this tab's text ends follows a frame this tab missed: ask for the whole state.
+    if (['answer', 'reasoning'].some(field => typeof view.at?.[field] === 'number' && typeof turn[field] !== 'string' && view.at[field] !== shown[field].length)) return { gap: true };
     for (const field of ['answer', 'reasoning']) {
       if (typeof turn[field] === 'string') shown[field] = turn[field];
       if (typeof view.append?.[field] === 'string') shown[field] += view.append[field];
@@ -86,7 +89,9 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
   };
   /** Requests this tab has decided: a frame read before a decision landed still shows it pending. */
   const decided = new Set();
-  const look = () => request('/api/pip/runs?request=' + encodeURIComponent(requestId) + '&after=' + cursor);
+  // A submitting tab follows its own request; an attaching tab follows whatever runs in the chat, then that run.
+  const where = () => runId ? 'run=' + encodeURIComponent(runId) : attach ? 'chat=' + encodeURIComponent(chat.uid) : 'request=' + encodeURIComponent(requestId);
+  const look = () => request(attach && !runId ? '/api/pip/runs?chat=' + encodeURIComponent(chat.uid) + '&active=1' : '/api/pip/runs?' + where() + '&after=' + cursor);
   /** Sends a POST without waiting for the stretch it runs. A failure cuts the watch short so the loop can look at it. */
   const send = task => {
     sending++;
@@ -97,7 +102,7 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
 
   // The chat's own access and timezone travel with the request: a run on a vaulted key has no server settings of its
   // own, so what this chat may read and where the user's day starts come from the tab they typed in.
-  send(() => post('/api/pip/runs', { action: 'submit', accountId: owner.id, requestId, device, chatUid: chat.uid, text: turn.text,
+  if (!attach) send(() => post('/api/pip/runs', { action: 'submit', accountId: owner.id, requestId, device, chatUid: chat.uid, text: turn.text,
     attempt: turn.attempt, turnUid: turn.uid, context: turn.context || [], grants: access(chat.config, storage),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     chat: { uid: chat.uid, title: chat.title, titled: Boolean(chat.titled), created: chat.created, config: chat.config } }));
@@ -105,10 +110,12 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
   /** What one snapshot means for this reply: progress to show, a settled answer, or a question to answer. */
   const step = async (view, streamed = false) => {
     const run = view.run;
-    // Until the submit has created the run there is nothing to show yet.
-    if (!run) { if (runId) throw new Error('This reply is no longer available on the server.'); return null; }
+    // Until the submit has created the run there is nothing to show yet. An attaching tab found nothing running.
+    if (!run) { if (runId) throw new Error('This reply is no longer available on the server.'); return attach ? { none: true } : null; }
+    if (!runId) onRun(run);
     runId = run.runId;
     const turnNow = merge(view);
+    if (turnNow?.gap) { live.request('resync', { runId }); return null; }
     // Live progress: the run's own turn carries the answer so far, its tool activity and its phase. The runtime
     // marker is what the chat shows as “on the server”, so a reply can be told apart from a tab-run one.
     // A streamed frame is a change by construction; a polled view may repeat the last one.
@@ -146,6 +153,43 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
   };
 
   /**
+   * Follow the run over the account's live socket: its progress arrives as deltas, each step of the run (waiting,
+   * done, …) prompts one read of the record. Resolves when the run settles, or with `live: false` when the socket
+   * closes, so the caller falls back to the run's own stream.
+   */
+  const followLive = () => new Promise(resolve => {
+    let settled = false, chain = Promise.resolve(), quiet = Date.now();
+    const finish = result => {
+      if (settled) return; settled = true;
+      off(); clearInterval(watchdog); signal?.removeEventListener('abort', aborted);
+      resolve(result);
+    };
+    // One frame at a time, in order: a step must not overtake the progress before it.
+    const handle = work => {
+      chain = chain.then(work).then(done => { if (done) finish({ live: true, done }); })
+        .catch(error => { failure ||= error; finish({ live: true }); });
+    };
+    const mine = data => runId ? data.runId === runId : attach ? data.chat === chat.uid : data.requestId === requestId;
+    const off = live.on(message => {
+      if (message.type === 'closed') { finish({ live: false }); return; }
+      if (message.type !== 'event' || message.event !== 'run' || !mine(message.data)) return;
+      const data = message.data; quiet = Date.now();
+      const known = Boolean(runId);
+      if (data.kind === 'progress') handle(() => step({ run: { runId: data.runId, status: 'running', turn: data.turn }, append: data.append, at: data.at, requests: [] }, true));
+      else handle(async () => step(await look()));
+      // The first frame this tab hears of a run may be a delta: get the whole state once the run is known.
+      if (!known && data.runId) { runId ||= data.runId; live.request('resync', { runId: data.runId }); }
+    });
+    // A safety net while nothing arrives (a step lost while reconnecting): read the record now and then.
+    const watchdog = setInterval(() => { if (Date.now() - quiet > 10_000) { quiet = Date.now(); handle(async () => step(await look())); } }, 2500);
+    const aborted = () => finish({ live: true });
+    signal?.addEventListener('abort', aborted, { once: true });
+    // The state as it is now first; then every change as it happens.
+    handle(async () => step(await look()));
+    if (runId) live.request('resync', { runId });
+  });
+
+  /**
    * Follow the run until this connection ends. Returns the settled reply when the run finishes inside the stream, or
    * `live: false` when this host cannot stream, so the caller asks again instead. A stream that came back at once is
    * not retried in a tight loop.
@@ -154,7 +198,7 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
     const opened = Date.now(), watch = new AbortController(), cut = () => watch.abort();
     signal?.addEventListener('abort', cut, { once: true }); unwatch = cut;
     try {
-      const response = await fetch('/api/pip/runs/stream?request=' + encodeURIComponent(requestId) + '&after=' + cursor,
+      const response = await fetch('/api/pip/runs/stream?' + where() + '&after=' + cursor,
         { credentials: 'same-origin', headers: { accept: 'text/event-stream' }, signal: watch.signal }).catch(() => null);
       const type = String(response?.headers.get('content-type') || '');
       if (!response?.ok || !response.body || !type.includes('text/event-stream')) return { live: watch.signal.aborted };
@@ -173,7 +217,7 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
     for (;;) {
       if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
       if (Date.now() - changed > WAIT) throw new Error('The server reply is taking too long. It keeps running; open the chat again to see it.');
-      const followed = failure ? { live: true } : await follow();
+      const followed = failure ? { live: true } : live.connected() ? await followLive() : await follow();
       if (followed.done) return followed.done;
       if (signal?.aborted) continue;
       if (!followed.live) await wait(signal, POLL);

@@ -1,5 +1,6 @@
 import { database } from './database.js';
 import { ensureSearch, reindexChat } from './search.js';
+import { publish } from './pocket-events.js';
 import { validObject, mergeObject, sanitizeObject } from '../shared/objects.js';
 
 export function collectionName(value) {
@@ -49,6 +50,8 @@ export async function writeObject(userId, collection, incoming, { appendTurns = 
     }
     if (collection === 'chats' && revision !== Number(previous?.revision || 0)) await reindexChat(tx, userId, value);
     await tx.commit();
+    // The account's other tabs and devices pull the change now instead of at their next sync.
+    if (revision !== Number(previous?.revision || 0)) publish(userId, { type: 'objects', collection, uid, revision });
     return { value, revision };
   } catch (error) {
     await tx?.rollback().catch(() => {});

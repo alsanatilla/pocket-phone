@@ -63,3 +63,21 @@ that; the worker writes progress every 700 ms and followers poll every 250 ms wi
    happens to the screen, worded once in the client.
 4. **The worker deployed with the app** (same commit as Vercel, on a host made for it), or server runs inside the
    Vercel functions (`PIP_RUNS_DETACHED` unset) until then.
+
+## Transport (since the live-socket commit)
+
+Each signed-in tab holds one WebSocket to `/api/live` (`services/server/web.mjs`), authenticated by the session
+cookie and Pocket's own origin. The server pushes what happens in the account (`src/server/pocket-events.js`):
+
+| Event | Sent when | The tab does |
+|---|---|---|
+| `run` · `progress` | every change of a reply executing in the web process, at most one frame per 33 ms per reply, as deltas (`src/server/pip-frames.js`) with the offset they start at | draws it; a gap (missed frame) asks `resync` for the whole state |
+| `run` · `queued`, `started`, `awaiting`, `decision`, `done`, `failed`, `stopped` | each recorded step of a run | reads the run's record once; an open chat with no reply of its own attaches (`ReplyRunner.attach`) |
+| `objects`, `documents` | a chat, note, task … was written by any device | pulls within 250 ms |
+
+The worker runs in its own process and forwards its events to the web process over a loopback endpoint with a
+per-boot secret (reply progress at most every 400 ms). Commands stay POSTs. Without the socket (Vercel, dev
+server, a dropped connection) a tab follows a reply over its SSE stream and syncs on its usual schedule.
+
+A message sent while a reply runs in the chat (another tab or device) is refused with code `run_active`: it goes
+back to the composer and the tab shows the running reply instead of recording a failed turn.
