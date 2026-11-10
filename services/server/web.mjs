@@ -77,7 +77,7 @@ async function command(path, params, as) {
   return { status: response.status, value };
 }
 /** The commands a tab may send over its socket, and where each goes. Nothing else is reachable this way. */
-const COMMANDS = { 'pip.runs': '/api/pip/runs' };
+const COMMANDS = { 'pip.runs': '/api/pip/runs', 'chat.events': '/api/objects/chat-events' };
 
 // A run's progress (its whole turn, from this process or the worker) becomes numbered changes, once per run for all
 // of the account's sockets; a step of the run sends what is pending first, and its end closes the stream.

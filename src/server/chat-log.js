@@ -10,11 +10,16 @@ const LIMIT = 500;
 const bad = message => Object.assign(new Error(message), { status: 400 });
 const counter = value => Number.isSafeInteger(value) && value >= 0;
 
+/** The chat's highest number in `tx`, or 0 when it has no events yet. */
+export async function chatLogHead(tx, userId, chatUid) {
+  const found = await tx.execute({ sql: 'SELECT MAX(seq) AS seq FROM pocket_chat_events WHERE user_id = ? AND chat_uid = ?', args: [userId, chatUid] });
+  return Number(found.rows[0]?.seq || 0);
+}
+
 /** Writes `events` after the chat's last number, in the caller's transaction, and returns them with their `seq`. */
 export async function appendChatEvents(tx, userId, chatUid, events, at = Date.now()) {
   if (!events.length) return [];
-  const found = await tx.execute({ sql: 'SELECT MAX(seq) AS seq FROM pocket_chat_events WHERE user_id = ? AND chat_uid = ?', args: [userId, chatUid] });
-  let seq = Number(found.rows[0]?.seq || 0);
+  let seq = await chatLogHead(tx, userId, chatUid);
   const written = [];
   for (const event of events) {
     seq += 1;

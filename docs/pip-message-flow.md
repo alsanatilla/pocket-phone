@@ -145,3 +145,14 @@ earlier reply: `[card <id> drawn here with show_card: …; change it with update
 
 Measured on 2026-11-10 with `tools/manual/card-update-real.mjs` (draw, then ask for a change; two cases per model):
 GLM 5.3 2/2, DeepSeek V4.1 Flash 2/2, Kimi K3.1 Pro 1/2 (the card was changed in all six).
+
+## A chat has a numbered log
+
+Every write of a chat records its changes in `pocket_chat_events`, in the same transaction as the stored object
+(`writeObject` in `src/server/objects.js`; the events come from `src/shared/chat-log.js` and are numbered by
+`src/server/chat-log.js`). The stored object stays the snapshot. A tab that was away asks
+`POST /api/objects/chat-events { accountId, chat, after }` and gets `{ events, head, gap }`: the events after its
+number, the chat's highest number, and whether the ones just after it were trimmed (then it reads the stored chat).
+The `objects` event now carries `seq` for a chat, with the events themselves while they fit in 32,000 characters; a
+larger change sends only `seq`. A chat written before the log existed starts it with one event holding the whole chat.
+Each log keeps its newest 2,000 events.
