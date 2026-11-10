@@ -301,7 +301,99 @@ Do not change `writeObject`, `mergeObject`, the reply runner (`pip-core.js`, `pi
 component. Do not remove the pull or the periodic sync: they remain the fallback and the way a tab learns a chat's
 number.
 
-## T4 — A reply continues after a restart (not ready)
+## T4 — A reply continues after a restart (ready)
+
+Today a reply whose process dies (a deploy, a crash) is ended as failed with "The server stopped while writing this
+reply" (`recover` → `endIdle` in `src/server/pip-runs.js`). After this task it is run again, once, keeping the
+lookups it had finished, and only fails if that second attempt dies too.
+
+Read all of `src/server/pip-runs.js` before anything else. The pieces you build on exist already:
+
+- A run is owned through its lease (`lease_id`, `lease_until`), renewed by `beat` in `drive`. An expired lease on a
+  `running` run means its process died.
+- `drive` already continues a turn: it passes `resume: { reasoning, activity, observations }` to `streamChat`, so
+  finished lookups in `turn.activity` are reused. `continueRun` shows how a run is claimed with a new lease and
+  handed to `executeStretch`.
+- `event(userId, runId, kind, data)` records a step in `pocket_pip_run_events` and tells the tabs.
+- Production (Fly) runs replies in the web process (`inProcess()` is true there: `executeStretch` does not wait).
+  The worker process runs `sweepRuns` every minute with `PIP_RUNS_MODE` empty: there `executeStretch` waits for the
+  whole reply.
+
+### 1. Restarting instead of failing
+
+New internal function `restart(userId, run, { fetcher })` → the claimed row, or `null` when the run may not be
+restarted. A run may be restarted when all hold: its status is `running` (not `stopping`); its lease has expired;
+it has no `restarted` event yet (`SELECT 1 FROM pocket_pip_run_events WHERE user_id = ? AND run_id = ? AND kind =
+'restarted'`); it was created less than 10 minutes ago. It claims the run with one conditional UPDATE (new
+`lease_id`, `lease_until = now + LEASE`, `WHERE … status = 'running' AND lease_until <= now RETURNING *`), so two
+callers cannot both restart it. On a successful claim: set the stored turn's `answer` to `''`, `phase` to
+`'requesting'`, and mark activity rows that were still running as failed the way `settle` does elsewhere in the
+file (use the existing function; write the turn in the same UPDATE as the claim); record
+`event(userId, runId, 'restarted')`; return the row. It does not call `executeStretch` itself.
+
+- `recover(userId, run)`: when `inProcess()` and `restart` returns a row, call `executeStretch` (it returns at once
+  in this mode) and return the claimed row. Otherwise exactly as today (`endIdle`). When not `inProcess()`,
+  `recover` never restarts: a page view must not wait for a whole reply.
+- `sweepRuns`: for expired `running` runs, when not `inProcess()`, restart and wait for the stretch the same way the
+  function already continues settled waiting runs (same time check against `deadline`; read that loop and mirror
+  it). A run it has no time for is left as it is for the next sweep, not failed. Runs that may not be restarted go
+  through `recover` as today. Count them in the result as `restarted` beside `interrupted`.
+- The second death: a run with a `restarted` event whose lease expires again ends through `endIdle`, unchanged.
+
+### 2. Letting go on shutdown
+
+So that a deploy does not make a reply wait 20 seconds for its lease to expire:
+
+- In `drive`, register the run while it executes, in a registry on `globalThis` (`globalThis.__pocketRuns ??= new
+  Map()`; the web server and Astro's build load this module as separate copies, exactly as
+  `src/server/pocket-events.js` explains for its hub), and remove it in `finally`. An entry can let go: it sets
+  `leaseLost = true` (so `drive`'s `catch` returns without ending the run: read that `catch`), aborts the
+  controller, and runs `UPDATE pocket_pip_runs SET lease_until = 0 WHERE <owned> AND status = 'running'`.
+- Export `releaseRuns()` → lets go of every registered run, waits for the UPDATEs, resolves to how many there were.
+  It never throws.
+- `services/server/web.mjs`: on `SIGTERM` and `SIGINT`, once: `await releaseRuns()` with a 3 second limit
+  (`Promise.race`), then `server.close()` and `process.exit(0)`. Import `releaseRuns` the way that file imports its
+  other server modules. `services/pip/worker.mjs` has a `stop` function: call `releaseRuns()` there too, before it
+  exits, with the same limit. Read how `services/server/start.mjs` stops its children (it waits up to 25 seconds).
+
+### 3. Tests: `tools/pip-run-restart.test.mjs` (new)
+
+Copy the setup and the helpers you need (`account`, `header`, `chatOf`, `provider`) from the top of
+`tools/pip-runs.test.mjs`. Set `process.env.PIP_RUNS_MODE = 'inprocess'` inside the tests that need it and restore
+it in `finally`. A provider that "hangs" is a `fetcher` returning a promise that rejects when `options.signal`
+aborts.
+
+1. Let go and restart: submit a run in-process whose provider answers one lookup (`search_notes`) and then hangs on
+   the next request. Wait until the stored run's turn shows that lookup as done (poll `runs.runView`, at most 5 s).
+   `await runs.releaseRuns()` → 1. The run's row is still `running` with `lease_until = 0`. Then
+   `runs.runView(userId, { runId })` with a working provider in place: poll until the run is `done`. Assert: its
+   events contain `restarted` once and no `failed`; the final answer is the second provider's; the stored chat has
+   one turn with that answer; the second provider's first request already contains the first lookup's result (it was
+   not looked up again).
+   To give the restarted run its provider, `recover`/`runView` need a `fetcher`: thread an optional `{ fetcher }`
+   through `runView` to `recover` the way `submitRun` takes it. Production passes none.
+2. Only once: take a run that was restarted, make its lease expire again by SQL (`lease_until = 0` while its new
+   provider hangs, then `releaseRuns()`), view it: it ends `failed` with the existing interrupted message.
+3. Too old: a `running` run with an expired lease and `created` 11 minutes ago (set by SQL) is failed, not restarted.
+4. `stopping` runs are stopped, not restarted.
+5. Two views at once (`Promise.all` of two `runView`) restart it once: one `restarted` event, one request to the
+   provider for the new attempt's first round.
+6. Not in-process: `runView` on an expired run does not restart it (it fails as today); `sweepRuns` with a working
+   provider does, and the run is `done` when `sweepRuns` resolves; its result has `restarted: 1`.
+
+All existing tests in `tools/pip-runs.test.mjs` must pass unchanged. If one asserts the old behaviour for a case
+this task changes on purpose, do not edit it: name it in your report.
+
+### Files you may touch
+
+`src/server/pip-runs.js`, `services/server/web.mjs`, `services/pip/worker.mjs`,
+`tools/pip-run-restart.test.mjs` (new), `docs/pip-message-flow.md` (append a short section "A reply survives a
+restart").
+
+### Do not
+
+No new columns or tables. Do not change `streamChat` or anything in `src/client`. Do not change the lease or
+heartbeat times. Do not restart a run more than once.
 
 ## T5 — A message sent during a reply is queued; offline sends wait (not ready)
 
