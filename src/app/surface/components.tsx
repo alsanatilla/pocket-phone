@@ -321,11 +321,11 @@ export function Form({ title, description, fields, submitLabel, onAsk }: { title
             {field.type === "choice" ? (
               <select value={values[field.name] ?? ""} aria-label={field.label} required={field.required === true}
                 onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))}
-                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
+                className="h-11 w-full rounded-md border border-input bg-background px-2 text-sm sm:h-9">
                 {(field.options ?? []).map(option => <option key={option} value={option}>{option}</option>)}
               </select>
             ) : (
-              <Input value={values[field.name] ?? ""} aria-label={field.label} required={field.required === true} maxLength={500}
+              <Input value={values[field.name] ?? ""} aria-label={field.label} required={field.required === true} maxLength={500} className="h-11 sm:h-9"
                 inputMode={field.type === "number" ? "decimal" : undefined}
                 placeholder={field.placeholder ?? undefined}
                 onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))} />
@@ -333,7 +333,7 @@ export function Form({ title, description, fields, submitLabel, onAsk }: { title
           </label>
         ))}
         <div className="mt-1 flex justify-end">
-          <Button type="submit" size="sm" disabled={missing}>{submitLabel?.trim() || "send"}</Button>
+          <Button type="submit" size="sm" className="h-11 px-4 sm:h-9" disabled={missing}>{submitLabel?.trim() || "send"}</Button>
         </div>
       </form>
     </Block>
