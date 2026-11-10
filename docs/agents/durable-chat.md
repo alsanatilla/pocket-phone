@@ -125,12 +125,89 @@ Do not call these functions from `objects.js`, runs, or the client. Do not publi
 
 ---
 
-## T2 — Every chat write is logged, and tabs are told by number (not ready: starts after T1 is merged)
+## T2 — Every chat write is logged, and tabs are told by number (ready)
 
-`writeObject` (`src/server/objects.js`), in its transaction: `chatEvents(stored, value)` → `appendChatEvents`. The
-`objects` event for a chat gains `seq` (the head) so a tab knows what it is missing. The socket gets a request
-`chat.events { chat, after }` (`services/server/web.mjs`). Existing chats without a log: a reader gets `gap: true`
-and pulls the object, as today. Detailed brief follows after T1.
+T1 is merged: read `src/shared/chat-log.js` and `src/server/chat-log.js` first. (T1 differs from its text above in
+two accepted points: `chat.deleted` carries `uid`, and `applyChatEvents` keeps the order turns are in, with
+`turns.order` emitted whenever that would differ from `after`.)
+
+After this task every change of a chat on the server has a number, a tab can ask for the changes after a number, and
+the event a tab already gets says which number the chat is at. No client code changes: that is T3.
+
+### 1. `src/server/chat-log.js`: one more function
+
+`chatLogHead(tx, userId, chatUid)` → the chat's highest `seq` inside the given transaction (0 when none). Use it in
+`appendChatEvents` instead of that function's own `MAX(seq)` query.
+
+### 2. `src/server/objects.js`: `writeObject` logs chats
+
+Only for `collection === 'chats'`, only inside the existing `if (payload !== previous?.payload)` block, in the same
+transaction `tx`, after the `pocket_objects` insert:
+
+- `head = await chatLogHead(tx, userId, uid)`.
+- `events = head === 0 ? chatEvents(null, value) : chatEvents(stored, value)`. Why: a chat that existed before the log
+  did has no events; its first logged write must be the whole chat, or a reader starting at 0 would rebuild only the
+  last change. This is the migration; there is no separate migration script.
+- `logged = await appendChatEvents(tx, userId, uid, events)`.
+- If the transaction fails or is retried (the function has a retry loop: read it), nothing of the log may remain
+  from the failed attempt. It is in `tx`, so a rollback covers it; make sure no log write happens outside `tx`.
+
+After the commit, where `publish(userId, { type: 'objects', collection, uid, revision })` is: for chats add
+`seq` (the last logged event's `seq`, or omit the field when nothing was logged) and `events` (the logged events)
+**only when `JSON.stringify(events).length <= 32_000`**; otherwise send `seq` without `events`, and the tab will ask.
+Other collections' events stay exactly as they are.
+
+Return value of `writeObject`: add `seq` (the chat's head after the write; for chats only). Existing callers ignore it.
+
+Trimming: after the commit, when the last logged `seq` is a multiple of 200, call
+`trimChatEvents(userId, uid, 2000)` and ignore its failure (wrap that one call; a failed trim must not fail a write
+that is already committed).
+
+### 3. Reading: `src/pages/api/objects/chat-events.ts` and the socket
+
+- New route `POST /api/objects/chat-events`, body `{ accountId, chat, after }`, written like the POST in
+  `src/pages/api/objects/[collection].ts` (`sameOrigin`, `signedIn`, `readJson`, the 409 when `accountId` differs,
+  `failure`). `chat` must pass `objectId` from `src/shared/objects.js`, else 400. Answers
+  `{ accountId, chat, ...await readChatEvents(user.id, chat, after) }`. Check that Astro routes the static file name
+  before the dynamic `[collection].ts` (it does by its rules; prove it with the test in 4.5 or by `npm run build`
+  and reading the route list).
+- `services/server/web.mjs`: add `'chat.events': '/api/objects/chat-events'` to `COMMANDS`. Nothing else in that
+  file changes. The socket does not know the account id of the body; the tab will send it (T3).
+
+### 4. Tests: `tools/chat-log-writes.test.mjs`
+
+Same setup as `tools/chat-log.test.mjs`. Use `writeObject` and `readChatEvents`; build chats with the helper style
+of that file. Required:
+
+1. A new chat written once: replaying `readChatEvents(…, 0).events` with `applyChatEvents(null, …)` equals the
+   stored value (compare with `canonical`). `writeObject`'s result has `seq` equal to `head`.
+2. Five further writes (a turn added with `appendTurns: true` the way `writeTurn` in `src/server/pip-runs.js` does
+   it, an answer changed, title changed, a turn's card updated, chat deleted): after each, replay from 0 equals the
+   stored value, and replay of only the events after the previous head, applied to the previous stored value, equals
+   it too.
+3. A write that changes nothing (same object again) logs nothing: `head` is unchanged.
+4. A chat that exists without a log (insert its row into `pocket_objects` and `pocket_object_changes` directly with
+   SQL, as an old chat): the next `writeObject` logs the whole chat; replay from 0 equals the stored value.
+5. The published event: subscribe with `subscribe` from `src/server/pocket-events.js` before writing; a small write
+   publishes `seq` and `events` whose replay on the previous value gives the new one; a write with a turn whose
+   answer is 40,000 characters publishes `seq` and no `events`.
+6. Another user reading the same chat uid gets `head: 0` and no events.
+7. A zine write (see how `validObject` wants a zine; a deleted zine `{ id, updated, deleted: true }` is the simplest
+   valid one) logs nothing and its event has neither `seq` nor `events`.
+
+The existing suites must stay green; `tools/pip-runs.test.mjs` and `tools/pip-jobs.test.mjs` exercise `writeObject`
+heavily.
+
+### Files you may touch
+
+`src/server/chat-log.js`, `src/server/objects.js`, `src/pages/api/objects/chat-events.ts` (new),
+`services/server/web.mjs` (one entry), `tools/chat-log-writes.test.mjs` (new), `docs/pip-message-flow.md` (append
+one short section "A chat has a numbered log" describing what now exists, in the style of the sections above it).
+
+### Do not
+
+No client changes (`src/client`, `src/app`). Do not change `mergeObject`, `sanitizeObject` or `validObject`. Do not
+change what `readObjects` returns.
 
 ## T3 — The tab applies chat events (not ready)
 
