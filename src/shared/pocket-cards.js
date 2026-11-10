@@ -44,7 +44,12 @@ export const CARD_TOOL_DESCRIPTION = 'Draw a picture at this point of your reply
   + 'elements is a flat list; each has an id, a type, its props and the ids of its children. root is the id of the top element: a single element, or a Stack that lists the others as children. Only Stack, Grid and Card hold children. '
   + 'Components: ' + list + '. Tone is one of ' + TONES.join(', ') + '. '
   + 'A Button acts through on: {"press":{"action":"askPip","params":{"prompt":"…"}}}. Actions: ' + actions + '. '
-  + 'The result says whether the card was drawn; if it names problems, correct them and call show_card again.';
+  + 'The result says whether the card was drawn and gives its id; if it names problems, correct them and call show_card again.';
+
+/** update_card's description. */
+export const CARD_UPDATE_DESCRIPTION = 'Change a card that is already in this chat, in this reply or an earlier one, where it stands: a figure that moved, a row to add, a mistake to correct. '
+  + 'id is the card\'s id, from show_card\'s result or from a "[card <id> …]" record in an earlier reply. root and elements are the whole new card, in the same form as show_card: the old card is replaced, not merged. '
+  + 'The person sees the card change in place, marked with the time. Use this instead of drawing the same card again.';
 
 /** When and how Pip draws, appended to its system prompt. What can be drawn is in show_card's own description. */
 export const CARDS_PROMPT = 'Pocket can draw parts of a reply as a picture: readings, charts, tables, a schedule, choices, the person\'s tasks. '
@@ -55,4 +60,5 @@ export const CARDS_PROMPT = 'Pocket can draw parts of a reply as a picture: read
   + 'Never invent, estimate or fill in numbers; if a source gives only some points, chart only those and say so in the note. '
   + 'Show tasks and thoughts with TaskList or ThoughtList instead of retyping them. '
   + 'Every fact appears once: what the prose says needs no tile, and a Hero is not repeated by a Metric. Short labels, no emoji. Skip pictures when plain prose is enough. '
-  + 'Earlier replies show "[card drawn here with show_card: …]" where a card was; that line is a record of what the person saw, never something to write yourself.';
+  + 'A card stays alive: when figures in a card that is already in this chat change, or it needs a correction, change that card with update_card and its id instead of drawing a second one. '
+  + 'Earlier replies show "[card <id> drawn here with show_card: …]" where a card was; that line is a record of what the person saw, never something to write yourself.';

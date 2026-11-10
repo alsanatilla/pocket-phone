@@ -6,3 +6,4 @@ export const CARD_COMPONENTS: Record<string, [string[], string]>;
 export const CARD_ACTIONS: Record<string, [string, string]>;
 export const CARDS_PROMPT: string;
 export const CARD_TOOL_DESCRIPTION: string;
+export const CARD_UPDATE_DESCRIPTION: string;

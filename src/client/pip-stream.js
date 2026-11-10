@@ -5,7 +5,7 @@ import { sdkTools } from './pip-sdk-tools.js';
 import { providerModel, providerOptions, providerError } from './pip-provider.js';
 import { RESEARCH_LIMITS } from './pip-limits.js';
 import { normalizeAnswer } from '../shared/pip-reply.js';
-import { CARD_ARGUMENT_LIMIT, draftLines } from '../shared/pocket-card-tool.js';
+import { CARD_ARGUMENT_LIMIT, cardFence, cardIds, draftLines, replaceCard } from '../shared/pocket-card-tool.js';
 export { RESEARCH_LIMITS, CONTEXT_OVERFLOW } from './pip-limits.js';
 export { freeFallbacks } from './pip-provider.js';
 const stopped = () => new DOMException('Stopped', 'AbortError');
@@ -20,7 +20,7 @@ const pausedRun = error => error?.name === 'RunPaused';
 // A durable run passes `durable`: { checkpoint, settled, pause }. checkpoint is the last pause's provider
 // messages, budgets and outstanding requests; settled is what a client decided; pause(state) stores the run
 // before the request ends and returns. The run then throws RunPaused and continues in a later request.
-export async function streamChat(chat, turn, { value, body, key, signal, onUpdate = () => {}, fetcher = fetch, executeTool = execute, previewTool = preview, approve = null, timeoutMs = 90000, deadlineMs = RESEARCH_LIMITS.deadlineMs, resume = null, coverage = null, deviceTools = [], durable = null } = {}) {
+export async function streamChat(chat, turn, { value, body, key, signal, onUpdate = () => {}, fetcher = fetch, executeTool = execute, previewTool = preview, approve = null, timeoutMs = 90000, deadlineMs = RESEARCH_LIMITS.deadlineMs, resume = null, coverage = null, deviceTools = [], durable = null, saveTurn = null } = {}) {
   const controller = new AbortController(), abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort();
   // A continued run keeps the provider messages, the budgets and the requests it already recorded. Its research
@@ -59,7 +59,28 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     result.answer = before + (before ? '\n\n' : '') + fence + '\n\n'; cardEnd = result.answer.length;
   };
   /** Arguments as the activity keeps them: a card's are in the answer already. */
-  const kept = (name, input) => name === 'show_card' ? '{}' : JSON.stringify(input);
+  const CARD_TOOLS = ['show_card', 'update_card'];
+  const kept = (name, input) => CARD_TOOLS.includes(name) ? (name === 'update_card' ? JSON.stringify({ id: input?.id }) : '{}') : JSON.stringify(input);
+  /**
+   * update_card: the checked card replaces the one with its id where that stands, in this reply or, newest first, in
+   * an earlier one of this chat. An earlier reply that changed is handed to `saveTurn`, which keeps it wherever this
+   * reply runs (the tab's store, the account's chat, a job's chat).
+   */
+  const reviseCard = async ({ id, spec, shows }) => {
+    const fence = cardFence(spec, { id, updated: Date.now() });
+    const here = replaceCard(result.answer, id, fence);
+    if (here !== null) { cardEnd += here.length - result.answer.length; result.answer = here; return { kind: 'card', updated: true, id, shows }; }
+    const earlier = (chat.turns || []).filter(item => item.uid !== turn.uid && typeof item.answer === 'string');
+    for (const item of earlier.reverse()) {
+      const changed = replaceCard(item.answer, id, fence);
+      if (changed === null) continue;
+      item.answer = changed; item.updated = Math.max(Date.now(), (item.updated || 0) + 1);
+      try { await saveTurn?.(item); } catch { return { error: 'card_not_saved', message: 'The card could not be saved. Say so, and draw a new one with show_card if it matters.' }; }
+      return { kind: 'card', updated: true, id, shows, where: 'an earlier reply' };
+    }
+    const known = [...cardIds(result.answer), ...earlier.flatMap(item => cardIds(item.answer))];
+    return { error: 'card_not_found', message: `No card with id "${id}" is in this chat. ` + (known.length ? 'Cards here: ' + [...new Set(known)].slice(0, 12).join(', ') + '.' : 'There are no cards to change; draw one with show_card.') };
+  };
   // What a pause stores: the provider messages, the remaining budgets, and the requests no client has settled yet.
   const checkpoint = extra => ({ messages: [...(base || body.messages), ...responses],
     counters: { calls, searches, toolData, tokens, round, currentRound, finalReason, finalRounds, finalCalls, final, canPrepare, researchLeft: Math.max(1, researchLeft - (requestBudget - deadlineLeft)) },
@@ -136,10 +157,11 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     check();
     if (answer?.error && !answer.repeated && !write) failures.set(cacheKey(name, input), { permissions: grantSignature(value, name), result: structuredClone(answer) });
     if (answer && !answer.error && !stateTool) answer = { access_fingerprint: accessFingerprint(value), request_identity: checkpointIdentity(value), ...answer };
+    if (name === 'update_card' && answer?.revise) answer = await reviseCard(answer);
     if (name === 'show_card') {
       // The draft gives way to the checked card, placed where the model called; the model is told only that it shows.
       dropDraft(toolCallId);
-      if (answer?.card) { placeCard(answer.card); answer = { kind: 'card', drawn: true, shows: answer.shows }; }
+      if (answer?.card) { placeCard(answer.card); answer = { kind: 'card', drawn: true, id: answer.id, shows: answer.shows }; }
     }
     let content = JSON.stringify(answer);
     if (!content || content.length > RESEARCH_LIMITS.result) { answer = { error: 'result_too_large', message: 'Use a narrower request.' }; content = JSON.stringify(answer); }
@@ -211,7 +233,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     dropDraft();
     // Text written before a lookup is working notes, and a cut-off step is written again: both leave the answer. What
     // was written up to the last drawn card stays, and so does everything when the step only drew cards.
-    if (step.toolCalls.some(call => call.toolName !== 'show_card') || step.finishReason === 'length') {
+    if (step.toolCalls.some(call => !CARD_TOOLS.includes(call.toolName)) || step.finishReason === 'length') {
       const notes = result.answer.slice(cardEnd).trim();
       if (notes) { result.reasoning += (result.reasoning ? '\n\n' : '') + notes + '\n\n'; result.answer = result.answer.slice(0, cardEnd); if (!cardEnd) result.sources = []; }
     }
@@ -233,12 +255,12 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       }
     } else if (part.type === 'tool-input-delta') {
       const partial = inputs.get(part.id); if (!partial) throw new Error('The provider returned tool arguments without a tool.');
-      partial.text += part.delta; if (partial.text.length > (partial.name === 'show_card' ? CARD_ARGUMENT_LIMIT : 8000)) throw new Error('The tool request is too large.');
-      if (partial.name !== 'show_card') record(activityId(part.id), { input: partial.text });
+      partial.text += part.delta; if (partial.text.length > (CARD_TOOLS.includes(partial.name) ? CARD_ARGUMENT_LIMIT : 8000)) throw new Error('The tool request is too large.');
+      if (!CARD_TOOLS.includes(partial.name)) record(activityId(part.id), { input: partial.text });
       else if (draft?.id === part.id) { const lines = draftLines(partial.text); result.answer = result.answer.slice(0, draft.at) + '```pocket\n' + (lines ? lines + '\n' : ''); }
     } else if (part.type === 'tool-call') {
       if (final && (!canPrepare || !STATE_TOOLS.includes(part.toolName))) { fatal = toolsAfterLimit(part.toolName); throw fatal; }
-      if (JSON.stringify(part.input || {}).length > (part.toolName === 'show_card' ? CARD_ARGUMENT_LIMIT : 8000)) throw new Error('The tool request is too large.');
+      if (JSON.stringify(part.input || {}).length > (CARD_TOOLS.includes(part.toolName) ? CARD_ARGUMENT_LIMIT : 8000)) throw new Error('The tool request is too large.');
       if (part.invalid) dropDraft(part.toolCallId);
       record(activityId(part.toolCallId), { name: part.toolName, title: label(part.toolName, part.input || {}), input: kept(part.toolName, part.input || {}), ...(part.invalid ? { state: 'failed', summary: 'Invalid tool request', ended: Date.now(), result: JSON.stringify({ error: 'invalid_arguments', message: 'Correct the arguments or use an available tool.' }) } : {}) });
     } else if (part.type === 'tool-error') {

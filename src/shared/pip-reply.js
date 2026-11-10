@@ -87,7 +87,10 @@ export function segmentAnswer(text) {
 export function canonicalCard(source) {
   const spec = normalizeSpec(pocketSpec(source));
   if (!spec || typeof spec.root !== 'string' || !spec.elements || typeof spec.elements !== 'object' || !spec.elements[spec.root]) return null;
-  const lines = [JSON.stringify({ op: 'add', path: '/root', value: spec.root })];
+  // A drawn card's id and the time it was last changed stay with it.
+  const lines = [...(typeof spec.id === 'string' && /^[a-z0-9]{4,24}$/.test(spec.id) ? [JSON.stringify({ op: 'add', path: '/id', value: spec.id })] : []),
+    ...(Number.isFinite(spec.updated) && spec.updated > 0 ? [JSON.stringify({ op: 'add', path: '/updated', value: spec.updated })] : []),
+    JSON.stringify({ op: 'add', path: '/root', value: spec.root })];
   for (const [id, element] of Object.entries(spec.elements)) if (element && typeof element === 'object') lines.push(JSON.stringify({ op: 'add', path: '/elements/' + id.replace(/~/g, '~0').replace(/\//g, '~1'), value: element }));
   return lines.join('\n');
 }

@@ -400,7 +400,8 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
     const facts = patternDigest(await readDocuments(userId), now);
     if (facts.length) body.instructions += `\n\nCounted from the workspace (do not recount, do not contradict): ${facts.join(' ')}`;
   }
-  if (routine.kind === 'watch') body.instructions += '\n\nThis is a standing watch the user set up. If nothing new matches it, answer exactly SKIP.';
+  if (routine.kind === 'watch') body.instructions += '\n\nThis is a standing watch the user set up. If nothing new matches it, answer exactly SKIP. '
+    + 'If an earlier report in this chat has a card with the figures you watch and only those figures moved, change that card with update_card and then answer exactly SKIP: the card is kept current without a new message. Write a new report only when the person should be told.';
   if (training) body.messages.push({ role: 'user', content: training.prompt });
   const source = await serverSource(userId);
   const prepare = async (value, name, input) => {
@@ -430,9 +431,12 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
   };
   // Imported here: the agent runtime and provider adapters load only when a routine runs.
   const { streamChat } = await import('../client/pip-stream.js');
+  let revised = false;
   try {
     const reply = await streamChat(view, turn, { value, body, key, fetcher, signal, deadlineMs: RUN_DEADLINE, coverage: contextCoverage(view, turn),
       onUpdate: update => Object.assign(turn, update),
+      // A card changed in an earlier report: the chat is written when the run ends, even one that reports nothing new.
+      saveTurn: () => { revised = true; },
       ...(training || conversation ? { previewTool: prepare, approve: async requests => new Map(requests.map(request => [request.toolCallId, { approved: true }])) } : {}),
       executeTool: async (value, name, input, signal, context) => {
         if (name === 'update_scratch') {
@@ -453,6 +457,8 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
   const quiet = routine.kind === 'watch' && !conversation && turn.status === 'done' && quietWatch(turn.answer);
   if (quiet) {
     chat.turns = chat.turns.filter(item => item !== turn);
+    // Nothing new to say, but a card it keeps current changed: that is saved, quietly.
+    if (revised) { chat.updated = Math.max(Date.now(), chat.updated + 1); await writeObject(userId, 'chats', chat); }
     const spent = (turn.usage?.input_tokens || 0) + (turn.usage?.output_tokens || 0);
     await sql({ sql: 'UPDATE pocket_pip_background SET used_day = ?, used_tokens = ? WHERE user_id = ?', args: [today, used + spent, userId] });
     return { status: 'unchanged' };

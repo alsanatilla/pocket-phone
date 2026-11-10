@@ -578,3 +578,26 @@ test('a follower gets only what changed: text added, and activity only when it c
   assert.equal(third.run.turn.activity.length, 2);
   assert.ok(JSON.stringify(second).length < 300, 'a text delta is a small frame even with large tool results');
 });
+
+test('update_card in a later run changes the card in the earlier turn of the stored chat', async () => {
+  const { cardIds } = await import('../src/shared/pocket-card-tool.js');
+  const card = value => ({ root: 'main', elements: [{ id: 'main', type: 'Metric', props: { label: 'Blue car', value: String(value), unit: 'EUR' }, children: [] }] });
+  const userId = await account(), sent = [];
+  const first = await runs.submitRun(userId, { requestId: 'req-card-1', chat: header('chat-card'), text: 'Show the blue car price.', device: 'browser-1' },
+    { fetcher: provider(sent, compatibleMessage({ text: 'The price:', calls: [{ name: 'show_card', input: card(21000), id: 'call_draw' }] }), compatibleMessage({ text: 'That is the listing.' })) });
+  assert.equal(first.run.status, 'done', first.run.turn.error);
+  const [id] = cardIds((await chatOf(userId, 'chat-card')).turns[0].answer);
+  assert.match(id, /^k[a-z0-9]{6}$/);
+
+  const second = await runs.submitRun(userId, { requestId: 'req-card-2', chat: header('chat-card'), text: 'It dropped to 19,500. Update it.', device: 'browser-1' },
+    { fetcher: provider(sent, compatibleMessage({ calls: [{ name: 'update_card', input: { id, ...card(19500) }, id: 'call_update' }] }), compatibleMessage({ text: 'Updated.' })) });
+  assert.equal(second.run.status, 'done', second.run.turn.error);
+  // The model saw the earlier card as a record with its id, not as a format to copy.
+  assert.match(JSON.stringify(sent[2].messages), new RegExp('\\[card ' + id + ' drawn here with show_card'));
+  const stored = await chatOf(userId, 'chat-card');
+  assert.equal(stored.turns.length, 2);
+  assert.deepEqual(cardIds(stored.turns[0].answer), [id], 'the card kept its id');
+  assert.match(stored.turns[0].answer, /19500/); assert.doesNotMatch(stored.turns[0].answer, /21000/);
+  assert.match(stored.turns[0].answer, /\/updated/);
+  assert.equal(stored.turns[1].answer, 'Updated.', 'the new reply has no second card');
+});

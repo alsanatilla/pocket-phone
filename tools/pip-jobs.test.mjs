@@ -132,3 +132,29 @@ test('jobs can use the key the account already keeps for Pip, when asked to, and
   assert.equal(result.status, 'done');
   assert.deepEqual(seen, ['sk-ant-fixture-account-key-0123456789']);
 });
+
+test('a watch keeps an earlier card current without a new message or a push', async () => {
+  const { cardIds } = await import('../src/shared/pocket-card-tool.js');
+  const card = value => ({ root: 'main', elements: [{ id: 'main', type: 'Metric', props: { label: 'Red bike', value: String(value), unit: 'EUR' }, children: [] }] });
+  const userId = await account(), phone = browser(), sent = [];
+  await notices.subscribe(userId, phone.subscription);
+  const { routines } = await background.saveRoutine(userId, { kind: 'watch', title: 'Bike price', prompt: 'Keep the red bike price current.', time: '08:00', days: [1, 2, 3, 4, 5] });
+  const routine = routines[0], service = pushService();
+  const chats = async () => (await execute({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats'", args: [userId] })).rows.map(row => JSON.parse(String(row.payload)));
+  let replies = [compatibleMessage({ text: 'The red bike today:', calls: [{ name: 'show_card', input: card(900), id: 'call_draw' }] }), compatibleMessage({ text: 'I will keep it current.' })];
+  const fetcher = async (url, options) => { sent.push(JSON.parse(options.body)); return response(replies.shift()); };
+  try {
+    assert.equal((await background.runClaimed(userId, routine.id, { force: true, fetcher })).status, 'done');
+    const before = (await chats()).find(chat => chat.turns.some(turn => cardIds(turn.answer).length));
+    const [id] = cardIds(before.turns[0].answer), pushed = service.pushed.length;
+
+    replies = [compatibleMessage({ calls: [{ name: 'update_card', input: { id, ...card(850) }, id: 'call_update' }] }), compatibleMessage({ text: 'SKIP' })];
+    await execute({ sql: 'UPDATE pocket_pip_routines SET last_run = 0 WHERE user_id = ?', args: [userId] });
+    assert.equal((await background.runClaimed(userId, routine.id, { force: true, fetcher })).status, 'unchanged');
+    const after = (await chats()).find(chat => chat.uid === before.uid);
+    assert.equal(after.turns.length, before.turns.length, 'no new message');
+    assert.match(after.turns[0].answer, /850/); assert.doesNotMatch(after.turns[0].answer, /"900"/);
+    assert.ok(after.updated > before.updated, 'other devices pull the change');
+    assert.equal(service.pushed.length, pushed, 'and nobody is buzzed');
+  } finally { service.restore(); }
+});

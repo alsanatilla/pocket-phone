@@ -442,6 +442,8 @@ async function drive(userId, run, leaseId, { fetcher }) {
       onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server' } }); live.publish(runId, turn, meta); progress(); },
       resume: { reasoning: turn.reasoning || '', activity: turn.activity || [], observations },
       durable: { checkpoint: resumed, settled: resumed ? settlementMap(requests) : null, pause },
+      // A card changed in an earlier reply (update_card) is written to the chat at once; every device pulls it.
+      saveTurn: async changed => { if (!await writeTurn(userId, chatUid, changed)) throw new Error('The chat could not be saved.'); },
       executeTool: (value, name, input, signal, context) => WRITE_TOOLS.includes(name)
         ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId: context.eventId, name, input })
         : runTool(value, name, input, signal, { ...context, source }),

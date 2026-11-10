@@ -5,6 +5,8 @@
 // - cardFence is how a drawn card is kept inside the stored answer, at the place it was drawn;
 // - draftLines turns the arguments streamed so far into the elements that are already complete, so a card builds
 //   up on screen while the model is still writing it;
+// - a drawn card has an id and stays alive: update_card replaces it where it stands (replaceCard), in this reply or
+//   an earlier one, so a figure that changed is corrected in place instead of drawn a second time;
 // - cardsAsRecords replaces cards in replayed history by one line each, so the model sees that a card was drawn
 //   there without seeing a text format it could copy.
 
@@ -67,9 +69,31 @@ export function cardProblems(spec) {
 }
 
 const pointer = id => '/elements/' + String(id).replace(/~/g, '~0').replace(/\//g, '~1');
-const lines = spec => [JSON.stringify({ op: 'add', path: '/root', value: spec.root }), ...Object.entries(spec.elements).map(([id, element]) => JSON.stringify({ op: 'add', path: pointer(id), value: element }))];
-/** A drawn card as it is kept in the answer: a pocket fence of JSON Lines, the same form every reader knows. */
-export const cardFence = spec => '```pocket\n' + lines(spec).join('\n') + '\n```';
+const CARD_ID = /^[a-z0-9]{4,24}$/;
+/** A new card's id: short enough for a model to repeat, random enough to be the only one in a chat. */
+export const newCardId = () => 'k' + Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => (byte % 36).toString(36)).join('');
+const lines = (spec, { id = '', updated = 0 } = {}) => [
+  ...(id ? [JSON.stringify({ op: 'add', path: '/id', value: id })] : []),
+  ...(updated ? [JSON.stringify({ op: 'add', path: '/updated', value: updated })] : []),
+  JSON.stringify({ op: 'add', path: '/root', value: spec.root }),
+  ...Object.entries(spec.elements).map(([key, element]) => JSON.stringify({ op: 'add', path: pointer(key), value: element }))];
+/**
+ * A drawn card as it is kept in the answer: a pocket fence of JSON Lines, the same form every reader knows. Its id
+ * is how it is found again; `updated` is when it was last changed after it was drawn.
+ */
+export const cardFence = (spec, mark = {}) => '```pocket\n' + lines(spec, mark).join('\n') + '\n```';
+
+const FENCES = /```pocket[ \t]*\n([\s\S]*?)\n```/g;
+/** The ids of the cards in a text, in order. */
+export const cardIds = text => [...String(text || '').matchAll(FENCES)].map(match => pocketSpec(match[1])?.id).filter(id => typeof id === 'string' && CARD_ID.test(id));
+/** The text with the card `id` replaced by `fence`, or null when no such card is in it. */
+export function replaceCard(text, id, fence) {
+  const source = String(text || '');
+  for (const match of source.matchAll(FENCES)) {
+    if (pocketSpec(match[1])?.id === id) return source.slice(0, match.index) + fence + source.slice(match.index + match[0].length);
+  }
+  return null;
+}
 
 /** "Chart “Weekly distance” + Text" for labels and for the record a replayed reply carries. */
 export function cardSummary(spec) {
@@ -83,7 +107,18 @@ export function drawCard(args) {
   const spec = cardFromTool(args);
   const problems = spec ? cardProblems(spec) : ['elements must be a list of {id, type, props, children}'];
   if (problems.length) return { error: 'card_invalid', message: 'The card was not drawn. Correct these and call show_card again: ' + problems.join('; ') + '.' };
-  return { kind: 'card', drawn: true, card: cardFence(spec), shows: cardSummary(spec) };
+  const id = newCardId();
+  return { kind: 'card', drawn: true, id, card: cardFence(spec, { id }), shows: cardSummary(spec) };
+}
+
+/** update_card as Pocket checks it: the new card and the id it replaces, or why it cannot. Placing it is the reply's job. */
+export function reviseCard(args) {
+  const id = String(args?.id || '').trim();
+  if (!CARD_ID.test(id)) return { error: 'card_not_found', message: 'Give the id of the card to change: show_card\'s result and the "[card <id> …]" records in earlier replies name it.' };
+  const spec = cardFromTool(args);
+  const problems = spec ? cardProblems(spec) : ['elements must be a list of {id, type, props, children}'];
+  if (problems.length) return { error: 'card_invalid', message: 'The card was not changed. Correct these and call update_card again: ' + problems.join('; ') + '.' };
+  return { kind: 'card', revise: true, id, spec, shows: cardSummary(spec) };
 }
 
 /**
@@ -128,6 +163,7 @@ export function cardsAsRecords(text) {
   return segmentAnswer(source).map(segment => {
     if (segment.kind === 'prose') return segment.text.replace(/\s+$/, '');
     const spec = normalizeSpec(pocketSpec(segment.source));
-    return '[card drawn here with show_card: ' + (spec?.elements ? cardSummary(spec) : 'card') + ']';
+    const id = typeof spec?.id === 'string' && CARD_ID.test(spec.id) ? spec.id : '';
+    return '[card' + (id ? ' ' + id : '') + ' drawn here with show_card: ' + (spec?.elements ? cardSummary(spec) : 'card') + (id ? '; change it with update_card' : '') + ']';
   }).filter(Boolean).join('\n\n');
 }

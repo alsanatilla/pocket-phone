@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { COROS_ARGUMENTS, COROS_INDEX, COROS_READS, COROS_WRITES, recordProblem } from './pip-tools.js';
-import { CARD_TOOL_DESCRIPTION } from '../shared/pocket-cards.js';
+import { CARD_TOOL_DESCRIPTION, CARD_UPDATE_DESCRIPTION } from '../shared/pocket-cards.js';
 
 // The model-facing contract of every Pip tool. The AI SDK sends these schemas as JSON Schema
 // and validates each call against them before it runs; tool behaviour lives in pip-tools.js.
@@ -18,6 +18,13 @@ const recordId = z.string().min(1).max(80).regex(/^[A-Za-z0-9_-]+$/).meta({ desc
 const line = z.string().min(1).max(160).regex(/^[^\r\n]+$/);
 const corosArguments = (name, description) => z.record(z.string(), z.unknown()).refine(value => JSON.stringify(value).length <= COROS_ARGUMENTS[name], 'Keep the COROS arguments under ' + COROS_ARGUMENTS[name] + ' characters.').meta({ description });
 const checked = problem => (value, context) => { const message = problem(value); if (message) context.addIssue({ code: 'custom', message }); };
+
+const cardElements = z.array(z.object({
+  id: z.string().min(1).max(80), type: z.string().max(40).meta({ description: 'A component name.' }),
+  props: z.record(z.string(), z.unknown()).optional(), children: z.array(z.string()).optional().meta({ description: 'Ids of child elements; empty for a leaf.' }),
+  on: z.record(z.string(), z.unknown()).optional()
+})).min(1).max(60);
+const cardRoot = z.string().max(80).meta({ description: 'The id of the top element.' });
 
 const DEFINITIONS = {
   update_training_preferences: ['Remember training preferences the user states in this conversation. Keep the existing brief when changing only days or pausing. When replacing the brief, retain still-valid goals, equipment and constraints; do not invent them. Put temporary soreness or fatigue in dated feedback, not permanent goals. Save before claiming to remember it. enabled pauses/resumes automatic planning only when the user asks.', object({
@@ -41,14 +48,8 @@ const DEFINITIONS = {
   update_scratch: ['Replace this scheduled job\'s notes, which only you read and which its next run receives: what you already reported, figures to compare next time, threads still open. Short and factual; the whole text is replaced each time.', object({ notes: z.string().max(2000).meta({ description: 'The complete notes for the next run, up to 2000 characters.' }) })],
   // Loose on purpose: Pocket checks the card itself and answers with the exact problems (pocket-card-tool.js),
   // which a model can act on; a schema rejection would only say that the arguments were invalid.
-  show_card: [CARD_TOOL_DESCRIPTION, z.object({
-    root: z.string().max(80).meta({ description: 'The id of the top element.' }),
-    elements: z.array(z.object({
-      id: z.string().min(1).max(80), type: z.string().max(40).meta({ description: 'A component name.' }),
-      props: z.record(z.string(), z.unknown()).optional(), children: z.array(z.string()).optional().meta({ description: 'Ids of child elements; empty for a leaf.' }),
-      on: z.record(z.string(), z.unknown()).optional()
-    })).min(1).max(60)
-  })],
+  show_card: [CARD_TOOL_DESCRIPTION, z.object({ root: cardRoot, elements: cardElements })],
+  update_card: [CARD_UPDATE_DESCRIPTION, z.object({ id: z.string().min(1).max(24).meta({ description: 'The id of the card to change.' }), root: cardRoot, elements: cardElements })],
   update_plan: ['Show or update a short plan for this reply. Changes only the displayed plan; never saves Pocket records.', object({ steps: z.array(object({ text: z.string().min(1).max(160), status: z.enum(['pending', 'in_progress', 'done']) })).min(1).max(6) })],
   create_record: ['Save a new note, task or appointment in Pocket. The user reviews it first and may edit, approve or decline it; the result says whether it was saved. Appointments need when; task due is YYYY-MM-DD.', object({
     kind: z.enum(['note', 'task', 'appointment']), title: z.string().min(1).max(200), text: z.string().max(6000), due: optional(z.string().max(10)),

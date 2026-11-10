@@ -109,3 +109,63 @@ test('draftLines waits for whole elements; cardProblems names what to fix', () =
   assert.match(drawCard({ root: 'a', elements: [{ id: 'a', type: 'Table', props: { columns: ['A', 'B'], rows: [['1']] } }] }).message, /one cell per column/);
   assert.match(drawCard({ root: 'a', elements: [{ id: 'a', type: 'Pie', props: {} }] }).message, /"Pie" is not a component/);
 });
+
+// ---- a card stays alive: update_card changes it where it stands ----------------------------------------------------
+const { replaceCard, cardIds, cardsAsRecords, cardFence } = await import('../src/shared/pocket-card-tool.js');
+const { normalizeAnswer } = await import('../src/shared/pip-reply.js');
+const withValue = value => ({ root: 'main', elements: [{ id: 'main', type: 'Metric', props: { label: 'Canyon Endurace', value, unit: '€' }, children: [] }] });
+const cardsOf = answer => segmentAnswer(answer).filter(segment => segment.kind === 'card').map(segment => pocketSpec(segment.source));
+
+test('a drawn card has an id the model is told, and update_card changes that card in the same reply', async t => {
+  const chat = workspace(t), sent = [];
+  const replies = [compatibleMessage({ text: 'The price today:', calls: [{ name: 'show_card', input: withValue(950), id: 'call_draw' }] })];
+  const result = await streamReply(chat, turn(), { key: 'fixture', fetcher: async (_url, options) => {
+    sent.push(JSON.parse(options.body));
+    if (replies.length) return response(replies.shift());
+    // The second round reads the id it was given and corrects the card; the third closes the reply.
+    const id = /"id":"(k[a-z0-9]+)"/.exec(toolResults(sent.at(-1)).join(' '))?.[1];
+    return response(sent.length === 2 ? compatibleMessage({ calls: [{ name: 'update_card', input: { id, ...withValue(899) }, id: 'call_update' }] }) : compatibleMessage({ text: 'Corrected: it dropped.' }));
+  } });
+  const [card] = cardsOf(result.answer);
+  assert.equal(cardsOf(result.answer).length, 1, 'changed in place, not drawn twice');
+  assert.match(card.id, /^k[a-z0-9]{6}$/); assert.equal(card.elements.main.props.value, 899); assert.ok(card.updated > 0);
+  assert.deepEqual(segmentAnswer(result.answer).map(segment => segment.kind), ['prose', 'card', 'prose']);
+  assert.match(toolResults(sent[2]).at(-1), /"updated":true/);
+  // The id and the time survive the clean form a reply is stored in.
+  assert.equal(normalizeAnswer(result.answer), result.answer);
+});
+
+test('update_card changes a card in an earlier reply, tells the path that keeps the chat, and names the cards when the id is wrong', async t => {
+  const chat = workspace(t), kept = [];
+  const old = cardFence({ root: 'main', elements: { main: { type: 'Metric', props: { label: 'Canyon Endurace', value: 950, unit: '€' }, children: [] } } }, { id: 'kprice1' });
+  chat.turns = [{ uid: 'earlier', text: 'Watch the bike', answer: 'Lowest so far:\n\n' + old + '\n\nI keep looking.', status: 'done', created: 1, updated: 5, context: [], activity: [] }];
+  const sent = [];
+  const result = await streamReply(chat, { uid: 'now', text: 'Any change?', context: [] }, { key: 'fixture', saveTurn: changed => { kept.push(structuredClone(changed)); },
+    fetcher: provider(sent,
+      compatibleMessage({ calls: [{ name: 'update_card', input: { id: 'kwrong9', ...withValue(899) }, id: 'call_wrong' }] }),
+      compatibleMessage({ calls: [{ name: 'update_card', input: { id: 'kprice1', ...withValue(899) }, id: 'call_right' }] }),
+      compatibleMessage({ text: 'It dropped to 899 €; the card above is current.' })) });
+  // The model saw the earlier card as a record with its id, never as a format.
+  const replayed = sent[0].messages.find(message => message.role === 'assistant');
+  assert.match(String(replayed.content), /\[card kprice1 drawn here with show_card: Metric “Canyon Endurace”; change it with update_card\]/);
+  assert.doesNotMatch(String(replayed.content), /```|"elements"/);
+  assert.match(toolResults(sent[1])[0], /card_not_found.*Cards here: kprice1/);
+  assert.match(toolResults(sent[2]).at(-1), /"updated":true.*an earlier reply/);
+  assert.equal(kept.length, 1); assert.equal(kept[0].uid, 'earlier'); assert.ok(kept[0].updated > 5);
+  const [card] = cardsOf(kept[0].answer);
+  assert.equal(card.id, 'kprice1'); assert.equal(card.elements.main.props.value, 899); assert.ok(card.updated > 0);
+  assert.match(kept[0].answer, /^Lowest so far:\n\n```pocket[\s\S]*```\n\nI keep looking\.$/, 'the words around the card are untouched');
+  assert.equal(cardsOf(result.answer).length, 0, 'no second card in the new reply');
+});
+
+test('cards are found and replaced by id only', () => {
+  const a = cardFence({ root: 'm', elements: { m: { type: 'Text', props: { text: 'a' }, children: [] } } }, { id: 'kaaaa11' });
+  const b = cardFence({ root: 'm', elements: { m: { type: 'Text', props: { text: 'b' }, children: [] } } }, { id: 'kbbbb22' });
+  const legacy = '```pocket\n{"op":"add","path":"/root","value":"m"}\n{"op":"add","path":"/elements/m","value":{"type":"Text","props":{"text":"old"},"children":[]}}\n```';
+  const text = 'One\n\n' + a + '\n\nTwo\n\n' + legacy + '\n\n' + b;
+  assert.deepEqual(cardIds(text), ['kaaaa11', 'kbbbb22']);
+  assert.equal(replaceCard(text, 'kzzzz99', a), null);
+  const changed = replaceCard(text, 'kbbbb22', cardFence({ root: 'm', elements: { m: { type: 'Text', props: { text: 'B!' }, children: [] } } }, { id: 'kbbbb22', updated: 7 }));
+  assert.ok(changed.startsWith('One\n\n' + a + '\n\nTwo\n\n' + legacy)); assert.match(changed, /"B!"/); assert.doesNotMatch(changed, /"text":"b"/);
+  assert.match(cardsAsRecords(text), /\[card drawn here with show_card: Text\]/, 'a card from before ids is a record without one');
+});

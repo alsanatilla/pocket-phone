@@ -331,7 +331,9 @@ export class ReplyRunner {
     };
     let outcome = null, refused = null;
     try {
-      const reply = await (remote ? remote.stream : this.stream)(chat, turn, { key, signal: active.controller.signal, resume: checkpoint, approve: (requests, signal) => this.waitForApproval(active, requests, signal), onUpdate: fields => {
+      // An earlier reply whose card this reply changed (update_card) is kept in the store; the run on the server keeps its own.
+      const saveTurn = changed => this.store.update(uid, c => { const earlier = c.turns.find(t => t.uid === changed.uid); if (earlier) { earlier.answer = changed.answer; earlier.updated = changed.updated; } });
+      const reply = await (remote ? remote.stream : this.stream)(chat, turn, { key, signal: active.controller.signal, resume: checkpoint, saveTurn, approve: (requests, signal) => this.waitForApproval(active, requests, signal), onUpdate: fields => {
         let checkpointReady = false;
         for (const row of fields.activity || []) if (row.result) { const marker = row.id + "|" + row.result; if (!savedResults.has(marker)) { savedResults.add(marker); checkpointReady = true; } }
         update(fields, checkpointReady);

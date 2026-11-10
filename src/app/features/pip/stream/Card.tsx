@@ -81,11 +81,21 @@ export const Card = memo(function Card({ source, closed, streaming, onAsk }: { s
   // Containers alone draw nothing: until the first visible element has arrived, the placeholder holds the place.
   if (!spec || !visible(spec)) return streaming && !closed ? <Placeholder /> : null;
   if (isLegacySpec(spec)) return <div className="not-prose my-3"><LegacyCard spec={spec} /></div>;
+  // A card Pip changed after it drew it (update_card) says when: the figures are newer than the words around them.
+  const updated = Number((spec as { updated?: unknown }).updated) || 0;
   return (
-    <div className="not-prose my-3">
+    <div className="not-prose my-3" data-card={(spec as { id?: string }).id || undefined}>
       <JSONUIProvider registry={registry} store={momentStore()} handlers={handlers}>
         <Renderer spec={spec} registry={registry} loading={streaming && !closed} />
       </JSONUIProvider>
+      {updated ? <p className="mt-1.5 text-xs text-dim">updated <time dateTime={new Date(updated).toISOString()}>{stamp(updated)}</time></p> : null}
     </div>
   );
 });
+
+/** "14:32" today, "Mon 14:32" this week, "3 Nov" before that. */
+function stamp(at: number): string {
+  const date = new Date(at), age = Date.now() - at, time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  if (date.toDateString() === new Date().toDateString()) return time;
+  return age < 6 * 864e5 ? date.toLocaleDateString([], { weekday: "short" }) + " " + time : date.toLocaleDateString([], { day: "numeric", month: "short" });
+}
