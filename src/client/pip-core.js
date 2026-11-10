@@ -234,11 +234,11 @@ export class ReplyRunner {
     this.active = active;
     let shown = false;
     // Deltas only redraw; the chat is saved when the reply starts and when it ends (the server keeps the record).
-    const update = (fields, save = false) => {
+    const update = ({ blocks, ...fields }, save = false) => {
       if (this.active !== active || active.controller.signal.aborted || !active.turn) return;
       Object.assign(active.turn, fields);
       if (save) this.store.update(uid, c => { const kept = c.turns.find(t => t.uid === active.turnId); if (kept) Object.assign(kept, active.turn); });
-      this.onChange({ type: "delta", chatId: uid, turn: copy(active.turn) });
+      this.onChange({ type: "delta", chatId: uid, turn: copy(active.turn), ...(blocks ? { blocks } : {}) });
     };
     try {
       const reply = await follow(chat, null, { attach: true, signal: active.controller.signal, approve: (requests, signal) => this.waitForApproval(active, requests, signal),
@@ -319,14 +319,15 @@ export class ReplyRunner {
     this.active = active; this.onChange({ type: "started", chatId: uid });
     let lastSave = 0;
     const savedResults = new Set((turn.activity || []).filter(row => row.result).map(row => row.id + "|" + row.result));
-    const update = (fields, force = false) => {
+    // `blocks` is how a streamed reply is drawn while it runs; it is passed on to the view and never stored.
+    const update = ({ blocks, ...fields }, force = false) => {
       if (this.active !== active || active.controller.signal.aborted) return;
       if (active.account !== activeAccount()) { active.controller.abort(); return; }
       const current = this.store.get(uid)?.turns.find(t => t.uid === turn.uid);
       if (!current || current.attempt !== active.attempt) { active.controller.abort(); return; }
       Object.assign(turn, fields);
       if (force || Date.now() - lastSave >= 120) { this.store.update(uid, c => Object.assign(c.turns.find(t => t.uid === turn.uid), turn)); lastSave = Date.now(); }
-      this.onChange({ type: "delta", chatId: uid, turn: copy(turn) });
+      this.onChange({ type: "delta", chatId: uid, turn: copy(turn), ...(blocks ? { blocks } : {}) });
     };
     let outcome = null, refused = null;
     try {

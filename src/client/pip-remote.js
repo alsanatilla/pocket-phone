@@ -1,6 +1,7 @@
 import { account, connected, post, request } from './cloud.js';
 import { access } from './pip-tools.js';
 import * as live from './live.js';
+import { answerOf, applyOps, emptyReply, segmentsOf } from '../shared/pip-blocks.js';
 
 // A signed-in chat can run on Pocket's server instead of this tab. The run keeps its own provider messages and
 // decisions, so the reply survives a closed tab, another device can settle an approval, and a reload reattaches
@@ -102,6 +103,31 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
     for (const field of ['activity', 'sources']) if (Array.isArray(turn[field])) shown[field] = turn[field];
     return { ...turn, ...shown };
   };
+  /**
+   * The reply as the live socket streams it: blocks and the number of the last change applied (pip-blocks.js). The
+   * chat draws these blocks as they are; nothing here parses the answer while it streams.
+   */
+  const stream = { seq: 0, state: emptyReply(), asking: false };
+  const liveTurn = () => ({ answer: answerOf(stream.state.blocks), blocks: segmentsOf(stream.state.blocks), reasoning: stream.state.reasoning,
+    activity: stream.state.activity, sources: stream.state.sources, usage: { ...stream.state.usage, runtime: 'pocket-server' }, model: stream.state.model || turn?.model, phase: stream.state.phase || 'requesting' });
+  /** Asks for the changes after this tab's number (or the whole state) and applies them. One request at a time. */
+  const catchUp = async id => {
+    if (stream.asking) return;
+    stream.asking = true;
+    try { const missed = await live.call('run.resume', { runId: id, after: stream.seq }, 8000); for (const event of missed?.events || []) take(event); }
+    catch { /* the socket went away; the caller falls back to the run's own stream */ }
+    finally { stream.asking = false; }
+  };
+  /** One numbered change. Old ones are skipped; one that does not follow the last is a gap. Returns whether it applied. */
+  const take = event => {
+    const reset = event.ops.length === 1 && event.ops[0].o === 'reset';
+    if (!reset && event.seq <= stream.seq) return true;
+    if (!reset && event.seq !== stream.seq + 1) return false;
+    if (!applyOps(stream.state, event.ops)) { stream.seq = 0; return false; }
+    stream.seq = event.seq; changed = Date.now();
+    onUpdate(liveTurn());
+    return true;
+  };
   /** Requests this tab has decided: a frame read before a decision landed still shows it pending. */
   const decided = new Set();
   // A submitting tab follows its own request; an attaching tab follows whatever runs in the chat, then that run.
@@ -129,8 +155,10 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
     if (!run) { if (runId) throw new Error('This reply is no longer available on the server.'); return attach ? { none: true } : null; }
     if (!runId) onRun(run);
     runId = run.runId;
-    const turnNow = merge(view);
-    if (turnNow?.gap) { live.request('resync', { runId }); return null; }
+    // While the socket streams a running reply, the record read here is behind it (it is a checkpoint): what is on
+    // screen stays what the stream says, and the record decides only what the run is doing.
+    const turnNow = stream.seq && !streamed && ['running', 'queued'].includes(run.status) ? { ...run.turn, ...liveTurn() } : merge(view);
+    if (turnNow?.gap) return null;
     // Live progress: the run's own turn carries the answer so far, its tool activity and its phase. The runtime
     // marker is what the chat shows as “on the server”, so a reply can be told apart from a tab-run one.
     // A streamed frame is a change by construction; a polled view may repeat the last one.
@@ -138,7 +166,7 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
     if (streamed || mark !== seen) {
       seen = mark; changed = Date.now();
       if (turnNow) onUpdate({ answer: turnNow.answer || '', reasoning: turnNow.reasoning || '', activity: turnNow.activity || [],
-        sources: turnNow.sources || [], usage: { ...(turnNow.usage || {}), runtime: 'pocket-server' }, model: turnNow.model || turn.model, phase: turnNow.phase || 'requesting' });
+        sources: turnNow.sources || [], usage: { ...(turnNow.usage || {}), runtime: 'pocket-server' }, model: turnNow.model || turn?.model, phase: turnNow.phase || 'requesting', ...(turnNow.blocks ? { blocks: turnNow.blocks } : {}) });
     }
     if (run.status === 'done') return { ...turnNow, phase: 'done' };
     if (run.status === 'failed') throw new Error(turnNow?.error || 'The server reply failed.');
@@ -190,18 +218,20 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
       if (message.type !== 'event' || message.event !== 'run' || !mine(message.data)) return;
       const data = message.data; quiet = Date.now();
       const known = Boolean(runId);
-      if (data.kind === 'progress') handle(() => step({ run: { runId: data.runId, status: 'running', turn: data.turn }, append: data.append, at: data.at, requests: [] }, true));
+      // A change to the reply is applied as it is; any other step of the run (waiting, done, …) reads its record once.
+      if (data.kind === 'delta') { if (!take(data)) void catchUp(data.runId); }
       else handle(async () => step(await look()));
-      // The first frame this tab hears of a run may be a delta: get the whole state once the run is known.
-      if (!known && data.runId) { runId ||= data.runId; live.request('resync', { runId: data.runId }); }
+      // The first thing this tab hears of a run it did not start: its record says which turn it is.
+      if (!known && data.runId && data.kind === 'delta') handle(async () => step(await look()));
     });
     // A safety net while nothing arrives (a step lost while reconnecting): read the record now and then.
     const watchdog = setInterval(() => { if (Date.now() - quiet > 10_000) { quiet = Date.now(); handle(async () => step(await look())); } }, 2500);
     const aborted = () => finish({ live: true });
     signal?.addEventListener('abort', aborted, { once: true });
     // The state as it is now first; then every change as it happens.
-    handle(async () => step(await look()));
-    if (runId) live.request('resync', { runId });
+    // The record first (which run, which turn), then the stream from its start: this tab may have joined mid-way.
+    stream.seq = 0; stream.state = emptyReply();
+    handle(async () => { const done = await step(await look()); if (!done && runId) await catchUp(runId); return done; });
   });
 
   /**
@@ -212,6 +242,8 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
   const follow = async () => {
     const opened = Date.now(), watch = new AbortController(), cut = () => watch.abort();
     signal?.addEventListener('abort', cut, { once: true }); unwatch = cut;
+    // The account's socket connected meanwhile (a page that loaded mid-reply): leave this stream for it.
+    const upgraded = live.on(message => { if (message.type === 'hello') cut(); });
     try {
       const response = await fetch('/api/pip/runs/stream?' + where() + '&after=' + cursor,
         { credentials: 'same-origin', headers: { accept: 'text/event-stream' }, signal: watch.signal }).catch(() => null);
@@ -225,7 +257,7 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
       }
       if (!watch.signal.aborted && Date.now() - opened < POLL) await wait(signal, POLL - (Date.now() - opened));
       return { live: true };
-    } finally { signal?.removeEventListener('abort', cut); unwatch = () => {}; watch.abort(); }
+    } finally { upgraded(); signal?.removeEventListener('abort', cut); unwatch = () => {}; watch.abort(); }
   };
 
   try {

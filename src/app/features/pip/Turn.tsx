@@ -12,6 +12,7 @@ import { Prose } from "./stream/Prose.tsx";
 import { ledger, ledgerTitle, offersOf, planOf, sourcesOf } from "./reply.ts";
 import { resume, retry, send } from "./runner.ts";
 import { hrefFor } from "../../lib/classic.ts";
+import type { Segment } from "../../../shared/pip-reply.js";
 
 // One exchange: the question, then Pip's reply with its parts in reading order: what it looked up (folded to one
 // line once the reply is done), its plan, its reasoning, the answer with its cards, sources, and what it offers.
@@ -52,14 +53,14 @@ function useCardButtons(chatId: string, locked: boolean) {
   };
 }
 
-interface TurnProps { turn: ChatTurn; live: Partial<ChatTurn> | null; chatId: string; latest: boolean; locked: boolean }
+interface TurnProps { turn: ChatTurn; live: Partial<ChatTurn> | null; blocks?: Segment[]; chatId: string; latest: boolean; locked: boolean }
 
 /**
  * Re-renders only when this exchange changed: its saved version (turns carry `updated`), its live copy while it
  * streams, or whether it is the latest or locked. Every other exchange stays put while one reply streams.
  */
 export const Turn = memo(TurnView, (before, after) =>
-  before.live === after.live && before.chatId === after.chatId && before.latest === after.latest && before.locked === after.locked
+  before.live === after.live && before.blocks === after.blocks && before.chatId === after.chatId && before.latest === after.latest && before.locked === after.locked
   && sameTurn(before.turn, after.turn));
 
 /** The store re-parses chats on every read, so objects are always new; the store stamps a turn's content change. */
@@ -69,7 +70,7 @@ function sameTurn(a: ChatTurn & { updated?: number }, b: ChatTurn & { updated?: 
   return a.status === b.status && a.answer === b.answer && JSON.stringify(a.activity) === JSON.stringify(b.activity);
 }
 
-function TurnView({ turn, live, chatId, latest, locked }: TurnProps) {
+function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
   const shown: ChatTurn = live ? { ...turn, ...live } as ChatTurn : turn;
   const streaming = Boolean(live);
   const rows = ledger(shown, streaming);
@@ -114,7 +115,7 @@ function TurnView({ turn, live, chatId, latest, locked }: TurnProps) {
         {shown.reasoning ? <Fold title="reasoning"><Prose text={shown.reasoning} streaming={streaming && !shown.answer} className="text-xs text-muted-foreground" /></Fold> : null}
 
         {/* Classic cards' buttons answer through data attributes; the click is caught here. */}
-        {shown.answer ? <div {...cards}><Answer text={shown.answer} streaming={streaming} onAsk={ask} /></div> : null}
+        {shown.answer ? <div {...cards}><Answer text={shown.answer} blocks={blocks} streaming={streaming} onAsk={ask} /></div> : null}
 
         {streaming && !shown.answer ? <Thinking label={phaseLabel(shown.phase || "thinking")} /> : null}
 

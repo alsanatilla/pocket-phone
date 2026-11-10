@@ -71,7 +71,7 @@ cookie and Pocket's own origin. The server pushes what happens in the account (`
 
 | Event | Sent when | The tab does |
 |---|---|---|
-| `run` · `progress` | every change of a reply executing in the web process, at most one frame per 33 ms per reply, as deltas (`src/server/pip-frames.js`) with the offset they start at | draws it; a gap (missed frame) asks `resync` for the whole state |
+| `run` · `delta` | every change of a running reply as numbered block changes, at most one per 33 ms per reply (see below) | applies it; a gap asks `run.resume` for what it missed |
 | `run` · `queued`, `started`, `awaiting`, `decision`, `done`, `failed`, `stopped` | each recorded step of a run | reads the run's record once; an open chat with no reply of its own attaches (`ReplyRunner.attach`) |
 | `objects`, `documents` | a chat, note, task … was written by any device | pulls within 250 ms |
 
@@ -106,3 +106,24 @@ what can be drawn.
 
 Measured on 2026-11-09 with the real pipeline, four requests each (chart, table, choices, tiles): DeepSeek V4.1
 Flash 4/4, GLM 5.3 4/4 (two after one correction), Kimi K3.1 Pro 4/4.
+
+## A reply streams as numbered block changes
+
+A reply is a list of blocks (prose, and cards where Pip drew them). While a reply runs, followers get changes to
+those blocks, not text to parse (`src/shared/pip-blocks.js`, used by both ends):
+
+- **One encoder per run, in the web process** (`src/server/pip-run-stream.js`). It takes the run's turn as it changes
+  (from a reply executing here, or forwarded by the worker), cuts the answer into blocks once, and publishes what
+  changed since its last event: `{ kind: 'delta', runId, chat, requestId, seq, ops }`, at most one per 33 ms. Ops:
+  `add`, `append`, `set`, `close`, `cut` for blocks; `think`/`thought` for reasoning; `meta` for activity, sources,
+  phase, model and usage when they changed; `reset` for the whole state.
+- **Every socket of the account gets the same events.** A socket that cannot keep up skips some.
+- **Numbers make it resumable.** A tab applies event `seq` only after `seq - 1`. On a gap, or when it joins mid-way,
+  it asks `run.resume { runId, after }` and gets the events it missed from the last 400, or the whole state as one
+  `reset`.
+- **The chat draws blocks as they are** (`Answer` takes `blocks`); nothing in the browser parses the answer while it
+  streams. The record read on a step of the run is a checkpoint and never moves the screen backwards.
+- **Stored answers are unchanged**: the finished turn is the normalized text (prose and `pocket` fences), which is
+  the same blocks written out. Blocks are never stored on a turn.
+- A tab without the socket still follows over SSE with text deltas (`pip-frames.js`), and leaves that stream as soon
+  as the socket connects.

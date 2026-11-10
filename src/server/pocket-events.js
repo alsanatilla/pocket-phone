@@ -7,7 +7,8 @@
 // process over a local endpoint (POCKET_EVENTS_URL with POCKET_EVENTS_SECRET, set by services/server/start.mjs).
 // Events are hints and deltas, never the record: a client that missed one reads the record again.
 
-const hub = globalThis.__pocketEvents ??= { subscribers: new Map() };
+const hub = globalThis.__pocketEvents ??= { subscribers: new Map(), taps: new Set() };
+hub.taps ??= new Set();
 
 /** Listens to one account's events. Returns the function that stops listening. */
 export function subscribe(userId, listener) {
@@ -17,12 +18,19 @@ export function subscribe(userId, listener) {
   return () => { set.delete(listener); if (!set.size) hub.subscribers.delete(userId); };
 }
 
+/**
+ * Sees every event of every account before its listeners do. The web process uses it to turn a run's progress into
+ * the numbered changes its sockets send (pip-run-stream.js).
+ */
+export function tap(listener) { hub.taps.add(listener); return () => hub.taps.delete(listener); }
+
 /** Whether anyone in this process listens to the account. */
 export const listening = userId => Boolean(hub.subscribers.get(userId)?.size);
 
 /** Tells the account's listeners. Never throws: an event is a courtesy, the record is already written. */
 export function publish(userId, event) {
   if (!userId || !event?.type) return;
+  for (const tap of [...hub.taps]) { try { tap(userId, event); } catch { /* a tap's own problem */ } }
   for (const listener of [...(hub.subscribers.get(userId) || [])]) {
     try { listener(event); } catch { /* one broken listener does not stop the others */ }
   }

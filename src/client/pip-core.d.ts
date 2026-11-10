@@ -21,7 +21,9 @@ export class ChatStore {
 }
 
 export interface ActiveReply { chatId: string; turnId: string; turn: Partial<ChatTurn> }
-export interface RunnerEvent { type: "started" | "delta" | "finished" | "approval"; chatId: string; turn?: Partial<ChatTurn> }
+export interface RunnerEvent { type: "started" | "delta" | "finished" | "approval"; chatId: string; turn?: Partial<ChatTurn>;
+  /** A streamed reply as the blocks to draw, while it runs on the server. */
+  blocks?: import("../shared/pip-reply.js").Segment[] }
 
 export interface RunnerOptions {
   key?: (value: PipConfig, chat: Chat) => unknown;

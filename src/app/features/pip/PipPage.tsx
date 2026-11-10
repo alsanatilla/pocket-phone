@@ -101,7 +101,8 @@ export function PipPage() {
           ? <Empty onAsk={prompt => { const target = chat ?? createChat(); if (!chat) open(target.uid); send(target.uid, prompt).catch(toastError); }} />
           : chat.turns.map((turn, index) => (
             <Turn key={turn.uid} turn={turn} chatId={chat.uid} latest={index === chat.turns.length - 1} locked={locked}
-              live={live && live.chatId === chat.uid && live.turnId === turn.uid ? live.turn : null} />
+              live={live && live.chatId === chat.uid && live.turnId === turn.uid ? live.turn : null}
+              blocks={live && live.chatId === chat.uid && live.turnId === turn.uid ? live.blocks : undefined} />
           ))}
       </div>
 

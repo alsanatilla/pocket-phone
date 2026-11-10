@@ -1,13 +1,18 @@
 import { memo, useMemo } from "react";
 import { Card } from "./Card.tsx";
 import { Prose } from "./Prose.tsx";
-import { segmentAnswer } from "./segments.ts";
+import { segmentAnswer, type Segment } from "./segments.ts";
 
 // A reply's text with its cards in place, as it streams: prose block by block, each card element by element.
 // Segment keys only ever grow at the end, so everything already on screen keeps its component.
 
-export const Answer = memo(function Answer({ text, streaming, onAsk }: { text: string; streaming: boolean; onAsk: (prompt: string) => void }) {
-  const segments = useMemo(() => segmentAnswer(text), [text]);
+/**
+ * `blocks` is a reply the server streams already cut into prose and cards: they are drawn as they are. Without
+ * them (a finished reply, or one that runs in this tab) the text is cut here, once per change.
+ */
+export const Answer = memo(function Answer({ text, blocks, streaming, onAsk }: { text: string; blocks?: Segment[]; streaming: boolean; onAsk: (prompt: string) => void }) {
+  const cut = useMemo(() => (blocks ? null : segmentAnswer(text)), [blocks, text]);
+  const segments = blocks ?? cut ?? [];
   return (
     <div className="text-[15px]">
       {segments.map((segment, index) => {

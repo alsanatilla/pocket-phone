@@ -7,6 +7,7 @@ import * as liveSocket from "../../../client/live.js";
 import { suggestTitle } from "../../../client/pip-title.js";
 import { trainingChatRoutine, trainingReply } from "../../../client/pip-training-chat.js";
 import { chats, type ChatTurn } from "../../data/chats.ts";
+import type { Segment } from "../../../shared/pip-reply.js";
 
 // One reply runner for the whole app, wired like the classic chat's:
 // - a signed-in chat always runs on Pocket's server (it survives a closed tab); a guest's runs in this tab;
@@ -15,7 +16,8 @@ import { chats, type ChatTurn } from "../../data/chats.ts";
 // - writes Pip asks for wait for the person's decision (approvals).
 // Views read the live turn and the approval state through useLiveReply().
 
-export interface LiveReply { chatId: string; turnId: string; turn: Partial<ChatTurn>; version: number }
+/** `blocks`: the reply already cut into prose and cards by the server, while it streams from there. */
+export interface LiveReply { chatId: string; turnId: string; turn: Partial<ChatTurn>; blocks?: Segment[]; version: number }
 
 let live: LiveReply | null = null;
 let version = 0;
@@ -43,7 +45,8 @@ const runner = new ReplyRunner(chats, {
   title: suggestTitle,
   onChange: (event: RunnerEvent) => {
     const active = runner.active;
-    live = active ? { chatId: active.chatId, turnId: active.turnId, turn: event.turn ?? live?.turn ?? active.turn, version: ++version } : null;
+    const blocks = event.type === "delta" ? event.blocks : live?.turnId === active?.turnId ? live?.blocks : undefined;
+    live = active ? { chatId: active.chatId, turnId: active.turnId, turn: event.turn ?? live?.turn ?? active.turn, ...(blocks ? { blocks } : {}), version: ++version } : null;
     // A delta waits for the next frame; the start, approvals and the end of a reply paint at once.
     if (event.type === "delta") schedule();
     else { if (frame) { (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout)(frame); frame = 0; } emit(); }
@@ -78,7 +81,7 @@ export function watchChat(chatId: string): () => void {
   look();
   return liveSocket.on(message => {
     if (message.type === "hello") look();
-    if (message.type === "event" && message.event === "run" && message.data.chat === chatId && ["queued", "started", "progress", "continued"].includes(message.data.kind)) look();
+    if (message.type === "event" && message.event === "run" && message.data.chat === chatId && ["queued", "started", "delta", "continued"].includes(message.data.kind)) look();
   });
 }
 

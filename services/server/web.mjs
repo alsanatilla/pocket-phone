@@ -1,7 +1,8 @@
 // Pocket's web process: Astro's Node build for pages and the API, plus the account's live socket at /api/live.
 //
 // One WebSocket per open tab carries what happens in the account as it happens (src/server/pocket-events.js): a
-// reply starting, growing and ending, a decision it waits for, records changed on another device, a job's result.
+// reply starting, growing block by block as numbered changes (src/server/pip-run-stream.js) and ending, a decision
+// it waits for, records changed on another device, a job's result.
 // Pip's run commands (send, decide, stop, continue) travel over the same socket as requests ({ type: 'req', id,
 // method: 'pip.runs', params } → { type: 'res', id, ok, payload | error }). Each is handed to the same endpoint a POST
 // reaches (/api/pip/runs), with the socket's session and origin, so authentication, checks and logic live in one
@@ -13,13 +14,12 @@ import { WebSocketServer } from 'ws';
 process.env.ASTRO_NODE_AUTOSTART = 'disabled';
 const { handler } = await import('../../dist/server/entry.mjs');
 const { authFor } = await import('../../src/server/auth.js');
-const { subscribe, receive } = await import('../../src/server/pocket-events.js');
-const { compactFrame } = await import('../../src/server/pip-frames.js');
+const { subscribe, receive, tap } = await import('../../src/server/pocket-events.js');
+const stream = await import('../../src/server/pip-run-stream.js');
 
 const PORT = Number(process.env.PORT) || 8080, HOST = process.env.HOST || '0.0.0.0';
 const SECRET = process.env.POCKET_EVENTS_SECRET || '';
-/** One frame per reply per socket at most this often: smooth to read, a burst of tokens costs one frame. */
-const FRAME = 33, PING = 25000, BUFFERED = 1 << 20;
+const PING = 25000, BUFFERED = 1 << 20;
 const log = (level, fields) => console.log(JSON.stringify({ at: new Date().toISOString(), level, ...fields }));
 
 const sameSecret = value => {
@@ -79,36 +79,21 @@ async function command(path, params, as) {
 /** The commands a tab may send over its socket, and where each goes. Nothing else is reachable this way. */
 const COMMANDS = { 'pip.runs': '/api/pip/runs' };
 
+// A run's progress (its whole turn, from this process or the worker) becomes numbered changes, once per run for all
+// of the account's sockets; a step of the run sends what is pending first, and its end closes the stream.
+tap((userId, event) => {
+  if (event.type !== 'run') return;
+  if (event.kind === 'progress') stream.feed(userId, event);
+  else if (event.kind !== 'delta') stream.settle(event.runId, ['done', 'failed', 'stopped'].includes(event.kind));
+});
+
 function open(ws, userId, as) {
   let alive = true;
   const send = message => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message)); };
-  // Per reply: what this socket already has (for deltas), and the latest progress waiting for its frame.
-  const runs = new Map();
-  const flush = runId => {
-    const state = runs.get(runId);
-    if (!state?.pending) return;
-    const event = state.pending; state.pending = null; state.last = Date.now(); state.latest = event;
-    // A socket that cannot keep up gets its next frame whole instead of a chain of deltas it may have missed.
-    if (ws.bufferedAmount > BUFFERED) { state.sent = {}; return; }
-    const frame = compactFrame({ run: { runId, chat: event.chat, status: 'running', turn: event.turn } }, state.sent);
-    send({ type: 'event', event: 'run', data: { runId, kind: 'progress', chat: event.chat, requestId: event.requestId, turn: frame.run.turn, ...(frame.append ? { append: frame.append, at: frame.at } : {}) } });
-  };
   const stop = subscribe(userId, event => {
-    if (event.type === 'run' && event.kind === 'progress') {
-      let state = runs.get(event.runId);
-      if (!state) runs.set(event.runId, state = { sent: {}, pending: null, last: 0, timer: null });
-      state.pending = event;
-      if (state.timer) return;
-      const wait = Math.max(0, FRAME - (Date.now() - state.last));
-      state.timer = setTimeout(() => { state.timer = null; flush(event.runId); }, wait);
-      return;
-    }
-    if (event.type === 'run') {
-      // A step of the run (started, awaiting, done, …): progress waiting for its frame goes first.
-      const state = runs.get(event.runId);
-      if (state) { clearTimeout(state.timer); state.timer = null; flush(event.runId); }
-      if (['done', 'failed', 'stopped'].includes(event.kind)) runs.delete(event.runId);
-    }
+    if (event.type === 'run' && event.kind === 'progress') return; // sent as deltas
+    // A socket that cannot keep up skips changes; it sees the gap in their numbers and asks for what it missed.
+    if (event.type === 'run' && event.kind === 'delta' && ws.bufferedAmount > BUFFERED) return;
     send({ type: 'event', event: event.type, data: event });
   });
   send({ type: 'hello', accountId: userId, at: Date.now() });
@@ -122,7 +107,6 @@ function open(ws, userId, as) {
     if (message?.type !== 'req') return;
     // A round trip, which tells the tab the connection is really there.
     if (message.method === 'ping') send({ type: 'res', id: message.id, ok: true });
-    // A tab that started following a reply mid-way, or missed a frame, gets the whole state in the next frame.
     if (Object.hasOwn(COMMANDS, message.method)) {
       command(COMMANDS[message.method], message.params, as)
         .then(({ status, value }) => send(status < 400
@@ -131,13 +115,11 @@ function open(ws, userId, as) {
         .catch(() => send({ type: 'res', id: message.id, ok: false, error: { status: 503, message: 'Pocket did not answer. Try again.' } }));
       return;
     }
-    if (message.method === 'resync' && typeof message.params?.runId === 'string') {
-      const state = runs.get(message.params.runId);
-      if (state) { state.sent = {}; state.pending ||= state.latest; clearTimeout(state.timer); state.timer = null; flush(message.params.runId); }
-      send({ type: 'res', id: message.id, ok: true });
-    }
+    // A tab that joins a reply mid-way, or missed changes, gets those after its own number (or the whole state).
+    if (message.method === 'run.resume' && typeof message.params?.runId === 'string')
+      send({ type: 'res', id: message.id, ok: true, payload: stream.resume(userId, message.params.runId, Number(message.params.after) || 0) });
   });
-  ws.on('close', () => { clearInterval(beat); stop(); for (const state of runs.values()) clearTimeout(state.timer); });
+  ws.on('close', () => { clearInterval(beat); stop(); });
 }
 
 server.listen(PORT, HOST, () => log('info', { message: 'Pocket web listening', port: PORT, live: '/api/live' }));
