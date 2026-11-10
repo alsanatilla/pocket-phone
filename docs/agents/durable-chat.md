@@ -209,9 +209,97 @@ one short section "A chat has a numbered log" describing what now exists, in the
 No client changes (`src/client`, `src/app`). Do not change `mergeObject`, `sanitizeObject` or `validObject`. Do not
 change what `readObjects` returns.
 
-## T3 — The tab applies chat events (not ready)
+## T3 — The tab applies chat changes by number instead of pulling the chat (ready)
 
-The open chat applies events from `chat.events` instead of pulling the object; a gap falls back to the pull.
+T2 is merged: every chat write is logged, `writeObject` returns `seq`, the `objects` event of a chat carries `seq`
+and (when small) `events`, and `chat.events` / `POST /api/objects/chat-events` return the events after a number.
+Read the section "A chat has a numbered log" in `docs/pip-message-flow.md`.
+
+Today a tab that hears `objects` waits 250 ms and runs a whole sync, which pulls the chat again
+(`src/app/runtime.ts`, `src/client/object-sync.js`). After this task a tab that knows which number its copy of a chat
+is at applies the changes directly and pulls only when it cannot.
+
+### The rule
+
+A tab's copy of a chat **is at number N** when it last took the whole chat from the server at N, or applied events
+up to N, and has not changed it locally since. Only then may events be applied. In every other case the tab does
+what it does today (the pull). There is no third way.
+
+### 1. Server: `readObjects` says which number each chat is at
+
+`src/server/objects.js`, `readObjects`: for `collection === 'chats'` the result gains
+`seqs: { [uid]: number }`, the head of each returned chat's log (0 when it has none). The chats and their heads must
+come from the same moment: run both queries in one read transaction (`database().transaction('read')`, closed in a
+`finally`). Zines get no `seqs`. Nothing else in the result changes.
+
+### 2. Client: `src/client/chat-follow.js` (new, with `chat-follow.d.ts`)
+
+Imports only `storage` (`./workspace-storage.js`), `marker` (`./persistence-events.js`) and `applyChatEvents`
+(`../shared/chat-log.js`). It must load in Node for the tests, so it never imports `cloud.js` or `live.js`.
+
+Keys: the chat is at `pocket:pip-chat:<uid>` (as in `object-sync.js`), its number at `pocket:chat-seq:<uid>`.
+A chat is **clean** when `storage.getItem(marker('chats', uid))` is empty and `pocket:chat-ack:<uid>` is set.
+
+- `chatAt(uid)` → the number the tab's copy is at, or `null` when unknown (no key, or the chat is not clean).
+- `noteChat(uid, seq, matches)` → called when a whole chat was taken from the server. When `matches` is true and
+  `seq` is a safe integer ≥ 0, stores it; otherwise removes the key.
+- `applyChat(uid, events, head)` → boolean. Applies when all of this holds, else changes nothing and returns false:
+  the chat is stored and clean; `events` is a non-empty array whose `seq` values are consecutive; the first is
+  `chatAt(uid) + 1`; the last equals `head`. Applying: `applyChatEvents(local, events)` (strip `seq` and `at` from
+  each event first), write the chat, store `head` as its number, and
+  `dispatchEvent(new Event('pocket-objects-synced'))` (guard with `typeof dispatchEvent === 'function'`).
+  Events at or below `chatAt(uid)` are dropped before the check (a change the tab already has); if none remain and
+  `chatAt(uid) >= head`, return true without writing.
+- `followChat(change, ask)` → `Promise<boolean>`: true when the tab's copy is at `change.seq` afterwards.
+  `change` is the data of an `objects` event. False at once unless `change.collection === 'chats'`, `change.seq` is a
+  number and `chatAt(change.uid)` is not null. If `change.events` is there, try `applyChat`. If that did not apply
+  (or there were no events): `const { events, head, gap } = await ask(change.uid, chatAt(change.uid))`; false when
+  `gap`; else `applyChat(change.uid, events, head)`. Any error from `ask` → false. Two calls for the same chat must
+  not interleave: chain them per uid.
+
+### 3. Wiring
+
+- `src/client/object-sync.js`: after each `acceptChat` (both places), call `noteChat`. `acceptChat` already computes
+  whether the local copy equals the server's (`acknowledged`): return it alongside its current result without
+  changing what its callers do with that result. The number comes from the POST response (`seq`) and from
+  `result.seqs[item.uid]` of the pull.
+- `src/app/runtime.ts`: in the `live.on` handler, an `objects` event whose data has `collection === "chats"` goes
+  to `followChat(data, ask)`; only when it resolves false, `pullSoon()`. Everything else stays (`documents`, zines,
+  the pull after a reconnect). `ask` uses the socket when `live.connected()` (read `src/client/live.js` for how a
+  request is sent and what it resolves to) and otherwise `cloud.post("/api/objects/chat-events", …)`; both need
+  `accountId` (see how `cloud.post` is used in `object-sync.js` and what the route expects).
+
+### 4. Tests
+
+`tools/chat-follow.test.mjs`, with an in-memory `localStorage` the way `tools/pip-live-follow.test.mjs` sets one
+up (read how `workspace-storage.js` scopes keys to an account before you seed anything). Use the real server
+modules to make real events: write a chat with `writeObject`, take `readChatEvents` output as what `ask` returns.
+
+1. A clean chat at N: `applyChat` with events N+1..M stores the server's value (compare with `canonical` against
+   `writeObject`'s `value`), the number is M, and one `pocket-objects-synced` is dispatched.
+2. Not applied, nothing written, returns false: unknown number; chat marked dirty; first event is N+2; events not
+   consecutive; last event is not `head`; chat not in storage.
+3. Events the tab already has are skipped; a batch that is entirely old returns true and writes nothing.
+4. `followChat`: with fitting `events` it never calls `ask`; without `events` it calls `ask` once with the tab's
+   number and applies; `gap: true` → false; `ask` rejecting → false; a zine change → false without calling `ask`.
+5. Two `followChat` calls started together for N+1 and N+2 (the second without events, so it asks) end with the chat
+   at N+2 and equal to the server's value.
+6. `noteChat`: stores when `matches`, removes when not.
+7. `readObjects('chats')` returns `seqs` with each chat's head, 0 for a chat without a log, and none for zines
+   (add this one to `tools/chat-log-writes.test.mjs`).
+
+### Files you may touch
+
+`src/server/objects.js` (`readObjects` only), `src/client/chat-follow.js` + `.d.ts` (new),
+`src/client/object-sync.js`, `src/app/runtime.ts`, `tools/chat-follow.test.mjs` (new),
+`tools/chat-log-writes.test.mjs` (test 7), `docs/pip-message-flow.md` (extend the section "A chat has a numbered
+log" by a short paragraph on what the tab now does).
+
+### Do not
+
+Do not change `writeObject`, `mergeObject`, the reply runner (`pip-core.js`, `pip-remote.js`) or any React
+component. Do not remove the pull or the periodic sync: they remain the fallback and the way a tab learns a chat's
+number.
 
 ## T4 — A reply continues after a restart (not ready)
 
