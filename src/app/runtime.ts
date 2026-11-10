@@ -5,6 +5,8 @@ import { settings } from "../client/pip-core.js";
 import { status as credentialStatus } from "../client/pip-credentials.js";
 import { describe, onStatus, status, syncNow } from "../client/sync.js";
 import * as live from "../client/live.js";
+import { followChat } from "../client/chat-follow.js";
+import type { ChatBatch, ChatChange } from "../client/chat-follow.js";
 import { initExtras } from "../client/extras.js";
 import { startClockRuntime } from "../client/planner.js";
 import { bumpAll } from "./data/bus.ts";
@@ -19,6 +21,19 @@ import { openPath } from "./lib/classic.ts";
 
 const HEARTBEAT = 5 * 60_000;
 let started = false;
+
+/** Asks the server for a chat's changes after a number, over the socket when it is up, else by POST. */
+const ask = async (chat: string, after: number): Promise<ChatBatch> => {
+  if (live.connected()) {
+    // A socket that fails mid-request is replaced by the same request as a POST.
+    try { return await live.call<ChatBatch>("chat.events", { accountId: cloud.account()?.id, chat, after }); } catch { /* fall through */ }
+  }
+  return cloud.post<ChatBatch>("/api/objects/chat-events", { chat, after });
+};
+
+/** An objects event's data when it is a chat's change; followChat checks the fields it needs. */
+const isChatChange = (value: unknown): value is ChatChange =>
+  typeof value === "object" && value !== null && "collection" in value && value.collection === "chats";
 
 export function startRuntime(): void {
   if (started) return;
@@ -43,7 +58,12 @@ export function startRuntime(): void {
   let greeted = false;
   live.on(message => {
     if (message.type === "hello") { if (greeted) pullSoon(); greeted = true; }
-    if (message.type === "event" && (message.event === "objects" || message.event === "documents")) pullSoon();
+    if (message.type !== "event") return;
+    if (message.event === "objects" && isChatChange(message.data)) {
+      void followChat(message.data, ask).then(followed => { if (!followed) pullSoon(); });
+      return;
+    }
+    if (message.event === "objects" || message.event === "documents") pullSoon();
   });
   /** The socket belongs to the signed-in account: opened on sign-in, closed on sign-out. */
   const follow = () => { const signed = cloud.connected() ? cloud.account()?.id : ""; if (signed) live.start(signed); else live.stop(); };

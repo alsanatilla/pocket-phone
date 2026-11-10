@@ -156,3 +156,9 @@ number, the chat's highest number, and whether the ones just after it were trimm
 The `objects` event now carries `seq` for a chat, with the events themselves while they fit in 32,000 characters; a
 larger change sends only `seq`. A chat written before the log existed starts it with one event holding the whole chat.
 Each log keeps its newest 2,000 events.
+
+A tab that holds a clean copy of a chat keeps its number beside the chat (`src/client/chat-follow.js`). When the
+`objects` event carries the changes and they continue that number exactly, the tab applies them and writes the new
+chat; when the event has only `seq`, or the changes do not fit, it asks `chat.events` over the socket (or the same POST)
+and applies the answer. A copy with a local edit, an unknown number, or a gap in the log still pulls the whole chat as
+before, and a pull writes the number it took the chat at.

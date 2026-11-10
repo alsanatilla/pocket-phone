@@ -11,10 +11,22 @@ export function collectionName(value) {
 }
 export async function readObjects(userId, collection, after = 0) {
   if (!Number.isSafeInteger(after) || after < 0) throw Object.assign(new Error('Invalid sync cursor.'), { status: 400 });
-  const result = await database().execute({ sql: 'SELECT o.payload, MAX(c.revision) AS revision FROM pocket_object_changes c JOIN pocket_objects o ON o.user_id = c.user_id AND o.collection = c.collection AND o.uid = c.uid WHERE c.user_id = ? AND c.collection = ? AND c.revision > ? GROUP BY c.uid ORDER BY revision LIMIT 25', args: [userId, collection, after] });
-  const selected = []; let size = 0;
-  for (const row of result.rows) { const bytes = Buffer.byteLength(String(row.payload)); if (selected.length && size + bytes > 3 * 1024 * 1024) break; selected.push(row); size += bytes; }
-  return { items: selected.map(row => JSON.parse(String(row.payload))), cursor: selected.length ? Number(selected.at(-1).revision) : after, more: selected.length < result.rows.length || result.rows.length === 25 };
+  // The chats and the heads of their logs are read from one snapshot, so a tab that notes a head also has the chat.
+  const tx = await database().transaction('read');
+  try {
+    const result = await tx.execute({ sql: 'SELECT o.payload, MAX(c.revision) AS revision FROM pocket_object_changes c JOIN pocket_objects o ON o.user_id = c.user_id AND o.collection = c.collection AND o.uid = c.uid WHERE c.user_id = ? AND c.collection = ? AND c.revision > ? GROUP BY c.uid ORDER BY revision LIMIT 25', args: [userId, collection, after] });
+    const selected = []; let size = 0;
+    for (const row of result.rows) { const bytes = Buffer.byteLength(String(row.payload)); if (selected.length && size + bytes > 3 * 1024 * 1024) break; selected.push(row); size += bytes; }
+    const items = selected.map(row => JSON.parse(String(row.payload))), seqs = {};
+    if (collection === 'chats' && items.length) {
+      for (const item of items) seqs[item.uid] = 0;
+      const heads = await tx.execute({ sql: `SELECT chat_uid, MAX(seq) AS seq FROM pocket_chat_events WHERE user_id = ? AND chat_uid IN (${items.map(() => '?').join(', ')}) GROUP BY chat_uid`, args: [userId, ...items.map(item => item.uid)] });
+      for (const row of heads.rows) seqs[String(row.chat_uid)] = Number(row.seq);
+    }
+    await tx.commit();
+    return { items, cursor: selected.length ? Number(selected.at(-1).revision) : after, more: selected.length < result.rows.length || result.rows.length === 25, ...(collection === 'chats' ? { seqs } : {}) };
+  } catch (error) { await tx.rollback().catch(() => {}); throw error; }
+  finally { tx.close(); }
 }
 export async function writeObject(userId, collection, incoming, { appendTurns = false } = {}) {
   if (appendTurns && collection !== 'chats') throw new Error('Only chats can append turns.');

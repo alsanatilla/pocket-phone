@@ -10,7 +10,7 @@ const folder = mkdtempSync(join(tmpdir(), 'pocket-chat-writes-'));
 process.env.TURSO_DATABASE_URL = 'file:' + join(folder, 'pocket.db').replaceAll('\\', '/');
 process.env.TURSO_AUTH_TOKEN = 'fixture-token';
 const { ensureSchema, execute, database } = await import('../src/server/database.js');
-const { writeObject } = await import('../src/server/objects.js');
+const { writeObject, readObjects } = await import('../src/server/objects.js');
 const { appendChatEvents, readChatEvents } = await import('../src/server/chat-log.js');
 const { applyChatEvents } = await import('../src/shared/chat-log.js');
 const { canonical, sanitizeObject } = await import('../src/shared/objects.js');
@@ -155,4 +155,21 @@ test('a zine write logs nothing and its event has no chat fields', async () => {
     assert.deepEqual(Object.keys(heard[0]).sort(), ['collection', 'revision', 'type', 'uid']);
     assert.equal(heard[0].uid, 'zine-1');
   } finally { stop(); }
+});
+
+test('readObjects gives every chat its log head, 0 without a log, and zines no heads', async () => {
+  const user = await account();
+  const logged = await writeObject(user, 'chats', chat({ uid: 'chat-logged' }));
+  const old = chat({ uid: 'chat-no-log' });
+  const change = await execute({ sql: 'INSERT INTO pocket_object_changes (user_id, collection, uid) VALUES (?, ?, ?)', args: [user, 'chats', old.uid] });
+  await execute({ sql: 'INSERT INTO pocket_objects (user_id, collection, uid, payload, revision) VALUES (?, ?, ?, ?, ?)', args: [user, 'chats', old.uid, JSON.stringify(old), Number(change.lastInsertRowid)] });
+  await writeObject(user, 'zines', { id: 'zine-1', updated: 1000, deleted: true });
+
+  const chats = await readObjects(user, 'chats');
+  assert.equal(chats.seqs['chat-logged'], logged.seq);
+  assert.equal(chats.seqs['chat-no-log'], 0);
+  assert.equal(canonical(chats.items.find(item => item.uid === 'chat-logged')), canonical(logged.value));
+  const zines = await readObjects(user, 'zines');
+  assert.equal('seqs' in zines, false);
+  assert.deepEqual(zines.items.map(item => item.id), ['zine-1']);
 });
