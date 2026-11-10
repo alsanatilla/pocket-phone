@@ -125,7 +125,7 @@ in the message trailer; the chat shows “about a card” instead of the interna
 
 Component tests cover menu visibility, pinning, Today updates, unpinning, targeted requests, confirmation and a
 card disappearing before removal. A local Chromium check at 390px covers pin → Today → unpin and overflow.
-C1–C2 are local; production deployment and a live-model check of these menu requests are still outstanding.
+C1–C5 are deployed (Vercel builds `main`); a live-model check of these menu requests is still outstanding.
 
 ## C3 — A pinned card keeps itself current (implemented)
 
