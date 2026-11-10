@@ -15,6 +15,7 @@ process.env.ASTRO_NODE_AUTOSTART = 'disabled';
 const { handler } = await import('../../dist/server/entry.mjs');
 const { authFor } = await import('../../src/server/auth.js');
 const { subscribe, receive, tap } = await import('../../src/server/pocket-events.js');
+const { drainRuns } = await import('../../src/server/pip-runs.js');
 const stream = await import('../../src/server/pip-run-stream.js');
 
 const PORT = Number(process.env.PORT) || 8080, HOST = process.env.HOST || '0.0.0.0';
@@ -123,3 +124,15 @@ function open(ws, userId, as) {
 }
 
 server.listen(PORT, HOST, () => log('info', { message: 'Pocket web listening', port: PORT, live: '/api/live' }));
+
+// A deploy stops this process: running replies get 20 seconds to finish; one still running then is let go, so the
+// next process continues it instead of waiting for its lease (drainRuns). Fly allows 30 seconds in all.
+let stopping = false;
+for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, async () => {
+  if (stopping) return;
+  stopping = true;
+  const released = await Promise.race([drainRuns(20000), new Promise(resolve => setTimeout(resolve, 23000).unref())]);
+  log('info', { message: 'Pocket web stopping', signal, released: released ?? 'timeout' });
+  server.close();
+  process.exit(0);
+});

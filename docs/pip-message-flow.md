@@ -162,3 +162,18 @@ A tab that holds a clean copy of a chat keeps its number beside the chat (`src/c
 chat; when the event has only `seq`, or the changes do not fit, it asks `chat.events` over the socket (or the same POST)
 and applies the answer. A copy with a local edit, an unknown number, or a gap in the log still pulls the whole chat as
 before, and a pull writes the number it took the chat at.
+
+## A reply survives a restart
+
+A reply whose process stopped while it ran is continued once. The next page view in the server process (`recover` in
+`src/server/pip-runs.js`) or the worker's sweep claims the run with one conditional update: it must still be
+`running`, its lease must have expired, it must have no `restarted` event and it must be younger than ten minutes.
+The claim clears the unfinished answer, keeps the completed lookups in its activity, records `restarted` and hands
+the run to `drive`, which reuses those lookups. A reply that dies again fails with the existing interrupted message.
+A page view outside the server process never restarts a run, it ends it as before; the sweep does the restarting
+there and counts it as `restarted`.
+
+On SIGTERM or SIGINT the web process and the worker give running replies 20 seconds to finish (`drainRuns`); one
+still running then is let go: it stops and its lease is set to 0, so the next process continues it at once instead
+of waiting for the lease to expire. A tab that hears `restarted` forgets the changes it had applied and takes the
+reply from its start again.

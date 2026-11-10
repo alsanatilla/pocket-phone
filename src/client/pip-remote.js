@@ -219,6 +219,8 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
       const data = message.data; quiet = Date.now();
       const known = Boolean(runId);
       // A change to the reply is applied as it is; any other step of the run (waiting, done, …) reads its record once.
+      // A reply restarted after its process died is written again from the start, and numbered again.
+      if (data.kind === 'restarted') { stream.seq = 0; stream.state = emptyReply(); }
       if (data.kind === 'delta') { if (!take(data)) void catchUp(data.runId); }
       else handle(async () => step(await look()));
       // The first thing this tab hears of a run it did not start: its record says which turn it is.

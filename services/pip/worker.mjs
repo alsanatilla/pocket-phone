@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import http from 'node:http';
 import { configured, database, ensureSchema } from '../../src/server/database.js';
-import { workerStep } from '../../src/server/pip-runs.js';
+import { drainRuns, workerStep } from '../../src/server/pip-runs.js';
 import { jobStats } from '../../src/server/pip-queue.js';
 import { runPipJob } from '../../src/server/pip-background.js';
 
@@ -122,6 +122,9 @@ async function stop(signal) {
   stopping = true;
   state.running = false;
   log('info', { message: 'Stopping after the current stretch', signal });
+  // Replies this worker executes get 20 seconds to finish; one still running then is let go, so the next process
+  // continues it instead of waiting for its lease.
+  await Promise.race([drainRuns(20000), new Promise(resolve => setTimeout(resolve, 23000))]);
   // A stretch can run for the full Pip deadline; give it that long before closing the database.
   const deadline = Date.now() + number(process.env.PIP_WORKER_STOP_MS, 180000, 5000, 600000);
   while ((state.active > 0 || state.routineBusy) && Date.now() < deadline) await sleep(250);

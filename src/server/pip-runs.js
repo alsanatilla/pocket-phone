@@ -46,8 +46,26 @@ const inProcess = () => process.env.PIP_RUNS_MODE === 'inprocess';
 /** Runs executing in this process, so a test or a shutdown can wait for them. */
 const executing = new Set();
 export const settledRuns = () => Promise.allSettled([...executing]);
-// A deploy or restart stops the process: replies executing here get up to 25 seconds to finish first. One that runs
-// longer ends like a closed request, and the person continues it from where it stopped.
+// Runs executing in this process, in a map on globalThis: the web server and Astro's build load this module as
+// separate copies, and a shutdown must let go of the same runs (src/server/pocket-events.js explains the hub).
+const running = globalThis.__pocketRuns ??= new Map();
+/** Lets go of every run executing here at once, so a restart can continue them instead of waiting for their leases. */
+export async function releaseRuns() {
+  const entries = [...running.values()];
+  await Promise.allSettled(entries.map(entry => Promise.resolve().then(() => entry.release())));
+  return entries.length;
+}
+/**
+ * For a shutdown: replies executing here get `ms` to finish; those still running then are let go, so the next
+ * process continues them. Resolves to how many were let go.
+ */
+export async function drainRuns(ms = 20000) {
+  const until = Date.now() + ms;
+  while (running.size && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 100));
+  return releaseRuns();
+}
+// A deploy or restart stops the process: replies executing here get up to 25 seconds to finish first (the web and
+// worker processes let go of the ones still running after 20, see drainRuns).
 if (inProcess()) process.once('SIGTERM', () => {
   const limit = new Promise(resolve => setTimeout(resolve, 25000).unref());
   Promise.race([Promise.allSettled([settledRuns(), settledSurfaces()]), limit]).finally(() => process.exit(0));
@@ -184,9 +202,31 @@ async function endIdle(userId, run, { stop = false, device = '' } = {}) {
   await event(userId, String(run.run_id), stopping ? 'stopped' : 'interrupted', { ...(device ? { device } : {}), ...(saved ? {} : { chat: 'not_saved' }) }, now);
   return row;
 }
-/** A run whose executing request died is ended as soon as anyone looks at it, instead of showing as running. */
-async function recover(userId, run) {
+/**
+ * Claims a run whose process died, once, so a deploy or crash continues the reply instead of failing it. Its
+ * finished lookups stay in the turn and its partial answer goes; the claim is one conditional update, so two
+ * callers cannot both restart it.
+ */
+async function restart(userId, run, { fetcher } = {}) {
+  const now = Date.now(), runId = String(run.run_id), turn = parse(run.turn) || {};
+  turn.answer = ''; turn.phase = 'requesting'; turn.activity = settle(turn.activity || [], 'failed');
+  const leaseId = randomUUID();
+  const claimed = (await sql({ sql: `UPDATE pocket_pip_runs SET lease_id = ?, lease_until = ?, turn = ?, updated = ?
+    WHERE user_id = ? AND run_id = ? AND status = 'running' AND lease_until <= ? AND lease_id = ? AND created > ?
+      AND NOT EXISTS (SELECT 1 FROM pocket_pip_run_events e WHERE e.user_id = pocket_pip_runs.user_id AND e.run_id = pocket_pip_runs.run_id AND e.kind = 'restarted')
+    RETURNING *`, args: [leaseId, now + LEASE, JSON.stringify(turn), now, userId, runId, now, String(run.lease_id), now - 10 * 60000] })).rows[0];
+  if (!claimed) return null;
+  await event(userId, runId, 'restarted', {}, now);
+  return claimed;
+}
+/** A run whose executing request died is ended as soon as anyone looks at it, instead of showing as running. In
+ * the server process it is first restarted, so a deploy or crash continues the reply instead of failing it. */
+async function recover(userId, run, { fetcher } = {}) {
   if (!run || !['running', 'stopping'].includes(String(run.status)) || Number(run.lease_until) > Date.now()) return run;
+  if (inProcess()) {
+    const claimed = await restart(userId, run, { fetcher });
+    if (claimed) { await executeStretch(userId, claimed, String(claimed.lease_id), { fetcher }); return claimed; }
+  }
   return await endIdle(userId, run) || await runRow(userId, String(run.run_id));
 }
 
@@ -359,6 +399,16 @@ async function drive(userId, run, leaseId, { fetcher }) {
     else if (String(row.status) === 'stopping') { stopRequested = true; controller.abort(); }
   };
   const timer = setInterval(() => { beating = beat().catch(() => { /* The next beat retries; the lease outlives a missed one. */ }); }, HEARTBEAT);
+  // Registered for releaseRuns: a shutdown stops the heartbeat, lets go of the run at once and leaves its lease to
+  // the next process.
+  const lettingGo = { release: async () => {
+    leaseLost = true;
+    controller.abort();
+    clearInterval(timer);
+    await beating;
+    await sql({ sql: `UPDATE pocket_pip_runs SET lease_until = 0 WHERE ${owned} AND status = 'running'`, args: ownedArgs });
+  } };
+  running.set(runId, lettingGo);
   const quiet = async () => { clearInterval(timer); clearTimeout(trailing); trailing = null; await beating; await writing; };
   const meta = { userId, chat: chatUid, requestId: String(run.request_id || '') };
   live.publish(runId, turn, meta);
@@ -456,6 +506,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
     if (stopRequested) await end('stopped', STOPPED);
     else await end('failed', String(error?.message || 'The reply could not be completed.').slice(0, 500));
   } finally {
+    if (running.get(runId) === lettingGo) running.delete(runId);
     await quiet();
     // Its record is final now; followers read it from there.
     live.close(runId);
@@ -470,7 +521,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
  * settled continue, while this call has time for a whole stretch.
  */
 export async function sweepRuns({ fetcher, now = Date.now(), deadline = Date.now() + JOB_BUDGET } = {}) {
-  let interrupted = 0, expired = 0, continued = 0, more = false;
+  let interrupted = 0, expired = 0, continued = 0, restarted = 0, more = false;
   await forgetWatches().catch(() => {});
   // A queued run must not wait forever when no worker is running at all.
   const abandoned = (await sql({ sql: `SELECT r.user_id, r.run_id FROM pocket_pip_runs r
@@ -487,8 +538,16 @@ export async function sweepRuns({ fetcher, now = Date.now(), deadline = Date.now
     await writeTurn(userId, String(moved.chat_uid), turn);
     await event(userId, runId, 'failed', { error: turn.error }, now);
   }
-  for (const row of (await sql({ sql: "SELECT * FROM pocket_pip_runs WHERE status IN ('running', 'stopping') AND lease_until <= ? LIMIT 50", args: [Date.now()] })).rows)
-    if (['failed', 'stopped'].includes(String((await recover(String(row.user_id), row))?.status))) interrupted++;
+  for (const row of (await sql({ sql: "SELECT * FROM pocket_pip_runs WHERE status IN ('running', 'stopping') AND lease_until <= ? LIMIT 50", args: [Date.now()] })).rows) {
+    const userId = String(row.user_id);
+    // A worker restarts a dead reply here and waits for it; a page view never does, so only the sweep does this.
+    if (!inProcess() && String(row.status) === 'running') {
+      if (Date.now() + RUN_DEADLINE > deadline) { more = true; break; }
+      const claimed = await restart(userId, row, { fetcher });
+      if (claimed) { restarted++; await executeStretch(userId, claimed, String(claimed.lease_id), { fetcher }); continue; }
+    }
+    if (['failed', 'stopped'].includes(String((await recover(userId, row))?.status))) interrupted++;
+  }
   const unanswered = JSON.stringify({ error: 'device_unavailable', message: 'The device did not answer in time; use what you already have.' });
   for (const row of (await sql({ sql: "SELECT user_id, run_id FROM pocket_pip_runs WHERE status = 'awaiting' AND expires_at > 0 AND expires_at <= ? LIMIT 50", args: [now] })).rows) {
     const userId = String(row.user_id), runId = String(row.run_id);
@@ -503,17 +562,17 @@ export async function sweepRuns({ fetcher, now = Date.now(), deadline = Date.now
     if (Date.now() + RUN_DEADLINE > deadline) { more = true; break; }
     try { if (await continueRun(String(row.user_id), String(row.run_id), { fetcher })) continued++; } catch { /* The next sweep retries. */ }
   }
-  return { interrupted, expired, continued, more };
+  return { interrupted, expired, continued, restarted, more };
 }
 
 /** What a client shows: the run, what it waits for, and the events since its cursor. */
-export async function runView(userId, { runId = '', request = '', chat = '', after = 0 } = {}) {
+export async function runView(userId, { runId = '', request = '', chat = '', after = 0, fetcher } = {}) {
   const cursor = Number.isSafeInteger(Number(after)) && Number(after) > 0 ? Number(after) : 0;
   const row = runId && allowedId(runId) ? await runRow(userId, runId)
     : request && allowedId(request) ? await requestRow(userId, request)
     : (await sql({ sql: `SELECT * FROM pocket_pip_runs WHERE user_id = ? ${chat && objectId(chat) ? 'AND chat_uid = ?' : ''} AND status IN ('queued', 'running', 'awaiting', 'stopping') ORDER BY created DESC LIMIT 1`,
       args: chat && objectId(chat) ? [userId, chat] : [userId] })).rows[0];
-  return view(userId, await recover(userId, row), cursor);
+  return view(userId, await recover(userId, row, { fetcher }), cursor);
 }
 
 /**
