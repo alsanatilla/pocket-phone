@@ -50,6 +50,12 @@ function parsePatch(text) {
   try { return JSON.parse(text + open.reverse().join('')); } catch { return null; }
 }
 
+/** A card's marks are read as written; a pin counts only as a positive time, so a zero or a bad value is absent. */
+function marks(spec) {
+  if (spec && typeof spec === 'object' && !(Number.isFinite(spec.pinned) && spec.pinned > 0)) delete spec.pinned;
+  return spec;
+}
+
 /** A finished spec, or the spec built so far from a patch stream. */
 export function pocketSpec(text) {
   const trimmed = text.trim();
@@ -57,7 +63,7 @@ export function pocketSpec(text) {
   try {
     const value = JSON.parse(trimmed);
     // Only something that looks like a card is a spec; arbitrary JSON in the fence stays prose.
-    if (value && typeof value === 'object' && ('root' in value || 'elements' in value || 'type' in value)) return value;
+    if (value && typeof value === 'object' && ('root' in value || 'elements' in value || 'type' in value)) return marks(value);
     // A card of a single patch line is a patch stream too.
     if (!value || typeof value !== 'object' || typeof value.op !== 'string') return null;
   } catch { /* not one object: try patches */ }
@@ -72,7 +78,7 @@ export function pocketSpec(text) {
     spec = applyPatch(spec, String(op.path), op.value, op.op === 'remove');
     applied += 1;
   }
-  return applied ? spec : null;
+  return applied ? marks(spec) : null;
 }
 
 /**

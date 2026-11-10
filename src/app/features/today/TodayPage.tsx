@@ -2,6 +2,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Surface } from "../../surface/Surface.tsx";
 import { useSurface } from "../../surface/useSurface.ts";
+import { PinnedCards } from "./PinnedCards.tsx";
 
 // Today is a surface: Pocket draws the standard one at once and, with a model connected, has it arranged for
 // the moment. The line at the bottom says which one you are looking at and lets you switch.
@@ -12,6 +13,7 @@ export function TodayPage() {
   const failed = status === "failed";
   return (
     <main className="pt-3">
+      <PinnedCards />
       <Surface spec={spec} store={store} loading={status === "arranging"} />
 
       <footer className="mt-8 flex items-center gap-3 border-t border-dashed pt-3">

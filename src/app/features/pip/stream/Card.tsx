@@ -1,4 +1,6 @@
 import { memo, useMemo, useRef } from "react";
+import { Pin } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { JSONUIProvider, Renderer } from "@json-render/react";
 import type { Spec } from "@json-render/core";
 import { LegacyCard } from "../../../../client/pip-cards.jsx";
@@ -10,6 +12,7 @@ import { isLegacySpec } from "../../../surface/cards.tsx";
 import { momentStore } from "../../../surface/moment.ts";
 import { registry } from "../../../surface/registry.tsx";
 import { openPath } from "../../../lib/classic.ts";
+import { CardMenu } from "./CardMenu.tsx";
 
 // A card inside a reply, built while it streams. Only complete JSON lines count (the line being written is held
 // back), each element appears as soon as its line is complete, and elements that did not change keep their
@@ -74,21 +77,36 @@ function Placeholder() {
   return <div className="shimmer arrive my-3 h-28 rounded-lg" aria-hidden="true" />;
 }
 
-export const Card = memo(function Card({ source, closed, streaming, onAsk }: { source: string; closed: boolean; streaming: boolean; onAsk: (prompt: string) => void }) {
+/** Where a card stands, so the person can pin, change or remove it: its chat, and whether this is the chat or Today. */
+export interface CardPlace { chatId: string; place: "chat" | "today"; chatTitle?: string; locked?: boolean }
+
+export const Card = memo(function Card({ source, closed, streaming, onAsk, at }: { source: string; closed: boolean; streaming: boolean; onAsk: (prompt: string) => void; at?: CardPlace }) {
   // Once the reply is finished, its last line is complete even without a newline after it.
   const spec = useStreamingSpec(source, closed || !streaming);
   const handlers = useHandlers(onAsk);
   // Containers alone draw nothing: until the first visible element has arrived, the placeholder holds the place.
   if (!spec || !visible(spec)) return streaming && !closed ? <Placeholder /> : null;
   if (isLegacySpec(spec)) return <div className="not-prose my-3"><LegacyCard spec={spec} /></div>;
+  const marks = spec as { id?: string; updated?: unknown; pinned?: unknown };
   // A card Pip changed after it drew it (update_card) says when: the figures are newer than the words around them.
-  const updated = Number((spec as { updated?: unknown }).updated) || 0;
+  const updated = Number(marks.updated) || 0, pinned = Number(marks.pinned) > 0;
+  const hasMenu = Boolean(at && marks.id && !streaming);
   return (
-    <div className="not-prose my-3" data-card={(spec as { id?: string }).id || undefined}>
+    <div className="not-prose relative my-3" data-card={marks.id || undefined}>
+      {/* Reserve a row: generated headings, figures and buttons can occupy any corner of the card. */}
+      {hasMenu || updated ? <div className="mb-1 flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          {at?.place === "today" ? <Button variant="ghost" className="h-11 min-w-0 max-w-full justify-start px-0 text-xs text-foreground sm:h-9"
+            onClick={() => openPath("/pip?chat=" + encodeURIComponent(at.chatId))}>
+            <Pin aria-hidden="true" className="size-3.5 text-primary" /><span className="truncate">{at.chatTitle || "a chat"}</span>
+          </Button> : pinned ? <span className="inline-flex items-center gap-1.5"><Pin aria-hidden="true" className="size-3" />pinned to today</span> : null}
+          {updated ? <span className="whitespace-nowrap">updated <time dateTime={new Date(updated).toISOString()}>{stamp(updated)}</time></span> : null}
+        </div>
+        {at && marks.id && hasMenu ? <CardMenu chatId={at.chatId} id={marks.id} pinned={pinned} place={at.place} locked={at.locked} onAsk={onAsk} /> : null}
+      </div> : null}
       <JSONUIProvider registry={registry} store={momentStore()} handlers={handlers}>
         <Renderer spec={spec} registry={registry} loading={streaming && !closed} />
       </JSONUIProvider>
-      {updated ? <p className="mt-1.5 text-xs text-dim">updated <time dateTime={new Date(updated).toISOString()}>{stamp(updated)}</time></p> : null}
     </div>
   );
 });

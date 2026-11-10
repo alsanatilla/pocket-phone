@@ -1,4 +1,4 @@
-import { memo, useCallback, useRef, type KeyboardEvent, type MouseEvent } from "react";
+import { memo, useCallback, useMemo, useRef, type KeyboardEvent, type MouseEvent } from "react";
 import { Check, ChevronRight, Circle, LoaderCircle, Minus, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -13,6 +13,7 @@ import { ledger, ledgerTitle, offersOf, planOf, sourcesOf } from "./reply.ts";
 import { resume, retry, send } from "./runner.ts";
 import { hrefFor } from "../../lib/classic.ts";
 import type { Segment } from "../../../shared/pip-reply.js";
+import { aboutCard } from "../../../shared/pocket-card-edit.js";
 
 // One exchange: the question, then Pip's reply with its parts in reading order: what it looked up (folded to one
 // line once the reply is done), its plan, its reasoning, the answer with its cards, sources, and what it offers.
@@ -77,13 +78,17 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
   const plan = planOf(rows), offers = offersOf(rows), sources = sourcesOf(shown, rows);
   const cards = useCardButtons(chatId, locked);
   const ask = useCallback((prompt: string) => { if (!locked) send(chatId, prompt).catch(toastError); }, [chatId, locked]);
+  const place = useMemo(() => ({ chatId, place: "chat" as const, locked }), [chatId, locked]);
+  // A message about one card says so in a line of its own, not with the card's id.
+  const asked = aboutCard(shown.text);
   const unfinished = !streaming && latest && ["stopped", "failed", "streaming"].includes(shown.status);
   const wasOpen = useRef(rows.length <= 4);
 
   return (
     <article className={cn("space-y-3", Date.now() - shown.created < 4000 && "arrive")}>
       <div className="ml-auto w-fit max-w-[85%] rounded-lg rounded-br-sm bg-secondary px-3.5 py-2">
-        <p className="whitespace-pre-wrap text-sm">{shown.text}</p>
+        <p className="whitespace-pre-wrap text-sm">{asked.text}</p>
+        {asked.id ? <p className="mt-1 text-[11px] text-dim">about a card</p> : null}
         <p className="mt-1 text-right text-[10px] text-dim">{clock(shown.created)}</p>
       </div>
 
@@ -115,7 +120,7 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
         {shown.reasoning ? <Fold title="reasoning"><Prose text={shown.reasoning} streaming={streaming && !shown.answer} className="text-xs text-muted-foreground" /></Fold> : null}
 
         {/* Classic cards' buttons answer through data attributes; the click is caught here. */}
-        {shown.answer ? <div {...cards}><Answer text={shown.answer} blocks={blocks} streaming={streaming} onAsk={ask} /></div> : null}
+        {shown.answer ? <div {...cards}><Answer text={shown.answer} blocks={blocks} streaming={streaming} onAsk={ask} at={place} /></div> : null}
 
         {streaming && !shown.answer ? <Thinking label={phaseLabel(shown.phase || "thinking")} /> : null}
 

@@ -226,3 +226,101 @@ test('a reply that copies a card record into its text is stored without the reco
   assert.ok(!result.answer.includes('k1a2b3c'));
   assert.deepEqual(result.answer.split('\n').filter(line => line.trim()), ['HRV is 58 ms now.', 'Rest is unchanged.']);
 });
+
+// ---- the person can pin, remove and point at a card ----------------------------------------------------------------
+const { cardMarks } = await import('../src/shared/pocket-card-tool.js');
+const { pinCard, dropCard, cardsIn, aboutCard, withCard } = await import('../src/shared/pocket-card-edit.js');
+const PRICE = { root: 'main', elements: { main: { type: 'Metric', props: { label: 'Canyon Endurace', value: 950, unit: '€' }, children: [] } } };
+const PRICE_ID = 'kprice9';
+const priceAnswer = 'Lowest so far:\n\n' + cardFence(PRICE, { id: PRICE_ID, updated: 111 }) + '\n\nI keep looking.';
+const cardIn = answer => segmentAnswer(answer).find(segment => segment.kind === 'card');
+
+test('pinCard pins, re-pins and unpins without touching the card or the prose', () => {
+  const before = pocketSpec(cardFence(PRICE, { id: PRICE_ID, updated: 111 }));
+  const pinned = pinCard(priceAnswer, PRICE_ID, 5000);
+  const [card] = cardsOf(pinned);
+  assert.deepEqual(card, { ...before, pinned: 5000 });
+  assert.match(pinned, /^Lowest so far:\n\n```pocket[\s\S]*```\n\nI keep looking\.$/, 'the words around the card are untouched');
+  assert.equal(cardIn(pinned).source, cardFence(before, { id: PRICE_ID, updated: 111, pinned: 5000 }).slice('```pocket\n'.length, -'\n```'.length));
+  assert.deepEqual(cardMarks(card), { id: PRICE_ID, updated: 111, pinned: 5000 });
+
+  const repinned = pinCard(pinned, PRICE_ID, 9000);
+  const [again] = cardsOf(repinned);
+  assert.equal(again.pinned, 9000); assert.equal(again.id, PRICE_ID); assert.equal(again.updated, 111); assert.deepEqual(again.elements, before.elements);
+
+  const unpinned = pinCard(repinned, PRICE_ID, 0);
+  const [plain] = cardsOf(unpinned);
+  assert.equal(plain.pinned, undefined); assert.ok(!unpinned.includes('/pinned'));
+  assert.ok(!pinCard(repinned, PRICE_ID).includes('/pinned'), 'no time unpins too');
+  assert.equal(pinCard(priceAnswer, 'knosuch1', 5000), null);
+});
+
+test('normalizeAnswer keeps the pinned mark, after updated and before root', () => {
+  const pinned = pinCard(priceAnswer, PRICE_ID, 5000);
+  assert.equal(normalizeAnswer(pinned), pinned);
+  const lines = pinned.split('\n');
+  const updated = lines.indexOf('{"op":"add","path":"/updated","value":111}');
+  const pin = lines.indexOf('{"op":"add","path":"/pinned","value":5000}');
+  const root = lines.findIndex(line => line.includes('"/root"'));
+  assert.ok(updated >= 0 && updated < pin && pin < root);
+});
+
+test('update_card keeps a pinned card pinned, with its new figures and a new time', async t => {
+  const chat = workspace(t), kept = [];
+  const old = cardFence({ root: 'main', elements: { main: { type: 'Metric', props: { label: 'Canyon Endurace', value: 950, unit: '€' }, children: [] } } }, { id: 'kprice1', pinned: 424242 });
+  chat.turns = [{ uid: 'earlier', text: 'Watch the bike', answer: 'Lowest so far:\n\n' + old + '\n\nI keep looking.', status: 'done', created: 1, updated: 5, context: [], activity: [] }];
+  const sent = [];
+  await streamReply(chat, { uid: 'now', text: 'Any change?', context: [] }, { key: 'fixture', saveTurn: changed => { kept.push(structuredClone(changed)); },
+    fetcher: provider(sent,
+      compatibleMessage({ calls: [{ name: 'update_card', input: { id: 'kprice1', ...withValue(899) }, id: 'call_pin_update' }] }),
+      compatibleMessage({ text: 'It dropped.' })) });
+  assert.equal(kept.length, 1);
+  const [card] = cardsOf(kept[0].answer);
+  assert.equal(card.id, 'kprice1'); assert.equal(card.pinned, 424242);
+  assert.equal(card.elements.main.props.value, 899);
+  assert.ok(card.updated > 0);
+  assert.equal((kept[0].answer.match(/\/pinned/g) ?? []).length, 1);
+});
+
+test('dropCard closes the blank lines around a card, and can remove the only card', () => {
+  const a = cardFence(PRICE, { id: 'kdrop111' });
+  assert.equal(dropCard('First.\n\n' + a + '\n\nSecond.', 'kdrop111'), 'First.\n\nSecond.');
+  assert.equal(dropCard(a, 'kdrop111'), '');
+  const b = cardFence(PRICE, { id: 'kdrop222' });
+  const both = a + '\n\nBetween.\n\n' + b;
+  const left = dropCard(both, 'kdrop111');
+  assert.deepEqual(cardsIn(left).map(card => card.id), ['kdrop222']);
+  assert.equal(left, 'Between.\n\n' + b);
+  assert.equal(dropCard(both, 'kdrop333'), null);
+});
+
+test('cardsIn lists each card with its marks and source, in order, and skips one without an id', () => {
+  const first = cardFence(PRICE, { id: 'kfirst1', updated: 11, pinned: 22 });
+  const plain = cardFence(PRICE);
+  const second = cardFence({ root: 'main', elements: { main: { type: 'Text', props: { text: 'two' }, children: [] } } }, { id: 'ksecond' });
+  const answer = 'One\n\n' + first + '\n\nTwo\n\n' + plain + '\n\nThree\n\n' + second;
+  const list = cardsIn(answer);
+  assert.deepEqual(list.map(card => card.id), ['kfirst1', 'ksecond']);
+  assert.equal(list[0].pinned, 22); assert.equal(list[0].updated, 11);
+  assert.equal(list[0].source, first.slice('```pocket\n'.length, -'\n```'.length));
+  assert.equal(list[1].pinned, 0); assert.equal(list[1].updated, 0);
+  assert.deepEqual(cardMarks(pocketSpec(plain)), {});
+});
+
+test('a message can name the card it is about on its last line', () => {
+  const text = 'Change the chart to this week';
+  const named = withCard(text, 'k1a2b3c');
+  assert.equal(named, text + '\n[about card k1a2b3c]');
+  assert.deepEqual(aboutCard(named), { text, id: 'k1a2b3c' });
+  assert.deepEqual(aboutCard(text), { text, id: '' });
+  assert.deepEqual(aboutCard('[about card k1a2b3c]\nand more'), { text: '[about card k1a2b3c]\nand more', id: '' }, 'a trailer in the middle is text');
+  assert.deepEqual(aboutCard('x\n[about card K1A2B3C]'), { text: 'x\n[about card K1A2B3C]', id: '' });
+  assert.deepEqual(aboutCard('x\n[about card k1]'), { text: 'x\n[about card k1]', id: '' });
+  assert.equal(withCard(named, 'kd4e5f6'), text + '\n[about card kd4e5f6]', 'an existing trailer is replaced');
+  assert.deepEqual(aboutCard(withCard('', 'k1a2b3c')), { text: '', id: 'k1a2b3c' });
+});
+
+test('the cards prompt says what a message that names a card means', () => {
+  assert.match(CARDS_PROMPT, /A message that ends with "\[about card <id>\]" is about that card/);
+  assert.match(CARDS_PROMPT, /change it with update_card and that id/);
+});

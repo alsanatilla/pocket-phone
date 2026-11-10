@@ -5,7 +5,7 @@ import type { PipConfig } from "../../client/pip-core.js";
 // Pip's conversations, kept in this browser (and synced by object sync when signed in).
 
 export interface ChatTurn {
-  uid: string; text: string; answer: string; created: number;
+  uid: string; text: string; answer: string; created: number; updated?: number;
   status: "streaming" | "done" | "stopped" | "failed" | string;
   error?: string; phase?: string; reasoning?: string;
   activity?: ActivityRow[]; sources?: { href: string; title: string }[];

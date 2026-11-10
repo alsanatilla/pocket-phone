@@ -6,6 +6,7 @@ import { providerModel, providerOptions, providerError } from './pip-provider.js
 import { RESEARCH_LIMITS } from './pip-limits.js';
 import { normalizeAnswer } from '../shared/pip-reply.js';
 import { CARD_ARGUMENT_LIMIT, cardFence, cardIds, draftLines, replaceCard } from '../shared/pocket-card-tool.js';
+import { cardsIn } from '../shared/pocket-card-edit.js';
 export { RESEARCH_LIMITS, CONTEXT_OVERFLOW } from './pip-limits.js';
 export { freeFallbacks } from './pip-provider.js';
 const stopped = () => new DOMException('Stopped', 'AbortError');
@@ -67,12 +68,16 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
    * reply runs (the tab's store, the account's chat, a job's chat).
    */
   const reviseCard = async ({ id, spec, shows }) => {
-    const fence = cardFence(spec, { id, updated: Date.now() });
-    const here = replaceCard(result.answer, id, fence);
+    // The card keeps the time it was pinned, wherever it stands.
+    const change = text => {
+      const old = cardsIn(text).find(card => card.id === id);
+      return old ? replaceCard(text, id, cardFence(spec, { id, updated: Date.now(), pinned: old.pinned })) : null;
+    };
+    const here = change(result.answer);
     if (here !== null) { cardEnd += here.length - result.answer.length; result.answer = here; return { kind: 'card', updated: true, id, shows }; }
     const earlier = (chat.turns || []).filter(item => item.uid !== turn.uid && typeof item.answer === 'string');
     for (const item of earlier.reverse()) {
-      const changed = replaceCard(item.answer, id, fence);
+      const changed = change(item.answer);
       if (changed === null) continue;
       item.answer = changed; item.updated = Math.max(Date.now(), (item.updated || 0) + 1);
       try { await saveTurn?.(item); } catch { return { error: 'card_not_saved', message: 'The card could not be saved. Say so, and draw a new one with show_card if it matters.' }; }

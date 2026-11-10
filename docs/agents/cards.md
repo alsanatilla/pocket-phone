@@ -19,7 +19,7 @@ except press a button Pip put in it.
 
 ---
 
-## C1 — A card can be pinned, removed and referred to (data and logic; ready)
+## C1 — A card can be pinned, removed and referred to (data and logic; implemented)
 
 No visible UI in this task. You add the mark, the functions the UI will call, and their tests.
 
@@ -115,7 +115,17 @@ No React components, no CSS, nothing in `src/app/features` or `src/app/surface`.
 
 ---
 
-## C2 — The card menu and pinned cards on Today (UI; done by the lead, not delegated)
+## C2 — The card menu and pinned cards on Today (UI; implemented by the lead)
+
+Finished cards with an id have a menu to pin/unpin, ask Pip to change or refresh that card, and remove it after
+confirmation. The menu has its own space above the generated content and a 44px touch target on phones.
+Today reads pinned cards from their original chats and offers the same change/refresh actions plus a link back
+to the chat. Changes in storage update Today through the existing collection bus. The card reference is carried
+in the message trailer; the chat shows “about a card” instead of the internal id.
+
+Component tests cover menu visibility, pinning, Today updates, unpinning, targeted requests, confirmation and a
+card disappearing before removal. A local Chromium check at 390px covers pin → Today → unpin and overflow.
+C1–C2 are local; production deployment and a live-model check of these menu requests are still outstanding.
 
 ## C3 — A pinned card keeps itself current (not ready)
 

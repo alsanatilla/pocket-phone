@@ -72,16 +72,27 @@ const pointer = id => '/elements/' + String(id).replace(/~/g, '~0').replace(/\//
 const CARD_ID = /^[a-z0-9]{4,24}$/;
 /** A new card's id: short enough for a model to repeat, random enough to be the only one in a chat. */
 export const newCardId = () => 'k' + Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => (byte % 36).toString(36)).join('');
-const lines = (spec, { id = '', updated = 0 } = {}) => [
+const lines = (spec, { id = '', updated = 0, pinned = 0 } = {}) => [
   ...(id ? [JSON.stringify({ op: 'add', path: '/id', value: id })] : []),
   ...(updated ? [JSON.stringify({ op: 'add', path: '/updated', value: updated })] : []),
+  ...(pinned ? [JSON.stringify({ op: 'add', path: '/pinned', value: pinned })] : []),
   JSON.stringify({ op: 'add', path: '/root', value: spec.root }),
   ...Object.entries(spec.elements).map(([key, element]) => JSON.stringify({ op: 'add', path: pointer(key), value: element }))];
 /**
  * A drawn card as it is kept in the answer: a pocket fence of JSON Lines, the same form every reader knows. Its id
- * is how it is found again; `updated` is when it was last changed after it was drawn.
+ * is how it is found again; `updated` is when it was last changed after it was drawn, and `pinned` is when it was
+ * pinned.
  */
 export const cardFence = (spec, mark = {}) => '```pocket\n' + lines(spec, mark).join('\n') + '\n```';
+
+/** The marks a spec carries, as cardFence writes them: only the ones set, so a caller can rebuild a card whole. */
+export function cardMarks(spec) {
+  return {
+    ...(typeof spec?.id === 'string' && CARD_ID.test(spec.id) ? { id: spec.id } : {}),
+    ...(Number.isFinite(spec?.updated) && spec.updated > 0 ? { updated: spec.updated } : {}),
+    ...(Number.isFinite(spec?.pinned) && spec.pinned > 0 ? { pinned: spec.pinned } : {}),
+  };
+}
 
 const FENCES = /```pocket[ \t]*\n([\s\S]*?)\n```/g;
 /** The ids of the cards in a text, in order. */

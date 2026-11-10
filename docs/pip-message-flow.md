@@ -146,6 +146,20 @@ earlier reply: `[card <id> drawn here with show_card: …; change it with update
 Measured on 2026-11-10 with `tools/manual/card-update-real.mjs` (draw, then ask for a change; two cases per model):
 GLM 5.3 2/2, DeepSeek V4.1 Flash 2/2, Kimi K3.1 Pro 1/2 (the card was changed in all six).
 
+## The person can pin, remove and point at a card
+
+- **Pin.** A pinned card carries one more mark in its fence, after `/updated` and before `/root`:
+  `{"op":"add","path":"/pinned","value":<time>}`. The card is the same card, not a copy: `pinCard` rewrites its fence
+  with that mark, and `pinnedCards` (`src/app/data/cards.ts`) lists every pinned card in a chat that is not deleted,
+  newest pin first. `update_card` reads the old card's pin and keeps it when it rebuilds the fence.
+- **Remove.** `dropCard` takes the fence out and `normalizeAnswer` closes the blank lines around it. A turn that held
+  only a card stays, with an empty answer.
+- **Point at one.** A message that asks about one card ends with `[about card <id>]` on its own last line. It is
+  ordinary text, so every path carries it; `aboutCard` and `withCard` read and write it, and `update_card` changes
+  that card. The cards prompt tells the model what such a message means.
+- `pinCard`, `dropCard`, `cardsIn`, `aboutCard` and `withCard` are in `src/shared/pocket-card-edit.js`; a turn with
+  `status: streaming` is never changed.
+
 ## A chat has a numbered log
 
 Every write of a chat records its changes in `pocket_chat_events`, in the same transaction as the stored object
