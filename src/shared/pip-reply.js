@@ -13,6 +13,11 @@ const FENCE = /^[ \t]{0,3}(`{3,}|~{3,})(.*)$/;
 const PATCH = /^\s*\{\s*"op"\s*:/;
 /** Closing tags of a tool call a model wrote as text; never meant for the reader. */
 const TOOL_DEBRIS = /^\s*<\/?(?:parameter|function|tool_call)\b[^>]*>\s*$/;
+/**
+ * A card record a model copied into its answer: a whole line, in either form cardsAsRecords writes, or one a model
+ * made up after it ("[card k… updated with show_card: …]").
+ */
+export const CARD_RECORD = /^\[card(?: [a-z0-9]{4,24})? [a-z ]{1,24}with (?:show|update)_card\b.*\]$/;
 /** A code fence a model may wrap a card in instead of ```pocket: no language, or JSON. */
 const CARD_LIKE = /^(?:json|jsonl|jsonc|json-render)?$/i;
 
@@ -57,6 +62,7 @@ export function segmentAnswer(text) {
       if (line.trim() === "pocket") { held = [line]; continue; }
       if (PATCH.test(line)) { flushProse(); bare = [line]; continue; }
       if (TOOL_DEBRIS.test(line)) continue;
+      if (CARD_RECORD.test(line)) continue;
     }
     if (card) {
       if (fence && !fence[2].trim() && fence[1][0] === closer[0] && fence[1].length >= closer.length) {

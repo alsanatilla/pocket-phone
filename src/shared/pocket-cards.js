@@ -61,4 +61,5 @@ export const CARDS_PROMPT = 'Pocket can draw parts of a reply as a picture: read
   + 'Show tasks and thoughts with TaskList or ThoughtList instead of retyping them. '
   + 'Every fact appears once: what the prose says needs no tile, and a Hero is not repeated by a Metric. Short labels, no emoji. Skip pictures when plain prose is enough. '
   + 'A card stays alive: when figures in a card that is already in this chat change, or it needs a correction, change that card with update_card and its id instead of drawing a second one. '
+  + 'When the person asks to change, correct or add to something a card in this chat shows, call update_card; describing the change in words does not change the card. '
   + 'Earlier replies show "[card <id> drawn here with show_card: …]" where a card was; that line is a record of what the person saw, never something to write yourself.';

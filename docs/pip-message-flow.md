@@ -127,3 +127,21 @@ those blocks, not text to parse (`src/shared/pip-blocks.js`, used by both ends):
   the same blocks written out. Blocks are never stored on a turn.
 - A tab without the socket still follows over SSE with text deltas (`pip-frames.js`), and leaves that stream as soon
   as the socket connects.
+
+## Cards stay alive (update_card)
+
+A drawn card has an id (`/id` line in its fence, told to the model in `show_card`'s result and in the record of an
+earlier reply: `[card <id> drawn here with show_card: …; change it with update_card]`).
+
+- **`update_card { id, root, elements }`** replaces that card where it stands (`replaceCard`), checked like a new one.
+  In the running reply it changes the answer; in an earlier turn it changes that turn, stamps the card (`/updated`)
+  and hands the turn to the path that keeps the chat (`saveTurn`): the tab's store, `writeTurn` on a server run, or
+  the job's write of the chat when it ends. An unknown id is answered with the ids that exist.
+- **A standing watch keeps a card current without a message**: it updates the card and answers SKIP; the chat is
+  written, no turn is added and nothing is pushed.
+- **Open tabs redraw it** through the usual `objects` event and pull (about half a second), and show "updated <time>".
+- **A record is never part of an answer**: a model that copies such a line into its text loses it in `segmentAnswer`
+  (`CARD_RECORD`), while it streams and when it is stored.
+
+Measured on 2026-11-10 with `tools/manual/card-update-real.mjs` (draw, then ask for a change; two cases per model):
+GLM 5.3 2/2, DeepSeek V4.1 Flash 2/2, Kimi K3.1 Pro 1/2 (the card was changed in all six).

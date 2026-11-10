@@ -153,6 +153,9 @@ export function draftLines(partial) {
   return out.join('\n');
 }
 
+/** The shape of the record cardsAsRecords writes, defined with the cleaning in pip-reply.js so the two stay in step. */
+export { CARD_RECORD } from './pip-reply.js';
+
 /**
  * A reply as the model should read it again: each card replaced by one line saying a card was drawn there. The
  * fence is how Pocket stores a card, not something a model may write, so replayed history never shows it.

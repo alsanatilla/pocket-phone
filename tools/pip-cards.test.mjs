@@ -4,6 +4,7 @@ import { ChatStore, DEFAULT_CONFIG, config, streamReply } from '../src/client/pi
 import { segmentAnswer, answerText } from '../src/shared/pip-reply.js';
 import { pocketSpec } from '../src/shared/pocket-spec.js';
 import { cardProblems, cardFromTool, draftLines, drawCard } from '../src/shared/pocket-card-tool.js';
+import { CARDS_PROMPT } from '../src/shared/pocket-cards.js';
 import { compatibleMessage, event, response } from './pip-provider-fixtures.mjs';
 
 // Pip draws with one tool, show_card. These run the real reply pipeline against a provider fixture: where a card
@@ -168,4 +169,60 @@ test('cards are found and replaced by id only', () => {
   const changed = replaceCard(text, 'kbbbb22', cardFence({ root: 'm', elements: { m: { type: 'Text', props: { text: 'B!' }, children: [] } } }, { id: 'kbbbb22', updated: 7 }));
   assert.ok(changed.startsWith('One\n\n' + a + '\n\nTwo\n\n' + legacy)); assert.match(changed, /"B!"/); assert.doesNotMatch(changed, /"text":"b"/);
   assert.match(cardsAsRecords(text), /\[card drawn here with show_card: Text\]/, 'a card from before ids is a record without one');
+});
+
+// ---- a card record is not prose: a model may copy one, the person must never see it ---------------------------------
+const RECORD_WITH_ID = '[card k1a2b3c drawn here with show_card: Metric “HRV”; change it with update_card]';
+const RECORD_WITHOUT_ID = '[card drawn here with show_card: Text]';
+
+test('a card record line is dropped alone and between prose paragraphs, in both forms', () => {
+  for (const record of [RECORD_WITH_ID, RECORD_WITHOUT_ID]) {
+    assert.deepEqual(segmentAnswer(record), []);
+    assert.equal(normalizeAnswer(record), '');
+    const text = 'Before the card.\n\n' + record + '\n\nAfter the card.';
+    const segments = segmentAnswer(text);
+    assert.equal(segments.length, 1, 'the record leaves one prose segment');
+    assert.equal(segments[0].kind, 'prose');
+    assert.match(segments[0].text, /Before the card\./);
+    assert.match(segments[0].text, /After the card\./);
+    assert.doesNotMatch(segments[0].text, /drawn here with show_card/);
+    assert.deepEqual(normalizeAnswer(text).split('\n').filter(line => line.trim()), ['Before the card.', 'After the card.']);
+  }
+});
+
+test('prose about a card, and a line that merely starts with [card, stay in the answer', () => {
+  const prose = 'I drew a card here with show_card earlier.';
+  const line = '[card game tonight]';
+  assert.equal(normalizeAnswer(prose), prose);
+  assert.equal(answerText(prose), prose);
+  assert.equal(normalizeAnswer(line), line);
+  assert.equal(answerText(line), line);
+  assert.equal(normalizeAnswer(prose + '\n\n' + line), prose + '\n\n' + line);
+  // A record a model made up after the real ones goes too.
+  assert.equal(normalizeAnswer('Added W4.\n\n[card kb7k749 updated with show_card: Chart “Weekly distance”]'), 'Added W4.');
+  assert.equal(normalizeAnswer('[card kb7k749 changed with update_card]'), '');
+});
+
+test('the record cardsAsRecords writes for a real card is the line an answer drops', () => {
+  const fence = cardFence(cardFromTool(withValue(950)), { id: 'kprice1' });
+  const record = cardsAsRecords('Lowest so far:\n\n' + fence + '\n\nI keep looking.').split('\n').find(line => line.startsWith('[card '));
+  assert.equal(record, '[card kprice1 drawn here with show_card: Metric “Canyon Endurace”; change it with update_card]');
+  assert.deepEqual(segmentAnswer(record), []);
+  assert.equal(normalizeAnswer(record), '');
+  const oldRecord = cardsAsRecords(cardFence(cardFromTool(withValue(950))));
+  assert.equal(oldRecord, '[card drawn here with show_card: Metric “Canyon Endurace”]');
+  assert.deepEqual(segmentAnswer(oldRecord), []);
+});
+
+test('the cards prompt says that describing a change does not change the card', () => {
+  assert.match(CARDS_PROMPT, /When the person asks to change, correct or add to something a card in this chat shows, call update_card; describing the change in words does not change the card\./);
+});
+
+test('a reply that copies a card record into its text is stored without the record', async t => {
+  const chat = workspace(t), sent = [];
+  const result = await streamReply(chat, turn(), { key: 'fixture', fetcher: provider(sent,
+    compatibleMessage({ text: 'HRV is 58 ms now.\n\n' + RECORD_WITH_ID + '\n\nRest is unchanged.' })) });
+  assert.doesNotMatch(result.answer, /drawn here with show_card/);
+  assert.ok(!result.answer.includes('k1a2b3c'));
+  assert.deepEqual(result.answer.split('\n').filter(line => line.trim()), ['HRV is 58 ms now.', 'Rest is unchanged.']);
 });
