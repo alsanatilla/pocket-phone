@@ -1,5 +1,5 @@
 import { memo, useMemo, useRef } from "react";
-import { Pin } from "lucide-react";
+import { Bell, Pin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { JSONUIProvider, Renderer } from "@json-render/react";
 import type { Spec } from "@json-render/core";
@@ -87,22 +87,25 @@ export const Card = memo(function Card({ source, closed, streaming, onAsk, at }:
   // Containers alone draw nothing: until the first visible element has arrived, the placeholder holds the place.
   if (!spec || !visible(spec)) return streaming && !closed ? <Placeholder /> : null;
   if (isLegacySpec(spec)) return <div className="not-prose my-3"><LegacyCard spec={spec} /></div>;
-  const marks = spec as { id?: string; updated?: unknown; pinned?: unknown };
+  const marks = spec as { id?: string; updated?: unknown; pinned?: unknown; alert?: unknown };
   // A card Pip changed after it drew it (update_card) says when: the figures are newer than the words around them.
   const updated = Number(marks.updated) || 0, pinned = Number(marks.pinned) > 0;
+  const alert = marks.alert && typeof marks.alert === "object" ? marks.alert as { below?: number; above?: number } : undefined;
+  const told = alert && Number.isFinite(alert.below) ? "below " + alert.below : alert && Number.isFinite(alert.above) ? "above " + alert.above : "";
   const hasMenu = Boolean(at && marks.id && !streaming);
   return (
     <div className="not-prose relative my-3" data-card={marks.id || undefined}>
       {/* Reserve a row: generated headings, figures and buttons can occupy any corner of the card. */}
-      {hasMenu || updated ? <div className="mb-1 flex min-w-0 items-center gap-2">
+      {hasMenu || updated || told ? <div className="mb-1 flex min-w-0 items-center gap-2">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {at?.place === "today" ? <Button variant="ghost" className="h-11 min-w-0 max-w-full justify-start px-0 text-xs text-foreground sm:h-9"
             onClick={() => openPath("/pip?chat=" + encodeURIComponent(at.chatId))}>
             <Pin aria-hidden="true" className="size-3.5 text-primary" /><span className="truncate">{at.chatTitle || "a chat"}</span>
           </Button> : pinned ? <span className="inline-flex items-center gap-1.5"><Pin aria-hidden="true" className="size-3" />pinned to today</span> : null}
           {updated ? <span className="whitespace-nowrap">updated <time dateTime={new Date(updated).toISOString()}>{stamp(updated)}</time></span> : null}
+          {told ? <span className="inline-flex items-center gap-1 whitespace-nowrap"><Bell aria-hidden="true" className="size-3 text-primary" />{told}</span> : null}
         </div>
-        {at && marks.id && hasMenu ? <CardMenu chatId={at.chatId} id={marks.id} pinned={pinned} place={at.place} locked={at.locked} onAsk={onAsk} /> : null}
+        {at && marks.id && hasMenu ? <CardMenu chatId={at.chatId} id={marks.id} pinned={pinned} place={at.place} locked={at.locked} source={source} alert={alert} onAsk={onAsk} /> : null}
       </div> : null}
       <JSONUIProvider registry={registry} store={momentStore()} handlers={handlers}>
         <Renderer spec={spec} registry={registry} loading={streaming && !closed} />

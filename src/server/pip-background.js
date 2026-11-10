@@ -139,8 +139,14 @@ export function backgroundRoutine(value) {
   const trainingDays = [...new Set(Array.isArray(value.trainingDays) ? value.trainingDays.filter(day => Number.isInteger(day) && day >= 0 && day <= 6) : [])].sort();
   if (kind === 'training' && !trainingDays.length) throw invalid('Choose your available training days.');
   const feedback = (Array.isArray(value.feedback) ? value.feedback : []).filter(item => Number.isSafeInteger(item.at) && typeof item.text === 'string').slice(-12).map(item => ({ at: item.at, text: item.text.slice(0, 1000) }));
+  // A watch can answer in one of the person's own chats (a pinned card it keeps current) instead of a chat of its own.
+  if (value.chat !== undefined && (typeof value.chat !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(value.chat))) throw invalid('Choose the chat this routine answers in.');
+  const chat = typeof value.chat === 'string' ? value.chat : '';
+  if (value.card !== undefined && (!chat || typeof value.card !== 'string' || !/^[A-Za-z0-9_/-]{1,140}$/.test(value.card))) throw invalid('Choose the card this routine keeps current.');
+  const card = chat && typeof value.card === 'string' ? value.card : '';
   return { id, kind, title, prompt, time, days, enabled: value.enabled !== false, delivery,
     ...(mode === 'once' ? { at: value.at } : {}), ...(mode === 'every' ? { every: value.every } : {}), ...(activeHours ? { activeHours } : {}),
+    ...(chat ? { chat, card } : {}),
     ...(kind === 'training' ? { trainingDays, feedback } : {}) };
 }
 /**
@@ -308,6 +314,12 @@ async function serverSource(userId) {
 }
 /** One chat per routine and month keeps every synced chat well within its size limit. */
 async function routineChat(userId, routine, settings, now) {
+  // A watch that keeps one card current answers in that card's chat, not in a chat of its own.
+  if (routine.chat) {
+    const row = (await sql({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, routine.chat] })).rows[0];
+    const chat = row ? parse(row.payload) : null;
+    return chat && !chat.deleted ? chat : null;
+  }
   const month = localDay(now, settings.timezone).slice(0, 7), uid = ((routine.kind === 'training' ? 'pip-training-' : 'pip-routine-') + routine.id + '-' + month).replace(/[^a-zA-Z0-9_-]/g, '');
   const row = (await sql({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, uid] })).rows[0], chat = row ? parse(row.payload) : null;
   if (chat?.deleted) return null;
@@ -326,7 +338,7 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   if (used >= settings.dailyTokens) return { status: 'limit', error: 'Today\'s token limit for Pip on its own is used up.' };
   // A brief or a watch that has nothing new to read must not spend a request to say so.
   let lastRun = 0, digest = '';
-  if (WATCH_KINDS.includes(routine.kind) && !conversation && !force) {
+  if (WATCH_KINDS.includes(routine.kind) && !conversation && !force && !routine.chat) {
     try {
       const row = (await sql({ sql: 'SELECT last_run FROM pocket_pip_routines WHERE user_id = ? AND id = ?', args: [userId, routine.id] })).rows[0];
       lastRun = Number(row?.last_run) || 0;
@@ -345,7 +357,7 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
     } catch { /* an unreadable revision is no reason to skip the run */ }
   }
   const chat = await routineChat(userId, routine, settings, now);
-  if (!chat) return { status: 'skipped', error: 'This month\'s chat for the routine was deleted.' };  if (conversation && (routine.kind !== 'training' || message.chat !== chat.uid || trainingChatRoutine(message.chat) !== routine.id)) throw invalid('Open your current training chat to continue.');
+  if (!chat) return { status: 'skipped', error: routine.chat ? 'The chat this card was in was deleted.' : 'This month\'s chat for the routine was deleted.' };  if (conversation && (routine.kind !== 'training' || message.chat !== chat.uid || trainingChatRoutine(message.chat) !== routine.id)) throw invalid('Open your current training chat to continue.');
   const earlier = conversation ? chat.turns.find(turn => turn.uid === message.uid) : null;
   if (earlier && earlier.text !== message.text) throw invalid('This message already has different text.');
   if (earlier?.status === 'done') return { status: 'done', chat: chat.uid, turn: earlier.uid, reply: earlier };

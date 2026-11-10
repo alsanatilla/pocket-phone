@@ -93,10 +93,11 @@ export function segmentAnswer(text) {
 export function canonicalCard(source) {
   const spec = normalizeSpec(pocketSpec(source));
   if (!spec || typeof spec.root !== 'string' || !spec.elements || typeof spec.elements !== 'object' || !spec.elements[spec.root]) return null;
-  // A drawn card's id, the time it was last changed and the time it was pinned stay with it.
+  // A drawn card's id, the time it was last changed, the time it was pinned and any threshold stay with it.
   const lines = [...(typeof spec.id === 'string' && /^[a-z0-9]{4,24}$/.test(spec.id) ? [JSON.stringify({ op: 'add', path: '/id', value: spec.id })] : []),
     ...(Number.isFinite(spec.updated) && spec.updated > 0 ? [JSON.stringify({ op: 'add', path: '/updated', value: spec.updated })] : []),
     ...(Number.isFinite(spec.pinned) && spec.pinned > 0 ? [JSON.stringify({ op: 'add', path: '/pinned', value: spec.pinned })] : []),
+    ...(spec.alert && (Number.isFinite(spec.alert.below) || Number.isFinite(spec.alert.above)) ? [JSON.stringify({ op: 'add', path: '/alert', value: spec.alert })] : []),
     JSON.stringify({ op: 'add', path: '/root', value: spec.root })];
   for (const [id, element] of Object.entries(spec.elements)) if (element && typeof element === 'object') lines.push(JSON.stringify({ op: 'add', path: '/elements/' + id.replace(/~/g, '~0').replace(/\//g, '~1'), value: element }));
   return lines.join('\n');

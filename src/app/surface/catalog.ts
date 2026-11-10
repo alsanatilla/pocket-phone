@@ -129,6 +129,22 @@ export const catalog = defineCatalog(schema, {
       props: z.object({ mode: z.enum(["thought", "task", "ask"]), placeholder: z.string().nullable() }),
       description: "One input line: park a thought, add a task, or ask Pip. Usually one per screen.",
     },
+    Form: {
+      props: z.object({
+        title: z.string().nullable(),
+        description: z.string().nullable(),
+        fields: z.array(z.object({
+          name: z.string().describe("Short and unique; the answer comes back under it"),
+          label: z.string().describe("What to ask, in the person's words"),
+          type: z.enum(["text", "number", "choice"]),
+          options: z.array(z.string()).nullable().optional().describe("The choices, for type choice"),
+          placeholder: z.string().nullable(),
+          required: z.boolean().nullable(),
+        })).min(1).max(6),
+        submitLabel: z.string().nullable(),
+      }),
+      description: "Ask for a few answers in one card: labeled fields and one send that passes them to Pip as a message. Use it instead of several questions in a row; keep only the fields you really need.",
+    },
   },
   actions: {
     open: { params: z.object({ to: z.enum(["/today", "/notes", "/pip", "/tasks", "/thoughts", "/calendar", "/clock", "/movement", "/gym", "/travel", "/brief"]) }), description: "Open an area of Pocket" },

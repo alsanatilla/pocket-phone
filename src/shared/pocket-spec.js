@@ -53,6 +53,7 @@ function parsePatch(text) {
 /** A card's marks are read as written; a pin counts only as a positive time, so a zero or a bad value is absent. */
 function marks(spec) {
   if (spec && typeof spec === 'object' && !(Number.isFinite(spec.pinned) && spec.pinned > 0)) delete spec.pinned;
+  if (spec && typeof spec === 'object' && !(Number.isFinite(spec.alert?.below) || Number.isFinite(spec.alert?.above))) delete spec.alert;
   return spec;
 }
 

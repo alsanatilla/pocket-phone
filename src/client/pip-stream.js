@@ -68,10 +68,10 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
    * reply runs (the tab's store, the account's chat, a job's chat).
    */
   const reviseCard = async ({ id, spec, shows }) => {
-    // The card keeps the time it was pinned, wherever it stands.
+    // The card keeps the time it was pinned and any threshold, wherever it stands.
     const change = text => {
       const old = cardsIn(text).find(card => card.id === id);
-      return old ? replaceCard(text, id, cardFence(spec, { id, updated: Date.now(), pinned: old.pinned })) : null;
+      return old ? replaceCard(text, id, cardFence(spec, { id, updated: Date.now(), pinned: old.pinned, alert: old.alert })) : null;
     };
     const here = change(result.answer);
     if (here !== null) { cardEnd += here.length - result.answer.length; result.answer = here; return { kind: 'card', updated: true, id, shows }; }

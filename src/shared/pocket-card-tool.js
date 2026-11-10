@@ -72,16 +72,17 @@ const pointer = id => '/elements/' + String(id).replace(/~/g, '~0').replace(/\//
 const CARD_ID = /^[a-z0-9]{4,24}$/;
 /** A new card's id: short enough for a model to repeat, random enough to be the only one in a chat. */
 export const newCardId = () => 'k' + Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => (byte % 36).toString(36)).join('');
-const lines = (spec, { id = '', updated = 0, pinned = 0 } = {}) => [
+const lines = (spec, { id = '', updated = 0, pinned = 0, alert = null } = {}) => [
   ...(id ? [JSON.stringify({ op: 'add', path: '/id', value: id })] : []),
   ...(updated ? [JSON.stringify({ op: 'add', path: '/updated', value: updated })] : []),
   ...(pinned ? [JSON.stringify({ op: 'add', path: '/pinned', value: pinned })] : []),
+  ...(alert && (Number.isFinite(alert.below) || Number.isFinite(alert.above)) ? [JSON.stringify({ op: 'add', path: '/alert', value: alert })] : []),
   JSON.stringify({ op: 'add', path: '/root', value: spec.root }),
   ...Object.entries(spec.elements).map(([key, element]) => JSON.stringify({ op: 'add', path: pointer(key), value: element }))];
 /**
  * A drawn card as it is kept in the answer: a pocket fence of JSON Lines, the same form every reader knows. Its id
- * is how it is found again; `updated` is when it was last changed after it was drawn, and `pinned` is when it was
- * pinned.
+ * is how it is found again; `updated` is when it was last changed after it was drawn, `pinned` is when it was
+ * pinned, and `alert` is the threshold the person asked to be told about.
  */
 export const cardFence = (spec, mark = {}) => '```pocket\n' + lines(spec, mark).join('\n') + '\n```';
 
@@ -91,6 +92,7 @@ export function cardMarks(spec) {
     ...(typeof spec?.id === 'string' && CARD_ID.test(spec.id) ? { id: spec.id } : {}),
     ...(Number.isFinite(spec?.updated) && spec.updated > 0 ? { updated: spec.updated } : {}),
     ...(Number.isFinite(spec?.pinned) && spec.pinned > 0 ? { pinned: spec.pinned } : {}),
+    ...(spec?.alert && (Number.isFinite(spec.alert.below) || Number.isFinite(spec.alert.above)) ? { alert: { ...spec.alert } } : {}),
   };
 }
 

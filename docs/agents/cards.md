@@ -127,8 +127,33 @@ Component tests cover menu visibility, pinning, Today updates, unpinning, target
 card disappearing before removal. A local Chromium check at 390px covers pin → Today → unpin and overflow.
 C1–C2 are local; production deployment and a live-model check of these menu requests are still outstanding.
 
-## C3 — A pinned card keeps itself current (not ready)
+## C3 — A pinned card keeps itself current (implemented)
 
-## C4 — Forms and approvals as cards (not ready)
+A pinned card that names a web source (a Chart or Table with `source.url`) is kept current by a watch routine of
+its own: pinning starts it, unpinning and removing stop it. The routine answers in the card's own chat, so the card
+is changed with `update_card` where it stands, and answers `SKIP` when only the figures moved. It reads the source
+every six hours inside 07:00–22:00; the person can pause or reschedule it in `/jobs` like any other routine.
 
-## C5 — Thresholds (not ready)
+- `sourceUrl` and `cardName` (`src/shared/pocket-card-edit.js`) find the address and a short name in the card.
+- `src/app/data/card-watch.ts` builds and saves the routine (`kind: watch`, `chat`, `card`, `every: 360`),
+  resumes one that was paused, and deletes it when the card is unpinned or removed.
+- A routine may name the chat it answers in (`chat`, `card` in `src/server/pip-background.js`), and a watch with
+  one is not skipped for "nothing new in the workspace": its source is outside the workspace.
+- Pinning still works without a routine: signed out, or with no key for Pip on its own, the toast says so.
+
+## C4 — Forms and approvals as cards (implemented)
+
+- A `Form` card asks for up to six answers in one card instead of one question per message: labeled fields of type
+  `text`, `number` or `choice`, one submit, and what the person filled in comes back as one ordinary message.
+  It is in the surface catalog, the card catalog (`CARD_COMPONENTS`) and the cards prompt.
+- Approvals and write proposals already draw as cards (`Frame` in `src/app/features/pip/Offers.tsx`), in the same
+  border and ground as a generated card, with approve or decline on the card itself.
+
+## C5 — Thresholds (implemented)
+
+A figure can carry a threshold the person sets from the card's menu ("tell me when it drops below…" / "rises
+above…"), for a card that names a source. The threshold is a mark inside the card, like the pin:
+`{"op":"add","path":"/alert","value":{"below":850}}` after `/pinned` and before `/root`, kept by `update_card`,
+`normalizeAnswer` and every other rewrite. Setting one pins the card and starts the C3 watch with the threshold in
+its prompt, so the routine tells the person when the figure crosses it and stays quiet otherwise; the card's header
+shows the threshold beside the time. "stop telling me" clears the mark and leaves the card current.

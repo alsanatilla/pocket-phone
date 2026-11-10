@@ -26,6 +26,7 @@ export const CARD_COMPONENTS = {
   TaskList: [['title', 'source', 'limit'], "the person's real tasks, live and checkable; source due|open|chosen"],
   ThoughtList: [['title', 'source', 'limit'], "the person's parked thoughts, live; source ready|open"],
   Button: [['label', 'variant'], 'a choice; bind on.press to an action; variant primary|secondary'],
+  Form: [['title', 'description', 'fields', 'submitLabel'], 'ask for a few answers at once; fields [{name, label, type: text|number|choice, options, placeholder, required}], one submit sends them to Pip as a message'],
 };
 
 /** The actions a card may bind, with their params. */
@@ -59,6 +60,7 @@ export const CARDS_PROMPT = 'Pocket can draw parts of a reply as a picture: read
   + 'For long ranges keep the shape with at most 60 points (weekly or monthly values, as the source reports them); compare places or groups with series. '
   + 'Never invent, estimate or fill in numbers; if a source gives only some points, chart only those and say so in the note. '
   + 'Show tasks and thoughts with TaskList or ThoughtList instead of retyping them. '
+  + 'When you need several answers from the person, draw one Form instead of asking question after question; what they send arrives as one message. '
   + 'Every fact appears once: what the prose says needs no tile, and a Hero is not repeated by a Metric. Short labels, no emoji. Skip pictures when plain prose is enough. '
   + 'A card stays alive: when figures in a card that is already in this chat change, or it needs a correction, change that card with update_card and its id instead of drawing a second one. '
   + 'When the person asks to change, correct or add to something a card in this chat shows, call update_card; describing the change in words does not change the card. '

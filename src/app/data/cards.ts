@@ -3,7 +3,7 @@
 
 import { chats, listChats } from "./chats.ts";
 import type { Chat } from "./chats.ts";
-import { cardsIn, dropCard, pinCard } from "../../shared/pocket-card-edit.js";
+import { alertCard, cardsIn, dropCard, pinCard } from "../../shared/pocket-card-edit.js";
 
 export interface PinnedCard {
   chat: string; chatTitle: string; turn: string; id: string; pinned: number; source: string;
@@ -52,6 +52,11 @@ function changeCard(chatUid: string, id: string, change: (answer: string) => str
 export function setCardPinned(chat: string, id: string, pinned: boolean): boolean {
   const at = pinned ? Date.now() : 0;
   return changeCard(chat, id, answer => pinCard(answer, id, at));
+}
+
+/** Sets the threshold the person wants to be told about, or clears it; false when there is no such card. */
+export function setCardAlert(chat: string, id: string, alert: { below?: number; above?: number } | null): boolean {
+  return changeCard(chat, id, answer => alertCard(answer, id, alert));
 }
 
 /** Removes the card `id` from the chat's turn that holds it, keeping the turn; false when there is none. */

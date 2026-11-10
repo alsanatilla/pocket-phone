@@ -345,3 +345,32 @@ test('a scheduled routine that replied is pushed to the account; one the user ra
     assert.deepEqual(phone.read(pushes[0].body), { title: 'Pip · Morning check-in', body: 'Two tasks are overdue.', href: '/pip/' + started.chat, tag: 'pip-' + started.chat });
   } finally { service.restore(); }
 });
+
+test('a watch that keeps a pinned card current answers in the card’s own chat, every time it is due', async () => {
+  const userId = await account();
+  await background.saveBackground(userId, { ...settings, grants: ['notes', 'tasks'] }, 'fixture-key-123456');
+  const { writeObject } = await import('../src/server/objects.js');
+  const chat = { uid: 'chat-card-watch', title: 'Car prices', titled: true, created: 1, updated: 1, draft: '', context: [], turns: [],
+    config: { provider: 'compatible', model: 'fixture-model', baseUrl: 'https://model.example/v1', maxTokens: 2048, thinking: false, webSearch: false } };
+  await writeObject(userId, 'chats', chat);
+  assert.throws(() => background.backgroundRoutine({ kind: 'watch', prompt: 'x', chat: 'not a chat', every: 360, days: [0] }), /chat this routine answers in/);
+  assert.throws(() => background.backgroundRoutine({ kind: 'watch', prompt: 'x', card: 'orphan/card', every: 360, days: [0] }), /card this routine keeps current/);
+  const routine = background.backgroundRoutine({ kind: 'watch', title: 'Keep car prices current',
+    prompt: 'Keep the card [about card kprice9] current from https://example.org/prices.', chat: chat.uid, card: chat.uid + '/kprice9',
+    every: 360, days: [0, 1, 2, 3, 4, 5, 6], activeHours: { start: '07:00', end: '22:00' }, delivery: 'quiet' });
+  assert.equal(routine.chat, chat.uid); assert.equal(routine.card, chat.uid + '/kprice9'); assert.equal(routine.every, 360);
+  const { routines } = await background.saveRoutine(userId, routine), saved = routines.find(item => item.id === routine.id);
+  const fetcher = async () => response(compatibleMessage({ text: 'The price moved from 950 to 899.' }));
+  const first = await background.runRoutine(userId, saved, { now: Date.parse('2026-10-09T08:00:00Z'), fetcher });
+  assert.equal(first.status, 'done'); assert.equal(first.chat, chat.uid);
+  const written = await chatOf(userId, chat.uid);
+  assert.equal(written.turns.length, 1);
+  assert.ok(written.turns[0].text.includes(routine.prompt));
+  // Its own chat was not opened beside the person's chat.
+  assert.equal((await execute({ sql: "SELECT COUNT(*) AS n FROM pocket_objects WHERE user_id = ? AND collection = 'chats'", args: [userId] })).rows[0].n, 1);
+  // No record in the workspace changed; a card watch still reads its source again next time.
+  await execute({ sql: 'UPDATE pocket_pip_routines SET last_run = ? WHERE user_id = ? AND id = ?', args: [Date.now(), userId, saved.id] });
+  const second = await background.runRoutine(userId, saved, { now: Date.parse('2026-10-09T14:00:00Z') + 1, fetcher });
+  assert.equal(second.status, 'done');
+  assert.equal((await chatOf(userId, chat.uid)).turns.length, 2);
+});

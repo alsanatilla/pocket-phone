@@ -292,3 +292,50 @@ export function Capture({ mode, placeholder, onAsk }: { mode: "thought" | "task"
     </form>
   );
 }
+
+/** A few answers in one card: labeled fields and one send, instead of question after question in the chat. */
+export interface FormField { name: string; label: string; type: "text" | "number" | "choice"; options?: string[] | null; placeholder?: string | null; required?: boolean | null }
+
+export function Form({ title, description, fields, submitLabel, onAsk }: { title?: string | null; description?: string | null; fields: FormField[]; submitLabel?: string | null; onAsk: (prompt: string) => void }) {
+  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(fields.map(field => [field.name, field.type === "choice" ? (field.options?.[0] ?? "") : ""])));
+  const missing = fields.some(field => field.required === true && !String(values[field.name] ?? "").trim());
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (missing) return;
+    const lines = fields.map(field => {
+      const value = String(values[field.name] ?? "").trim();
+      return value ? field.label.trim() + ": " + value : "";
+    }).filter(Boolean);
+    if (!lines.length) return;
+    onAsk((title?.trim() ? title.trim() + "\n" : "") + lines.join("\n"));
+    setValues(Object.fromEntries(fields.map(field => [field.name, field.type === "choice" ? (field.options?.[0] ?? "") : ""])));
+  };
+  return (
+    <Block>
+      {title ? <Label>{title}</Label> : null}
+      {description ? <p className="mt-1.5 text-sm text-muted-foreground">{description}</p> : null}
+      <form onSubmit={submit} className="mt-3 grid gap-2.5">
+        {fields.map(field => (
+          <label key={field.name} className="grid gap-1">
+            <span className="text-xs text-muted-foreground">{field.label}</span>
+            {field.type === "choice" ? (
+              <select value={values[field.name] ?? ""} aria-label={field.label} required={field.required === true}
+                onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))}
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
+                {(field.options ?? []).map(option => <option key={option} value={option}>{option}</option>)}
+              </select>
+            ) : (
+              <Input value={values[field.name] ?? ""} aria-label={field.label} required={field.required === true} maxLength={500}
+                inputMode={field.type === "number" ? "decimal" : undefined}
+                placeholder={field.placeholder ?? undefined}
+                onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))} />
+            )}
+          </label>
+        ))}
+        <div className="mt-1 flex justify-end">
+          <Button type="submit" size="sm" disabled={missing}>{submitLabel?.trim() || "send"}</Button>
+        </div>
+      </form>
+    </Block>
+  );
+}

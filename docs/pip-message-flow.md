@@ -157,8 +157,15 @@ GLM 5.3 2/2, DeepSeek V4.1 Flash 2/2, Kimi K3.1 Pro 1/2 (the card was changed in
 - **Point at one.** A message that asks about one card ends with `[about card <id>]` on its own last line. It is
   ordinary text, so every path carries it; `aboutCard` and `withCard` read and write it, and `update_card` changes
   that card. The cards prompt tells the model what such a message means.
-- `pinCard`, `dropCard`, `cardsIn`, `aboutCard` and `withCard` are in `src/shared/pocket-card-edit.js`; a turn with
-  `status: streaming` is never changed.
+- **Keep current.** A pinned card with a web source gets a watch routine of its own (`src/app/data/card-watch.ts`):
+  it answers in the card's chat, reads the source every six hours, changes the card with `update_card` and answers
+  `SKIP` when only the figures moved. A routine can name its chat (`chat`, `card`), and such a watch is never
+  skipped for "nothing new in the workspace".
+- **A threshold.** `/alert` (`{"op":"add","path":"/alert","value":{"below":850}}`, after `/pinned`, before `/root`)
+  is a figure the person wants to be told about. It survives `update_card` and every rewrite; setting it pins the
+  card and puts the threshold into the watch's prompt.
+- `pinCard`, `dropCard`, `alertCard`, `cardsIn`, `aboutCard` and `withCard` are in `src/shared/pocket-card-edit.js`;
+  a turn with `status: streaming` is never changed.
 
 ## A chat has a numbered log
 

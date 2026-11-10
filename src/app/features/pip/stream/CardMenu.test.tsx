@@ -5,7 +5,7 @@ vi.mock("../../../ui/toast/toast.ts", () => ({ toast: vi.fn(), toastError: vi.fn
 vi.mock("../../../lib/classic.ts", () => ({ openPath: vi.fn() }));
 vi.mock("../runner.ts", () => ({ busy: () => false, send: vi.fn().mockResolvedValue(undefined) }));
 import { prompt, confirm } from "../../../ui/dialog/dialog.ts";
-import { toastError } from "../../../ui/toast/toast.ts";
+import { toast, toastError } from "../../../ui/toast/toast.ts";
 import { chats } from "../../../data/chats.ts";
 import { connect } from "../../../data/bus.ts";
 import { pinnedCards } from "../../../data/cards.ts";
@@ -83,5 +83,45 @@ describe("card controls", () => {
     vi.mocked(confirm).mockImplementationOnce(async () => { chats.remove(chatId); return true; });
     await select("remove");
     expect(toastError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("could not be removed") }));
+  });
+
+  it("knows when a pinned card names a source, so Pip can keep it current", async () => {
+    localStorage.removeItem("pocket:active-account");
+    const chat = chats.create();
+    const chart = [
+      line("/id", "kchart12"), line("/root", "main"),
+      line("/elements/main", { type: "Chart", props: { kind: "line", title: "Distance", data: [{ label: "W1", value: 22 }], source: { title: "Club log", url: "https://example.org/log" } }, children: [] }),
+    ].join("\n");
+    chats.update(chat.uid, c => { c.title = "Running"; c.turns.push({ uid: "turn1", text: "Distance?", answer: "```pocket\n" + chart + "\n```", created: 1, status: "done" }); });
+    render(<Card source={chart} closed streaming={false} onAsk={vi.fn()} at={{ chatId: chat.uid, place: "chat" }} />);
+    await select("pin to today");
+    expect(pinnedCards()).toHaveLength(1);
+    expect(toast).toHaveBeenCalledWith("Pinned. Sign in to let Pip keep it current.");
+  });
+
+  it("sets a threshold on a card that names a source, and offers to stop it", async () => {
+    localStorage.removeItem("pocket:active-account");
+    const chat = chats.create();
+    const chart = [
+      line("/id", "kchart12"), line("/root", "main"),
+      line("/elements/main", { type: "Chart", props: { kind: "line", title: "Distance", data: [{ label: "W1", value: 22 }], source: { title: "Club log", url: "https://example.org/log" } }, children: [] }),
+    ].join("\n");
+    chats.update(chat.uid, c => { c.title = "Running"; c.turns.push({ uid: "turn1", text: "Distance?", answer: "```pocket\n" + chart + "\n```", created: 1, status: "done" }); });
+    const view = render(<Card source={chart} closed streaming={false} onAsk={vi.fn()} at={{ chatId: chat.uid, place: "chat" }} />);
+    expect(screen.getByRole("button", { name: "Card options" })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Card options" }), { key: "ArrowDown" });
+    await screen.findByRole("menuitem", { name: "tell me when it drops below…" });
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    vi.mocked(prompt).mockResolvedValueOnce("900");
+    await select("tell me when it drops below…");
+    const answer = chats.get(chat.uid)!.turns[0]!.answer;
+    expect(answer).toContain('"/alert"');
+    expect(answer).toContain('"below":900');
+    expect(pinnedCards()).toHaveLength(1);
+    view.unmount();
+    render(<Card source={answer.split("```pocket\n")[1]!.split("\n```")[0]!} closed streaming={false} onAsk={vi.fn()} at={{ chatId: chat.uid, place: "chat" }} />);
+    expect(screen.getByText("below 900")).toBeTruthy();
+    await select("stop telling me");
+    expect(chats.get(chat.uid)!.turns[0]!.answer).not.toContain('"/alert"');
   });
 });

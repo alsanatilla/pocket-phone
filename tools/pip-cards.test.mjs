@@ -4,6 +4,7 @@ import { ChatStore, DEFAULT_CONFIG, config, streamReply } from '../src/client/pi
 import { segmentAnswer, answerText } from '../src/shared/pip-reply.js';
 import { pocketSpec } from '../src/shared/pocket-spec.js';
 import { cardProblems, cardFromTool, draftLines, drawCard } from '../src/shared/pocket-card-tool.js';
+import { aboutCard, alertCard, cardName, sourceUrl, withCard } from '../src/shared/pocket-card-edit.js';
 import { CARDS_PROMPT } from '../src/shared/pocket-cards.js';
 import { compatibleMessage, event, response } from './pip-provider-fixtures.mjs';
 
@@ -229,7 +230,7 @@ test('a reply that copies a card record into its text is stored without the reco
 
 // ---- the person can pin, remove and point at a card ----------------------------------------------------------------
 const { cardMarks } = await import('../src/shared/pocket-card-tool.js');
-const { pinCard, dropCard, cardsIn, aboutCard, withCard } = await import('../src/shared/pocket-card-edit.js');
+const { pinCard, dropCard, cardsIn } = await import('../src/shared/pocket-card-edit.js');
 const PRICE = { root: 'main', elements: { main: { type: 'Metric', props: { label: 'Canyon Endurace', value: 950, unit: '€' }, children: [] } } };
 const PRICE_ID = 'kprice9';
 const priceAnswer = 'Lowest so far:\n\n' + cardFence(PRICE, { id: PRICE_ID, updated: 111 }) + '\n\nI keep looking.';
@@ -267,7 +268,7 @@ test('normalizeAnswer keeps the pinned mark, after updated and before root', () 
 
 test('update_card keeps a pinned card pinned, with its new figures and a new time', async t => {
   const chat = workspace(t), kept = [];
-  const old = cardFence({ root: 'main', elements: { main: { type: 'Metric', props: { label: 'Canyon Endurace', value: 950, unit: '€' }, children: [] } } }, { id: 'kprice1', pinned: 424242 });
+  const old = cardFence({ root: 'main', elements: { main: { type: 'Metric', props: { label: 'Canyon Endurace', value: 950, unit: '€' }, children: [] } } }, { id: 'kprice1', pinned: 424242, alert: { below: 900 } });
   chat.turns = [{ uid: 'earlier', text: 'Watch the bike', answer: 'Lowest so far:\n\n' + old + '\n\nI keep looking.', status: 'done', created: 1, updated: 5, context: [], activity: [] }];
   const sent = [];
   await streamReply(chat, { uid: 'now', text: 'Any change?', context: [] }, { key: 'fixture', saveTurn: changed => { kept.push(structuredClone(changed)); },
@@ -276,10 +277,11 @@ test('update_card keeps a pinned card pinned, with its new figures and a new tim
       compatibleMessage({ text: 'It dropped.' })) });
   assert.equal(kept.length, 1);
   const [card] = cardsOf(kept[0].answer);
-  assert.equal(card.id, 'kprice1'); assert.equal(card.pinned, 424242);
+  assert.equal(card.id, 'kprice1'); assert.equal(card.pinned, 424242); assert.deepEqual(card.alert, { below: 900 });
   assert.equal(card.elements.main.props.value, 899);
   assert.ok(card.updated > 0);
   assert.equal((kept[0].answer.match(/\/pinned/g) ?? []).length, 1);
+  assert.equal((kept[0].answer.match(/\/alert/g) ?? []).length, 1, 'the threshold survives the change too');
 });
 
 test('dropCard closes the blank lines around a card, and can remove the only card', () => {
@@ -323,4 +325,37 @@ test('a message can name the card it is about on its last line', () => {
 test('the cards prompt says what a message that names a card means', () => {
   assert.match(CARDS_PROMPT, /A message that ends with "\[about card <id>\]" is about that card/);
   assert.match(CARDS_PROMPT, /change it with update_card and that id/);
+});
+
+test('a card tells the web address its figures come from, and a short name', () => {
+  const chart = { root: 'main', elements: {
+    main: { type: 'Chart', props: { kind: 'line', title: 'Distance', data: [{ label: 'W1', value: 22 }], source: { title: 'Club log', url: 'https://example.org/log?week=45' } }, children: [] } } };
+  assert.equal(sourceUrl(cardFence(chart, { id: 'kchart12' })), 'https://example.org/log?week=45');
+  assert.equal(cardName(cardFence(chart, { id: 'kchart12' })), 'Distance');
+  const local = { root: 'main', elements: { main: { type: 'Table', props: { title: 'Prices', columns: ['car'], rows: [['Canyon']], source: { title: 'My notes' } }, children: [] } } };
+  assert.equal(sourceUrl(cardFence(local, { id: 'ktable12' })), '', 'a source without a web address is not one to read');
+  assert.equal(cardName(cardFence(local, { id: 'ktable12' })), 'Prices');
+  const metric = { root: 'main', elements: { main: { type: 'Metric', props: { label: 'Recovery', value: 72 }, children: [] } } };
+  assert.equal(sourceUrl(cardFence(metric, { id: 'kmetric1' })), '');
+  assert.equal(cardName(cardFence(metric, { id: 'kmetric1' })), 'Recovery');
+  assert.equal(sourceUrl('not a card'), '');
+  assert.equal(cardName('not a card'), '');
+});
+
+test('a threshold can be set and cleared on a card, and pinning keeps it', () => {
+  const watched = alertCard(priceAnswer, PRICE_ID, { below: 900 });
+  assert.deepEqual(pocketSpec(cardIn(watched).source).alert, { below: 900 });
+  assert.equal(cardIn(watched).source, cardFence(PRICE, { id: PRICE_ID, updated: 111, alert: { below: 900 } }).slice('```pocket\n'.length, -'\n```'.length));
+  const pinned = pinCard(watched, PRICE_ID, 5000);
+  assert.deepEqual(pocketSpec(cardIn(pinned).source).alert, { below: 900 });
+  assert.equal(pocketSpec(cardIn(pinned).source).pinned, 5000);
+  const cleared = alertCard(pinned, PRICE_ID, null);
+  assert.equal(pocketSpec(cardIn(cleared).source).alert, undefined);
+  assert.equal(pocketSpec(cardIn(cleared).source).pinned, 5000, 'clearing the threshold keeps the pin');
+  assert.equal(alertCard(priceAnswer, 'knosuch1', { below: 1 }), null);
+  // The mark sits after the pin and before root, and every reader keeps it.
+  const marked = alertCard(pinCard(priceAnswer, PRICE_ID, 5000), PRICE_ID, { above: 1200 });
+  assert.equal(normalizeAnswer(marked), marked);
+  const lines = marked.split('\n'), pin = lines.findIndex(line => line.includes('"/pinned"')), alert = lines.findIndex(line => line.includes('"/alert"')), root = lines.findIndex(line => line.includes('"/root"'));
+  assert.ok(pin >= 0 && pin < alert && alert < root);
 });

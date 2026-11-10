@@ -3,7 +3,7 @@ import { defineRegistry, useActions } from "@json-render/react";
 import * as controls from "./controls.tsx";
 import { cn } from "@/lib/utils";
 import { catalog } from "./catalog.ts";
-import { Capture, Chart, Gauge, Hero, Metric, Table, TaskList, ThoughtList, Timeline } from "./components.tsx";
+import { Capture, Chart, Form, Gauge, Hero, Metric, Table, TaskList, ThoughtList, Timeline } from "./components.tsx";
 
 // Catalog entries → components: layout and controls from controls.tsx (Pocket's shadcn components), readings,
 // charts and live lists from components.tsx. Adjusted for a phone-sized Pocket screen, in one place:
@@ -64,6 +64,11 @@ export const { registry } = defineRegistry(catalog, {
     Capture: function CaptureElement({ props }) {
       const { execute } = useActions();
       return <Capture {...props} onAsk={prompt => void execute({ action: "askPip", params: { prompt } })} />;
+    },
+    // A form's answers go back as one message, the same path as a typed one.
+    Form: function FormElement({ props }) {
+      const { execute } = useActions();
+      return <Form {...props} onAsk={prompt => void execute({ action: "askPip", params: { prompt } })} />;
     },
   },
   actions: {
