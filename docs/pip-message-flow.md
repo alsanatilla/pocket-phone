@@ -100,9 +100,12 @@ what can be drawn.
   fence (`draftLines`), replaced by the checked card when the call completes.
 - **Never replayed as a format.** History shows `[card drawn here with show_card: …]` (`cardsAsRecords`).
 - **Budget.** A round may use the reply's remaining tokens less the reserve for the closing text; a fixed 2,048 per
-  round cut thinking models off before their call. Each card costs one more model round (the tools and prompt are
-  sent again, about 3,400 input tokens with every tool offered; providers that cache the prefix bill most of it as
-  cached).
+  round cut thinking models off before their call. Lookups have their own budget (`RESEARCH_LIMITS.researchTokens`):
+  a round whose tool calls are all lookups is charged there, so research does not spend the answer's tokens; every
+  other round (text, cards, writes) is charged to the answer. When the lookups' budget runs out, research ends and
+  the reply writes its answer with the full answer budget that is left. Each card costs one more model round (the
+  tools and prompt are sent again, about 3,400 input tokens with every tool offered; providers that cache the prefix
+  bill most of it as cached).
 
 Measured on 2026-11-09 with the real pipeline, four requests each (chart, table, choices, tiles): DeepSeek V4.1
 Flash 4/4, GLM 5.3 4/4 (two after one correction), Kimi K3.1 Pro 4/4.

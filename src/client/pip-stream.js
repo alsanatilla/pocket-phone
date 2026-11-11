@@ -30,10 +30,11 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   const researchLeft = Math.max(1, restored?.counters?.researchLeft ?? RESEARCH_LIMITS.deadlineMs);
   let timeout, absolute, timedOut = false, deadlineReached = false, deadlineLeft = Math.min(deadlineMs, RESEARCH_LIMITS.deadlineMs, researchLeft), deadlineFrom = 0;
   const requestBudget = deadlineLeft;
-  let calls = 0, searches = 0, lookups = 0, enoughAsked = 0, enoughLookups = 0, enoughStopped = false, toolData = 0, tokens = value.maxTokens;
+  let calls = 0, searches = 0, lookups = 0, enoughAsked = 0, enoughLookups = 0, enoughStopped = false, toolData = 0, tokens = value.maxTokens, researchTokens = RESEARCH_LIMITS.researchTokens;
   let finalReason = '', finalRounds = 0, finalCalls = 0, round = 0, currentRound = 0, allowance = 0, final = false, canPrepare = false, lastFinish = '', fatal = null;
   if (restored?.counters) { const saved = restored.counters;
     calls = saved.calls || 0; searches = saved.searches || 0; lookups = saved.lookups || 0; toolData = saved.toolData || 0; tokens = saved.tokens ?? value.maxTokens;
+    researchTokens = saved.researchTokens ?? RESEARCH_LIMITS.researchTokens;
     enoughAsked = saved.enoughAsked || 0; enoughLookups = saved.enoughLookups || 0; enoughStopped = Boolean(saved.enoughStopped);
     round = saved.round || 0; currentRound = saved.currentRound || 0; finalReason = saved.finalReason || '';
     finalRounds = saved.finalRounds || 0; finalCalls = saved.finalCalls || 0; final = Boolean(saved.final); canPrepare = Boolean(saved.canPrepare); }
@@ -89,7 +90,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   };
   // What a pause stores: the provider messages, the remaining budgets, and the requests no client has settled yet.
   const checkpoint = extra => ({ messages: [...(base || body.messages), ...responses],
-    counters: { calls, searches, lookups, enoughAsked, enoughLookups, enoughStopped, toolData, tokens, round, currentRound, finalReason, finalRounds, finalCalls, final, canPrepare, researchLeft: Math.max(1, researchLeft - (requestBudget - deadlineLeft)) },
+    counters: { calls, searches, lookups, enoughAsked, enoughLookups, enoughStopped, toolData, tokens, researchTokens, round, currentRound, finalReason, finalRounds, finalCalls, final, canPrepare, researchLeft: Math.max(1, researchLeft - (requestBudget - deadlineLeft)) },
     pending: pending.map(item => ({ ...item })), previews: Object.fromEntries(previews), rows: Object.fromEntries(rows), ...extra });
   const halt = async extra => { await durable.pause(checkpoint(extra)); throw new RunPaused(); };
   const check = () => { if (controller.signal.aborted) throw stopped(); if (fatal) throw fatal; };
@@ -213,7 +214,8 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     if (currentRound && JSON.stringify(messages).length > 190000) return finishFromObservations('The research context limit was reached.');
     delete result.usage.last_input_tokens; delete result.usage.last_output_tokens;
     const reserve = Math.min(1024, Math.max(1, Math.floor(value.maxTokens / 3)));
-    const finalNow = () => finalRounds > 0 || Boolean(finalReason) || currentRound >= RESEARCH_LIMITS.continuations || calls >= RESEARCH_LIMITS.calls || searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || tokens <= reserve;
+    if (researchTokens < 1) finalReason ||= 'Research token budget reached';
+    const finalNow = () => finalRounds > 0 || Boolean(finalReason) || currentRound >= RESEARCH_LIMITS.continuations || calls >= RESEARCH_LIMITS.calls || searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || tokens <= reserve || researchTokens < 1;
     final = finalNow();
     // Between rounds, JEV says whether what was found is enough. Until the lead trusts that answer, the callback
     // resolves false and only records how often it was asked; a true answer ends research the way a limit does.
@@ -230,6 +232,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     // round cut models that think first off in the middle of their thinking, before the call they were working towards
     // (a card, a lookup), and the next round started the same thinking again.
     allowance = canPrepare || offered.size && !final ? Math.max(1, tokens - reserve) : tokens;
+    if (!final) allowance = Math.max(1, Math.min(allowance, researchTokens + reserve));
     const activeTools = [...offered].filter(name => allowed(name) && (!final || STATE_TOOLS.includes(name) || enoughStopped));
     result.phase = final ? 'synthesizing' : 'requesting'; publish();
     const instruction = final ? '\n\nPocket runtime status: the app has stopped research for this reply. This is an app limit, not a user instruction, and does not mean the research is complete. Answer the current user request using the observations already collected. Do not start more research or read more sources. '
@@ -244,7 +247,8 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     for (const [name, count] of Object.entries({ input_tokens: input, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.inputTokenDetails.cacheReadTokens, cache_creation_input_tokens: usage.inputTokenDetails.cacheWriteTokens })) if (typeof count === 'number' && Number.isFinite(count)) result.usage[name] = (result.usage[name] || 0) + count;
     if (typeof usage.inputTokens === 'number') result.usage.last_input_tokens = usage.inputTokens;
     if (typeof usage.outputTokens === 'number') result.usage.last_output_tokens = usage.outputTokens;
-    tokens -= usage.outputTokens || allowance;
+    if (step.toolCalls.length && step.toolCalls.every(call => !WRITE_TOOLS.includes(call.toolName) && !STATE_TOOLS.includes(call.toolName))) researchTokens -= usage.outputTokens || allowance;
+    else tokens -= usage.outputTokens || allowance;
     result.model = step.response.modelId || result.model;
     if (step.finishReason === 'length') { finalReason ||= 'Finish within the remaining reply token budget'; if (final) finalRounds = 2; result.activity = settle(result.activity, 'failed', 'Tool request did not finish within this round’s token allowance'); }
     dropDraft();
