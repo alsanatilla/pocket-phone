@@ -24,7 +24,10 @@ Layout you need:
 
 1. **Stay inside your task.** Change only the files the task lists. If the task cannot be done without touching
    another file, stop and say so in your report. Do not "improve" nearby code, rename things, or reformat.
-2. **No new dependencies.** Nothing is added to `package.json`. No new frameworks, no Preact, no state library, no ORM.
+2. **Open source first, chosen by the lead.** Pocket uses an existing open-source library before building a piece
+   by hand; your brief names the library and its version when one is to be used. You do not add a dependency on your
+   own: if you see a library that would do your task better than writing it, stop and say so in your report. No
+   framework swaps (no Preact and the like), no state library, no ORM.
 3. **No fallbacks and no second way.** If something exists already (a merge function, an event hub, a block format),
    use it. Search before you write: `grep -rn "name" src tools`. Do not add a compatibility branch "just in case".
 4. **Never weaken a check to get green.** Do not delete, skip or loosen an existing test, do not catch-and-ignore an
