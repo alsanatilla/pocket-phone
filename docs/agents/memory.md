@@ -13,7 +13,7 @@ showing what.
 | # | Task | State |
 |---|---|---|
 | M1 | The list, the tools, the prompt, the API (no UI) | ready |
-| M2 | "remembered: …" under a reply, and the page that lists the memory | not ready (after M1) |
+| M2 | The page that lists the memory | ready |
 
 ---
 
@@ -127,3 +127,82 @@ if typecheck needs it, `docs/pip-message-flow.md` (append a short section "Pip r
 
 No UI. No embeddings, no search, no second model call. Do not touch `src/client/pip-memory.js` (that file is about
 replaying a conversation, not this memory). Do not offer the tools on the tab path.
+
+---
+
+## M2 — The page that lists what Pip remembers (ready)
+
+M1 is live (store, tools, `GET`/`POST /api/pip/memory`), and a reply already says what it remembered
+(`memoryOf` in `src/app/features/pip/reply.ts`, drawn in `Turn.tsx`). What is missing is the place where the person
+sees the whole list and changes it.
+
+### 1. `src/app/data/memory.ts` (new)
+
+- `interface MemoryEntry { id: string; text: string; chat: string; created: number; updated: number }`.
+- `loadMemory()`, `addMemory(text)`, `editMemory(id, text)`, `forgetMemory(id)`: each resolves to the list the
+  server answers with. Use `cloud.request` / `cloud.post` the way `src/client/object-sync.js` does (`post` adds the
+  account id). Server errors reach the caller as errors with the server's message.
+- `useMemory()` → `{ entries, state: "loading" | "ready" | "signed-out" | "failed", error, reload }`. It loads on
+  mount, and again when the window hears `pocket-memory-changed`. Signed out (`cloud.connected()` false) it does
+  not ask the server.
+- `src/app/runtime.ts`: in the `live.on` handler, an event named `memory` dispatches
+  `new Event("pocket-memory-changed")`. Nothing else there changes.
+
+### 2. The page: `src/app/features/memory/MemoryPage.tsx` (new), route `/memory`
+
+Add the route in `src/app/router.tsx` the way `jobs` is added (lazy component). Read `JobsPage` and `TasksPage`
+first: this page uses the same building blocks and the same look (`PageTitle`, the row style, `Button`, the
+`prompt`/`confirm` dialogs from `src/app/ui/dialog/dialog.ts`, `toast`). No new visual idea.
+
+- Title `memory`, and under it one quiet line: `What pip remembers about you. It reads this in every reply.`
+- One row per entry, newest first: the sentence; under it in the small dim style `since <date>` and, when the
+  entry has a chat that still exists (`readChat` from `src/app/data/chats.ts`), ` · from <chat title>` as a link to
+  that chat. Each row has two actions, at least 44 px tall on a phone: `edit` (the `prompt` dialog with the current
+  text, `maxLength` 300, multiline) and `forget` (no confirmation; a toast `Forgotten.`).
+- At the bottom: a field `add something pip should remember` with a button `remember` (disabled while empty or
+  sending; Enter sends). After adding, the field is empty and the list shows the entry.
+- States: loading → three shimmer rows (the `shimmer` class used in `Answer.tsx`); empty →
+  `Nothing yet. Pip remembers lasting things you tell it, and you can add some here.`; signed out →
+  `Sign in to give pip a memory.` with the link the settings page uses for signing in; failed → the error text and a
+  `try again` button.
+- At 100 entries the add field is replaced by `Memory is full (100). Forget something to add more.`
+- Every action shows the server's list afterwards; while one is running, that row's actions are disabled. A failed
+  action shows `toastError` and leaves the list as it was.
+
+### 3. Ways in
+
+- `src/app/features/settings/SettingsPage.tsx`: one row or link `memory: what pip remembers about you` leading to
+  `/memory`, placed with the other Pip settings and styled like its neighbours.
+- `src/app/features/pip/Turn.tsx`: the list that says `remembered: …` gets, after its last line, a small link
+  `memory` to `/memory` (same dim style, underlined on hover). The lines themselves do not change.
+
+### 4. The lab
+
+`tools/manual/chat-lab.mjs` gains two states, photographed like the others: `memory` (the page with four entries:
+one long sentence of 280 characters, one learned in an existing chat) and `memory-empty`. Seed entries with
+`remember` from `src/server/pip-memory-store.js`. The existing states and the `stream` measurement must be
+unchanged.
+
+### 5. Tests
+
+`src/app/features/memory/MemoryPage.test.tsx` (new; see `src/app/features/pip/Turn.test.tsx` and the jobs tests for
+how pages are rendered and `cloud` is stubbed): the list shows entries newest first with their chat link; edit
+sends the new text and shows the server's list; forget removes the row and toasts; add clears the field; the empty,
+signed-out, failed and full states show their text; a `pocket-memory-changed` event reloads.
+
+### Run and attach
+
+Build the Node target and run the lab (`docs/agents/chat-polish.md`, P3, has the command). Open the four new
+pictures yourself and check: nothing overlaps, the long sentence wraps inside the row, actions are not cut off at
+390 px, the page looks like Jobs and Tasks do. Describe each picture in your report.
+
+### Files you may touch
+
+`src/app/data/memory.ts` (new), `src/app/features/memory/MemoryPage.tsx` + `MemoryPage.test.tsx` (new),
+`src/app/router.tsx`, `src/app/runtime.ts` (the one handler line), `src/app/features/settings/SettingsPage.tsx` (the
+one row), `src/app/features/pip/Turn.tsx` (the one link), `tools/manual/chat-lab.mjs` (the two states), a `.d.ts`
+beside `cloud.js` only if typecheck needs it.
+
+### Do not
+
+No change to the store, the tools or the API. No search, tags or categories. No new colours, fonts or components.

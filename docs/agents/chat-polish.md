@@ -15,7 +15,7 @@ to 60 seconds before the first word. The limit today is the same for every messa
 | P1 | The chat lab: the chat in fixed states, photographed and measured | ready |
 | P2 | Pip looks up as much as the message deserves (JEV judges before the reply) | ready |
 | P3 | Writing is fluid: a trial of Streamdown for the reply's text | ready |
-| P4 | "Is this enough?" after each round of lookups | not ready |
+| P4 | "Is this enough?" after each round of lookups, first only recorded | ready |
 | P5 | Design points (card menu, tiles, empty chat, spacing) | not ready |
 
 ---
@@ -302,3 +302,81 @@ scrolling (`PipPage.tsx`); that is the next task. Do not merge or push.
 
 Both `stream.json` medians side by side, the bundle sizes, the list of visible differences, what you set for
 safety, and your own judgement: better, same or worse, and why.
+
+---
+
+## P4 — "Is this enough?" after each round of lookups, first only recorded (ready)
+
+P2 is live: JEV names a level before the reply, and `none` and `quick` cap the lookups. `thorough` has no cap, and
+that is where replies still run away: asked to compare two cars from six notes, DeepSeek made 11 to 18 searches and
+one reply failed. This task lets JEV say, between rounds, whether what was found is enough to answer. **In this
+task its answer is only recorded, never acted on**: a wrong "enough" would make answers worse, so the lead compares
+the record with real replies before it may stop anything.
+
+Read `docs/agents/chat-polish.md` P2 and the code it added (`src/shared/pip-effort.js`, `src/server/pip-effort.js`,
+the `research` option in `src/client/pip-stream.js`, `drive` in `src/server/pip-runs.js`) before anything else.
+
+### 1. `src/client/pip-stream.js`: a question between rounds
+
+The `research` option gains `enough?: (state) => Promise<boolean> | boolean`.
+
+- It is asked in `prepareStep`, at the start of a round, only when all hold: it is given; lookups (the counter P2
+  added) were made since it was last asked; the reply is not already in its final rounds (`final` would be true
+  without it). `state` is `{ lookups, rounds: currentRound }`. Read the AI SDK's types for `prepareStep` in
+  `node_modules/ai` to confirm it may be async, and make it async only if it may; if it may not, stop and report.
+- When it resolves `true`: `finalReason ||= 'Enough looked up for this message'`, so the round that starts is a
+  final round through the existing path. Anything else (false, a throw, a rejection) changes nothing; a throw is
+  swallowed.
+- It is asked at most 6 times in a reply.
+- Without the option nothing changes.
+
+### 2. `src/shared/pip-effort.js` and `src/server/pip-effort.js`: asking JEV
+
+- `enoughQuestions()` → one choice named `enough`, instructions
+  `Can the assistant give a good answer to the message with what it has looked up so far?`, criteria
+  `yes`: `What was found covers what the message asks; more lookups would repeat or add detail nobody asked for.`
+  `no`: `Something the message asks for has not been found yet, or the findings contradict each other.`
+- `enoughState(turn, rows)` → `{ message, found }`: `message` as in `effortState`; `found` the finished lookups so
+  far (rows of `turn.activity` that are done and are neither writes nor state tools; take the names from
+  `src/client/pip-tools.js`), each `{ did, got }`: `did` the row's title (at most 120 characters), `got` the start
+  of its result text (at most 300), newest last, at most the last 12.
+- `enoughFromAnswers(answers)` → `true`, `false`, or `null` when the answer is not a choice of `yes`/`no`.
+- `judgeEnough(userId, turn, { fetcher, timeoutMs = 1200 })` → `{ enough, ms }` or `null`, built like `judgeEffort`
+  (same key, endpoint, headers, never throws). Share what the two have in common in one small function in that file
+  rather than copying it.
+
+### 3. `src/server/pip-runs.js`, `drive`: recording, not stopping
+
+- Only when the reply's level is `thorough`, pass `research: { enough }` (alone: `thorough` has no caps). `enough`
+  calls `judgeEnough` with the turn as it is now, **always resolves `false`**, and the first time JEV says yes
+  records where the reply stood: `enoughAt: <lookups made then>` in the turn's usage, beside `effort` (same places
+  the usage is rebuilt; read how P2 keeps `effort`). Also keep `enoughAsked: <how often JEV was asked>`.
+- A level other than `thorough`, or no level: `enough` is not passed.
+- One constant at the top of the new code, `ENOUGH_STOPS = false`, with a comment that the lead switches it on after
+  comparing; when true, `enough` resolves what JEV said. Tests cover both values through an option, not by editing
+  the constant (for example `drive` reads `process.env.PIP_ENOUGH_STOPS === '1' || ENOUGH_STOPS`; say what you chose).
+
+### 4. Tests: add to `tools/pip-effort.test.mjs`
+
+1. `enoughState` cuts lengths, keeps the last 12, leaves out cards, writes and failed rows; `enoughFromAnswers`
+   for yes, no, and three bad shapes.
+2. Recording only: level `thorough`, JEV says `no` after round one and `yes` after round two; the model makes
+   lookups in four rounds and all of them run; the stored turn has `usage.enoughAt` equal to the lookups made when
+   yes came, and `usage.enoughAsked` 2 or more; the reply is the model's own.
+3. Stopping, with the option on: same script; after the yes, the next lookups are refused with
+   `research_budget_reached` and the reply finishes with the model's final text.
+4. JEV failing on the second question (500, timeout) changes nothing and the reply finishes.
+5. Level `quick` and no level: no request with the `enough` question reaches JEV (count them by the question name
+   in the request body).
+6. Never asked more than 6 times: a model that looks up in 9 rounds.
+7. Every test already in the file passes unchanged.
+
+### Files you may touch
+
+`src/client/pip-stream.js`, `src/shared/pip-effort.js` + `.d.ts`, `src/server/pip-effort.js`,
+`src/server/pip-runs.js` (`drive` only), `tools/pip-effort.test.mjs`, `docs/pip-message-flow.md` (extend the section
+"Pip looks up as much as the message deserves").
+
+### Do not
+
+Do not stop replies by default. Do not change the levels or their caps. Nothing on the tab path or in jobs.
