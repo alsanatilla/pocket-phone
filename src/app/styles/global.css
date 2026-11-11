@@ -5,6 +5,9 @@
 /* json-render's shadcn components carry their own Tailwind classes; scan them so those classes exist. */
 @source "../../../node_modules/@json-render/shadcn/dist";
 
+/* Streamdown, which draws a reply's text, carries its own Tailwind classes; scan them so those classes exist too. */
+@source "../../../node_modules/streamdown/dist/*.js";
+
 @custom-variant dark (&:is(.dark *));
 
 @font-face { font-family: "VT323"; src: url("/fonts/VT323-Regular.ttf") format("truetype"); font-display: swap; }
@@ -133,8 +136,13 @@
     background-size: 200% 100%;
     animation: var(--animate-shimmer);
   }
-  /* The caret at the end of text that is still being written. */
-  .caret::after { content: "▍"; margin-left: 1px; color: var(--primary); animation: var(--animate-caret); }
+  /* The caret at the end of text that is still being written. `caret` marks the reply as it is drawn by Streamdown;
+     the caret itself sits at the end of the last block, since a reply's text becomes several block elements. */
+  .caret::after { content: none; }
+  .caret > .reply-md > .reply-block:last-child > :last-child:not(ul, ol)::after,
+  .caret > .reply-md > .reply-block:last-child > :last-child > li:last-child::after {
+    content: "▍"; margin-left: 1px; color: var(--primary); animation: var(--animate-caret);
+  }
   /* Blocks of a streaming reply arrive with a short rise; text inside them never animates. */
   .arrive { animation: var(--animate-rise); }
 

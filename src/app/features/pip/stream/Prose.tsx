@@ -1,84 +1,122 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { memo, type ComponentProps } from "react";
+import { Block, Streamdown, defaultRemarkPlugins } from "streamdown";
 import { cn } from "@/lib/utils";
-import { markdownFragment, renderMarkdown } from "../../../../shared/markdown.js";
-import { inlineTokens, pendingShape, splitProse } from "./segments.ts";
 
-// Prose of a reply. While it streams, every settled block is rendered once by Pocket's Markdown renderer (on the
-// server, sanitized) and then left alone; the block still being written is drawn right away with light inline
-// formatting, shaped like what it will become, so nothing raw or half-formatted appears and nothing re-flows.
-// A finished reply is rendered as one piece; until that arrives, the block view (which looks the same) stays.
+// Prose of a reply, drawn in the browser by Streamdown. The text of a reply is Markdown that is still being written:
+// the library keeps every block it has drawn mounted, completes unfinished syntax itself (an open **, an open fence,
+// a table whose header has arrived), and asks nothing of the server, so a block that is on screen is never drawn
+// again. Cards are cut out before this (Answer.tsx), so only prose arrives here.
+//
+// The look is Pocket's: every element is drawn as the plain element the `.prose` rules style, and the caret at the
+// end of the text being written is the same `.caret` (see the rules in global.css).
 
-const rendered = new Map<string, string>();
-const RENDERED_LIMIT = 400;
+type BlockProps = ComponentProps<typeof Block>;
+type ElementProps<K extends keyof React.JSX.IntrinsicElements> = React.JSX.IntrinsicElements[K] & { node?: unknown };
 
-function remember(text: string, html: string) {
-  rendered.set(text, html);
-  if (rendered.size > RENDERED_LIMIT) rendered.delete(rendered.keys().next().value!);
+/** One block of the text in its own box: the `.prose` margins between blocks stay exactly as they were. */
+function ReplyBlock(props: BlockProps) {
+  return <div className="reply-block"><Block {...props} /></div>;
 }
 
-/** The rendered HTML for `text` (null while it is on its way, or when `text` is null). */
-export function useRenderedMarkdown(text: string | null): string | null {
-  const [, setVersion] = useState(0);
-  useEffect(() => {
-    if (text == null || rendered.has(text)) return;
-    let live = true;
-    renderMarkdown(text, {}, false)
-      .then(html => { remember(text, html); if (live) setVersion(n => n + 1); })
-      .catch(() => { /* the pending view stays readable offline */ });
-    return () => { live = false; };
-  }, [text]);
-  return text == null ? null : rendered.get(text) ?? null;
+/** Without rehype-raw, Streamdown shows HTML in the text as text and never as elements (as the server renderer did). */
+type RehypePlugins = NonNullable<ComponentProps<typeof Streamdown>["rehypePlugins"]>;
+const REHYPE_PLUGINS: RehypePlugins = [];
+
+type Mdast = { type: string; value?: string; children?: Mdast[] };
+
+/** A newline inside a paragraph becomes a line break, as the server renderer drew it; Streamdown would join it. */
+function lineBreaks() {
+  return (tree: Mdast) => { breakLines(tree); };
 }
 
-/** Sanitized HTML, mounted once per change. */
-const Html = memo(function Html({ html }: { html: string }) {
-  const host = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => { host.current?.replaceChildren(markdownFragment(html)); }, [html]);
-  return <div ref={host} />;
-});
-
-function Inline({ text }: { text: string }) {
-  return (
-    <>
-      {inlineTokens(text).map((token, index) =>
-        token.type === "strong" ? <strong key={index}>{token.text}</strong>
-        : token.type === "em" ? <em key={index}>{token.text}</em>
-        : token.type === "code" ? <code key={index}>{token.text}</code>
-        : token.type === "link" ? <span key={index} className="text-primary">{token.text}</span>
-        : <span key={index}>{token.text}</span>)}
-    </>
-  );
+function breakLines(node: Mdast) {
+  if (!node.children || node.type === "code" || node.type === "inlineCode") return;
+  const children: Mdast[] = [];
+  for (const child of node.children) {
+    if (child.type === "text" && child.value?.includes("\n")) {
+      child.value.split("\n").forEach((line, index) => {
+        if (index) children.push({ type: "break" });
+        if (line) children.push({ type: "text", value: line });
+      });
+      continue;
+    }
+    breakLines(child);
+    children.push(child);
+  }
+  node.children = children;
 }
 
-/** The block being written, in the shape it will have once rendered. */
-export function Pending({ text, caret }: { text: string; caret: boolean }) {
-  const shape = pendingShape(text);
-  const tail = caret ? "caret" : undefined;
-  let body: ReactNode;
-  if (shape.kind === "heading") body = shape.level <= 2 ? <h2 className={tail}><Inline text={shape.text} /></h2> : <h3 className={tail}><Inline text={shape.text} /></h3>;
-  else if (shape.kind === "code") body = <pre><code className={tail}>{shape.text}</code></pre>;
-  else if (shape.kind === "quote") body = <blockquote><p className={tail}><Inline text={shape.text} /></p></blockquote>;
-  else if (shape.kind === "list") {
-    const items = shape.items.map((item, index) => <li key={index} className={index === shape.items.length - 1 ? tail : undefined}><Inline text={item} /></li>);
-    body = shape.ordered ? <ol>{items}</ol> : <ul>{items}</ul>;
-  } else body = <p className={cn("whitespace-pre-line", tail)}><Inline text={shape.text} /></p>;
-  return <div>{body}</div>;
+/** GFM (tables, strikethrough, task lists) plus the line breaks a reply has always shown. */
+const REMARK_PLUGINS = [defaultRemarkPlugins.gfm!, lineBreaks];
+
+/** Only web addresses and mail are links; anything else loses its address and stays plain text. */
+function allowedUrl(url: string, key: string): string | undefined {
+  if (/^https?:\/\//i.test(url)) return url;
+  if (key === "href" && /^mailto:/i.test(url)) return url;
+  return undefined;
 }
 
-/** One settled block: its rendered HTML when it has arrived, the same text drawn directly until then. */
-const Block = memo(function Block({ text }: { text: string }) {
-  const html = useRenderedMarkdown(text);
-  return html ? <Html html={html} /> : <Pending text={text} caret={false} />;
-});
+/** A link as the server renderer made it: web links in a new tab, mail and the rest in this one. */
+function Link({ node: _node, href, children, ...props }: ElementProps<"a">) {
+  if (!href) return <span {...props}>{children}</span>;
+  const web = /^https?:/i.test(href);
+  return <a {...props} href={href} target={web ? "_blank" : undefined} rel={web ? "noopener noreferrer" : undefined}>{children}</a>;
+}
+
+/** The server renderer drew a heading one level lower (a reply sits under the page's title); keep that. */
+function heading(level: number) {
+  const tag = ("h" + Math.min(level + 1, 6)) as "h2";
+  return ({ node: _node, ...props }: ElementProps<typeof tag>) => {
+    const Heading = tag;
+    return <Heading {...props} />;
+  };
+}
+
+/** Every element a reply's text can make, as the element the `.prose` rules were written for. */
+const COMPONENTS = {
+  p: ({ node: _node, ...props }: ElementProps<"p">) => <p {...props} />,
+  h1: heading(1),
+  h2: heading(2),
+  h3: heading(3),
+  h4: heading(4),
+  h5: heading(5),
+  h6: heading(6),
+  ul: ({ node: _node, ...props }: ElementProps<"ul">) => <ul {...props} />,
+  ol: ({ node: _node, ...props }: ElementProps<"ol">) => <ol {...props} />,
+  li: ({ node: _node, ...props }: ElementProps<"li">) => <li {...props} />,
+  blockquote: ({ node: _node, ...props }: ElementProps<"blockquote">) => <blockquote {...props} />,
+  hr: ({ node: _node, ...props }: ElementProps<"hr">) => <hr {...props} />,
+  pre: ({ node: _node, ...props }: ElementProps<"pre">) => <pre {...props} />,
+  code: ({ node: _node, ...props }: ElementProps<"code">) => <code {...props} />,
+  table: ({ node: _node, ...props }: ElementProps<"table">) => <table {...props} />,
+  thead: ({ node: _node, ...props }: ElementProps<"thead">) => <thead {...props} />,
+  tbody: ({ node: _node, ...props }: ElementProps<"tbody">) => <tbody {...props} />,
+  tr: ({ node: _node, ...props }: ElementProps<"tr">) => <tr {...props} />,
+  th: ({ node: _node, ...props }: ElementProps<"th">) => <th {...props} />,
+  td: ({ node: _node, ...props }: ElementProps<"td">) => <td {...props} />,
+  strong: ({ node: _node, ...props }: ElementProps<"strong">) => <strong {...props} />,
+  a: Link,
+  // A reply never showed remote pictures; leaving them out keeps that, and fetches nothing from a model's URL.
+  img: () => null,
+};
+
+/** Streamdown's own root box would space the blocks itself; `.prose` owns the rhythm between them. */
+const ROOT = "reply-md space-y-0";
 
 export const Prose = memo(function Prose({ text, streaming, className }: { text: string; streaming: boolean; className?: string }) {
-  const whole = useRenderedMarkdown(streaming ? null : text);
-  if (whole) return <div className={cn("prose", className)}><Html html={whole} /></div>;
-  const { blocks, pending } = splitProse(text, streaming);
   return (
-    <div className={cn("prose", className)}>
-      {blocks.map((block, index) => <Block key={index} text={block} />)}
-      {pending ? <Pending text={pending} caret={streaming} /> : null}
+    <div className={cn("prose", streaming && "caret", className)}>
+      <Streamdown
+        className={ROOT}
+        components={COMPONENTS}
+        BlockComponent={ReplyBlock}
+        rehypePlugins={REHYPE_PLUGINS}
+        remarkPlugins={REMARK_PLUGINS}
+        urlTransform={allowedUrl}
+        isAnimating={streaming}
+      >
+        {text}
+      </Streamdown>
     </div>
   );
 });

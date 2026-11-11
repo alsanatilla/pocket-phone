@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 
-// The Markdown renderer runs on Pocket's server; here it answers at once with a paragraph per block.
-vi.mock("../../../../shared/markdown.js", async original => ({
-  ...(await original<typeof import("../../../../shared/markdown.js")>()),
-  renderMarkdown: async (source: string) => source.split(/\n{2,}/).map(block => "<p>" + block.replace(/[<&*]/g, "") + "</p>").join(""),
-}));
+// A reply's text is drawn in the browser (Streamdown), so nothing here asks the server for HTML.
 vi.mock("recharts", async original => ({ ...(await original<typeof import("recharts")>()), ResponsiveContainer: ({ children }: { children: unknown }) => children }));
 
 import { Answer } from "./Answer.tsx";
@@ -48,19 +44,55 @@ describe("a streaming reply", () => {
     expect(screen.queryByText("light")).toBeNull();
   });
 
-  it("leaves a settled paragraph in place while the next one is written", async () => {
+  it("leaves a settled paragraph in place while the next one is written", () => {
     const view = render(<Answer text={"First paragraph.\n\nSecond is coming"} streaming onAsk={() => {}} />);
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     const first = screen.getByText("First paragraph.");
     view.rerender(<Answer text={"First paragraph.\n\nSecond is coming along nicely"} streaming onAsk={() => {}} />);
     expect(screen.getByText("First paragraph.")).toBe(first);
-    expect(view.container.querySelector(".caret")?.textContent).toContain("coming along nicely");
+    // The caret marks the reply still being written, so its text ends with the half-written sentence.
+    expect(view.container.querySelector(".caret")?.textContent?.trim().endsWith("Second is coming along nicely")).toBe(true);
   });
 
   it("formats the paragraph being written without showing its markers", () => {
     const view = render(<Answer text={"Start **bold** and then **half"} streaming onAsk={() => {}} />);
     expect(view.container.querySelector("strong")?.textContent).toBe("bold");
     expect(view.container.textContent).not.toContain("*");
+  });
+
+  it("draws a table, a code block and a list from the text alone, and asks nothing of the server", () => {
+    const asked = vi.spyOn(globalThis, "fetch");
+    const text = "Die Woche:\n\n| Tag | km |\n|---|---|\n| Mo | 8 |\n| Sa | 18 |\n\n- locker\n- lang\n\n```js\nconst pace = distance / time;\n```";
+    const view = render(<Answer text={text} streaming onAsk={() => {}} />);
+    expect(view.container.querySelector("table thead th")?.textContent).toBe("Tag");
+    expect(view.container.querySelectorAll("table tbody tr")).toHaveLength(2);
+    expect(view.container.querySelectorAll("ul li")).toHaveLength(2);
+    expect(view.container.querySelector("pre code")?.textContent).toContain("const pace = distance / time;");
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it("shows no syntax characters while the text is half written", () => {
+    const view = render(<Answer text="" streaming onAsk={() => {}} />);
+    for (const text of ["Der Wert ist **wichtig", "Ein Satz.\n\n```js\nconst pace = distance / time;", "| Tag | Lauf |\n|---|---|"]) {
+      view.rerender(<Answer text={text} streaming onAsk={() => {}} />);
+      const shown = view.container.textContent ?? "";
+      expect(shown, text).not.toMatch(/\*\*|```|\|/);
+      expect(shown.length, text).toBeGreaterThan(3);
+    }
+  });
+
+  it("draws raw HTML in the text as text, never as elements", () => {
+    const view = render(<Answer text={'Ein <b>fetter</b> Satz und <script>alert(1)</script>'} streaming={false} onAsk={() => {}} />);
+    expect(view.container.querySelector("b, script, img")).toBeNull();
+    expect(view.container.textContent).toContain("<b>fetter</b>");
+  });
+
+  it("keeps only web and mail links, as the server renderer did", () => {
+    const view = render(<Answer text={"[weg](javascript:alert) und [hin](https://example.com/x) und [mail](mailto:a@b.c)"} streaming={false} onAsk={() => {}} />);
+    const links = view.container.querySelectorAll("a");
+    expect([...links].map(link => link.getAttribute("href"))).toEqual(["https://example.com/x", "mailto:a@b.c"]);
+    expect(links[0]?.getAttribute("target")).toBe("_blank");
+    expect(links[0]?.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(links[1]?.getAttribute("target")).toBeNull();
   });
 });
 
