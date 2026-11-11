@@ -118,7 +118,8 @@ test('a save in the last research round reserves an answer even when output usag
     return response(answer('The note is saved.'));
   } });
   assert.equal(sent.length, 10); assert.ok(sent[9].tool_choice?.type === 'none' || !sent[9].tools?.length);
-  assert.ok(sent[8].max_tokens + sent[9].max_tokens + 8 <= chat.config.maxTokens);
+  // The eight lookup rounds are paid from the lookups' own budget; the save and the answer share the reply's.
+  assert.ok(sent[8].max_tokens + sent[9].max_tokens <= chat.config.maxTokens);
   assert.ok(result.activity.some(event => event.name === 'create_record' && event.state === 'done' && event.applied_href === '/notes/research'));
   assert.equal(result.answer, 'The note is saved.');
 });
