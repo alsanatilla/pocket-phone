@@ -30,9 +30,28 @@ export async function listMemory(userId) {
  * count and the write share one transaction, so a request sent twice adds one entry. `added` and `replaced` say
  * whether anything was written.
  */
-export async function remember(userId, text, { chat = '', replaces = '' } = {}) {
+export function remember(userId, text, options = {}) {
   const kept = tidy(text);
-  if (!kept) throw refusal('Write what to remember.', 400, 'memory_empty');
+  if (!kept) return Promise.reject(refusal('Write what to remember.', 400, 'memory_empty'));
+  // A model often remembers two things in one round: its writes take turns, and one the database was too busy for
+  // is tried again, as a chat's write is (objects.js).
+  const next = (writing.get(userId) || Promise.resolve()).then(async () => {
+    for (let attempt = 0; ; attempt++) {
+      try { return await write(userId, kept, options); }
+      catch (error) {
+        if (attempt === 3 || !/SQLITE_BUSY|TRANSACTION_CLOSED|TRANSACTION_ACTIVE/.test(error.code || '')) throw error;
+        await new Promise(resolve => setTimeout(resolve, 20 * (attempt + 1)));
+      }
+    }
+  });
+  const settled = next.catch(() => {});
+  writing.set(userId, settled);
+  settled.then(() => { if (writing.get(userId) === settled) writing.delete(userId); });
+  return next;
+}
+/** The write an account's memory is waiting on, so two of them never hold a transaction at once in this process. */
+const writing = new Map();
+async function write(userId, kept, { chat = '', replaces = '' } = {}) {
   let entry;
   const tx = await database().transaction('write');
   try {
@@ -73,7 +92,11 @@ export function memoryNote(entries) {
 
 /** remember and forget as the server paths run them: the store's answer, or a refusal the model can act on. */
 export async function memoryTool(userId, chat, name, input = {}) {
-  if (name === 'forget') return { kind: 'memory', forgotten: await forget(userId, input.id), id: String(input.id || '') };
+  if (name === 'forget') {
+    // What was forgotten is said back, so the person reads the sentence, not an id.
+    const entry = (await listMemory(userId)).find(item => item.id === input.id);
+    return { kind: 'memory', forgotten: await forget(userId, input.id), id: String(input.id || ''), ...(entry ? { text: entry.text } : {}) };
+  }
   try { return { kind: 'memory', saved: true, ...await remember(userId, input.text, { chat: String(chat || ''), replaces: input.replaces || '' }) }; }
   catch (error) { return { error: error.code || 'memory_not_saved', message: error.message }; }
 }

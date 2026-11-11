@@ -9,7 +9,7 @@ import { toastError } from "../../ui/toast/toast.ts";
 import { OfferCard } from "./Offers.tsx";
 import { Answer, Thinking } from "./stream/Answer.tsx";
 import { Prose } from "./stream/Prose.tsx";
-import { ledger, ledgerTitle, offersOf, planOf, sourcesOf } from "./reply.ts";
+import { ledger, ledgerTitle, memoryOf, offersOf, planOf, sourcesOf } from "./reply.ts";
 import { resume, retry, send } from "./runner.ts";
 import { hrefFor } from "../../lib/classic.ts";
 import type { Segment } from "../../../shared/pip-reply.js";
@@ -76,6 +76,7 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
   const streaming = Boolean(live);
   const rows = ledger(shown, streaming);
   const plan = planOf(rows), offers = offersOf(rows), sources = sourcesOf(shown, rows);
+  const remembered = memoryOf(shown);
   const cards = useCardButtons(chatId, locked);
   const ask = useCallback((prompt: string) => { if (!locked) send(chatId, prompt).catch(toastError); }, [chatId, locked]);
   const place = useMemo(() => ({ chatId, place: "chat" as const, locked }), [chatId, locked]);
@@ -123,6 +124,13 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
         {shown.answer ? <div {...cards}><Answer text={shown.answer} blocks={blocks} streaming={streaming} onAsk={ask} at={place} /></div> : null}
 
         {streaming && !shown.answer ? <Thinking label={phaseLabel(shown.phase || "thinking")} /> : null}
+
+        {/* What Pip took into its memory of the person with this reply: said, so nothing is remembered unseen. */}
+        {!streaming && remembered.length ? (
+          <ul className="space-y-0.5 text-xs text-dim">
+            {remembered.map((change, index) => <li key={index}>{change.kind}: {change.text}</li>)}
+          </ul>
+        ) : null}
 
         {sources.length && !streaming ? (
           <div className="flex flex-wrap gap-1.5">

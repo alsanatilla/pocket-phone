@@ -249,3 +249,13 @@ test('a remember call is not a lookup: it still runs when the message needs none
   assert.deepEqual((await memory.listMemory(userId)).map(entry => entry.text), ['Reads the blue car note.']);
   assert.equal(view.run.turn.answer, 'Gern.');
 });
+
+test('two things remembered in the same round are both kept, and the same thing twice at once is kept once', async () => {
+  const userId = await account();
+  const kept = await Promise.all([memory.remember(userId, 'Trains for a half marathon.'), memory.remember(userId, 'Likes short answers.'), memory.remember(userId, 'likes short answers.')]);
+  assert.equal(kept.filter(entry => entry.added).length, 2);
+  assert.deepEqual((await memory.listMemory(userId)).map(entry => entry.text).sort(), ['Likes short answers.', 'Trains for a half marathon.']);
+  // A refusal does not hold up the writes behind it.
+  const mixed = await Promise.allSettled([memory.remember(userId, '   '), memory.remember(userId, 'Has a sister, Lena.')]);
+  assert.equal(mixed[0].status, 'rejected'); assert.equal(mixed[1].value.added, true);
+});
