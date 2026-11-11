@@ -13,6 +13,7 @@ import { config as pipConfig, requestBody, contextCoverage } from '../client/pip
 import { execute as runTool, preview as previewTool, label, WRITE_TOOLS } from '../client/pip-tools.js';
 import { settle } from '../client/pip-activity.js';
 import { objectId, validObject } from '../shared/objects.js';
+import { homeSegments, homeTail } from '../shared/pip-home.js';
 import { effortLimits, effortNote } from '../shared/pip-effort.js';
 import { replyNotice, waitingNotice } from '../shared/pip-notice.js';
 import { notify, watched, watching, unwatch, forgetWatches } from './pip-notify.js';
@@ -149,12 +150,22 @@ const chatObject = async (userId, uid) => {
   const row = (await sql({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, uid] })).rows[0];
   return row ? parse(row.payload) : null;
 };
+/** The account's home segments, oldest first, for a reply that runs in one. The LIKE keeps ordinary chats unread. */
+async function homeSegmentsOf(userId) {
+  const rows = (await sql({ sql: `SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND payload LIKE '%"home":true%'`, args: [userId] })).rows;
+  const chats = [];
+  for (const row of rows) {
+    const chat = parse(row.payload);
+    if (chat) chats.push(chat);
+  }
+  return homeSegments(chats);
+}
 async function conversation(userId, uid, header, value, now) {
   const stored = await chatObject(userId, uid);
   if (stored?.deleted) throw no('This chat was removed.', 404);
   if (stored) return stored;
   const config = (() => { try { return pipConfig(header?.config); } catch { return pipConfig(value); } })();
-  return { uid, title: String(header?.title || 'Pip').slice(0, 64), ...(header?.titled ? { titled: true } : {}),
+  return { uid, title: String(header?.title || 'Pip').slice(0, 64), ...(header?.titled ? { titled: true } : {}), ...(header?.home === true ? { home: true } : {}),
     created: Number.isSafeInteger(header?.created) ? header.created : now,
     updated: now, draft: '', context: [], turns: [], config };
 }
@@ -499,7 +510,8 @@ async function drive(userId, run, leaseId, { fetcher }) {
     };
     const judging = effort ? null : judgeEffort(userId, turn, (chat.turns || []).filter(item => item.uid !== turn.uid), { fetcher });
     const key = saved.key, timezone = value.timezone || saved.settings.timezone || 'UTC';
-    const conversationView = { ...chat, config: value }, body = requestBody(conversationView, turn), source = await serverRecordSource(userId);
+    const tail = chat.home === true ? homeTail(await homeSegmentsOf(userId), chat) : [];
+    const conversationView = { ...chat, config: value, ...(tail.length ? { turns: [...tail, ...(chat.turns || [])] } : {}) }, body = requestBody(conversationView, turn), source = await serverRecordSource(userId);
     body.instructions += '\n\nToday is ' + localDay(Date.now(), timezone) + ' (' + timezone + ').' + NOTE;
     // The memory is read once at the start of the reply; a fact saved during it lands in the next request.
     const remembered = memoryNote(await listMemory(userId));

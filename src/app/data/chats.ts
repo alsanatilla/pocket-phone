@@ -12,7 +12,7 @@ export interface ChatTurn {
 }
 export interface ChatSource { kind: string; uid: string; title: string; text: string; href: string }
 export interface Chat {
-  uid: string; title: string; titled?: boolean; pinned?: boolean; updated: number; draft: string; config: PipConfig;
+  uid: string; title: string; titled?: boolean; pinned?: boolean; home?: boolean; updated: number; draft: string; config: PipConfig;
   context: (ChatSource & { originalLength: number })[]; turns: ChatTurn[];
 }
 
@@ -22,7 +22,7 @@ const CURRENT = "pocket:pip-current";
 export function listChats(): Chat[] {
   try { return chats.list(); } catch (error) { console.warn("chats", error); return []; }
 }
-export const createChat = (): Chat => chats.create();
+export const createChat = (value?: PipConfig): Chat => chats.create(value);
 export const getChat = (uid: string): Chat | null => chats.get(uid);
 /** One chat, or null when it is missing or cannot be read. */
 export function readChat(uid: string): Chat | null {

@@ -14,7 +14,7 @@ export class ChatStore {
   constructor(storage?: Storage);
   list(): Chat[];
   get(uid: string | null): Chat | null;
-  create(): Chat;
+  create(value?: PipConfig): Chat;
   update(uid: string, edit: (chat: Chat) => void): Chat;
   remove(uid: string): void;
   recordApplied(uid: string, turnId: string, eventId: string, href: string, result?: unknown): Chat;

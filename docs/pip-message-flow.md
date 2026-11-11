@@ -253,3 +253,12 @@ would add a second model provider and remember without showing what.
 - **The person's copy.** `GET /api/pip/memory` returns the list; `POST { accountId, action, id?, text? }` adds one,
   edits one (`replaces`, 404 when it is gone) or forgets one, and answers the list after the change. The page that
   shows it is a later task.
+
+## One big chat
+
+Opening Pip lands in one ongoing conversation, kept as a chain of ordinary chats marked `home: true`
+(`src/shared/pip-home.js`). The segment created last takes the next message; when it holds 60 turns or 400,000
+characters, the next message starts a new one, and nothing is moved. The page shows the segments joined, oldest
+first. A server reply in a home segment also reads the last six finished turns of the segment before it and puts
+them before its own turns in the request only; `writeTurn` still stores just the new turn in the current segment.
+
