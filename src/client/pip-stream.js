@@ -21,7 +21,7 @@ const pausedRun = error => error?.name === 'RunPaused';
 // A durable run passes `durable`: { checkpoint, settled, pause }. checkpoint is the last pause's provider
 // messages, budgets and outstanding requests; settled is what a client decided; pause(state) stores the run
 // before the request ends and returns. The run then throws RunPaused and continues in a later request.
-export async function streamChat(chat, turn, { value, body, key, signal, onUpdate = () => {}, fetcher = fetch, executeTool = execute, previewTool = preview, approve = null, timeoutMs = 90000, deadlineMs = RESEARCH_LIMITS.deadlineMs, resume = null, coverage = null, deviceTools = [], durable = null, saveTurn = null } = {}) {
+export async function streamChat(chat, turn, { value, body, key, signal, onUpdate = () => {}, fetcher = fetch, executeTool = execute, previewTool = preview, approve = null, timeoutMs = 90000, deadlineMs = RESEARCH_LIMITS.deadlineMs, resume = null, research = null, coverage = null, deviceTools = [], durable = null, saveTurn = null } = {}) {
   const controller = new AbortController(), abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort();
   // A continued run keeps the provider messages, the budgets and the requests it already recorded. Its research
@@ -30,10 +30,10 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   const researchLeft = Math.max(1, restored?.counters?.researchLeft ?? RESEARCH_LIMITS.deadlineMs);
   let timeout, absolute, timedOut = false, deadlineReached = false, deadlineLeft = Math.min(deadlineMs, RESEARCH_LIMITS.deadlineMs, researchLeft), deadlineFrom = 0;
   const requestBudget = deadlineLeft;
-  let calls = 0, searches = 0, toolData = 0, tokens = value.maxTokens;
+  let calls = 0, searches = 0, lookups = 0, toolData = 0, tokens = value.maxTokens;
   let finalReason = '', finalRounds = 0, finalCalls = 0, round = 0, currentRound = 0, allowance = 0, final = false, canPrepare = false, lastFinish = '', fatal = null;
   if (restored?.counters) { const saved = restored.counters;
-    calls = saved.calls || 0; searches = saved.searches || 0; toolData = saved.toolData || 0; tokens = saved.tokens ?? value.maxTokens;
+    calls = saved.calls || 0; searches = saved.searches || 0; lookups = saved.lookups || 0; toolData = saved.toolData || 0; tokens = saved.tokens ?? value.maxTokens;
     round = saved.round || 0; currentRound = saved.currentRound || 0; finalReason = saved.finalReason || '';
     finalRounds = saved.finalRounds || 0; finalCalls = saved.finalCalls || 0; final = Boolean(saved.final); canPrepare = Boolean(saved.canPrepare); }
   const deadline = () => { deadlineFrom = Date.now(); absolute = setTimeout(() => { deadlineReached = true; controller.abort(); }, deadlineLeft); };
@@ -88,7 +88,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   };
   // What a pause stores: the provider messages, the remaining budgets, and the requests no client has settled yet.
   const checkpoint = extra => ({ messages: [...(base || body.messages), ...responses],
-    counters: { calls, searches, toolData, tokens, round, currentRound, finalReason, finalRounds, finalCalls, final, canPrepare, researchLeft: Math.max(1, researchLeft - (requestBudget - deadlineLeft)) },
+    counters: { calls, searches, lookups, toolData, tokens, round, currentRound, finalReason, finalRounds, finalCalls, final, canPrepare, researchLeft: Math.max(1, researchLeft - (requestBudget - deadlineLeft)) },
     pending: pending.map(item => ({ ...item })), previews: Object.fromEntries(previews), rows: Object.fromEntries(rows), ...extra });
   const halt = async extra => { await durable.pause(checkpoint(extra)); throw new RunPaused(); };
   const check = () => { if (controller.signal.aborted) throw stopped(); if (fatal) throw fatal; };
@@ -137,9 +137,10 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     }
     let answer;
     if (!allowed(name)) { answer = { error: 'tool_unavailable', message: 'This tool is not offered or its access was switched off.' }; finalReason ||= 'Unavailable tool requested'; }
+    else if (!write && !stateTool && research && ((research.lookups !== undefined && lookups >= research.lookups) || (research.webCalls !== undefined && web && searches >= research.webCalls))) { answer = budgetError; finalReason ||= 'Enough looked up for this message'; }
     else if (!write && (stateTool ? (final ? finalCalls >= RESEARCH_LIMITS.finalCalls : calls >= RESEARCH_LIMITS.calls) : calls >= RESEARCH_LIMITS.calls || web && searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || finalReason === 'Research data exhausted')) { answer = budgetError; finalReason ||= 'Research calls or data exhausted'; }
     else {
-      if (!write) { calls++; if (final) finalCalls++; if (web) searches++; }
+      if (!write) { calls++; if (final) finalCalls++; if (web) searches++; if (!stateTool) lookups++; }
       record(id, { name, state: 'running', title: label(name, input), input: kept(name, input) }); result.phase = label(name, input);
       const signature = grantSignature(value, name), lookup = cacheKey(name, input), reuse = !stateTool;
       try {

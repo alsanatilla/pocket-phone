@@ -198,3 +198,22 @@ On SIGTERM or SIGINT the web process and the worker give running replies 20 seco
 still running then is let go: it stops and its lease is set to 0, so the next process continues it at once instead
 of waiting for the lease to expire. A tab that hears `restarted` forgets the changes it had applied and takes the
 reply from its start again.
+
+## Pip looks up as much as the message deserves
+
+Before a server reply, `drive` asks JEV (`judgeEffort` in `src/server/pip-effort.js`) how much looking-up the
+message needs. It is the same decisions API the Girder game uses, read with the account's OpenRouter key; the levels
+and the sentence the model reads are in `src/shared/pip-effort.js`.
+
+- The question is one choice named `effort`: `none`, `quick` or `thorough`. The state is the message (up to 2,000
+  characters), how many sources are attached, and the last two finished turns (requests and prose answers, never a
+  card's source).
+- `none` allows one lookup and no web call, `quick` three lookups and two web calls. `thorough` leaves today's
+  `RESEARCH_LIMITS` alone. `streamChat` counts a lookup as any tool call that is neither a write nor a state tool,
+  and the lookup beyond the level is answered with `research_budget_reached`, so the model answers from what it
+  has. Cards are never refused by this limit.
+- The level is judged once per run and kept in `usage.effort`. A run continued after a pause or a restart keeps it
+  without asking again, and the lookups it made before the pause count after it.
+- No OpenRouter key, no answer within 1.2 seconds, a refused request or an answer that is not one of the levels:
+  the reply runs exactly as before and its usage carries no `effort`. The tab path and scheduled jobs are never
+  judged.

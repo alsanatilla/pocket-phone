@@ -7,10 +7,12 @@ import { serverRecordSource } from './pip-source.js';
 import { applyApprovedWrite } from './pip-writes.js';
 import { backgroundAccount, keyOf, chargeTokens, localDay, tokensLeft, validTimezone, JOB_BUDGET } from './pip-background.js';
 import { readKey } from './pip-keys.js';
+import { judgeEffort } from './pip-effort.js';
 import { config as pipConfig, requestBody, contextCoverage } from '../client/pip-core.js';
 import { execute as runTool, preview as previewTool, label, WRITE_TOOLS } from '../client/pip-tools.js';
 import { settle } from '../client/pip-activity.js';
 import { objectId, validObject } from '../shared/objects.js';
+import { effortLimits, effortNote } from '../shared/pip-effort.js';
 import { replyNotice, waitingNotice } from '../shared/pip-notice.js';
 import { notify, watched, watching, unwatch, forgetWatches } from './pip-notify.js';
 import { enqueue, claimJob, finishJob, releaseJob } from './pip-queue.js';
@@ -479,6 +481,9 @@ async function drive(userId, run, leaseId, { fetcher }) {
     const value = { ...snapshot, grants: (snapshot.grants || []).filter(grant => serverGrants(saved.settings).includes(grant)) };
     const chat = await chatObject(userId, chatUid);
     if (!chat || chat.deleted) return await end('stopped', 'This chat was removed.');
+    // JEV decides how much looking-up this message deserves; it answers while the run's source and requests are read.
+    let effort = typeof turn.usage?.effort === 'string' ? turn.usage.effort : '';
+    const judging = effort ? null : judgeEffort(userId, turn, (chat.turns || []).filter(item => item.uid !== turn.uid), { fetcher });
     const key = saved.key, timezone = value.timezone || saved.settings.timezone || 'UTC';
     const conversationView = { ...chat, config: value }, body = requestBody(conversationView, turn), source = await serverRecordSource(userId);
     body.instructions += '\n\nToday is ' + localDay(Date.now(), timezone) + ' (' + timezone + ').' + NOTE;
@@ -488,8 +493,15 @@ async function drive(userId, run, leaseId, { fetcher }) {
     const observations = (turn.activity || []).filter(row => row.state === 'done' && row.result && !row.applied_href)
       .map(row => ({ name: row.name, input: row.input || '{}', result: row.result })).slice(-24);
     const { streamChat } = await import('../client/pip-stream.js');
+    const judged = judging ? await judging : null;
+    if (judged) effort = judged.level;
+    // The level's sentence joins the date line: the model knows how much looking-up Pocket expects before it writes.
+    const note = effort && effortNote(effort);
+    if (note) body.instructions += '\n\n' + note;
+    const limits = effortLimits(effort);
     const reply = await streamChat(conversationView, turn, { value, body, key, fetcher, deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
-      onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server' } }); live.publish(runId, turn, meta); progress(); },
+      ...(limits ? { research: limits } : {}),
+      onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}) } }); live.publish(runId, turn, meta); progress(); },
       resume: { reasoning: turn.reasoning || '', activity: turn.activity || [], observations },
       durable: { checkpoint: resumed, settled: resumed ? settlementMap(requests) : null, pause },
       // A card changed in an earlier reply (update_card) is written to the chat at once; every device pulls it.
@@ -499,7 +511,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
         : runTool(value, name, input, signal, { ...context, source }),
       previewTool: (value, name, input, signal) => previewTool(value, name, input, signal, source) });
     segment = reply.usage || segment;
-    Object.assign(turn, reply, { usage: { ...total(segment), runtime: 'pocket-server' } });
+    Object.assign(turn, reply, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}) } });
     await end('done');
   } catch (error) {
     if (error?.name === 'RunPaused' && paused || leaseLost) return;
