@@ -1,5 +1,5 @@
 // Browser check for Shadow Protocol. Run the dev server first (port in SHADOW_URL,
-// default 8890; JEV_MOCK=1 exercises the relay with the local model), then:
+// default 8890; JEV_MOCK=1 exercises the relay with deterministic mock orders), then:
 //   PLAYWRIGHT_MODULE=.../playwright/index.mjs node tools/shadow-browser.mjs
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';

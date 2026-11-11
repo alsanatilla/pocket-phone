@@ -107,6 +107,15 @@ function drawGuard(ctx, g, time, selected, pose = null) {
   ctx.lineCap = 'butt';
   ctx.fillStyle = GUARD.rifle; ctx.fillRect(5.2, 2.7, 1.1, 1.9);
   ctx.fillStyle = '#3a3e41'; ctx.fillRect(9.2, 3.1, 1.9, 1.1);
+  // A guard who has you in sight brings the rifle up: a short red aim line and
+  // a muzzle glint on the first beat make the spot readable before the chase.
+  if (g.sees) {
+    const flash = Math.max(0, 1 - (time - (g.spottedAt ?? -9)) / .22);
+    ctx.strokeStyle = `rgba(255,92,72,${(.2 + flash * .5).toFixed(3)})`;
+    ctx.lineWidth = .45;
+    ctx.beginPath(); ctx.moveTo(11.5, 2.6); ctx.lineTo(21, 2.6); ctx.stroke();
+    if (flash > 0) { ctx.fillStyle = `rgba(255,224,176,${flash.toFixed(3)})`; ctx.fillRect(10.2, 1.2, 3.2, 2.8); }
+  }
   ctx.fillStyle = GUARD.gloves; ctx.beginPath(); ctx.arc(4.3, 3, .9, 0, Math.PI * 2); ctx.arc(6.7, 2, .9, 0, Math.PI * 2); ctx.fill();
   // A cap with its brim to the front.
   ctx.fillStyle = GUARD.brim; ctx.beginPath(); ctx.ellipse(3.3, 0, 1.5, 2.5, 0, 0, Math.PI * 2); ctx.fill();
@@ -205,11 +214,16 @@ function drawCombat(ctx, sim) {
 }
 
 function drawDoors(ctx, sim) {
+  const seal = sim.field?.seal;
   for (const door of sim.doors.values()) {
     const x = door.tx * TILE, y = door.ty * TILE;
     const vertical = kindAt(door.tx, door.ty - 1).walk === 'none' && kindAt(door.tx, door.ty + 1).walk === 'none';
-    const slide = door.open * 6.5;
-    const [leaf, inner, edge] = door.locked ? ['#9b6f5c', '#83594a', '#bb8d76'] : ['#8c98a3', '#76828d', '#aeb9c2'];
+    const onSeal = Boolean(seal && seal.until > sim.t && seal.tiles.some(([tx, ty]) => tx === door.tx && ty === door.ty));
+    const sealed = onSeal && seal.active, warning = onSeal && !seal.active;
+    const slide = sealed ? 0 : door.open * 6.5;
+    const [leaf, inner, edge] = sealed ? ['#b4543e', '#8f3f31', '#e08a6f']
+      : warning ? ['#a68a4e', '#8a7040', '#d6b974']
+        : door.locked ? ['#9b6f5c', '#83594a', '#bb8d76'] : ['#8c98a3', '#76828d', '#aeb9c2'];
     const panel = (lx, ly, w, h) => {
       ctx.fillStyle = leaf; ctx.fillRect(lx, ly, w, h);
       ctx.fillStyle = inner; ctx.fillRect(lx + .8, ly + .8, w - 1.6, h - 1.6);
@@ -217,6 +231,18 @@ function drawDoors(ctx, sim) {
     };
     if (vertical) { panel(x + 5.5, y - slide, 5, 8); panel(x + 5.5, y + 8 + slide, 5, 8); }
     else { panel(x - slide, y + 5.5, 8, 5); panel(x + 8 + slide, y + 5.5, 8, 5); }
+    if (warning) {
+      // The one-second interlock warning: a bright frame and hazard stripes.
+      ctx.strokeStyle = `rgba(255,214,120,${(.5 + .4 * Math.sin(sim.t * 14)).toFixed(3)})`;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x - 1.5, y - 1.5, TILE + 3, TILE + 3);
+      ctx.fillStyle = 'rgba(255,214,120,.32)';
+      for (let i = 2; i < 15; i += 4) ctx.fillRect(x + i, y + 2, 2, 2);
+    } else if (sealed) {
+      ctx.strokeStyle = `rgba(255,120,86,${(.55 + .25 * Math.sin(sim.t * 6)).toFixed(3)})`;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 2, y + 2, TILE - 4, TILE - 4);
+    }
     const slammed = sim.t - (door.slamAt ?? -9);
     if (slammed < .18) {
       ctx.fillStyle = `rgba(255,240,214,${(.55 * (1 - slammed / .18)).toFixed(3)})`;
@@ -236,12 +262,29 @@ function drawProps(ctx, sim, time) {
     ctx.fillStyle = '#12110f'; ctx.fillRect(58 * TILE + 6, 14 * TILE + 6, 2, 1);
   }
   for (const camera of sim.cameras) {
+    const priority = sim.field?.camera?.id === camera.id && sim.field.camera.until > time;
     ctx.fillStyle = 'rgba(4,6,10,.4)'; ctx.fillRect(camera.x - 2, camera.y - 1.5, 6, 6);
     ctx.fillStyle = '#4a5058'; ctx.fillRect(camera.x - 2.5, camera.y - 2.5, 5, 5);
     ctx.save(); ctx.translate(camera.x, camera.y); ctx.rotate(camera.angle);
     ctx.fillStyle = camera.on ? '#9aa3ab' : '#5d6166'; ctx.fillRect(-.5, -1.8, 6.2, 3.6);
     ctx.fillStyle = '#2a2f34'; ctx.fillRect(5.2, -1.2, 1.2, 2.4);
+    if (priority && camera.on) { ctx.fillStyle = '#ffd27a'; ctx.fillRect(1.6, -2.6, 1.4, 1.4); }
     ctx.restore();
+    if (priority && camera.on) {
+      ctx.strokeStyle = `rgba(255,210,122,${(.35 + .25 * Math.sin(time * 7)).toFixed(3)})`;
+      ctx.lineWidth = .7;
+      ctx.beginPath(); ctx.arc(camera.x, camera.y, 7 + Math.sin(time * 4) * 1.2, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+  // A raised floodlight mast marks the bank Jev switched on.
+  const lamp = sim.field?.light;
+  if (lamp && lamp.until > time) {
+    const lx = lamp.x * TILE, ly = lamp.y * TILE;
+    ctx.fillStyle = 'rgba(4,6,10,.45)'; ctx.fillRect(lx - 1, ly + 3, 2, 8);
+    ctx.fillStyle = '#5d6166'; ctx.fillRect(lx - 6, ly, 12, 3);
+    ctx.fillStyle = '#f4e7b8'; ctx.fillRect(lx - 5, ly - 1, 3, 3); ctx.fillRect(lx + 2, ly - 1, 3, 3);
+    ctx.fillStyle = `rgba(255,238,190,${(.55 + .35 * Math.sin(time * 5)).toFixed(3)})`;
+    ctx.fillRect(lx - 4, ly - 2, 1, 1); ctx.fillRect(lx + 3, ly - 2, 1, 1);
   }
 }
 
@@ -386,6 +429,11 @@ export function drawWorld(ctx, sim, view, opts = {}) {
     if (!onScreen(f.x, f.y, 20)) continue;
     sources.push({ x: f.x + f.w / 2, y: f.y + f.h / 2, radius: f.kind === 'screen' ? 15 : 11, color: f.objective && sim.player.data ? [255, 96, 76] : f.color, strength: f.kind === 'screen' ? .32 : .2 });
   }
+  // Jev's floodlight bank is a real light source, matching sim.lightAt.
+  const flood = sim.field?.light;
+  if (flood && flood.until > time && onScreen(flood.x * TILE, flood.y * TILE, 30)) {
+    sources.push({ x: flood.x * TILE, y: flood.y * TILE, radius: flood.r * TILE, color: [255, 238, 190], strength: .55 + .05 * Math.sin(time * 5) });
+  }
   const p = sim.player;
   // A little moonlight on the operative: in the dark they read as a shape, not a hole.
   if (!p.locker) sources.push({ x: p.x, y: p.y, radius: 18, color: [70, 86, 120], strength: .4 });
@@ -468,7 +516,7 @@ const ORDER_TAGS = { pursue: 'chase', intercept: 'cut off', block: 'hold', guard
 function drawOrders(ctx, sim, time) {
   for (const g of sim.guards) {
     const order = g.order;
-    if (!order || g.down || g.sees) continue;
+    if (!order || g.down) continue;
     const age = time - order.at;
     if (age < 0 || age > 2.6) continue;
     const fade = Math.min(1, age * 6) * Math.min(1, (2.6 - age) / .8);
