@@ -217,3 +217,25 @@ and the sentence the model reads are in `src/shared/pip-effort.js`.
 - No OpenRouter key, no answer within 1.2 seconds, a refused request or an answer that is not one of the levels:
   the reply runs exactly as before and its usage carries no `effort`. The tab path and scheduled jobs are never
   judged.
+
+## Pip remembers the person
+
+A short list of lasting facts about the person (how they like answers, what they work towards, who someone is to
+them) that Pip adds to while it talks and reads in every reply and job. Built in Pocket on purpose: a memory library
+would add a second model provider and remember without showing what.
+
+- **The list.** `pocket_pip_memory` holds at most 100 entries of up to 300 characters per account, each with an id of
+  `m` and six random characters, the chat it was learned in and when. `remember`, `forget`, `listMemory` and
+  `memoryNote` are in `src/server/pip-memory-store.js`: text is trimmed and its whitespace collapsed, equal text in
+  any case is the same fact, and the count check and the write share one transaction, so a message sent twice adds
+  one entry. A change publishes `{ type: 'memory' }` after the write.
+- **The tools.** `remember { text, replaces? }` and `forget { id }` are state tools, so a call never counts as a
+  lookup and is never replayed as an observation. They are offered only when the value given to `streamChat` says
+  `memory: true`, which `drive` and `runRoutine` set; nothing sets it on the tab path, so a reply that runs in the
+  browser has no memory.
+- **What the model reads.** Both paths read `listMemory` once while they build the request and append `memoryNote`
+  (one line per entry with its id) and a paragraph telling Pip to remember sparingly. A fact saved during a reply is
+  in the list from that reply's next request on, never in the reply that saved it.
+- **The person's copy.** `GET /api/pip/memory` returns the list; `POST { accountId, action, id?, text? }` adds one,
+  edits one (`replaces`, 404 when it is gone) or forgets one, and answers the list after the change. The page that
+  shows it is a later task.

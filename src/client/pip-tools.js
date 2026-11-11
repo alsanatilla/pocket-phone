@@ -39,10 +39,10 @@ export const COROS_ARGUMENTS = { coros_read: 4000, coros_write: 6000 };
 const TOOL_CATEGORIES = { search_notes: "notes", read_note: "notes", search_thoughts: "thoughts", search_tasks: "tasks", read_task: "tasks", search_calendar: "calendar", search_pocket: "pocket",
   read_chat_history: "universal", update_plan: "universal", show_card: "universal", update_card: "universal", create_record: "universal", change_record: "changes", gym_summary: "gym", update_training_preferences: "training",
   coros_summary: "coros", coros_read: "coros", coros_format: "coros", coros_write: "coros", search_web: "web", read_web_page: "web",
-  update_scratch: "job" };
+  update_scratch: "job", remember: "memory", forget: "memory" };
 const pocketCategories = ["notes", "tasks", "thoughts", "calendar"];
 /** Tools that show or change something instead of reading: never cached, never replayed as observations. The propose_* names are earlier replies' review cards. */
-export const STATE_TOOLS = ["update_plan", "show_card", "update_card", "create_record", "change_record", "coros_write", "update_training_preferences", "update_scratch", "propose_action", "propose_change", "propose_coros"];
+export const STATE_TOOLS = ["update_plan", "show_card", "update_card", "create_record", "change_record", "coros_write", "update_training_preferences", "update_scratch", "remember", "forget", "propose_action", "propose_change", "propose_coros"];
 /** Tools that write to Pocket or COROS. The AI SDK holds each call until the user approves or declines it. */
 export const WRITE_TOOLS = ["create_record", "change_record", "coros_write", "update_training_preferences"];
 const CHANGE_CATEGORY = { complete_task: "tasks", update_task: "tasks", append_note: "notes", move_appointment: "calendar" };
@@ -54,6 +54,8 @@ const permitted = (value, name) => {
   if (category === "training") return value.trainingConversation === true;
   // A scheduled job's notes exist only in its own unattended runs, never in a conversation.
   if (category === "job") return value.backgroundJob === true;
+  // Only a server reply or job keeps a memory; a chat that runs in the browser has none.
+  if (category === "memory") return value.memory === true;
   if (category === "universal") return true;
   if (category === "changes") return access(value).some(c => ["tasks", "notes", "calendar"].includes(c));
   if (category === "pocket") return access(value).some(c => pocketCategories.includes(c));
@@ -374,6 +376,8 @@ function resultSummary(name, result) {
   if (name === "show_card" || name === "update_card") return result.shows || "drawn";
   if (name === "update_plan") return result.plan.filter(step => step.status === "done").length + "/" + result.plan.length + " steps";
   if (name === "update_scratch") return result.saved ? "notes kept for the next run" : "notes not saved";
+  if (name === "remember") return result.added || result.replaced ? "remembered" : "already remembered";
+  if (name === "forget") return result.forgotten ? "forgotten" : "not remembered";
   if (result.kind === "action") return result.action.title + " · " + (result.action.status === "saved" ? "saved" : "declined");
   if (name === "propose_action") return result.proposal.title + " · ready to review";
   if (name === "propose_change") return result.before.title + " · ready to review";

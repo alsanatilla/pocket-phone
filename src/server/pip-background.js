@@ -9,6 +9,7 @@ import { EMPTY } from '../shared/workspace.js';
 import { config as pipConfig, requestBody, contextCoverage } from '../client/pip-core.js';
 import { execute as runTool, recordSource, WRITE_TOOLS } from '../client/pip-tools.js';
 import { trainingRuntime, trainingObservation, trainingCheckpoint, trainingChanged, rememberTraining, sweepMissedSessions, TRAINING_GRANTS, TRAINING_CHECK_INTERVAL } from './pip-training.js';
+import { listMemory, memoryNote, memoryTool, MEMORY_INSTRUCTIONS } from './pip-memory-store.js';
 import { trainingChatRoutine } from '../shared/pip-training-chat.js';
 import { sweepRuns } from './pip-runs.js';
 import { notify } from './pip-notify.js';
@@ -361,7 +362,7 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   const earlier = conversation ? chat.turns.find(turn => turn.uid === message.uid) : null;
   if (earlier && earlier.text !== message.text) throw invalid('This message already has different text.');
   if (earlier?.status === 'done') return { status: 'done', chat: chat.uid, turn: earlier.uid, reply: earlier };
-  const key = await keyOf(userId, saved), value = { ...pipConfig(settings), grants: settings.grants, trainingConversation: conversation };
+  const key = await keyOf(userId, saved), value = { ...pipConfig(settings), memory: true, grants: settings.grants, trainingConversation: conversation };
   let training, trainingLoad, observation, checkpoint, dailyReview;
   const formats = [];
   const authorized = async () => {
@@ -401,6 +402,10 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   const notes = job ? await readScratch(userId, routine.id) : '';
   const view = { ...chat, config: value }, body = requestBody(view, turn);
   body.tools = body.tools.filter(name => !WRITE_TOOLS.includes(name) || (conversation ? ['coros_write', 'create_record', 'update_training_preferences'].includes(name) : training?.tools.includes(name)));
+  // A job and the training conversation remember the person like a server reply does.
+  const remembered = memoryNote(await listMemory(userId));
+  if (remembered) body.instructions += '\n\n' + remembered;
+  body.instructions += '\n\n' + MEMORY_INSTRUCTIONS;
   if (job) body.instructions += JOB_NOTES(notes);
   body.instructions += conversation ? `\n\nThis is the user's ongoing training conversation with Pip. Answer their actual message naturally, in their language. Ask one useful follow-up when goals, availability or how a workout felt are unclear; do not demand a fixed prompt or issue a full report on every reply. Remember explicit goals, equipment, availability and constraints with update_training_preferences; keep temporary workout feedback dated. The saved preferences and this chat guide automatic reviews too. More recent corrections supersede old preferences. Use live reads when discussing workout performance; no COROS connection is needed just to talk. Automatic planning is currently ${routine.enabled && settings.enabled ? 'on' : 'paused'}. Only enable/resume it if the user asks. Use scoped workout writes when the user wants the plan adjusted; no per-workout confirmation is needed once automatic planning is enabled. Only saved tool results establish changes. Never schedule beyond the next two sessions within three days. Calendar appointments are unavailable.
 Remembered training brief: ${JSON.stringify(routine.prompt || 'Not set yet; learn it through conversation.')}
@@ -451,6 +456,7 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
       saveTurn: () => { revised = true; },
       ...(training || conversation ? { previewTool: prepare, approve: async requests => new Map(requests.map(request => [request.toolCallId, { approved: true }])) } : {}),
       executeTool: async (value, name, input, signal, context) => {
+        if (name === 'remember' || name === 'forget') return memoryTool(userId, chat.uid, name, input);
         if (name === 'update_scratch') {
           if (!job) return { error: 'unavailable', message: 'Only a scheduled job keeps notes.' };
           const kept = await writeScratch(userId, routine.id, input?.notes);

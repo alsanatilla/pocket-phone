@@ -46,6 +46,10 @@ const DEFINITIONS = {
     request_offset: integer('Original request and attached snapshot offset with turn_id; use next_request_offset or request_match_offset.', 0, 200000)
   })],
   update_scratch: ['Replace this scheduled job\'s notes, which only you read and which its next run receives: what you already reported, figures to compare next time, threads still open. Short and factual; the whole text is replaced each time.', object({ notes: z.string().max(2000).meta({ description: 'The complete notes for the next run, up to 2000 characters.' }) })],
+  remember: ['Keep one lasting fact about the person in your memory, in one short sentence: how they like answers, what they are working towards, who someone is to them, a standing preference. Not what only matters in this chat, not something a note or task already holds, never a password or key. To correct something you remember, pass its id as replaces.', object({
+    text: z.string().min(1).max(300).meta({ description: 'The fact, in one short sentence.' }), replaces: optional(z.string().min(1).max(7), 'The id of the memory this corrects.')
+  })],
+  forget: ['Remove one thing from your memory by its id, when the person asks you to forget it or it is no longer true.', object({ id: z.string().min(1).max(7).meta({ description: 'The id of the memory to remove.' }) })],
   // Loose on purpose: Pocket checks the card itself and answers with the exact problems (pocket-card-tool.js),
   // which a model can act on; a schema rejection would only say that the arguments were invalid.
   show_card: [CARD_TOOL_DESCRIPTION, z.object({ root: cardRoot, elements: cardElements })],

@@ -4,6 +4,7 @@ import { database, execute as sql } from './database.js';
 import { open } from './secrets.js';
 import { writeObject } from './objects.js';
 import { serverRecordSource } from './pip-source.js';
+import { listMemory, memoryNote, memoryTool, MEMORY_INSTRUCTIONS } from './pip-memory-store.js';
 import { applyApprovedWrite } from './pip-writes.js';
 import { backgroundAccount, keyOf, chargeTokens, localDay, tokensLeft, validTimezone, JOB_BUDGET } from './pip-background.js';
 import { readKey } from './pip-keys.js';
@@ -478,7 +479,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
     saved = await account(userId, snapshot, snapshot.grants, snapshot.timezone);
     if (!saved) return await end('failed', 'Pip on the server is no longer set up for this account.');
     // The provider and model stay as the reply started, so its reasoning continues; access is what the account allows now.
-    const value = { ...snapshot, grants: (snapshot.grants || []).filter(grant => serverGrants(saved.settings).includes(grant)) };
+    const value = { ...snapshot, memory: true, grants: (snapshot.grants || []).filter(grant => serverGrants(saved.settings).includes(grant)) };
     const chat = await chatObject(userId, chatUid);
     if (!chat || chat.deleted) return await end('stopped', 'This chat was removed.');
     // JEV decides how much looking-up this message deserves; it answers while the run's source and requests are read.
@@ -487,6 +488,10 @@ async function drive(userId, run, leaseId, { fetcher }) {
     const key = saved.key, timezone = value.timezone || saved.settings.timezone || 'UTC';
     const conversationView = { ...chat, config: value }, body = requestBody(conversationView, turn), source = await serverRecordSource(userId);
     body.instructions += '\n\nToday is ' + localDay(Date.now(), timezone) + ' (' + timezone + ').' + NOTE;
+    // The memory is read once at the start of the reply; a fact saved during it lands in the next request.
+    const remembered = memoryNote(await listMemory(userId));
+    if (remembered) body.instructions += '\n\n' + remembered;
+    body.instructions += '\n\n' + MEMORY_INSTRUCTIONS;
     const requests = (await sql({ sql: 'SELECT * FROM pocket_pip_run_requests WHERE user_id = ? AND run_id = ? ORDER BY created', args: [userId, runId] })).rows;
     const resumed = parse(run.checkpoint);
     // A continued run keeps the completed lookups as reusable observations.
@@ -506,8 +511,8 @@ async function drive(userId, run, leaseId, { fetcher }) {
       durable: { checkpoint: resumed, settled: resumed ? settlementMap(requests) : null, pause },
       // A card changed in an earlier reply (update_card) is written to the chat at once; every device pulls it.
       saveTurn: async changed => { if (!await writeTurn(userId, chatUid, changed)) throw new Error('The chat could not be saved.'); },
-      executeTool: (value, name, input, signal, context) => WRITE_TOOLS.includes(name)
-        ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId: context.eventId, name, input })
+      executeTool: (value, name, input, signal, context) => name === 'remember' || name === 'forget' ? memoryTool(userId, chatUid, name, input)
+        : WRITE_TOOLS.includes(name) ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId: context.eventId, name, input })
         : runTool(value, name, input, signal, { ...context, source }),
       previewTool: (value, name, input, signal) => previewTool(value, name, input, signal, source) });
     segment = reply.usage || segment;
