@@ -152,6 +152,13 @@
   .prose ol { list-style: decimal; padding-left: 1.25rem; margin: 0 0 10px; }
   .prose code { background: var(--muted); padding: 0 4px; }
   .prose pre { background: var(--muted); padding: 10px 12px; overflow-x: auto; margin: 0 0 10px; }
+  /* Code in a block has the block's own padding; the inline padding would indent only its first line. */
+  .prose pre code { background: none; padding: 0; }
+  /* A table reads as rows: a rule under each, room between columns, and it scrolls sideways before it breaks the page. */
+  .prose table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 0 0 10px; }
+  .prose th, .prose td { padding: 5px 16px 5px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  .prose th { color: var(--muted-foreground); font-weight: 400; }
+  .prose th:last-child, .prose td:last-child { padding-right: 0; }
   .prose blockquote { border-left: 2px solid var(--border); margin: 0 0 10px; padding-left: 12px; color: var(--muted-foreground); }
   .prose .thought-line .accent { color: var(--primary); }
   .prose .meta, .prose .muted { color: var(--muted-foreground); font-size: 12px; }
