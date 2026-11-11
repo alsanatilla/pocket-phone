@@ -380,3 +380,78 @@ The `research` option gains `enough?: (state) => Promise<boolean> | boolean`.
 ### Do not
 
 Do not stop replies by default. Do not change the levels or their caps. Nothing on the tab path or in jobs.
+
+---
+
+## P6 — Looking things up does not use up the answer (ready)
+
+### What real replies showed (2026-11-11)
+
+Asked to compare two cars from six short notes, GLM 5.3 made 6 to 12 lookups and then **failed** with "The
+configured reply token limit was reached": the reply's whole output budget (`maxTokens`, 4,096 here) is one number
+that every round draws from, a model that thinks before each lookup spends most of it on the rounds, and nothing is
+left for the answer. The person gets "Collected observations: …" instead of an answer, after 40 seconds. JEV's
+"enough?" (P4) does not help here: it said yes late or never.
+
+### The change, in `src/client/pip-stream.js` only
+
+Today: `tokens` starts at `value.maxTokens`; `onStepEnd` does `tokens -= usage.outputTokens || allowance` for every
+round; `prepareStep` ends the reply when `tokens < 1` and makes rounds final when `tokens <= reserve`.
+
+After this task there are two budgets:
+
+- **The answer's budget** is `tokens`, as now, starting at `value.maxTokens`.
+- **The lookups' budget** is new: `researchTokens`, starting at `RESEARCH_LIMITS.researchTokens`, a new entry in
+  `src/client/pip-limits.js` with the value `16000`.
+
+A round is charged to one of them when it ends (`onStepEnd`):
+
+- A round whose tool calls are **all lookups** (at least one call; none of them a write or a state tool; the same
+  rule the `lookups` counter uses) is charged to `researchTokens`.
+- Every other round (text only, or any card, write or other state tool) is charged to `tokens`, as now.
+
+And:
+
+- When `researchTokens` falls below 1, research ends the way the other limits end it: add it to the condition that
+  computes `final`, and set `finalReason ||= 'Research token budget reached'` at that point. The reply must then
+  still write its answer with the full remaining `tokens`.
+- A round's allowance (`maxOutputTokens`) is computed as now from `tokens` (a round may turn out to be the answer),
+  but a round that is not final is also capped at what is left of `researchTokens` plus the reserve, so a lookup
+  round cannot run far past the lookups' budget.
+- `researchTokens` is stored in and restored from the checkpoint counters like `tokens` (a checkpoint without it:
+  the full budget).
+- Nothing else changes: the same usage is reported (`result.usage`), the same daily accounting, the same messages.
+
+Read the whole function before changing it, and read every existing test that mentions `token` in
+`tools/pip-runs.test.mjs`, `tools/pip-reliability.test.mjs` and `tools/pip-cards.test.mjs`: they describe today's
+behaviour for the answer's budget, which must not change for a reply without lookups.
+
+### Tests: `tools/pip-budget.test.mjs` (new)
+
+Run the real pipeline against the provider fixture, as `tools/pip-cards.test.mjs` does. The fixture's
+`compatibleMessage` can report usage; read `tools/pip-provider-fixtures.mjs` for how to give a round its
+`output_tokens`.
+
+1. The failure above, fixed: `maxTokens` 4096; six rounds of one lookup each, every round reporting 700 output
+   tokens; then a final text of 900 tokens. The reply finishes with that text (today it fails after the fifth
+   round). `result.usage.output_tokens` is the sum of all rounds.
+2. A reply without lookups is charged exactly as before: a text round of 3,000 tokens with `maxTokens` 4096 leaves
+   1,096; show it through the next round's `max_tokens` in the provider request.
+3. A round that draws a card (`show_card`) is charged to the answer, not to the lookups; a round with one lookup
+   and one card in it too.
+4. The lookups' budget ends research: lookup rounds that together report more than 16,000 tokens are followed by a
+   final round (the provider request offers no lookup tools, as for the other limits) and the reply finishes with
+   its text.
+5. A pause keeps both budgets: a run that pauses for an approval after two lookup rounds continues with the
+   lookups' budget it had left (assert through the stored checkpoint's counters).
+6. All existing suites pass unchanged. If an existing test asserts a number that this task changes on purpose, do
+   not edit it: name it in the report.
+
+### Files you may touch
+
+`src/client/pip-stream.js`, `src/client/pip-limits.js` (the one entry), `tools/pip-budget.test.mjs` (new),
+`docs/pip-message-flow.md` (extend the "Budget" point in "Cards are a tool call").
+
+### Do not
+
+Do not change `maxTokens`, the reserve, the other limits, or what a reply costs to report. No UI.

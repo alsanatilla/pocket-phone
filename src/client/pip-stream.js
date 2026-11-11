@@ -114,7 +114,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     dropDraft();
     const observations = completed.length ? completed : (resume?.observations || []).flatMap(row => { try { return [{ answer: JSON.parse(row.result) }]; } catch { return []; } });
     if (!result.answer.trim()) {
-      const excerpts = observations.flatMap(({ answer }) => answer.error ? [] : answer.kind === 'action' ? [(answer.action.status === 'saved' ? 'Saved: ' : 'Declined: ') + answer.action.title] : answer.kind === 'plan' ? [] : answer.text ? [String(answer.title || 'Source') + ': ' + answer.text.slice(0, 600)] : (answer.results || answer.notes || answer.tasks || answer.appointments || []).slice(0, 3).map(item => (item.title || item.text || 'Source') + (item.description || item.excerpt ? ': ' + (item.description || item.excerpt).slice(0, 300) : '')));
+      const excerpts = observations.flatMap(({ answer }) => answer.error ? [] : answer.kind === 'action' ? [(answer.action.status === 'saved' ? 'Saved: ' : 'Declined: ') + answer.action.title] : answer.kind === 'plan' ? [] : answer.text ? [String(answer.title || 'Source') + ': ' + answer.text.slice(0, 600)] : (answer.results || answer.notes || answer.tasks || answer.appointments || []).slice(0, 3).map(item => (item.title || item.text || 'Source') + (item.description || item.excerpt || item.title && item.text ? ': ' + (item.description || item.excerpt || item.text).slice(0, 300) : '')));
       result.answer = excerpts.length ? 'Collected observations:\n\n' + excerpts.slice(0, 8).map(item => '- ' + item).join('\n') : 'Research stopped before a final answer was available.';
     }
     result.answer = normalizeAnswer(result.answer + '\n\n' + reason + ' Completed lookups remain in the activity.');

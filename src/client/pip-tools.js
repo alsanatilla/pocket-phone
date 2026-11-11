@@ -306,7 +306,9 @@ export async function execute(value, name, args = {}, signal, context = {}) {
     result = item ? { source: "pocket:task:" + item.uid, id: item.uid, text: item.text, title: item.text, due: item.due || "", completed: Boolean(item.done), done: Boolean(item.done), steps: (item.steps || []).map(step => ({ text: String(step.text || "").slice(0, 200), done: Boolean(step.done) })), task_source: item.source ? { kind: item.source.kind || "", name: restricted ? "" : String(item.source.name || "").slice(0, 200), text: restricted ? "" : String(item.source.text || "").slice(0, 4000), note_uid: item.source.note_uid || "", ...(restricted ? { access_disabled: true } : {}) } : null } : failure("task_not_found", "That task is no longer available.");
   } else if (name === "search_notes") {
     const found = recent(source.notes(), query);
-    result = { source: "pocket:notes", matched: found.length, truncated: found.length > limit, notes: found.slice(0, limit).map(n => ({ id: n.uid, title: noteTitle(n), excerpt: excerpt(n.text, query), text_truncated: n.text.length > 500 })) };
+    result = { source: "pocket:notes", matched: found.length, truncated: found.length > limit, notes: found.slice(0, limit).map(n => n.text.length > 500 ? { id: n.uid, title: noteTitle(n), excerpt: excerpt(n.text, query), text_truncated: true }
+      // A short note is given whole, so it is not read a second time.
+      : { id: n.uid, title: noteTitle(n), text: n.text, complete: true }) };
   } else if (name === "read_note") {
     if (typeof args.id !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(args.id)) return failure("invalid_arguments", "Use the id returned by search_notes.");
     const note = source.note(args.id);

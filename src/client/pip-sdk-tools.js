@@ -31,7 +31,7 @@ const DEFINITIONS = {
     brief: z.string().min(1).max(4000).optional(), trainingDays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
     feedback: z.string().min(1).max(1000).optional(), enabled: z.boolean().optional()
   }).refine(value => Object.keys(value).length > 0, 'Supply a training preference to remember.')],
-  search_notes: ['Search saved Pocket notes. All query words must match. Read a result by id for its text; drafts are excluded.', object(search)],
+  search_notes: ['Search saved Pocket notes. All query words must match; an empty query lists the most recent. A result with complete: true is the whole note. Read a note by id only when its result says text_truncated; drafts are excluded.', object(search)],
   read_note: ['Read a saved Pocket note in pages. Use next_offset for more text. No drafts or writes.', object({ id: recordId, ...paging })],
   search_thoughts: ['Search undecided, parked Thoughts. Thoughts are separate from Tasks. Read only; never turns an idea into an action.', object(search)],
   search_tasks: ['Search chosen Pocket tasks, including completion and due date. Read only; never edits or completes a task.', object(search)],
