@@ -14,7 +14,7 @@ to 60 seconds before the first word. The limit today is the same for every messa
 |---|---|---|
 | P1 | The chat lab: the chat in fixed states, photographed and measured | ready |
 | P2 | Pip looks up as much as the message deserves (JEV judges before the reply) | ready |
-| P3 | Writing is fluid (what P1 measures decides the brief) | not ready |
+| P3 | Writing is fluid: a trial of Streamdown for the reply's text | ready |
 | P4 | "Is this enough?" after each round of lookups | not ready |
 | P5 | Design points (card menu, tiles, empty chat, spacing) | not ready |
 
@@ -218,3 +218,87 @@ deserves").
 
 Do not change `RESEARCH_LIMITS`. Do not judge on the tab path or in jobs. Do not show the level in the UI. Do not add
 a setting. Do not call JEV from the browser.
+
+---
+
+## P3 — A trial: the reply's text drawn by Streamdown (ready)
+
+### What the lab measured (2026-11-11, phone size, median of three)
+
+While one reply of about 220 words is written: **31 elements already on screen were removed and drawn again, 15 of
+them after being visible for more than 100 ms**; layout shift 0.4; the view was up to 126 px behind the text in 29
+frames; 12 requests to `/api/markdown`. Frames themselves are steady (16.7 ms). So the reply does not stutter
+because the browser is slow: it stutters because each finished block is first drawn as an approximation
+(`Pending` in `src/app/features/pip/stream/Prose.tsx`), then replaced by HTML the server rendered, and the whole
+reply is replaced once more when it ends.
+
+### The trial
+
+Replace that mechanism, for a reply's prose only, with **Streamdown** (`streamdown@2.7.1`, Apache-2.0, by Vercel):
+a React component made for Markdown that is still being written. It renders in the browser, keeps finished blocks
+mounted and completes unfinished syntax, so nothing is requested from the server and nothing is swapped.
+
+This is a trial on a branch. It is merged only if the numbers and the pictures are better; say plainly if they are
+not.
+
+1. `npm install streamdown@2.7.1` (exactly this version; it is the one dependency this task adds). Read its README
+   and types in `node_modules/streamdown` first: how it is told that text is still streaming, which plugins exist
+   for code highlighting, math and diagrams, and how its styles reach Tailwind v4 (`@source` in the app's CSS).
+   **Do not enable plugins for math or diagrams.** Code highlighting only if it comes without loading a highlighter
+   for every language up front; otherwise leave code blocks plain and say so.
+2. `src/app/features/pip/stream/Prose.tsx`: `Prose` keeps its props (`text`, `streaming`, `className`) and renders
+   through Streamdown. `Pending`, `Block` and `useRenderedMarkdown` stay exported if anything else imports them
+   (`grep -rn` before removing); nothing else in the app changes its imports.
+3. Looks: a reply must look as it does now. The app styles rendered Markdown through the `prose` class and classes
+   such as `md-table` in `src/app/styles/global.css`; Streamdown brings its own classes. Use its `components` (or
+   class options) so headings, paragraphs, lists, links, tables, code and quotes get Pocket's existing styles, fonts
+   and colours. No new colours, no new fonts, no rounded "chat bubble" styles from the library. Links open as they do
+   today (read how the current renderer treats links and keep that: same-tab or new-tab, `rel`).
+4. Safety: the current renderer sanitizes on the server. Read what Streamdown does with raw HTML in Markdown and
+   with link and image URLs (its hardening options) and set it so that raw HTML is not rendered and only `http`,
+   `https` and `mailto` links work. Say in the report what you set and what you verified.
+5. The caret at the end of the text while it streams stays (class `caret`; see `Pending`).
+
+### Measure
+
+Build (`POCKET_TARGET=node POCKET_ALLOW_PROXY=1 npx astro build`) and run the lab before your change and after it:
+
+```
+PUPPETEER_MODULE=/tmp/claude-1000/-data-workspace-pocket-phone/c5f48c1b-1c82-4368-b6cd-2b17434fdce7/scratchpad/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js \
+  node tools/manual/chat-lab.mjs --out app/build/reports/chat-lab-before   # then …-after
+```
+
+Targets: `swaps.visible` 2 or fewer (from 15), `markdownRequests.count` 0 (from 12), `layoutShift` below 0.1 (from
+0.4), frames no worse. Also record the size of the built client JavaScript before and after
+(`du -sb dist/client/_astro` and the five largest files): the trial fails if the page's first load grows by more
+than 150 kB gzipped, unless the growth is in a chunk that is only loaded when a reply is shown; say which.
+
+Compare the pictures `long`, `long-top`, `writing`, `card-building`, `failed` at both sizes, before and after, and
+list every visible difference. The lab's own check for raw Markdown must still pass.
+
+### Tests
+
+`src/app/features/pip/stream/stream.test.tsx` and `Turn.test.tsx` test the current rendering. Read them. Tests that
+assert *what the person sees* (text present, no raw Markdown, a table is a table, the caret while streaming) must
+pass, adapted only where they reach into the old mechanism (for example waiting for a server render). Do not delete
+a test; list each one you changed and why. Add: a table, a code block and a list each render as such from text
+alone with no request made (assert `fetch` was not called); half-written Markdown (`**bold` without its end, an
+open code fence, a table with only its header) shows no stray syntax characters; raw HTML in the text is not
+rendered as elements.
+
+### Files you may touch
+
+`package.json` and `package-lock.json` (the one dependency), `src/app/features/pip/stream/Prose.tsx`,
+`src/app/styles/global.css` (the `@source` line and style rules for the reply's Markdown only),
+`src/app/features/pip/stream/stream.test.tsx`, `src/app/features/pip/Turn.test.tsx`, `segments.ts` beside it only to
+remove helpers nothing uses any more.
+
+### Do not
+
+Do not touch the server renderer, `/api/markdown`, notes, or the classic app: they keep using it. Do not change
+scrolling (`PipPage.tsx`); that is the next task. Do not merge or push.
+
+### Your report adds
+
+Both `stream.json` medians side by side, the bundle sizes, the list of visible differences, what you set for
+safety, and your own judgement: better, same or worse, and why.
