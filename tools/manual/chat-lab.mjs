@@ -425,15 +425,15 @@ const STATES = [
       await page.click('button[aria-label="All chats"]');
       await until(page, 'chat-list', 'the list of chats', () => {
         const dialog = document.querySelector('[role="dialog"]');
-        return Boolean(dialog) && dialog.innerText.toLowerCase().includes('5 conversations') && dialog.innerText.includes('everything, in one conversation');
+        return Boolean(dialog) && dialog.innerText.toLowerCase().includes('5 conversations') && dialog.innerText.includes('one ongoing conversation');
       });
     },
-    text: [/5 conversations/i, 'pip', 'everything, in one conversation · 45 messages', 'Schlaf und Training', 'Notiz speichern', 'Fehlgeschlagen', 'Schlafkarte', 'New chat'],
+    text: [/5 conversations/i, 'pip', 'one ongoing conversation · 45 messages', 'Schlaf und Training', 'Notiz speichern', 'Fehlgeschlagen', 'Schlafkarte', 'New chat'],
     selectors: ['[role="dialog"]'],
     scroll: 'keep',
     async check(page) {
       const first = await page.evaluate(() => document.querySelector('[role="dialog"] li')?.innerText ?? '');
-      if (!first.replace(/\s+/g, ' ').startsWith('pip everything, in one conversation · 45 messages')) throw new Error('the pip row is not first: ' + JSON.stringify(first));
+      if (!first.replace(/\s+/g, ' ').startsWith('pip one ongoing conversation · 45 messages')) throw new Error('the pip row is not first: ' + JSON.stringify(first));
     },
   },
   {

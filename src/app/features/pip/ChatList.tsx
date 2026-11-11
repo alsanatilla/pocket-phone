@@ -65,7 +65,7 @@ export function ChatList({ open, onOpenChange, current, homeCurrent, onPick, onH
             <li className={cn("group flex items-center rounded-md border-l-2", homeCurrent ? "border-primary bg-accent" : "border-transparent hover:bg-accent/50")}>
               <button type="button" className="min-w-0 flex-1 px-2 py-2.5 text-left" onClick={onHome} aria-current={homeCurrent ? "page" : undefined}>
                 <p className={cn("truncate text-sm", homeCurrent && "text-primary")}>pip</p>
-                <p className="mt-0.5 text-[11px] leading-tight text-dim">everything, in one conversation · {messages} {messages === 1 ? "message" : "messages"}</p>
+                <p className="mt-0.5 text-[11px] leading-tight text-dim">one ongoing conversation · {messages} {messages === 1 ? "message" : "messages"}</p>
               </button>
             </li>
           </ul>

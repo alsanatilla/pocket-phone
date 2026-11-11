@@ -29,7 +29,7 @@ describe("the chat list's home row", () => {
     const rows = screen.getAllByRole("listitem");
     expect(rows).toHaveLength(2);
     expect(rows[0]!.textContent).toContain("pip");
-    expect(rows[0]!.textContent).toContain("everything, in one conversation · 3 messages");
+    expect(rows[0]!.textContent).toContain("one ongoing conversation · 3 messages");
     expect(within(rows[0]!).getByRole("button").getAttribute("aria-current")).toBe("page");
     // The heading counts separate chats only, and both segments keep the one pip row.
     expect(screen.getByText(/1 conversation/)).toBeTruthy();
@@ -43,6 +43,6 @@ describe("the chat list's home row", () => {
   it("says one message when the whole conversation has one", () => {
     seed("pip", 1, true);
     render(<ChatList open onOpenChange={() => {}} current={null} homeCurrent onPick={() => {}} onHome={() => {}} onNew={() => {}} />);
-    expect(screen.getByText(/everything, in one conversation · 1 message$/)).toBeTruthy();
+    expect(screen.getByText(/one ongoing conversation · 1 message$/)).toBeTruthy();
   });
 });
