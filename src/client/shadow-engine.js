@@ -1,6 +1,6 @@
 // Shadow Protocol's simulation. Pure and DOM-free: the browser and the node
 // evaluation harness run the same rules. Guards move, see, hear and react
-// deterministically; the commander (Jev or its local System-One stand-in)
+// deterministically; Jev alone
 // chooses the tactics at decision points and never sees the player directly.
 import {
   TILE, COLS, ROWS, START, ZONE_BY_ID, CAMERAS, PATROLS, GUARD_SLOTS, POSTS, POST_BY_ID, HIDING,
@@ -11,8 +11,9 @@ import {
   guardWalk, playerWalk, lineClear, lightAt, findPath, smoothPath, walkableLine, distanceField, soundField,
   mulberry32, angleTo, wrapAngle, turnToward, nearestPassable, index, inside,
 } from './shadow-nav.js';
-import { readAnswers, planFromAnswers } from '../shared/shadow-jev.js';
-import { buildSituation, localAnswers, emptyDossier } from './shadow-commander.js';
+import { readCompleteAnswers, planFromAnswers } from '../shared/shadow-jev.js';
+import { DOOR_CONTROLS, FLOODLIGHTS, SEAL_SECONDS, FIELD_SECONDS } from '../shared/shadow-field.js';
+import { buildSituation, emptyDossier, initialMind, updateMind } from './shadow-commander.js';
 import { orderLine, openingLine, predictionLine, ackLine } from './shadow-voice.js';
 
 export const DIFFICULTY = Object.freeze({
@@ -44,7 +45,10 @@ const ACCEL_TIME = .03, DECEL_TIME = .026;
 export const DASH = Object.freeze({ time: .22, distance: 60, cooldown: .34, buffer: .15, reach: 56 });
 export const SLIDE = Object.freeze({ time: .5, boost: 1.12, turn: 2.6 });
 export const VAULT = Object.freeze({ time: .3, reach: 50, height: 7 });
-const VAULTABLE = new Set(['C', 'B']);
+// Crates, furniture, wrecks, drums and sandbags can be vaulted; a burning barrel cannot.
+// The mouse's one close-range button tells a tap from a hold after this long.
+export const STRIKE_HOLD = .26;
+const VAULTABLE = new Set(['C', 'B', 'W', 'Y', 'S']);
 const PLAYER_R = 4.5, GUARD_R = 5.5;
 const LEVEL_DETECT = [.9, 1, 1.12, 1.25];
 const STATE_SPEED = { patrol: 36, returning: 40, investigate: 44, suspicious: 0, search: 56, lockdown: 72 };
@@ -54,7 +58,6 @@ const OBJECTIVE_ROLES = new Set(['guard']);
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const world = ([tx, ty]) => ({ x: tx * TILE, y: ty * TILE });
 const rounded = value => Math.round(value * 10) / 10;
-const planSignature = ({ confidence, ...behavior }) => JSON.stringify(behavior);
 
 export function zoneSearchPoints(zoneId) {
   const zone = ZONE_BY_ID[zoneId];
@@ -119,14 +122,17 @@ export class ShadowSim {
     this.queue = [];
     this.decisions = [];
     this.decisionSerial = 0;
+    this.field = { seal: null, light: null, camera: null, history: [] };
     this.mission = { entry: null, labEntry: null, breachAt: null, breachKnown: false, panelAt: null, traces: new Set(), seenKeycardGone: false, progress: { hack: 0, panel: 0 } };
     this.net = {
       phase: 'calm', phaseSince: 0, level: 1, lastSeen: null, sightings: [], evidence: [], plan: null, decision: null,
       lastDecisionAt: -99, nextSweep: 0, searchUntil: 0, lockdownUntil: 0, calmAt: 0, missing: new Set(), found: new Set(),
       camerasOff: false, breach: false, keycardMissing: false, searched: {}, checked: {}, nextCheckin: this.rules.checkin,
       prediction: null, lostAt: null, lostEpisode: null, pendingAnomaly: null, alertEpisode: null, posture: null,
-      jevQueued: null, watcher: null, acked: 0,
+      jevQueued: null, jevInFlight: null, commandError: null, watcher: null, acked: 0,
+      contactPulseAt: 0, contactPulses: 0,
     };
+    this.mind = initialMind(this);
     this.metrics = {
       alerts: 0, sightings: 0, cameraSightings: 0, interceptions: 0, searches: 0, reacquired: 0, reacquireTimes: [],
       recoveries: 0, takedowns: 0, kills: 0, shots: 0, killPoints: 0, killChain: 0, bestChain: 0, lastKillAt: -99,
@@ -137,12 +143,12 @@ export class ShadowSim {
     this.guards = this.setupGuards();
     if (this.mode === 'commander') {
       this.decide('posture', null);
-      this.say(this.chief, openingLine(this.dossier, this.net.plan, this.net.watcher), '');
     } else this.applyBaselinePosture();
   }
 
   /** Who speaks for security on the radio: Jev when it commands, a plain dispatcher for the baseline. */
   get chief() { return this.mode === 'commander' ? 'Jev' : 'Command'; }
+  get commandBlocked() { return this.mode === 'commander' && (!this.net.plan || Boolean(this.net.commandError)); }
 
   /* ── setup ─────────────────────────────────────────────────────────────── */
 
@@ -191,16 +197,16 @@ export class ShadowSim {
 
   doorOpen = (tx, ty) => {
     const door = this.doors.get(index(tx, ty));
-    return !door || door.open > .55;
+    return !door || !this.isSealed(tx, ty) && door.open > .55;
   };
   playerPassable = (tx, ty) => {
     if (!playerWalk(tx, ty, this.player.crouch)) return false;
     const door = this.doors.get(index(tx, ty));
-    return !door || door.open > .62;
+    return !door || !this.isSealed(tx, ty) && door.open > .62;
   };
-  guardPassable = (tx, ty) => guardWalk(tx, ty);
+  guardPassable = (tx, ty) => guardWalk(tx, ty) && !this.isSealed(tx, ty);
   guardBlocked = (tx, ty) => {
-    if (!guardWalk(tx, ty)) return true;
+    if (!this.guardPassable(tx, ty)) return true;
     const door = this.doors.get(index(tx, ty));
     return Boolean(door && door.open < .5);
   };
@@ -257,8 +263,9 @@ export class ShadowSim {
   /* ── main step ─────────────────────────────────────────────────────────── */
 
   step(dt, input = {}) {
-    if (this.status !== 'playing') return;
+    if (this.status !== 'playing' || this.commandBlocked) return;
     this.t += dt;
+    this.updateField();
     this.updatePlayer(dt, input);
     this.updateDoors(dt);
     this.updatePebbles(dt);
@@ -282,6 +289,7 @@ export class ShadowSim {
     // A press that lands mid-move or mid-strike is kept for a moment and fires as soon as it can.
     if (input.dash) p.buffer = { kind: 'dash', until: this.t + DASH.buffer };
     if (input.knife && (p.action || p.move)) p.buffer = { kind: 'knife', aim: input.aim, until: this.t + DASH.buffer };
+    if (input.strike && (p.action || p.move)) p.buffer = { kind: 'strike', aim: input.aim, until: this.t + DASH.buffer };
     if (input.crouch) this.crouchPressed();
     if (p.locker) {
       if (input.interact || Math.hypot(input.move?.x || 0, input.move?.y || 0) > .5) this.leaveLocker();
@@ -294,7 +302,11 @@ export class ShadowSim {
     p.buffer = null;
     if (input.interact) this.interact();
     if (input.knife) this.knife(input.aim);
+    else if (input.strike) this.strike(input.aim);
     else if (buffered?.kind === 'knife') this.knife(buffered.aim);
+    else if (buffered?.kind === 'strike') this.strike(buffered.aim);
+    // A body picked up by holding the strike button is dropped when the button is let go.
+    if (p.dragHeld && p.carrying && !input.strikeHeld) this.dropBody();
     if (input.shoot) this.shoot(input.aim);
     if (input.knock) this.knock();
     if (input.throw) this.throwPebble(input.aim);
@@ -354,7 +366,7 @@ export class ShadowSim {
     }
     const kind = kindAt(toTile(p.x), toTile(p.y));
     p.hidden = kind.hide === 'duct' ? 'duct' : kind.hide === 'grass' && p.crouch ? 'grass' : null;
-    const light = lightAt(p.x, p.y);
+    const light = this.lightAt(p.x, p.y);
     const posture = p.hidden === 'duct' ? 0 : p.hidden === 'grass' ? .22 : p.crouch ? .6 : 1;
     const motion = !p.moving ? .72 : p.running ? 1.32 : p.crouch ? .85 : 1;
     p.visibility = Math.min(1, (.16 + .84 * light) * posture * motion * (p.carrying ? 1.3 : 1));
@@ -526,6 +538,7 @@ export class ShadowSim {
     const p = this.player, probe = { x: p.x + cos * (PLAYER_R + 4), y: p.y + sin * (PLAYER_R + 4) };
     const door = this.doors.get(index(toTile(probe.x), toTile(probe.y)));
     if (!door || m.doors?.has(door)) return null;
+    if (this.isSealed(door.tx, door.ty)) return 'locked';
     const shut = door.open < .85;
     if (shut && door.locked && !p.keycard) return 'locked';
     // Double doors swing together.
@@ -855,11 +868,7 @@ export class ShadowSim {
       return;
     }
     const body = this.guards.find(g => g.down && !g.hidden && !g.carried && dist(g, p) < 18);
-    if (body) {
-      p.carrying = body.id; body.carried = true;
-      if (body.keycard && !p.keycard) { p.keycard = true; body.keycard = false; this.emit('toast', { text: `${body.name}’s keycard` }); }
-      return;
-    }
+    if (body) { this.pickUp(body); return; }
     if (!p.data && dist(p, { x: TERMINAL.x * TILE, y: TERMINAL.y * TILE + 10 }) < 26) { p.action = { kind: 'hack', t: this.mission.progress.hack, need: 4 }; return; }
     if (!this.net.camerasOff && dist(p, { x: PANEL.x * TILE + 8, y: PANEL.y * TILE + 8 }) < 24) { p.action = { kind: 'panel', t: this.mission.progress.panel, need: 1.6 }; return; }
     if (this.keycardOnDesk && dist(p, { x: KEYCARD.x * TILE, y: KEYCARD.y * TILE }) < 22) {
@@ -900,6 +909,34 @@ export class ShadowSim {
   updateAction(dt, input) {
     const p = this.player, action = p.action;
     p.moving = false; p.speed = 0; p.vx = 0; p.vy = 0;
+    if (action.kind === 'grab') {
+      const g = this.guards.find(item => item.id === action.target);
+      if (!g || g.down) { p.action = null; return; }
+      action.t += dt;
+      this.lunge(action, g.x, g.y, 9);
+      p.facing = angleTo(p.x, p.y, g.x, g.y);
+      // Let go: a choke, carrying on from the time already spent in the grab.
+      if (!input.strikeHeld) { p.action = { kind: 'takedown', t: action.t, need: .38, target: g.id, fromX: action.fromX, fromY: action.fromY }; return; }
+      // Still holding: the knife.
+      if (action.t >= action.need) {
+        p.action = { kind: 'kill', t: .1, need: .26, target: g.id, fromX: action.fromX, fromY: action.fromY };
+        this.emit('knife', { guard: g.id });
+      }
+      return;
+    }
+    if (action.kind === 'body') {
+      const g = this.guards.find(item => item.id === action.target);
+      if (!g || !g.down || g.carried || g.hidden) { p.action = null; return; }
+      action.t += dt;
+      p.facing = angleTo(p.x, p.y, g.x, g.y);
+      if (!input.strikeHeld) {
+        p.action = g.dead ? null : { kind: 'kill', t: 0, need: .3, target: g.id, fromX: p.x, fromY: p.y };
+        if (!g.dead) this.emit('knife', { guard: g.id });
+        return;
+      }
+      if (action.t >= action.need) { p.action = null; this.pickUp(g, true); }
+      return;
+    }
     if (action.kind === 'swing') {
       action.t += dt;
       this.lunge(action, action.fromX + Math.cos(action.angle) * 10, action.fromY + Math.sin(action.angle) * 10, 0);
@@ -978,9 +1015,36 @@ export class ShadowSim {
     this.emit('takedown', { guard: g.id });
   }
 
+  pickUp(body, held = false) {
+    const p = this.player;
+    p.carrying = body.id; body.carried = true; p.dragHeld = held;
+    if (body.keycard && !p.keycard) { p.keycard = true; body.keycard = false; this.emit('toast', { text: `${body.name}’s keycard` }); }
+  }
+
+  /**
+   * The mouse's one close-range button. Behind a guard who has not seen you it grabs: let go
+   * quickly and he is choked out, keep holding and the knife finishes it. On a body a tap
+   * finishes it and a hold picks it up. Anything else is the knife: a lunge at a guard in
+   * reach, or a swing at the air.
+   */
+  strike(aim = null) {
+    const p = this.player;
+    if (p.action) return;
+    if (p.carrying) { this.dropBody(); return; }
+    const sneak = this.takedownTarget();
+    if (sneak) {
+      p.action = { kind: 'grab', t: 0, need: STRIKE_HOLD, target: sneak.id, fromX: p.x, fromY: p.y };
+      sneak.grabbed = true;
+      return;
+    }
+    const body = this.guards.find(g => g.down && !g.hidden && !g.carried && dist(g, p) < 18);
+    if (body) { p.action = { kind: 'body', t: 0, need: STRIKE_HOLD, target: body.id, fromX: p.x, fromY: p.y }; return; }
+    this.knife(aim);
+  }
+
   dropBody() {
     const p = this.player, body = this.guards.find(g => g.id === p.carrying);
-    p.carrying = null;
+    p.carrying = null; p.dragHeld = false;
     if (!body) return;
     body.carried = false;
     const locker = this.lockerNear(p, 22);
@@ -1031,6 +1095,62 @@ export class ShadowSim {
 
   /* ── world ─────────────────────────────────────────────────────────────── */
 
+  isSealed(tx, ty) {
+    const seal = this.field?.seal;
+    return Boolean(seal?.active && seal.until > this.t && seal.tiles.some(([x, y]) => x === tx && y === ty));
+  }
+
+  lightAt(x, y) {
+    const base = lightAt(x, y), lamp = this.field.light;
+    if (!lamp || lamp.until <= this.t) return base;
+    const reach = lamp.r * TILE, d = Math.hypot(x - lamp.x * TILE, y - lamp.y * TILE);
+    if (d >= reach || !lineClear(lamp.x * TILE, lamp.y * TILE, x, y, this.doorOpen, false)) return base;
+    return Math.min(1, base + (1 - d / reach) * .95);
+  }
+
+  applyField(orders = {}, decisionId) {
+    const f = this.field, changes = [];
+    if (orders.doors === 'release' && f.seal) { f.seal = null; changes.push('Door seal released'); }
+    const door = DOOR_CONTROLS.find(item => item.id === orders.doors);
+    if (door && (f.seal?.id !== door.id || f.seal.until <= this.t)) {
+      f.seal = { ...door, startsAt: this.t + 1, until: this.t + 1 + SEAL_SECONDS, active: false, decisionId };
+      changes.push(`Sealing ${door.name} · ${SEAL_SECONDS}s`);
+    }
+    if (orders.lights === 'off' && f.light) { f.light = null; changes.push('Extra floodlights off'); }
+    const light = FLOODLIGHTS.find(item => item.id === orders.lights);
+    if (light) { f.light = { ...light, until: this.t + FIELD_SECONDS, decisionId }; changes.push(`${light.name} on · ${FIELD_SECONDS}s`); }
+    if (orders.camera === 'routine' && f.camera) { f.camera = null; changes.push('Camera sweeps normal'); }
+    const camera = this.cameras.find(item => item.id === orders.camera && item.on);
+    if (camera) { f.camera = { id: camera.id, name: camera.name, until: this.t + FIELD_SECONDS, decisionId }; changes.push(`${camera.name} priority sweep · ${FIELD_SECONDS}s`); }
+    for (const text of changes) {
+      f.history.unshift({ text, at: this.t, decisionId });
+      this.say(this.chief, text, 'caution');
+      this.emit('field', { text });
+    }
+    f.history.length = Math.min(f.history.length, 8);
+    if (changes.length) for (const g of this.guards) { g.path = []; g.pathGoal = null; }
+  }
+
+  updateField() {
+    const f = this.field;
+    for (const key of ['seal', 'light', 'camera']) if (f[key] && this.t >= f[key].until) {
+      const name = f[key].name;
+      f[key] = null;
+      this.say('Security', `${name}: timed order ended.`, '');
+      for (const g of this.guards) { g.path = []; g.pathGoal = null; }
+    }
+    if (f.camera && !this.cameras.find(camera => camera.id === f.camera.id)?.on) f.camera = null;
+    const seal = f.seal;
+    if (seal && !seal.active && this.t >= seal.startsAt) {
+      // The closing interlock is physical: no actor can be trapped inside a door tile.
+      const occupied = [this.player, ...this.guards].some(body => seal.tiles.some(([x, y]) => Math.abs(body.x - (x * TILE + 8)) < 14 && Math.abs(body.y - (y * TILE + 8)) < 14));
+      if (!occupied) {
+        seal.active = true;
+        for (const g of this.guards) { g.path = []; g.pathGoal = null; }
+      }
+    }
+  }
+
   updateDoors(dt) {
     const p = this.player;
     for (const door of this.doors.values()) {
@@ -1039,7 +1159,8 @@ export class ShadowSim {
       // A door opens ahead of the operative in proportion to the speed they come at it, so walking
       // or sprinting through never meets a closed door. A dash is too quick for it: that slams it.
       const d = Math.hypot(p.x - cx, p.y - cy);
-      const approach = p.move || d < 1 ? 0 : Math.max(0, (p.vx * (cx - p.x) + p.vy * (cy - p.y)) / d);
+      const approach = p.move?.kind === 'dash' || d < 1 ? 0 : Math.max(0, (p.vx * (cx - p.x) + p.vy * (cy - p.y)) / d);
+      if (this.isSealed(door.tx, door.ty)) { door.open = Math.max(0, door.open - 7.5 * dt); continue; }
       if (!p.locker && d < 21 + approach * .24 && (!door.locked || p.keycard)) want = true;
       if (!want) for (const g of this.guards) if (!g.down && Math.hypot(g.x - cx, g.y - cy) < 23) { want = true; break; }
       if (!want) for (const g of this.guards) if (g.down && toTile(g.x) === door.tx && toTile(g.y) === door.ty) { want = true; break; }
@@ -1051,7 +1172,9 @@ export class ShadowSim {
     const p = this.player;
     for (const camera of this.cameras) {
       if (!camera.on) continue;
-      const sweep = camera.facing + Math.sin(this.t * Math.PI * 2 / camera.period + camera.phase) * camera.sweep;
+      const priority = this.field.camera?.id === camera.id;
+      camera.range = CAMERAS[camera.index].range * TILE * (priority ? 1.25 : 1);
+      const sweep = camera.facing + Math.sin(this.t * Math.PI * 2 / (camera.period * (priority ? .6 : 1)) + camera.phase) * camera.sweep;
       if (camera.track > 0 && camera.lastSeen) {
         camera.track -= dt;
         camera.angle = turnToward(camera.angle, angleTo(camera.x, camera.y, camera.lastSeen.x, camera.lastSeen.y), 1.6 * dt);
@@ -1172,13 +1295,14 @@ export class ShadowSim {
       g.reportIn -= dt;
       if (g.reportIn <= 0) {
         g.reported = true;
-        this.say(g.name, `Contact! ${ZONE_BY_ID[zoneAt(g.lastSeen.x, g.lastSeen.y)]?.name || 'here'}.`, 'alert');
-        this.send({ kind: 'sighting', from: g.id, ...g.lastSeen, at: g.lastSeen.t }, rules.radio);
+        // The shout is immediate; the radio report follows a short beat so a
+        // very fast takedown can still cut the call.
+        this.send({ kind: 'sighting', from: g.id, ...g.lastSeen, at: g.lastSeen.t }, rules.radio * .55);
         g.nextUpdate = this.t + 1;
       }
     } else if (g.sees && g.reported && this.t >= g.nextUpdate) {
       g.nextUpdate = this.t + 1;
-      this.send({ kind: 'sighting', from: g.id, ...g.lastSeen, at: g.lastSeen.t }, rules.radio * .6);
+      this.send({ kind: 'sighting', from: g.id, ...g.lastSeen, at: g.lastSeen.t }, rules.radio * .45);
     }
     this.perceiveBodies(g, dt);
   }
@@ -1196,21 +1320,24 @@ export class ShadowSim {
       && !this.guards.some(other => other !== g && !other.down && other.sees)
       && !this.cameras.some(camera => camera.on && camera.lastSeen && this.t - camera.lastSeen.t < .6)) this.metrics.interceptions++;
     g.sees = true; g.lostFor = 0; g.state = 'alert';
-    // The classic beat of surprise: a guard freezes before reacting, which is the player's window.
+    // The guard sees you, shouts at once and brings the rifle up. The short
+    // freeze is a beat of surprise, not a silent stare.
     g.spottedAt = this.t;
-    g.freeze = wasHunting ? this.rules.reaction * .45 : this.rules.reaction;
+    g.freeze = wasHunting ? this.rules.reaction * .25 : this.rules.reaction * .4;
     g.lastSeen = { x: p.x, y: p.y, t: this.t, heading: p.facing, pace: this.pace() };
     g.knowledge = { source: 'eyes', x: p.x, y: p.y, t: this.t };
     g.indicator = '!'; g.indicatorAt = this.t;
     g.lastAction = 'spotted the intruder';
     g.task = { role: 'pursue', x: p.x, y: p.y, label: 'chase on sight', source: 'reflex', issued: this.t };
     this.metrics.sightings++;
+    const zoneName = ZONE_BY_ID[zoneAt(p.x, p.y)]?.name || 'the facility';
+    this.say(g.name, `Contact! ${zoneName}.`, 'alert');
     if (!g.reported || this.t - (g.lastSeenReport || -9) > 6) {
       g.reported = false;
-      g.reportIn = wasHunting ? this.rules.report * .5 : this.rules.report;
+      g.reportIn = wasHunting ? this.rules.report * .22 : this.rules.report * .35;
     }
     g.lastSeenReport = this.t;
-    this.emit('spotted', { guard: g.id });
+    this.emit('spotted', { guard: g.id, name: g.name, zone: zoneAt(p.x, p.y) });
   }
 
   perceiveBodies(g, dt) {
@@ -1220,7 +1347,7 @@ export class ShadowSim {
       if (!other.down || other.hidden || other.carried || other === g || this.net.found.has(other.id) && other.bodyClaimed) continue;
       if (other.bodyClaimed && other.bodyClaimed !== g.id) continue;
       const d = dist(g, other);
-      const dark = lightAt(other.x, other.y) < .22 ? .55 : 1;
+      const dark = this.lightAt(other.x, other.y) < .22 ? .55 : 1;
       if (d > this.rules.range * TILE * .85 * dark) continue;
       const off = Math.abs(wrapAngle(angleTo(g.x, g.y, other.x, other.y) - g.facing));
       if (off > this.rules.fov / 2 + .1) continue;
@@ -1253,7 +1380,10 @@ export class ShadowSim {
     if (g.groggy > 0) g.groggy -= dt;
     if (g.pendingTask && this.t >= g.pendingTask.deliverAt) {
       const task = g.pendingTask; g.pendingTask = null;
-      if (!g.sees) {
+      // A contact plan can keep the spotter in the plan. Other orders wait
+      // until the guard loses sight, so a chase is never interrupted by a
+      // stale post order.
+      if (!g.sees || task.role === 'pursue') {
         this.assign(g, task);
         // One voice answers each order round, so the radio carries the plan without chatter.
         if (task.decision && this.net.acked !== task.decision && task.role !== 'return' && task.role !== 'post') {
@@ -1731,18 +1861,29 @@ export class ShadowSim {
       this.metrics.alertTime += dt;
       if (!anyEyes && sinceSeen > 3) this.loseContact();
       else if (this.mode === 'commander' && this.t - net.lastDecisionAt > this.rules.replan && net.lastSeen && zoneAt(net.lastSeen.x, net.lastSeen.y) !== net.decisionZone) this.decide('contact', null);
+      else if (this.mode === 'commander' && net.contactPulses < 2 && this.t >= net.contactPulseAt
+        && this.t - net.lastDecisionAt > this.rules.gap && this.guards.some(g => g.sees)) {
+        // A pursuit is a conversation, not one delayed order. Jev gets two
+        // short update windows while the intruder is still in sight.
+        net.contactPulses++;
+        net.contactPulseAt = this.t + Math.max(2.4, this.rules.replan * .55);
+        this.decide('contact', { kind: 'pursuit', label: 'still in contact' });
+      }
     } else if (net.phase === 'search') {
       this.metrics.alertTime += dt;
-      if (this.t >= net.searchUntil) this.endSearch();
+      if (this.mode === 'baseline' && this.t >= net.searchUntil) this.endSearch();
       else if (this.mode === 'commander' && this.t >= net.nextSweep && this.t - net.lastDecisionAt > this.rules.gap) this.decide('sweep', null);
     } else if (net.phase === 'lockdown') {
-      if (this.t >= net.lockdownUntil) this.setPhase('returning');
+      if (this.t >= net.lockdownUntil && this.t - net.lastDecisionAt > this.rules.replan) {
+        if (this.mode === 'commander') this.decide('posture', { kind: 'review' });
+        else this.setPhase('returning');
+      }
     } else if (net.phase === 'returning' || net.phase === 'caution') {
       if (this.t - net.phaseSince > (net.phase === 'returning' ? 14 : 30) && this.t - (net.lastEvidenceAt || 0) > 20) this.setPhase(net.phase === 'returning' ? 'caution' : 'calm');
     }
     if (net.postureDue && this.t >= net.postureDue && net.phase !== 'alert' && net.phase !== 'search' && this.t - net.lastDecisionAt >= this.rules.gap) {
       net.postureDue = 0;
-      this.say(this.chief, 'Something is wrong in here. Rearranging patrols.', 'caution');
+      this.say('Security', 'Requesting revised patrol orders.', 'caution');
       this.decide('posture', { kind: 'escalation' });
     }
     if (net.pendingAnomaly && this.t - net.lastDecisionAt >= this.rules.gap) {
@@ -1756,13 +1897,13 @@ export class ShadowSim {
     if (net.phase === phase) return;
     const before = net.phase;
     net.phase = phase; net.phaseSince = this.t;
+    if (phase !== 'alert') { net.contactPulses = 0; net.contactPulseAt = 0; }
     this.emit('phase', { phase, before });
     if (phase === 'returning') {
       this.say(this.chief, 'Stand down. Return to your routes, stay sharp.', '');
       for (const g of this.guards) if (!g.down && !g.sees && g.task && g.task.role !== 'post') this.goHome(g);
-      if (this.mode === 'commander') net.level = Math.max(1, Math.min(net.level, 2));
     }
-    if (phase === 'calm') net.level = this.mode === 'commander' ? Math.max(1, net.posture?.level ?? 1) : 1;
+    if (phase === 'calm' && this.mode === 'baseline') net.level = 1;
   }
 
   receive(message) {
@@ -1792,15 +1933,10 @@ export class ShadowSim {
         }
         this.notePrediction(zone, null, true);
         this.setPhase('alert');
-        net.level = 3;
-        this.say(this.chief, `All units: contact, ${ZONE_BY_ID[zone]?.name || 'inside'}.`, 'alert');
+        net.contactPulses = 0;
+        net.contactPulseAt = this.t + Math.max(2.4, this.rules.gap + .6);
+        this.say('Security', `Contact reported in ${ZONE_BY_ID[zone]?.name || 'the facility'}. Awaiting orders.`, 'alert');
         this.emit('alarm', { zone });
-        // Everyone hears the broadcast: the two closest head over at once, before command assigns roles.
-        if (this.mode === 'commander') {
-          for (const g of this.nearestGuards(net.lastSeen, 2, other => !other.objective && !net.missing.has(other.id) && !other.task?.role?.match(/^(guard|revive)$/))) {
-            if (!g.down) this.assign(g, { role: 'pursue', x: message.x, y: message.y, label: 'respond to the broadcast', source: 'broadcast' });
-          }
-        }
         this.decide('contact', null);
       } else if (net.prediction && net.prediction.zone && zone !== net.prediction.zone && !this.adjacentZone(zone, net.prediction.zone) && this.t - net.lastDecisionAt > 1.2) {
         this.notePrediction(zone, null, true);
@@ -1879,7 +2015,7 @@ export class ShadowSim {
       const near = HIDING_CLUSTERS.map(cluster => ({ cluster, d: Math.hypot(cluster.x * TILE - lkp.x, cluster.y * TILE - lkp.y) })).sort((a, b) => a.d - b.d)[0];
       this.metrics.vanish.push(near && near.d < 6 * TILE ? near.cluster.id : lkp.zone);
     }
-    this.say(this.chief, line, 'caution');
+    this.say('Security', line, 'caution');
     if (this.mode === 'commander') this.decide('lost', null);
     else this.baselineLost();
   }
@@ -1888,12 +2024,7 @@ export class ShadowSim {
     const net = this.net;
     if (net.lostEpisode) { this.metrics.recoveries++; net.lostEpisode = null; }
     net.alertEpisode = null;
-    if (this.mode === 'commander') {
-      this.setPhase('lockdown');
-      net.lockdownUntil = this.t + this.rules.lockdown;
-      this.say(this.chief, 'Search over. Hold the key posts.', 'caution');
-      this.decide('posture', { kind: 'stand_down' });
-    } else this.setPhase('returning');
+    this.setPhase('returning');
   }
 
   notePrediction(zone, cluster, evidence) {
@@ -1951,11 +2082,7 @@ export class ShadowSim {
 
   /* ── the commander ─────────────────────────────────────────────────────── */
 
-  /**
-   * One commander decision. The local System-One policy answers at once so the
-   * guards never wait; if Jev is connected its answers replace the local ones
-   * when they arrive, as long as the situation has not moved on.
-   */
+  /** Request orders. Existing Jev orders continue until a complete new reply arrives. */
   decide(kind, event) {
     const net = this.net;
     if (this.mode === 'baseline') {
@@ -1963,83 +2090,106 @@ export class ShadowSim {
       return null;
     }
     const situation = buildSituation(this, kind, event);
-    const local = localAnswers(kind, situation, this.random);
-    const plan = planFromAnswers(kind, local, situation);
     const decision = {
-      id: ++this.decisionSerial, kind, t: this.t, situation, answers: local, localAnswers: local, plan, source: 'local',
-      status: this.remote ? 'asking jev' : 'local', latency: null, event: event ? { kind: event.kind, label: event.label, zone: event.zone } : null,
+      id: ++this.decisionSerial, kind, t: this.t, situation, answers: null, plan: null, source: 'pending',
+      status: 'awaiting jev', latency: null, event: event ? { ...event } : null,
     };
     this.decisions.unshift(decision);
     this.decisions.length = Math.min(this.decisions.length, 24);
     net.decision = decision;
     net.lastDecisionAt = this.t;
     this.metrics.decisions++;
-    this.applyPlan(plan, decision, situation, event);
-    if (this.remote) this.consult(decision, situation, event);
+    if (net.jevInFlight) net.jevQueued = { decision, event };
+    else this.consult(decision, situation, event);
     return decision;
   }
 
-  /**
-   * Asks Jev about a decision the local policy has already acted on. Jev's
-   * answer replaces the local plan while the decision is still the current one.
-   * If newer sightings arrived in the same area meanwhile, Jev's choices are
-   * planned against the newest report, so fresh evidence still sets the
-   * positions. A question that meets a busy line waits for the current one.
-   */
+  /** Serial requests, newest report wins. Missing answers never become guessed orders. */
   consult(decision, situation, event) {
     const net = this.net, kind = decision.kind;
     const asked = performance.now();
     const sightingAtRequest = net.lastSeen ? { ...net.lastSeen } : null;
+    net.jevInFlight = decision;
+    decision.t = this.t;
+    decision.situation = situation;
     decision.status = 'asking jev';
-    Promise.resolve().then(() => this.remote(kind, situation)).then(answers => {
+    const accepted = raw => {
       decision.latency = performance.now() - asked;
-      this.consultQueued();
       if (this.status !== 'playing') return;
-      if (net.decision !== decision || this.t - decision.t > 8) { decision.status = 'jev late · superseded by a newer decision'; return; }
+      if (net.decision !== decision) { decision.status = 'superseded'; return; }
       const latest = net.lastSeen;
       const moved = Boolean(latest && sightingAtRequest && latest.at > sightingAtRequest.at
         && (dist(latest, sightingAtRequest) > TILE || latest.zone !== sightingAtRequest.zone
           || latest.pace !== sightingAtRequest.pace || Math.abs(wrapAngle((latest.heading || 0) - (sightingAtRequest.heading || 0))) > Math.PI / 4));
-      if (moved && latest.zone !== sightingAtRequest.zone) { decision.status = 'jev late · intruder reported in another area'; return; }
-      const current = moved ? buildSituation(this, kind, event) : situation;
-      // Fallbacks for a rebuilt situation draw from their own stream, so a late answer leaves the mission's dice alone.
-      const fallback = current === decision.situation ? decision.localAnswers : localAnswers(kind, current, mulberry32(this.seed ^ (decision.id * 7919)));
-      const merged = readAnswers(kind, answers, current, fallback);
-      if (!merged || merged === fallback) { decision.status = 'jev unreadable · local kept'; this.metrics.jevFailures++; return; }
-      const jevPlan = planFromAnswers(kind, merged, current);
-      const same = planSignature(jevPlan) === planSignature(net.plan);
-      decision.answers = merged; decision.plan = jevPlan; decision.source = 'jev';
-      decision.status = moved ? 'jev · planned on the newest report' : 'jev';
+      if (this.t - decision.t > 8 || moved && latest.zone !== sightingAtRequest.zone) {
+        decision.status = 'superseded by a fresh report'; this.decide(kind, event); return;
+      }
+      // Validate against the report Jev was actually asked about first. A
+      // same-room update may move the positions, but a plan that is no longer
+      // offered must never turn a valid reply into a frozen mission.
+      const askedAnswers = readCompleteAnswers(kind, raw, situation);
+      if (!askedAnswers) throw new Error('Jev returned incomplete orders.');
+      let answers = askedAnswers, current = situation, newest = false;
+      if (moved) {
+        const fresh = buildSituation(this, kind, event);
+        const freshAnswers = readCompleteAnswers(kind, raw, fresh);
+        const offered = !freshAnswers?.plan?.choice || fresh.plans?.some(item => item.id === freshAnswers.plan.choice);
+        if (freshAnswers && offered) { answers = freshAnswers; current = fresh; newest = true; }
+      }
+      if (answers.intent) updateMind(this, answers.intent, current, decision.id);
+      const jevPlan = planFromAnswers(kind, answers, current), first = !net.plan;
+      decision.answers = answers; decision.plan = jevPlan; decision.source = 'jev';
+      decision.status = newest ? 'jev · planned on the newest report' : 'jev';
       decision.situation = current;
+      net.commandError = null;
       this.metrics.jevDecisions++;
-      if (!same) this.applyPlan(jevPlan, decision, current, event, true);
-      else { net.plan = jevPlan; net.planSource = 'jev'; net.planStatus = 'confirmed by jev'; }
-    }).catch(error => {
+      this.applyPlan(jevPlan, decision, current, event);
+      if (first) this.say(this.chief, openingLine(this.dossier, jevPlan, net.watcher), '');
+    };
+    const failed = error => {
       decision.latency = performance.now() - asked;
-      if (error?.message === 'busy') { decision.status = 'local · jev busy'; decision.latency = null; net.jevQueued = { decision, event }; return; }
-      this.consultQueued();
-      if (error?.message === 'off') { decision.status = 'local'; decision.latency = null; return; }
-      decision.status = 'jev unavailable · local kept';
+      if (this.status !== 'playing' || net.decision !== decision) { decision.status = 'superseded'; return; }
+      decision.status = 'jev unavailable · mission paused';
       decision.error = String(error?.message || error).slice(0, 80);
+      net.commandError = decision.error;
       this.metrics.jevFailures++;
-    });
+    };
+    const finished = () => {
+      if (net.jevInFlight === decision) net.jevInFlight = null;
+      this.consultQueued();
+    };
+    try {
+      if (!this.remote) throw new Error('Connect OpenRouter to play against Jev.');
+      const reply = this.remote(kind, situation);
+      if (reply && typeof reply.then === 'function') reply.then(accepted).catch(failed).finally(finished);
+      else { accepted(reply); finished(); } // deterministic injected fixtures use the same validation path
+    } catch (error) { failed(error); finished(); }
   }
 
   /** When Jev frees up, it is asked about the newest decision it missed, if that is still current. */
   consultQueued() {
     const net = this.net, queued = net.jevQueued;
     net.jevQueued = null;
-    if (!queued || !this.remote || this.status !== 'playing' || net.decision !== queued.decision || this.t - queued.decision.t > 4) return;
+    if (!queued || !this.remote || this.status !== 'playing' || net.decision !== queued.decision) return;
     this.consult(queued.decision, buildSituation(this, queued.decision.kind, queued.event), queued.event);
   }
 
+  retryCommand() {
+    if (this.net.jevInFlight || this.status !== 'playing') return;
+    const previous = this.net.decision;
+    // Keep a failed mission frozen until the new request succeeds.
+    this.decide(previous?.kind || 'posture', previous?.event || null);
+  }
+
   applyPlan(plan, decision, situation, event, revised = false) {
+    if (decision.source !== 'jev') return;
     const net = this.net;
     // A revision that keeps the same tactics only moves guards; it is not worth a radio call.
     const voice = { kind: decision.kind, event, revised, n: decision.id, quiet: revised && net.plan?.summary === plan.summary };
     net.plan = plan;
     net.planSource = decision.source;
     net.planStatus = revised ? 'revised by jev' : 'issued';
+    this.applyField(plan.field, decision.id);
     if (plan.level != null) net.level = decision.kind === 'anomaly' ? Math.max(net.level, plan.level) : Math.max(0, Math.min(3, plan.level));
     if (decision.kind === 'anomaly' && ['body', 'missing'].includes(event?.kind)) net.postureDue = this.t + 5;
     if (plan.prediction) net.prediction = { ...plan.prediction, at: this.t, exitTo: plan.prediction.zone, resolved: null, cleared: 0 };
@@ -2047,9 +2197,10 @@ export class ShadowSim {
     if (decision.kind === 'lost' || decision.kind === 'sweep') net.nextSweep = this.t + this.rules.replan;
     if (plan.strategy === 'posture') { this.applyPosture(plan, event); }
     if (plan.strategy === 'stand_down') {
-      net.searchUntil = Math.min(net.searchUntil, this.t + 1);
+      this.endSearch();
       return;
     }
+    if ((decision.kind === 'lost' || decision.kind === 'sweep') && this.net.phase === 'search') net.searchUntil = this.t + this.rules.search;
     if (decision.kind === 'anomaly' && plan.threat != null) {
       if (plan.threat >= 2 && net.phase === 'calm') this.setPhase('caution');
       if (event?.kind === 'cameras' && plan.strategy === 'investigate') {
@@ -2079,7 +2230,10 @@ export class ShadowSim {
   allocate(roles, plan, decision, voice = { kind: decision.kind }) {
     const net = this.net;
     const taken = new Set();
-    const free = g => !g.sees && !g.grabbed && !net.missing.has(g.id) && !(g.task?.role === 'revive') && !(g.down && net.found.has(g.id));
+    // A guard in contact is still Jev's guard. Contact plans may command the
+    // spotter directly; other plans leave a chasing guard to their reflex.
+    const contact = decision.kind === 'contact';
+    const free = g => !g.grabbed && !net.missing.has(g.id) && !(g.task?.role === 'revive') && !(g.down && net.found.has(g.id)) && (contact || !g.sees);
     const objectiveFree = plan.keepObjective === false || this.net.breach;
     const issued = [];
     for (const role of roles) {
@@ -2087,9 +2241,12 @@ export class ShadowSim {
       let best = null, bestScore = Infinity;
       for (const g of this.guards) {
         if (taken.has(g.id) || !free(g)) continue;
+        // A guard with eyes on the intruder can only take the pursuit slot;
+        // a post or flank order waits until contact breaks.
+        if (g.sees && role.role !== 'pursue') continue;
         if (g.objective && !objectiveFree && !OBJECTIVE_ROLES.has(role.role)) continue;
         // Security does not know who is unconscious: a downed guard can be picked.
-        const known = g.down ? g.known : g;
+        const known = g.sees ? g : g.down ? g.known : g;
         let score = field[index(toTile(known.x), toTile(known.y))];
         if (!Number.isFinite(score)) continue;
         if (role.role === 'pursue' && g.task?.role === 'pursue') score -= 6;
@@ -2115,8 +2272,11 @@ export class ShadowSim {
   }
 
   order(g, role, decision) {
-    const task = { ...role, source: decision.source, decision: decision.id, issued: this.t + this.rules.radio };
-    g.pendingTask = { ...task, deliverAt: this.t + this.rules.radio };
+    // Contact orders use the spotter's already-open channel: faster than a
+    // fresh radio call to a guard on the far side of the facility.
+    const delay = decision.kind === 'contact' ? this.rules.radio * .5 : this.rules.radio;
+    const task = { ...role, source: decision.source, decision: decision.id, issued: this.t + delay };
+    g.pendingTask = { ...task, deliverAt: this.t + delay };
     g.ackDue = this.t + this.rules.radio + 2.5;
     if (g.down) g.lastOrder = task;
   }
@@ -2194,6 +2354,9 @@ export class ShadowSim {
     if (this.status !== 'playing') return '';
     if (p.locker) return 'E - leave the locker';
     if (p.action) {
+      if (p.action.kind === 'grab') return 'let go - choke out · keep holding - kill';
+      if (p.action.kind === 'body') return 'let go - finish · keep holding - drag';
+      if (p.action.kind === 'swing') return '';
       if (p.action.kind === 'takedown') return 'taking down...';
       if (p.action.kind === 'kill') return 'knife...';
       const left = Math.max(0, p.action.need - p.action.t).toFixed(1);
@@ -2205,8 +2368,8 @@ export class ShadowSim {
     }
     const target = this.takedownTarget();
     const downed = this.guards.find(g => g.down && !g.dead && !g.hidden && !g.carried && dist(g, p) < 18);
-    if (target) return `E - take down ${target.name} · click - knife`;
-    if (downed) return `E - drag ${downed.name}${downed.keycard ? ' · has a keycard' : ''} · click - finish`;
+    if (target) return `E or click - choke out ${target.name} · hold click - kill`;
+    if (downed) return `E or hold click - drag ${downed.name}${downed.keycard ? ' · has a keycard' : ''} · click - finish`;
     const dead = this.guards.find(g => g.dead && !g.hidden && !g.carried && dist(g, p) < 18);
     if (dead) return `E - drag ${dead.name}${dead.keycard ? ' · has a keycard' : ''}`;
     if (!p.data && dist(p, { x: TERMINAL.x * TILE, y: TERMINAL.y * TILE + 10 }) < 26) return 'hold E - download the data';

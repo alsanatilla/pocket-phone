@@ -1,5 +1,5 @@
 // Paired, seeded benchmark. The privileged scripted bot is not a human
-// playtester. Local tactical AI is not Jev: live requests are opt-in.
+// playtester. Commander runs require live Jev requests and are opt-in.
 // node tools/shadow-eval.mjs --runs 3 --json app/build/reports/shadow-eval.json
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -54,14 +54,16 @@ function jevRemote(budget) {
 
 /** Production simulation and bot; no balance overrides, teleports or invulnerability. */
 export async function mission({ difficulty, mode, seed, route, dossier, limit = 480, remote = null }) {
+  if (mode === 'jev' && !remote) throw new Error('Commander runs need live Jev access.');
   let pending = null;
   const sim = new ShadowSim({ difficulty, seed, mode: mode === 'baseline' ? 'baseline' : 'commander', dossier,
-    remote: mode === 'jev' && remote ? (kind, situation) => (pending = remote(kind, situation)) : null });
+    remote: mode === 'jev' ? (kind, situation) => (pending = remote(kind, situation)) : null });
   const bot = new Bot(sim, { route, seed, habit: 'locker', aggression: .5, distract: .4 });
   let crouchEdge = false;
   for (let step = 0; step < Math.ceil(limit / DT) && sim.status === 'playing'; step++) {
     // Zero simulated network latency: this measures model decisions, not the browser loop.
-    if (pending) { try { await pending; } catch { /* retain the local fallback */ } await new Promise(resolve => setImmediate(resolve)); pending = null; }
+    // A failed request freezes the field until retry; the eval records the failure instead of inventing orders.
+    if (pending) { try { await pending; } catch { /* mission stays frozen; the failure is counted */ } await new Promise(resolve => setImmediate(resolve)); pending = null; }
     const input = bot.input(DT);
     if (input.crouch && crouchEdge) input.crouch = false;
     crouchEdge = Boolean(input.crouch);
@@ -131,25 +133,25 @@ async function drill(mode, difficulty, seed, [name, tx, ty]) {
 export async function main(args = process.argv.slice(2)) {
   if (args.includes('--help')) {
     console.log('node tools/shadow-eval.mjs [--runs 4] [--difficulty normal,hard,extreme] [--routes culvert,keycard,fence] [--only missions,drill,adapt] [--limit 480] [--json path]');
-    console.log('--jev enables billed mission decisions using OPENROUTER_API_KEY; --max-calls 100 caps total requests. Drills and adaptation stay local.');
+    console.log('--jev enables billed Jev commander runs using OPENROUTER_API_KEY; --max-calls 100 caps total requests. Without it, only baseline security runs.');
     return;
   }
   const config = parseArgs(args), budget = { calls: 0, max: config.maxCalls };
   const remote = config.jev ? jevRemote(budget) : null;
   const report = { version: 2, generatedAt: new Date().toISOString(), config, liveJev: config.jev ? 'requested; inspect accepted decisions and failures' : 'not tested', missionGroups: [], drillGroups: [], adaptationGroups: [] };
   console.log(`Shadow Protocol · ${config.runs} seeds per route/cell · ${config.limit}s mission limit · map-aware scripted bot`);
-  console.log('Paired seeds and bot rules; local commander and baseline differ in tactics, initial posture, and resulting patrols.');
+  console.log('Paired seeds and bot rules; Jev commander and baseline differ in tactics, initial posture, and resulting patrols.');
   console.log('extr/capt/limit: mission outcomes; quiet: extracted without any detection; det: any detection; al/min: radio alarm episodes/minute.');
   console.log('icpt/m: confirmed interception sightings/mission (not captures); find/s and rec/s: reacquisition and stand-down/extraction per search started; open/s: searches censored at the time limit.');
   console.log('A timeout is unfinished play, not a win or proven deadlock. n/a means no observations. Live Jev ' + (config.jev ? 'enabled (billed, zero simulated latency).' : 'not tested; no network requests.') + '\n');
-  const modes = config.jev ? ['baseline', 'commander', 'jev'] : ['baseline', 'commander'];
+  const modes = config.jev ? ['baseline', 'jev'] : ['baseline'];
   for (const difficulty of config.sections.includes('missions') ? config.difficulties : []) {
     console.log(difficulty + '\n' + header);
     for (const mode of modes) {
       const sims = [];
       for (const route of config.routes) for (let i = 0; i < config.runs; i++) sims.push(await mission({ difficulty, mode, seed: 1000 + i * 7919, route, dossier: emptyDossier(), limit: config.limit, remote }));
       const summary = summarise(sims);
-      console.log(row(mode === 'commander' ? 'local commander' : mode, summary));
+      console.log(row(mode, summary));
       if (mode === 'jev') console.log(`  accepted live answers: ${summary.counts.jevDecisions}/${summary.counts.decisions}; failures: ${summary.counts.jevFailures}; requests: ${budget.calls}/${budget.max}`);
       report.missionGroups.push({ difficulty, mode, summary, samples: sims.map(sample) });
     }
@@ -158,7 +160,7 @@ export async function main(args = process.argv.slice(2)) {
   if (config.sections.includes('drill')) {
     console.log('Pursuit drill · synthetic report at seven fixed sites · 75s · original guard placements');
     console.log('Located = first actual guard/camera detection at any time after report; survival is not mission completion.');
-    for (const difficulty of config.difficulties) for (const mode of ['baseline', 'commander']) {
+    for (const difficulty of config.difficulties) for (const mode of ['baseline']) {
       const sims = [];
       for (const spot of SPOTS) for (let i = 0; i < config.runs; i++) sims.push(await drill(mode, difficulty, 7000 + i * 613, spot));
       const summary = summarise(sims), located = sims.filter(sim => sim.benchmark.locatedAt != null).length;
@@ -168,24 +170,31 @@ export async function main(args = process.argv.slice(2)) {
     console.log('');
   }
   if (config.sections.includes('adapt')) {
-    console.log('Adaptation · hard/culvert · five attempts · compare local commander fresh vs learned on matched seeds');
-    console.log('Only completed missions update the learned dossier. Changing seeds or baseline comparison alone cannot establish adaptation benefit.');
-    const groups = { baseline: [], fresh: [], learned: [] };
-    for (let chain = 0; chain < config.runs; chain++) {
-      let dossier = emptyDossier();
-      for (let attempt = 0; attempt < 5; attempt++) for (const arm of ['baseline', 'fresh', 'learned']) {
-        const sim = await mission({ difficulty: 'hard', mode: arm === 'baseline' ? 'baseline' : 'commander', seed: 50000 + chain * 104729 + attempt * 31, route: 'culvert', dossier: arm === 'learned' ? dossier : emptyDossier(), limit: config.limit });
-        sim.benchmark.trainingAttempts = arm === 'learned' ? dossier.attempts : 0;
-        (groups[arm][attempt] ||= []).push(sim);
-        if (arm === 'learned' && sim.status !== 'playing') dossier = recordMission(dossier, sim.report());
+    if (!config.jev) console.log('Adaptation needs live Jev. Rerun with --jev and OPENROUTER_API_KEY.\n');
+    else {
+      console.log('Adaptation · hard/culvert · five attempts · compare Jev fresh vs learned on matched seeds');
+      console.log('Only completed missions update the learned dossier. Changing seeds or baseline comparison alone cannot establish adaptation benefit.');
+      const groups = { baseline: [], fresh: [], learned: [] };
+      for (let chain = 0; chain < config.runs; chain++) {
+        let dossier = emptyDossier();
+        for (let attempt = 0; attempt < 5; attempt++) for (const arm of ['baseline', 'fresh', 'learned']) {
+          const sim = await mission({
+            difficulty: 'hard', mode: arm === 'baseline' ? 'baseline' : 'jev',
+            seed: 50000 + chain * 104729 + attempt * 31, route: 'culvert',
+            dossier: arm === 'learned' ? dossier : emptyDossier(), limit: config.limit, remote,
+          });
+          sim.benchmark.trainingAttempts = arm === 'learned' ? dossier.attempts : 0;
+          (groups[arm][attempt] ||= []).push(sim);
+          if (arm === 'learned' && sim.status !== 'playing') dossier = recordMission(dossier, sim.report());
+        }
       }
-    }
-    for (let attempt = 0; attempt < 5; attempt++) {
-      console.log(`attempt ${attempt + 1}\n${header}`);
-      for (const arm of ['baseline', 'fresh', 'learned']) {
-        const sims = groups[arm][attempt], summary = summarise(sims);
-        console.log(row(arm, summary));
-        report.adaptationGroups.push({ attempt: attempt + 1, arm, summary, samples: sims.map(sample) });
+      for (let attempt = 0; attempt < 5; attempt++) {
+        console.log(`attempt ${attempt + 1}\n${header}`);
+        for (const arm of ['baseline', 'fresh', 'learned']) {
+          const sims = groups[arm][attempt], summary = summarise(sims);
+          console.log(row(arm, summary));
+          report.adaptationGroups.push({ attempt: attempt + 1, arm, summary, samples: sims.map(sample) });
+        }
       }
     }
   }
