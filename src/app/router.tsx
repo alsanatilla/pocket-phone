@@ -56,6 +56,11 @@ const jobs = createRoute({
   component: lazyRouteComponent(() => import("./features/jobs/JobsPage.tsx"), "JobsPage"),
 });
 
+const memory = createRoute({
+  getParentRoute: () => root, path: "memory",
+  component: lazyRouteComponent(() => import("./features/memory/MemoryPage.tsx"), "MemoryPage"),
+});
+
 /** Tasks: four views (inbox, today, next 7 days, done) and the person's lists, chosen with ?view=… */
 const tasks = createRoute({
   getParentRoute: () => root, path: "tasks",
@@ -69,7 +74,7 @@ const task = createRoute({
   component: lazyRouteComponent(() => import("./features/tasks/TaskPage.tsx"), "TaskPage"),
 });
 
-const routeTree = root.addChildren([index, today, notes, note, pip, pipChat, settings, jobs, tasks, task]);
+const routeTree = root.addChildren([index, today, notes, note, pip, pipChat, settings, jobs, memory, tasks, task]);
 
 export const router = createRouter({
   routeTree,

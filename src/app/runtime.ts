@@ -59,6 +59,7 @@ export function startRuntime(): void {
   live.on(message => {
     if (message.type === "hello") { if (greeted) pullSoon(); greeted = true; }
     if (message.type !== "event") return;
+    if (message.event === "memory") dispatchEvent(new Event("pocket-memory-changed"));
     if (message.event === "objects" && isChatChange(message.data)) {
       void followChat(message.data, ask).then(followed => { if (!followed) pullSoon(); });
       return;

@@ -257,6 +257,27 @@ const BUILDING_TURN = streamingTurn('building-turn-1', 'Zeig mir die Werte als K
   answer: 'Die Werte als Karte:\n\n' + openFence(BUILD_LINES.slice(0, 5)),
 });
 
+// The memory page: four lasting facts, one learned in an existing chat and one as long as the store allows.
+const MEMORY_LONG = 'Trains for a half marathon in April, follows a plan that builds the long run every second weekend with easy runs in between and one interval session, takes a full rest day after the longest run so the knees stay quiet, and keeps a paper log of every run read back on every Sunday.';
+const MEMORY_ROWS = [
+  { text: 'Keeps Sundays free and prefers to train early, before work.', chat: 'lablong' },
+  { text: 'Trains for a half marathon in April.' },
+  { text: 'Likes short answers without preamble.' },
+  { text: MEMORY_LONG },
+];
+const MEMORY_CHAT = 'lablong';
+
+/** Forgets everything this account remembered, so a state starts from a known list. */
+async function resetMemory(ctx) {
+  for (const entry of await ctx.memory.listMemory(USER)) await ctx.memory.forget(USER, entry.id);
+}
+
+/** Gives the account the four entries the memory picture shows, oldest first. */
+async function seedMemory(ctx) {
+  await resetMemory(ctx);
+  for (const row of MEMORY_ROWS) await ctx.memory.remember(USER, row.text, { chat: row.chat || '' });
+}
+
 const STATES = [
   {
     name: 'empty',
@@ -345,6 +366,29 @@ const STATES = [
     text: [/5 conversations/i, 'Schlaf und Training', 'Notiz speichern', 'Fehlgeschlagen', 'Schlafkarte', 'New chat'],
     selectors: ['[role="dialog"]'],
     scroll: 'keep',
+  },
+  {
+    name: 'memory',
+    async run(page, ctx) {
+      await seedMemory(ctx);
+      await until(page, 'memory', 'the remembered chat in this tab', key => localStorage.getItem(key) !== null, chatKey(MEMORY_CHAT));
+      await page.goto(ctx.origin + '/#/memory', { waitUntil: 'domcontentloaded' });
+      await until(page, 'memory', 'the remembered lines', () => document.body.innerText.includes('half marathon') && document.body.innerText.includes('Schlaf und Training'));
+    },
+    text: ['What pip remembers about you. It reads this in every reply.', MEMORY_LONG, 'Likes short answers without preamble.', 'Trains for a half marathon in April.', 'Schlaf und Training'],
+    selectors: ['input[placeholder="add something pip should remember"]'],
+    scroll: 'top',
+  },
+  {
+    name: 'memory-empty',
+    async run(page, ctx) {
+      await resetMemory(ctx);
+      await page.goto(ctx.origin + '/#/memory', { waitUntil: 'domcontentloaded' });
+      await until(page, 'memory-empty', 'the empty memory page', () => document.body.innerText.includes('Nothing yet. Pip remembers lasting things you tell it'));
+    },
+    text: ['What pip remembers about you. It reads this in every reply.', 'Nothing yet. Pip remembers lasting things you tell it, and you can add some here.', 'remember'],
+    selectors: ['input[placeholder="add something pip should remember"]'],
+    scroll: 'top',
   },
   {
     name: 'thinking',
@@ -781,6 +825,7 @@ async function main() {
     const database = await import('file://' + join(ROOT, 'src/server/database.js'));
     const auth = await import('file://' + join(ROOT, 'src/server/auth.js'));
     const objects = await import('file://' + join(ROOT, 'src/server/objects.js'));
+    const memory = await import('file://' + join(ROOT, 'src/server/pip-memory-store.js'));
     const { ensureSchema, execute } = database;
     await ensureSchema();
     await execute({
@@ -812,7 +857,7 @@ async function main() {
 
     for (const chat of [EMPTY_CHAT, LONG_CHAT, FAILED_CHAT, APPROVAL_CHAT, PINNED_CHAT]) await objects.writeObject(USER, 'chats', chat);
 
-    const ctx = { browser: null, origin, out, eventsSecret, insertRun, finishRun, signInLink: auth.signInLink };
+    const ctx = { browser: null, origin, out, eventsSecret, insertRun, finishRun, signInLink: auth.signInLink, memory };
     browser = ctx.browser = await launchBrowser();
     await signIn(ctx);
     console.log('chat lab → ' + out);
@@ -820,6 +865,9 @@ async function main() {
     const selected = only ? STATES.filter(state => state.name === only) : STATES;
     for (const state of selected) {
       for (const viewport of ['phone', 'desktop']) {
+        // Capturing many states opens more pages than Better Auth's one-minute limit counts; clearing the scratch
+        // database's rate-limit rows keeps that harness budget from turning a picture into a sign-in page.
+        await execute({ sql: 'DELETE FROM pocket_rate_limit' });
         try {
           await capture(ctx, state, viewport);
         } catch (error) {
@@ -829,6 +877,7 @@ async function main() {
       }
     }
     if (!only || only === 'stream') {
+      await execute({ sql: 'DELETE FROM pocket_rate_limit' });
       try {
         await measureStream(ctx);
       } catch (error) {

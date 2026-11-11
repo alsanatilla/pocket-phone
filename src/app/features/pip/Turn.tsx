@@ -1,4 +1,5 @@
 import { memo, useCallback, useMemo, useRef, type KeyboardEvent, type MouseEvent } from "react";
+import { Link } from "@tanstack/react-router";
 import { Check, ChevronRight, Circle, LoaderCircle, Minus, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -129,6 +130,7 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
         {!streaming && remembered.length ? (
           <ul className="space-y-0.5 text-xs text-dim">
             {remembered.map((change, index) => <li key={index}>{change.kind}: {change.text}</li>)}
+            <li><Link to="/memory" className="underline-offset-2 hover:underline">memory</Link></li>
           </ul>
         ) : null}
 

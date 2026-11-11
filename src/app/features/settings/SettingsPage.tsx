@@ -90,6 +90,10 @@ export function SettingsPage() {
         <Button asChild variant="outline"><Link to="/jobs">open jobs</Link></Button>
       </Section>
 
+      <Section title="memory">
+        <Button asChild variant="outline"><Link to="/memory">memory: what pip remembers about you</Link></Button>
+      </Section>
+
       <Section title="this month">
         <div className="grid grid-cols-3 gap-2">
           <Reading label="replies" value={String(usage.replies)} />
