@@ -12,7 +12,8 @@ const fail = (message: string, status: number) => new MarkdownError(message, sta
 /** Public rendering needs no account, and never persists or logs its source. */
 export const POST: APIRoute = async ({ request }) => {
   try {
-    const expected = new URL(request.url).origin;
+    // Behind a proxy (Fly) the request's own URL is not the address the browser used: the configured one counts.
+    const expected = process.env.BETTER_AUTH_URL || new URL(request.url).origin;
     const origin = request.headers.get('origin');
     const site = request.headers.get('sec-fetch-site');
     if ((origin && !sameHost(origin, expected)) || (site && site !== 'same-origin' && site !== 'none') || (!origin && request.headers.get('cookie'))) throw fail('Request origin is not allowed.', 403);
