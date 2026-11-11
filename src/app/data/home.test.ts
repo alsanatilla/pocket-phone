@@ -2,7 +2,7 @@
 // with the same marks and the model the person chose. The real chat store runs against jsdom's localStorage.
 
 import { describe, expect, it } from "vitest";
-import { chats, createChat, listChats } from "./chats.ts";
+import { chats, createChat, listChats, withContext } from "./chats.ts";
 import { homeChat, homeChats, homeForSend, isHome } from "./home.ts";
 import type { PipConfig } from "../../client/pip-core.js";
 
@@ -41,5 +41,24 @@ describe("homeForSend", () => {
     expect(next.config).toEqual(config);
     expect(homeChats().map(chat => chat.uid)).toEqual([first.uid, next.uid]);
     expect(homeForSend().uid).toBe(next.uid);
+  });
+});
+
+describe("withContext", () => {
+  const source = { kind: "today", uid: "today", title: "Today", text: "the day", href: "/today" };
+
+  it("adds a source to home when no chat was opened, not to the newest separate chat", () => {
+    const home = homeChat();
+    createChat();
+    expect(withContext(source)).toBe(home.uid);
+    expect(chats.get(home.uid)!.context).toMatchObject([{ kind: "today", href: "/today" }]);
+  });
+
+  it("keeps the chat last opened while it exists, and falls back to home when it is gone", () => {
+    const opened = createChat();
+    localStorage.setItem("pocket:pip-current", opened.uid);
+    expect(withContext(source)).toBe(opened.uid);
+    chats.remove(opened.uid);
+    expect(withContext(source)).toBe(homeChat().uid);
   });
 });

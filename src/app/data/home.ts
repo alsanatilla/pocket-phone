@@ -1,5 +1,5 @@
 // The one big chat with Pip: a chain of ordinary chats marked `home`, whose newest segment takes the next message.
-// This file only decides which segment that is; showing the segments joined as one page comes later.
+// This file decides which segment that is; the page joins the segments into one conversation.
 
 import { chats, createChat, listChats } from "./chats.ts";
 import type { Chat } from "./chats.ts";

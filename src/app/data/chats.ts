@@ -1,6 +1,7 @@
 import { ChatStore } from "../../client/pip-core.js";
 import type { ActivityRow } from "../../client/pip-activity.js";
 import type { PipConfig } from "../../client/pip-core.js";
+import { homeChat } from "./home.ts";
 
 // Pip's conversations, kept in this browser (and synced by object sync when signed in).
 
@@ -34,7 +35,7 @@ export function readChat(uid: string): Chat | null {
  * returns that chat's uid.
  */
 export function withContext(source: ChatSource): string {
-  const current = chats.get(localStorage.getItem(CURRENT)) || chats.list()[0] || chats.create();
+  const current = chats.get(localStorage.getItem(CURRENT)) || homeChat();
   return chats.update(current.uid, (chat: Chat) => {
     if (chat.context.some(item => item.kind === source.kind && item.uid === source.uid)) return;
     if (chat.context.length >= 3) throw new Error("This draft already has three sources. Remove one in pip before adding another.");

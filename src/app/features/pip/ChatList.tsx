@@ -6,11 +6,13 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { cn } from "@/lib/utils";
 import { useCollection } from "../../data/bus.ts";
 import { listChats, pinChat, removeChat, renameChat, type Chat } from "../../data/chats.ts";
+import { isHome } from "../../data/home.ts";
 import { confirm, prompt } from "../../ui/dialog/dialog.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 
-// Every conversation, pinned first, then the most recent day by day. Rename, pin and delete live in each row's
-// menu; the chat you are in is marked with an amber edge and its title, not only a lighter row.
+// Every conversation, pinned first, then the most recent day by day, with the one big chat above them all. Rename,
+// pin and delete live in each row's menu; the chat you are in is marked with an amber edge and its title, not only
+// a lighter row.
 
 const when = (at: number) => {
   const date = new Date(at), today = new Date();
@@ -33,21 +35,25 @@ function groupsOf(chats: Chat[]): [string, Chat[]][] {
   return [...buckets.entries()].filter(([, list]) => list.length);
 }
 
-export function ChatList({ open, onOpenChange, current, onPick, onNew }: {
-  open: boolean; onOpenChange: (open: boolean) => void; current: string | null; onPick: (uid: string) => void; onNew: () => void;
+export function ChatList({ open, onOpenChange, current, homeCurrent, onPick, onHome, onNew }: {
+  open: boolean; onOpenChange: (open: boolean) => void; current: string | null; homeCurrent: boolean;
+  onPick: (uid: string) => void; onHome: () => void; onNew: () => void;
 }) {
   // Read only while the sheet is open (listing parses every chat); while it slides shut it keeps what it showed.
   const shown = useRef<Chat[]>([]);
   const chats: Chat[] = useCollection(["chats"], () => (open ? listChats() : shown.current), [open]);
   shown.current = chats;
-  const groups = groupsOf(chats);
+  const home = chats.filter(isHome);
+  const separate = chats.filter(chat => !isHome(chat));
+  const messages = home.reduce((count, chat) => count + chat.turns.length, 0);
+  const groups = groupsOf(separate);
   const guard = (run: () => unknown) => async () => { try { await run(); } catch (error) { toastError(error); } };
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="left" className="w-[85vw] max-w-sm gap-0 p-0">
         <SheetHeader className="border-b px-4 pt-3 pb-2.5 pr-12">
           <SheetTitle className="font-pixel text-2xl leading-none font-normal">chats</SheetTitle>
-          <SheetDescription className="text-[11px] uppercase tracking-[0.08em] text-dim">{chats.length} {chats.length === 1 ? "conversation" : "conversations"}</SheetDescription>
+          <SheetDescription className="text-[11px] uppercase tracking-[0.08em] text-dim">{separate.length} {separate.length === 1 ? "conversation" : "conversations"}</SheetDescription>
         </SheetHeader>
 
         <div className="px-3 pt-3 pb-1">
@@ -55,6 +61,14 @@ export function ChatList({ open, onOpenChange, current, onPick, onNew }: {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+          <ul className="pt-1">
+            <li className={cn("group flex items-center rounded-md border-l-2", homeCurrent ? "border-primary bg-accent" : "border-transparent hover:bg-accent/50")}>
+              <button type="button" className="min-w-0 flex-1 px-2 py-2.5 text-left" onClick={onHome} aria-current={homeCurrent ? "page" : undefined}>
+                <p className={cn("truncate text-sm", homeCurrent && "text-primary")}>pip</p>
+                <p className="mt-0.5 text-[11px] leading-tight text-dim">everything, in one conversation · {messages} {messages === 1 ? "message" : "messages"}</p>
+              </button>
+            </li>
+          </ul>
           {groups.length ? groups.map(([title, list]) => <section key={title} className="pt-3 first:pt-1">
             <h3 className="flex items-baseline justify-between px-2 pb-1 text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
               {title}<span className="text-dim">{list.length}</span>

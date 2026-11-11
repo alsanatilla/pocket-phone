@@ -262,3 +262,9 @@ characters, the next message starts a new one, and nothing is moved. The page sh
 first. A server reply in a home segment also reads the last six finished turns of the segment before it and puts
 them before its own turns in the request only; `writeTurn` still stores just the new turn in the current segment.
 
+On screen, `/pip` without a `chat` in the address is home; `?chat=<uid>` is a separate chat, and a link that names
+a home segment replaces the address with `/pip`. The joined conversation shows its last 30 turns, with `earlier
+messages` adding 30 more without moving the message at the top of the screen. The chat list keeps a `pip` row above
+the separate chats and leaves the segments out of its count. `withContext` (the app's "ask pip" buttons) adds a
+source to the chat last opened, or to home when there is none.
+

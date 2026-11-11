@@ -240,6 +240,26 @@ const PINNED_CHAT = chatRecord('labpinned', 'Schlafkarte', [{
   reasoning: '', error: '', status: 'done', usage: {}, activity: [], sources: [], phase: 'done',
 }]);
 
+// Pip's one big chat as two segments: an old one of forty short exchanges and the current one of five. They are
+// written like every other chat, and the page joins them oldest first.
+function homeTurn(prefix, index, created) {
+  return {
+    uid: prefix + '-turn-' + index, text: 'Frage ' + index, context: [], created, updated: created + 1000,
+    owner: 'phone', attempt: 'home-attempt-' + index, answer: 'Antwort ' + index + '.', reasoning: '', error: '',
+    status: 'done', usage: {}, activity: [], sources: [], phase: 'done',
+  };
+}
+const HOME_EARLIER_CHAT = {
+  uid: 'labhome1', title: 'pip', titled: true, home: true, created: NOW - 180 * MINUTE, updated: NOW - 100 * MINUTE,
+  config: CONFIG, draft: '', context: [],
+  turns: Array.from({ length: 40 }, (_, index) => homeTurn('home-a', index + 1, NOW - (150 - index) * MINUTE)),
+};
+const HOME_CURRENT_CHAT = {
+  uid: 'labhome2', title: 'pip', titled: true, home: true, created: NOW - 90 * MINUTE, updated: NOW - 2 * MINUTE,
+  config: CONFIG, draft: '', context: [],
+  turns: Array.from({ length: 5 }, (_, index) => homeTurn('home-b', 41 + index, NOW - (20 - index) * MINUTE)),
+};
+
 const THINKING_TURN = streamingTurn('thinking-turn-1', QUESTION);
 const TOOL_TURN = streamingTurn('tool-turn-1', 'Was steht heute an? Suche in meinen Notizen und im Web.', {
   phase: 'searching',
@@ -309,6 +329,51 @@ const STATES = [
     },
   },
   {
+    name: 'home',
+    async run(page, ctx) {
+      await openHome(page, ctx, 'home');
+    },
+    text: ['pip', 'Frage 45', 'Antwort 45.', 'Frage 16'],
+    async check(page) {
+      const seen = await page.evaluate(() => document.querySelectorAll('main article').length);
+      if (seen !== 30) throw new Error('home shows ' + seen + ' turns, not the last 30');
+      const body = await page.evaluate(() => document.body.innerText);
+      if (body.includes('Frage 15')) throw new Error('a turn behind the button is already on screen');
+    },
+  },
+  {
+    name: 'home-earlier',
+    async run(page, ctx) {
+      await openHome(page, ctx, 'home-earlier');
+      await scrollPage(page, 'top');
+      await until(page, 'home-earlier', 'the earlier messages button', () => document.body.innerText.includes('earlier messages'));
+    },
+    text: ['earlier messages', 'Frage 16'],
+    scroll: 'keep',
+    async check(page) {
+      const before = await page.evaluate(() => {
+        const button = [...document.querySelectorAll('main button')].find(item => item.textContent.trim() === 'earlier messages');
+        const message = [...document.querySelectorAll('main p')].find(item => item.textContent === 'Frage 16');
+        return { height: button ? button.getBoundingClientRect().height : 0, top: message ? message.getBoundingClientRect().top : null };
+      });
+      if (!before.height) throw new Error('the earlier messages button is not on screen');
+      if (page.viewport()?.width <= 400 && before.height < 44) throw new Error('the earlier messages button is ' + before.height + 'px tall');
+      if (before.top === null) throw new Error('the first visible message was not found');
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll('main button')].find(item => item.textContent.trim() === 'earlier messages');
+        button?.click();
+      });
+      await until(page, 'home-earlier', 'the earlier messages button to go', () => !document.body.innerText.includes('earlier messages'));
+      const after = await page.evaluate(() => {
+        const message = [...document.querySelectorAll('main p')].find(item => item.textContent === 'Frage 16');
+        return message ? message.getBoundingClientRect().top : null;
+      });
+      if (after === null) throw new Error('the first message disappeared');
+      const moved = Math.abs(after - before.top);
+      if (moved > 4) throw new Error('the message moved ' + Math.round(moved) + 'px');
+    },
+  },
+  {
     name: 'failed',
     async run(page, ctx) {
       await openStaticChat(page, ctx, 'failed', 'labfailed', 'The provider did not answer (502).');
@@ -360,12 +425,16 @@ const STATES = [
       await page.click('button[aria-label="All chats"]');
       await until(page, 'chat-list', 'the list of chats', () => {
         const dialog = document.querySelector('[role="dialog"]');
-        return Boolean(dialog) && dialog.innerText.toLowerCase().includes('5 conversations');
+        return Boolean(dialog) && dialog.innerText.toLowerCase().includes('5 conversations') && dialog.innerText.includes('everything, in one conversation');
       });
     },
-    text: [/5 conversations/i, 'Schlaf und Training', 'Notiz speichern', 'Fehlgeschlagen', 'Schlafkarte', 'New chat'],
+    text: [/5 conversations/i, 'pip', 'everything, in one conversation · 45 messages', 'Schlaf und Training', 'Notiz speichern', 'Fehlgeschlagen', 'Schlafkarte', 'New chat'],
     selectors: ['[role="dialog"]'],
     scroll: 'keep',
+    async check(page) {
+      const first = await page.evaluate(() => document.querySelector('[role="dialog"] li')?.innerText ?? '');
+      if (!first.replace(/\s+/g, ' ').startsWith('pip everything, in one conversation · 45 messages')) throw new Error('the pip row is not first: ' + JSON.stringify(first));
+    },
   },
   {
     name: 'memory',
@@ -512,6 +581,13 @@ async function openStaticChat(page, ctx, state, uid, text) {
   await until(page, state, 'the chat in this tab', key => localStorage.getItem(key) !== null, chatKey(uid));
   await page.goto(ctx.origin + '/#/pip?chat=' + encodeURIComponent(uid), { waitUntil: 'domcontentloaded' });
   await until(page, state, 'the seeded reply', wanted => document.body.innerText.includes(wanted), text);
+}
+
+/** Wait for both home segments to reach the tab, then open home; an early visit would start an empty third one. */
+async function openHome(page, ctx, state) {
+  await until(page, state, 'the home segments in this tab', keys => keys.every(key => localStorage.getItem(key) !== null), [chatKey('labhome1'), chatKey('labhome2')]);
+  await page.goto(ctx.origin + '/#/pip', { waitUntil: 'domcontentloaded' });
+  await until(page, state, 'the joined conversation', () => document.body.innerText.includes('Frage 45') && document.body.innerText.includes('Antwort 45.'));
 }
 
 /** Seed a streaming chat in the tab's storage, put its run row in place, then open the chat. */
@@ -855,7 +931,7 @@ async function main() {
       });
     };
 
-    for (const chat of [EMPTY_CHAT, LONG_CHAT, FAILED_CHAT, APPROVAL_CHAT, PINNED_CHAT]) await objects.writeObject(USER, 'chats', chat);
+    for (const chat of [EMPTY_CHAT, LONG_CHAT, FAILED_CHAT, APPROVAL_CHAT, PINNED_CHAT, HOME_EARLIER_CHAT, HOME_CURRENT_CHAT]) await objects.writeObject(USER, 'chats', chat);
 
     const ctx = { browser: null, origin, out, eventsSecret, insertRun, finishRun, signInLink: auth.signInLink, memory };
     browser = ctx.browser = await launchBrowser();
