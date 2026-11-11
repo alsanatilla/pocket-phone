@@ -21,3 +21,17 @@ export function effortFromAnswers(answers: unknown): EffortLevel | null;
 export function effortLimits(level: string | null | undefined): { lookups: number; webCalls: number } | null;
 /** The sentence the model reads for a level; nothing for thorough. */
 export function effortNote(level: string | null | undefined): string;
+/** The JEV questions object for one "is this enough?" judgment: one choice named `enough`. */
+export function enoughQuestions(): {
+  enough: { type: "choice"; instructions: string; criteria: { yes: string; no: string } };
+};
+/** The message and the finished lookups so far, each as what it did and the start of what it found. */
+export function enoughState(
+  turn: { text?: string; activity?: Array<{ name?: string; state?: string; title?: string; result?: string }> },
+  rows?: Array<{ name?: string; state?: string; title?: string; result?: string }>,
+): {
+  message: string;
+  found: Array<{ did: string; got: string }>;
+};
+/** Whether JEV said what was found is enough, or null when its answer is not a choice of yes or no. */
+export function enoughFromAnswers(answers: unknown): boolean | null;

@@ -217,6 +217,17 @@ and the sentence the model reads are in `src/shared/pip-effort.js`.
 - No OpenRouter key, no answer within 1.2 seconds, a refused request or an answer that is not one of the levels:
   the reply runs exactly as before and its usage carries no `effort`. The tab path and scheduled jobs are never
   judged.
+- Between rounds, a `thorough` reply also asks JEV whether what it has found is enough: `enoughQuestions` and
+  `enoughState` in `src/shared/pip-effort.js`, sent by `judgeEnough` in `src/server/pip-effort.js`. The state is
+  the message and the last twelve finished lookups, each as its title and the start of its result; cards, writes
+  and failed rows are left out. It is asked at most six times, only after new lookups and only while the reply is
+  not already final. The count and the lookups last asked about are kept in the run's checkpoint, so a pause does
+  not ask again about the same lookups.
+- A yes is recorded, not acted on: `drive` passes `enough` only for `thorough`, the callback always tells
+  `streamChat` false, and the first yes is kept as `usage.enoughAt` (the lookups made when it came), with
+  `usage.enoughAsked` beside it. `ENOUGH_STOPS` in `src/server/pip-runs.js` is off; when the lead switches it on
+  (or sets `PIP_ENOUGH_STOPS=1`), a yes ends research through `finalReason`, later lookups are answered with
+  `research_budget_reached`, and cards may still draw.
 
 ## Pip remembers the person
 

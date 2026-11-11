@@ -14,7 +14,7 @@ const { syncDocuments } = await import('../src/server/workspace.js');
 const { saveBackground } = await import('../src/server/pip-background.js');
 const { saveKey } = await import('../src/server/pip-keys.js');
 const { JEV_ENDPOINT, JEV_MODEL } = await import('../src/shared/girder-jev.js');
-const { EFFORT_LEVELS, effortFromAnswers, effortLimits, effortNote, effortQuestions, effortState } = await import('../src/shared/pip-effort.js');
+const { EFFORT_LEVELS, effortFromAnswers, effortLimits, effortNote, effortQuestions, effortState, enoughFromAnswers, enoughQuestions, enoughState } = await import('../src/shared/pip-effort.js');
 const runs = await import('../src/server/pip-runs.js');
 await ensureSchema();
 test.after(() => { database().close(); try { rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); } catch {} });
@@ -36,7 +36,7 @@ async function account({ openrouter = true } = {}) {
 }
 const header = (uid, title = 'Pip run') => ({ uid, title, created: Date.now(), config: VAULT_CONFIG });
 const failure = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-const answers = choice => new Response(JSON.stringify({ answers: { effort: { type: 'choice', choice } } }), { status: 200, headers: { 'content-type': 'application/json' } });
+const answers = (name, choice) => new Response(JSON.stringify({ answers: { [name]: { type: 'choice', choice } } }), { status: 200, headers: { 'content-type': 'application/json' } });
 
 // What a chat-completions endpoint refuses: a tool call without its result before the next message, a result for
 // a call it never made, or an empty tool message. The double answers those with 400, as the provider would.
@@ -63,14 +63,36 @@ const provider = (sent, ...replies) => async (url, options) => {
   return response(replies.shift());
 };
 /**
- * One fetcher for both services: a request to JEV_ENDPOINT is recorded and answered with `choice`, anything else
- * goes to the provider double. Routing on the url comes first because the provider checks the chat key.
+ * One fetcher for both services: a request to JEV_ENDPOINT is recorded and answered by the question it names —
+ * `effort` with the level, `enough` with no (an old test never reaches that question) — anything else goes to the
+ * provider double. Routing on the url comes first because the provider checks the chat key.
  */
 const judged = (sent, jev, choice, ...replies) => {
   const serve = provider(sent, ...replies);
   return async (url, options) => {
-    if (String(url) === JEV_ENDPOINT) { jev.push({ headers: options.headers, body: JSON.parse(options.body) }); return answers(choice); }
+    if (String(url) === JEV_ENDPOINT) {
+      const body = JSON.parse(options.body), name = body.questions?.enough ? 'enough' : 'effort';
+      jev.push({ headers: options.headers, body });
+      return answers(name, name === 'effort' ? choice : 'no');
+    }
     return serve(url, options);
+  };
+};
+/**
+ * A JEV double that answers by the question's name: `plan.effort` for the level, and `plan.enough` in order for
+ * each enough question (the last answer repeats). An answer may be a Response (to fail), or a function that
+ * answers or throws. Every request it saw is kept in `jev`.
+ */
+const judging = (sent, jev, plan, ...replies) => {
+  const serve = provider(sent, ...replies), asked = { effort: 0, enough: 0 };
+  return async (url, options) => {
+    if (String(url) !== JEV_ENDPOINT) return serve(url, options);
+    const body = JSON.parse(options.body), name = body.questions?.effort ? 'effort' : body.questions?.enough ? 'enough' : '';
+    jev.push({ headers: options.headers, body });
+    const index = asked[name]++, listed = name === 'effort' ? plan.effort : plan.enough;
+    const given = Array.isArray(listed) ? listed[Math.min(index, listed.length - 1)] : listed;
+    const answer = typeof given === 'function' ? await given(name, body) : given;
+    return answer instanceof Response ? answer : answers(name, answer);
   };
 };
 const lookups = (count, prefix = 'q') => compatibleMessage({ calls: Array.from({ length: count }, (_, index) => ({ name: 'search_notes', input: { query: prefix + index }, id: 'call_' + prefix + index })) });
@@ -230,4 +252,130 @@ test('a run paused for an approval is judged once, keeps its level, and counts i
   assert.deepEqual(rows(decided, 'search_notes').map(item => item.state), ['done', 'done', 'done', 'failed']);
   assert.match(rows(decided, 'search_notes')[3].result, /research_budget_reached/);
   assert.equal(decided.run.turn.answer, 'Notiert.');
+});
+
+const enoughRequests = jev => jev.filter(item => item.body.questions?.enough);
+const script = (rounds, calls = 2) => Array.from({ length: rounds }, (_, index) => lookups(calls, 'round' + index));
+
+test('enough state keeps the last twelve finished lookups, cut short, and never sends cards, writes or failures', () => {
+  const questions = enoughQuestions();
+  assert.equal(questions.enough.type, 'choice');
+  assert.match(questions.enough.instructions, /good answer .* with what it has looked up so far/);
+  assert.deepEqual(Object.keys(questions.enough.criteria), ['yes', 'no']);
+  assert.equal(enoughFromAnswers({ enough: { type: 'choice', choice: 'yes' } }), true);
+  assert.equal(enoughFromAnswers({ enough: { type: 'choice', choice: 'no' } }), false);
+  assert.equal(enoughFromAnswers({ enough: { type: 'noul', noul: 0.8 } }), null, 'a wrong answer type is no answer');
+  assert.equal(enoughFromAnswers({ enough: { type: 'choice', choice: 'maybe' } }), null, 'an unknown choice is no answer');
+  assert.equal(enoughFromAnswers({}), null);
+  assert.equal(enoughFromAnswers(null), null);
+  const rows = [
+    { name: 'show_card', state: 'done', title: 'A card', result: '{"drawn":true}' },
+    { name: 'create_record', state: 'done', title: 'A saved note', result: '{"status":"saved"}' },
+    { name: 'search_notes', state: 'failed', title: 'A failed lookup', result: '{"error":"data_unavailable"}' },
+    ...Array.from({ length: 14 }, (_, index) => ({
+      name: 'search_notes', state: 'done', title: index + 'T'.repeat(140), result: index + 'R'.repeat(340)
+    }))
+  ];
+  const state = enoughState({ text: 'M'.repeat(2500) }, rows);
+  assert.equal(state.message.length, 2000, 'the message is cut at 2,000 characters');
+  assert.equal(state.found.length, 12, 'only the last twelve lookups are sent');
+  assert.equal(state.found[0].did.length, 120, 'what a lookup did is cut at 120 characters');
+  assert.equal(state.found[0].got.length, 300, 'what it found is cut at 300 characters');
+  assert.ok(state.found[0].did.startsWith('2'), 'the first sent lookup is the third of the fourteen');
+  assert.ok(state.found.at(-1).did.startsWith('13'), 'newest last');
+  const body = JSON.stringify(state);
+  for (const left of ['A card', 'A saved note', 'A failed lookup']) assert.ok(!body.includes(left), left + ' is not a lookup');
+  assert.deepEqual(enoughState({ text: 'Same', activity: rows }).found.length, 12, 'the turn activity is used when no rows are given');
+});
+
+test('recording only: four rounds of lookups all run and the first yes records where the reply stood', async () => {
+  const userId = await account(), sent = [], jev = [];
+  const view = await runs.submitRun(userId, { requestId: 'req-enough-record', chat: header('chat-enough-record'), text: 'Vergleiche die zwei Autos aus meinen Notizen gründlich.', device: 'browser-1' },
+    { fetcher: judging(sent, jev, { effort: 'thorough', enough: ['no', 'yes', 'no', 'no'] }, ...script(4), compatibleMessage({ text: 'Der blaue Wagen ist günstiger.' })) });
+  assert.equal(view.run.status, 'done', view.run.turn.error);
+  assert.equal(view.run.turn.answer, 'Der blaue Wagen ist günstiger.', 'the reply is the model’s own');
+  assert.equal(view.run.turn.usage.effort, 'thorough');
+  assert.equal(view.run.turn.usage.enoughAt, 4, 'yes came after four finished lookups');
+  assert.ok(view.run.turn.usage.enoughAsked >= 2, 'at least the no and the yes were asked');
+  assert.deepEqual(rows(view, 'search_notes').map(item => item.state), Array(8).fill('done'), 'recording alone stops nothing');
+  const asked = enoughRequests(jev);
+  assert.equal(view.run.turn.usage.enoughAsked, asked.length);
+  assert.equal(asked[0].body.state.message, 'Vergleiche die zwei Autos aus meinen Notizen gründlich.');
+  assert.equal(asked[1].body.state.found.length, 4, 'the second question sees the first two rounds of lookups');
+  assert.doesNotMatch(String(asked[0].body.state.found[0].got), /"op"/, 'a card source is never sent');
+});
+
+test('with stopping on, the lookups after the yes are refused and the model writes the final text', async () => {
+  process.env.PIP_ENOUGH_STOPS = '1';
+  try {
+    const userId = await account(), sent = [], jev = [];
+    const view = await runs.submitRun(userId, { requestId: 'req-enough-stop', chat: header('chat-enough-stop'), text: 'Recherchiere die zwei Autos gründlich.', device: 'browser-1' },
+      { fetcher: judging(sent, jev, { effort: 'thorough', enough: ['no', 'yes'] }, ...script(4), compatibleMessage({ text: 'Mehr brauche ich nicht.' })) });
+    assert.equal(view.run.status, 'done', view.run.turn.error);
+    assert.equal(view.run.turn.answer, 'Mehr brauche ich nicht.', 'the reply finishes with the model’s text');
+    const made = rows(view, 'search_notes');
+    assert.deepEqual(made.map(item => item.state), [...Array(4).fill('done'), ...Array(4).fill('failed')]);
+    for (const refused of made.slice(4)) assert.match(refused.result, /research_budget_reached/);
+    assert.equal(view.run.turn.usage.effort, 'thorough');
+    assert.equal(view.run.turn.usage.enoughAt, 4);
+    assert.equal(view.run.turn.usage.enoughAsked, 2, 'once the yes ends research it is not asked again');
+  } finally {
+    delete process.env.PIP_ENOUGH_STOPS;
+  }
+});
+
+test('a JEV that fails on the second question changes nothing and the reply finishes', async () => {
+  const cases = [
+    ['status 500', () => failure(500, { error: 'JEV is down' })],
+    ['a timeout', () => { throw Object.assign(new Error('The judge timed out'), { name: 'AbortError' }); }]
+  ];
+  for (const [name, fail] of cases) {
+    const userId = await account(), sent = [], jev = [];
+    const view = await runs.submitRun(userId, { requestId: 'req-enough-fails-' + userId, chat: header('chat-enough-fails-' + userId), text: 'Recherchiere das gründlich.', device: 'browser-1' },
+      { fetcher: judging(sent, jev, { effort: 'thorough', enough: ['no', fail] }, ...script(4), compatibleMessage({ text: 'Ich habe genug gefunden.' })) });
+    assert.equal(view.run.status, 'done', name + ': ' + view.run.turn.error);
+    assert.equal(view.run.turn.answer, 'Ich habe genug gefunden.', name + ': the reply is the model’s own');
+    assert.deepEqual(rows(view, 'search_notes').map(item => item.state), Array(8).fill('done'), name + ': every lookup runs');
+    assert.equal('enoughAt' in view.run.turn.usage, false, name + ': no yes is recorded');
+    assert.equal(view.run.turn.usage.enoughAsked, enoughRequests(jev).length, 'the question was still counted');
+  }
+});
+
+test('quick and no level never send the enough question', async () => {
+  for (const [label, slug, effort] of [
+    ['quick', 'quick', 'quick'],
+    ['no level', 'none', new Response(JSON.stringify({ answers: {} }), { status: 200, headers: { 'content-type': 'application/json' } })]
+  ]) {
+    const userId = await account(), sent = [], jev = [];
+    const view = await runs.submitRun(userId, { requestId: 'req-enough-' + slug, chat: header('chat-enough-' + slug), text: 'Was sagen meine Notizen?', device: 'browser-1' },
+      { fetcher: judging(sent, jev, { effort, enough: () => { throw new Error('The enough question must not be asked.'); } }, lookups(2, 'quiet'), compatibleMessage({ text: 'Die Notiz nennt 21.000 Euro.' })) });
+    assert.equal(view.run.status, 'done', label + ': ' + view.run.turn.error);
+    assert.equal(enoughRequests(jev).length, 0, label + ': no enough question reaches JEV');
+  }
+});
+
+test('the enough question is asked at most six times in a reply', async () => {
+  const userId = await account(), sent = [], jev = [];
+  const view = await runs.submitRun(userId, { requestId: 'req-enough-six', chat: header('chat-enough-six'), text: 'Recherchiere neun Runden lang.', device: 'browser-1' },
+    { fetcher: judging(sent, jev, { effort: 'thorough', enough: 'no' }, ...script(9, 1), compatibleMessage({ text: 'Genug.' })) });
+  assert.equal(enoughRequests(jev).length, 6, 'never a seventh question');
+  // The existing continuation limit ends a script this long after its ninth lookup round.
+  assert.equal(view.run.status, 'failed');
+  assert.match(view.run.turn.error, /more tools after the research limit/);
+});
+
+test('the enough count and the lookups last asked about survive a pause', async () => {
+  const userId = await account(), sent = [], jev = [];
+  const plan = { effort: 'thorough', enough: 'no' };
+  const submitted = await runs.submitRun(userId, { requestId: 'req-enough-pause', chat: header('chat-enough-pause'), text: 'Recherchiere und merke dir den Preis.', device: 'phone-1' },
+    { fetcher: judging(sent, jev, plan, lookups(2, 'before'), compatibleMessage({ calls: [{ name: 'create_record', input: { kind: 'note', title: 'Blue car', text: '21,000 euros' }, id: 'call_note' }] })) });
+  assert.equal(submitted.run.status, 'awaiting', 'waiting failed: ' + submitted.run.turn.error);
+  assert.equal(enoughRequests(jev).length, 1, 'asked once before the pause');
+  const decided = await runs.decideRun(userId, { runId: submitted.run.runId, requestId: submitted.requests[0].id, approved: true, device: 'browser-1' },
+    { fetcher: judging(sent, jev, plan, compatibleMessage({ text: 'Notiert.' })) });
+  assert.equal(decided.run.status, 'done', 'continue failed: ' + decided.run.turn.error);
+  assert.equal(decided.run.turn.answer, 'Notiert.');
+  assert.equal(enoughRequests(jev).length, 1, 'no new lookup was made, so the question is not repeated after the pause');
+  assert.equal(decided.run.turn.usage.enoughAsked, 1);
+  assert.equal('enoughAt' in decided.run.turn.usage, false);
 });

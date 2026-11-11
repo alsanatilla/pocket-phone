@@ -8,7 +8,7 @@ import { listMemory, memoryNote, memoryTool, MEMORY_INSTRUCTIONS } from './pip-m
 import { applyApprovedWrite } from './pip-writes.js';
 import { backgroundAccount, keyOf, chargeTokens, localDay, tokensLeft, validTimezone, JOB_BUDGET } from './pip-background.js';
 import { readKey } from './pip-keys.js';
-import { judgeEffort } from './pip-effort.js';
+import { judgeEffort, judgeEnough } from './pip-effort.js';
 import { config as pipConfig, requestBody, contextCoverage } from '../client/pip-core.js';
 import { execute as runTool, preview as previewTool, label, WRITE_TOOLS } from '../client/pip-tools.js';
 import { settle } from '../client/pip-activity.js';
@@ -88,6 +88,9 @@ const QUEUE_TTL = (() => {
 /** Tools a device may answer instead of the server: sources that can live only on that device. */
 const DEVICE_TOOLS = ['search_calendar'];
 const USAGE = ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'];
+// The lead switches this on after comparing recorded "enough" answers with real replies. Until then a "yes" is
+// only recorded: the reply keeps looking up and the model writes when it is ready.
+const ENOUGH_STOPS = false;
 const STOPPED = 'Stopped. Continue or retry when you’re ready.', INTERRUPTED = 'The server stopped while writing this reply. Retry when you’re ready.';
 const NOTE = '\n\nThis reply runs on your Pocket account\'s server and is shared by your devices: another device sees the same answer, tool activity and any change waiting for approval, and answers it once. Provider keys stay on the server for this chat. Notes, tasks, thoughts, calendar, gym and COROS come from your synced account copy.';
 const no = (message, status = 400, code = '') => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
@@ -484,6 +487,16 @@ async function drive(userId, run, leaseId, { fetcher }) {
     if (!chat || chat.deleted) return await end('stopped', 'This chat was removed.');
     // JEV decides how much looking-up this message deserves; it answers while the run's source and requests are read.
     let effort = typeof turn.usage?.effort === 'string' ? turn.usage.effort : '';
+    let enoughAt = Number(turn.usage?.enoughAt) || 0, enoughAsked = Number(turn.usage?.enoughAsked) || 0;
+    const enoughStops = process.env.PIP_ENOUGH_STOPS === '1' || ENOUGH_STOPS;
+    // The turn is the live object drive updates, so the judge reads the lookups finished at this moment. A yes is
+    // recorded at the lookups it came after; only with ENOUGH_STOPS does it end the reply's research.
+    const enough = async state => {
+      enoughAsked++;
+      const judgedEnough = await judgeEnough(userId, turn, { fetcher });
+      if (judgedEnough?.enough) enoughAt ||= state.lookups;
+      return Boolean(enoughStops && judgedEnough?.enough);
+    };
     const judging = effort ? null : judgeEffort(userId, turn, (chat.turns || []).filter(item => item.uid !== turn.uid), { fetcher });
     const key = saved.key, timezone = value.timezone || saved.settings.timezone || 'UTC';
     const conversationView = { ...chat, config: value }, body = requestBody(conversationView, turn), source = await serverRecordSource(userId);
@@ -504,9 +517,10 @@ async function drive(userId, run, leaseId, { fetcher }) {
     const note = effort && effortNote(effort);
     if (note) body.instructions += '\n\n' + note;
     const limits = effortLimits(effort);
+    const researchOption = effort === 'thorough' ? { enough } : limits;
     const reply = await streamChat(conversationView, turn, { value, body, key, fetcher, deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
-      ...(limits ? { research: limits } : {}),
-      onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}) } }); live.publish(runId, turn, meta); progress(); },
+      ...(researchOption ? { research: researchOption } : {}),
+      onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } }); live.publish(runId, turn, meta); progress(); },
       resume: { reasoning: turn.reasoning || '', activity: turn.activity || [], observations },
       durable: { checkpoint: resumed, settled: resumed ? settlementMap(requests) : null, pause },
       // A card changed in an earlier reply (update_card) is written to the chat at once; every device pulls it.
@@ -516,7 +530,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
         : runTool(value, name, input, signal, { ...context, source }),
       previewTool: (value, name, input, signal) => previewTool(value, name, input, signal, source) });
     segment = reply.usage || segment;
-    Object.assign(turn, reply, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}) } });
+    Object.assign(turn, reply, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } });
     await end('done');
   } catch (error) {
     if (error?.name === 'RunPaused' && paused || leaseLost) return;

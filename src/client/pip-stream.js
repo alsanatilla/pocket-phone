@@ -30,10 +30,11 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   const researchLeft = Math.max(1, restored?.counters?.researchLeft ?? RESEARCH_LIMITS.deadlineMs);
   let timeout, absolute, timedOut = false, deadlineReached = false, deadlineLeft = Math.min(deadlineMs, RESEARCH_LIMITS.deadlineMs, researchLeft), deadlineFrom = 0;
   const requestBudget = deadlineLeft;
-  let calls = 0, searches = 0, lookups = 0, toolData = 0, tokens = value.maxTokens;
+  let calls = 0, searches = 0, lookups = 0, enoughAsked = 0, enoughLookups = 0, enoughStopped = false, toolData = 0, tokens = value.maxTokens;
   let finalReason = '', finalRounds = 0, finalCalls = 0, round = 0, currentRound = 0, allowance = 0, final = false, canPrepare = false, lastFinish = '', fatal = null;
   if (restored?.counters) { const saved = restored.counters;
     calls = saved.calls || 0; searches = saved.searches || 0; lookups = saved.lookups || 0; toolData = saved.toolData || 0; tokens = saved.tokens ?? value.maxTokens;
+    enoughAsked = saved.enoughAsked || 0; enoughLookups = saved.enoughLookups || 0; enoughStopped = Boolean(saved.enoughStopped);
     round = saved.round || 0; currentRound = saved.currentRound || 0; finalReason = saved.finalReason || '';
     finalRounds = saved.finalRounds || 0; finalCalls = saved.finalCalls || 0; final = Boolean(saved.final); canPrepare = Boolean(saved.canPrepare); }
   const deadline = () => { deadlineFrom = Date.now(); absolute = setTimeout(() => { deadlineReached = true; controller.abort(); }, deadlineLeft); };
@@ -88,7 +89,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   };
   // What a pause stores: the provider messages, the remaining budgets, and the requests no client has settled yet.
   const checkpoint = extra => ({ messages: [...(base || body.messages), ...responses],
-    counters: { calls, searches, lookups, toolData, tokens, round, currentRound, finalReason, finalRounds, finalCalls, final, canPrepare, researchLeft: Math.max(1, researchLeft - (requestBudget - deadlineLeft)) },
+    counters: { calls, searches, lookups, enoughAsked, enoughLookups, enoughStopped, toolData, tokens, round, currentRound, finalReason, finalRounds, finalCalls, final, canPrepare, researchLeft: Math.max(1, researchLeft - (requestBudget - deadlineLeft)) },
     pending: pending.map(item => ({ ...item })), previews: Object.fromEntries(previews), rows: Object.fromEntries(rows), ...extra });
   const halt = async extra => { await durable.pause(checkpoint(extra)); throw new RunPaused(); };
   const check = () => { if (controller.signal.aborted) throw stopped(); if (fatal) throw fatal; };
@@ -133,11 +134,11 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       if ([...executed].filter(item => item.startsWith(currentRound + ':')).length >= RESEARCH_LIMITS.calls + RESEARCH_LIMITS.finalCalls) { fatal = new Error('The tool request is too large.'); throw fatal; }
       if (executed.has(ran)) { fatal = new Error('The provider returned duplicate tool identifiers.'); throw fatal; }
       executed.add(ran);
-      if (final && allowed(name) && (!canPrepare || !stateTool)) { fatal = toolsAfterLimit(name); throw fatal; }
+      if (final && allowed(name) && (!canPrepare || !stateTool) && !(enoughStopped && !write && !stateTool)) { fatal = toolsAfterLimit(name); throw fatal; }
     }
     let answer;
     if (!allowed(name)) { answer = { error: 'tool_unavailable', message: 'This tool is not offered or its access was switched off.' }; finalReason ||= 'Unavailable tool requested'; }
-    else if (!write && !stateTool && research && ((research.lookups !== undefined && lookups >= research.lookups) || (research.webCalls !== undefined && web && searches >= research.webCalls))) { answer = budgetError; finalReason ||= 'Enough looked up for this message'; }
+    else if (!write && !stateTool && research && (enoughStopped || (research.lookups !== undefined && lookups >= research.lookups) || (research.webCalls !== undefined && web && searches >= research.webCalls))) { answer = budgetError; finalReason ||= 'Enough looked up for this message'; }
     else if (!write && (stateTool ? (final ? finalCalls >= RESEARCH_LIMITS.finalCalls : calls >= RESEARCH_LIMITS.calls) : calls >= RESEARCH_LIMITS.calls || web && searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || finalReason === 'Research data exhausted')) { answer = budgetError; finalReason ||= 'Research calls or data exhausted'; }
     else {
       if (!write) { calls++; if (final) finalCalls++; if (web) searches++; if (!stateTool) lookups++; }
@@ -205,21 +206,31 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   const tools = sdkTools([...offered], runTool);
   const toolApproval = Object.fromEntries([...WRITE_TOOLS, ...deviceTools].filter(name => tools[name]).map(name => [name, approval(name)]));
   const instructions = body.instructions;
-  const prepareStep = ({ messages }) => {
+  const prepareStep = async ({ messages }) => {
     check(); if (tokens < 1) return finishFromObservations('The configured reply token limit was reached. Continue when you’re ready.');
     if (round > RESEARCH_LIMITS.continuations + 2) return finishFromObservations('The research continuation limit was reached.');
     currentRound = round++; inputs.clear();
     if (currentRound && JSON.stringify(messages).length > 190000) return finishFromObservations('The research context limit was reached.');
     delete result.usage.last_input_tokens; delete result.usage.last_output_tokens;
     const reserve = Math.min(1024, Math.max(1, Math.floor(value.maxTokens / 3)));
-    final = finalRounds > 0 || Boolean(finalReason) || currentRound >= RESEARCH_LIMITS.continuations || calls >= RESEARCH_LIMITS.calls || searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || tokens <= reserve;
+    const finalNow = () => finalRounds > 0 || Boolean(finalReason) || currentRound >= RESEARCH_LIMITS.continuations || calls >= RESEARCH_LIMITS.calls || searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || tokens <= reserve;
+    final = finalNow();
+    // Between rounds, JEV says whether what was found is enough. Until the lead trusts that answer, the callback
+    // resolves false and only records how often it was asked; a true answer ends research the way a limit does.
+    if (!final && typeof research?.enough === 'function' && lookups > enoughLookups && enoughAsked < 6) {
+      enoughAsked++; enoughLookups = lookups;
+      try {
+        if (await research.enough({ lookups, rounds: currentRound })) { finalReason ||= 'Enough looked up for this message'; enoughStopped = true; }
+      } catch { /* A judge that fails must never fail the reply. */ }
+      final = finalNow();
+    }
     canPrepare = final && finalRounds < 2 && finalCalls < RESEARCH_LIMITS.finalCalls && tokens > reserve && [...offered].some(name => STATE_TOOLS.includes(name));
     if (final) finalRounds++;
     // A round may use what is left of the reply's budget, less the reserve for the closing answer. A fixed slice per
     // round cut models that think first off in the middle of their thinking, before the call they were working towards
     // (a card, a lookup), and the next round started the same thinking again.
     allowance = canPrepare || offered.size && !final ? Math.max(1, tokens - reserve) : tokens;
-    const activeTools = [...offered].filter(name => allowed(name) && (!final || STATE_TOOLS.includes(name)));
+    const activeTools = [...offered].filter(name => allowed(name) && (!final || STATE_TOOLS.includes(name) || enoughStopped));
     result.phase = final ? 'synthesizing' : 'requesting'; publish();
     const instruction = final ? '\n\nPocket runtime status: the app has stopped research for this reply. This is an app limit, not a user instruction, and does not mean the research is complete. Answer the current user request using the observations already collected. Do not start more research or read more sources. '
       + (canPrepare ? 'Only if the current user request asks to save or change something, request it now if it has not already been requested in this reply. An unfinished action from an earlier message must not replace the current answer. ' : 'Make no more tool calls; write the answer now. ')
@@ -265,7 +276,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       if (!CARD_TOOLS.includes(partial.name)) record(activityId(part.id), { input: partial.text });
       else if (draft?.id === part.id) { const lines = draftLines(partial.text); result.answer = result.answer.slice(0, draft.at) + '```pocket\n' + (lines ? lines + '\n' : ''); }
     } else if (part.type === 'tool-call') {
-      if (final && (!canPrepare || !STATE_TOOLS.includes(part.toolName))) { fatal = toolsAfterLimit(part.toolName); throw fatal; }
+      if (final && (!canPrepare || !STATE_TOOLS.includes(part.toolName)) && !(enoughStopped && !WRITE_TOOLS.includes(part.toolName))) { fatal = toolsAfterLimit(part.toolName); throw fatal; }
       if (JSON.stringify(part.input || {}).length > (CARD_TOOLS.includes(part.toolName) ? CARD_ARGUMENT_LIMIT : 8000)) throw new Error('The tool request is too large.');
       if (part.invalid) dropDraft(part.toolCallId);
       record(activityId(part.toolCallId), { name: part.toolName, title: label(part.toolName, part.input || {}), input: kept(part.toolName, part.input || {}), ...(part.invalid ? { state: 'failed', summary: 'Invalid tool request', ended: Date.now(), result: JSON.stringify({ error: 'invalid_arguments', message: 'Correct the arguments or use an available tool.' }) } : {}) });
