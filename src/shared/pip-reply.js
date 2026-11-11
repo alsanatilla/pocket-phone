@@ -13,6 +13,8 @@ const FENCE = /^[ \t]{0,3}(`{3,}|~{3,})(.*)$/;
 const PATCH = /^\s*\{\s*"op"\s*:/;
 /** Closing tags of a tool call a model wrote as text; never meant for the reader. */
 const TOOL_DEBRIS = /^\s*<\/?(?:parameter|function|tool_call)\b[^>]*>\s*$/;
+/** DeepSeek's own tool-call markup, written as text when a call was not sent as one: no line of it is for the reader. */
+const DSML = /<\/?｜DSML｜/;
 /**
  * A card record a model copied into its answer: a whole line, in either form cardsAsRecords writes, or one a model
  * made up after it ("[card k… updated with show_card: …]").
@@ -62,6 +64,7 @@ export function segmentAnswer(text) {
       if (line.trim() === "pocket") { held = [line]; continue; }
       if (PATCH.test(line)) { flushProse(); bare = [line]; continue; }
       if (TOOL_DEBRIS.test(line)) continue;
+      if (DSML.test(line)) continue;
       if (CARD_RECORD.test(line)) continue;
     }
     if (card) {

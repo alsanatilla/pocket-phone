@@ -359,3 +359,9 @@ test('a threshold can be set and cleared on a card, and pinning keeps it', () =>
   const lines = marked.split('\n'), pin = lines.findIndex(line => line.includes('"/pinned"')), alert = lines.findIndex(line => line.includes('"/alert"')), root = lines.findIndex(line => line.includes('"/root"'));
   assert.ok(pin >= 0 && pin < alert && alert < root);
 });
+
+test('tool-call markup a model wrote as text never reaches the reader', () => {
+  const debris = '<｜DSML｜ calls>\n<｜DSML｜ invoke name="search_notes">\n<｜DSML｜ parameter name="query" string="true">Jahr</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>';
+  assert.deepEqual(normalizeAnswer('Ich schaue nach.\n\n' + debris + '\n\nDer Golf kostet 21.000 Euro.').split('\n').filter(line => line.trim()), ['Ich schaue nach.', 'Der Golf kostet 21.000 Euro.']);
+  assert.equal(normalizeAnswer(debris), '');
+});

@@ -56,21 +56,17 @@ export function PipPage() {
   const open = (uid: string) => { setListOpen(false); void navigate({ search: { chat: uid } }); };
   const start = () => open(createChat().uid);
 
-  // Follow the reply while it grows (text, cards, rendered blocks arriving), unless the person scrolled up to read.
-  // Growth is observed on the thread itself and followed once per frame, so a burst of changes is one scroll.
+  // Follow the reply while it grows (text, cards, blocks arriving), unless the person scrolled up to read. The
+  // observer reports growth after layout and before the frame is painted, so scrolling right there keeps the end in
+  // view in the same frame; waiting for the next frame showed the new line below the fold first.
   useEffect(() => {
     const node = thread.current;
     if (!node) return;
-    let frame = 0;
     const onScroll = () => { following.current = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 120; };
-    const follow = () => {
-      if (frame || !following.current) return;
-      frame = requestAnimationFrame(() => { frame = 0; window.scrollTo({ top: document.documentElement.scrollHeight }); });
-    };
-    const observer = new ResizeObserver(follow);
+    const observer = new ResizeObserver(() => { if (following.current) window.scrollTo({ top: document.documentElement.scrollHeight }); });
     observer.observe(node);
     addEventListener("scroll", onScroll, { passive: true });
-    return () => { observer.disconnect(); removeEventListener("scroll", onScroll); cancelAnimationFrame(frame); };
+    return () => { observer.disconnect(); removeEventListener("scroll", onScroll); };
   }, []);
   // A new message always brings the end into view.
   // A reply running in this chat that this tab did not send (another device, or before a reload) shows here live.
