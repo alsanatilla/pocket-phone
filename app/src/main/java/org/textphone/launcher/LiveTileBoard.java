@@ -174,11 +174,12 @@ final class LiveTileBoard extends ViewGroup {
         final MiniChart chart;
         String dataKey = "";
         final int ink = WarmWorkspace.INK;
-        final int fill;
+        final GradientDrawable base = new GradientDrawable();
+        int fill;
 
         Tile(String kind, String size) {
             super(activity); this.kind = kind; this.size = size;
-            fill = color(kind); boolean small = "small".equals(size);
+            boolean small = "small".equals(size);
             setTag("today_tile_" + kind); setOrientation(VERTICAL); setGravity(Gravity.TOP);
             setPadding(dp(small ? 8 : 12), dp(small ? 6 : 10), dp(small ? 8 : 12), dp(small ? 6 : 10));
             setFocusable(true); setClickable(true); setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
@@ -196,7 +197,14 @@ final class LiveTileBoard extends ViewGroup {
                 LinearLayout.LayoutParams preview = new LinearLayout.LayoutParams(-1, 0, 1); preview.topMargin = dp(2); addView(detail, preview);
                 LinearLayout.LayoutParams plot = new LinearLayout.LayoutParams(-1, dp(12)); plot.bottomMargin = dp(6); addView(chart, plot);
             } else if (!"pip".equals(kind)) addView(new View(activity), new LinearLayout.LayoutParams(1, 0, 1));
-            addView(name, new LinearLayout.LayoutParams(-1, -2));
+            // The foot is the scan point: icon and name. A small tile has room for the icon only; Pip's sprite is its own icon.
+            if (!(small && "pip".equals(kind))) {
+                LinearLayout foot = new LinearLayout(activity); foot.setGravity(Gravity.CENTER_VERTICAL);
+                WarmWorkspace.Glyph glyph = new WarmWorkspace.Glyph(activity, kind, ink); glyph.setTag("live_glyph_" + kind);
+                foot.addView(glyph, new LinearLayout.LayoutParams(dp(18), dp(18)));
+                if (!small) { LinearLayout.LayoutParams text = new LinearLayout.LayoutParams(0, -2, 1); text.leftMargin = dp(6); foot.addView(name, text); }
+                addView(foot, new LinearLayout.LayoutParams(-1, -2));
+            }
             setOnClickListener(v -> { if (editing) actions.edit(kind); else actions.open(kind); });
             setOnLongClickListener(v -> {
                 if (!editing) { actions.edit(kind); return true; }
@@ -205,8 +213,12 @@ final class LiveTileBoard extends ViewGroup {
                 if (started) setAlpha(.4f); else { endDrag(); actions.edit(kind); }
                 return true;
             });
-            GradientDrawable base = new GradientDrawable(); base.setColor(fill);
-            setBackground(new RippleDrawable(ColorStateList.valueOf(0x33000000), base, null));
+            fill(false); setBackground(new RippleDrawable(ColorStateList.valueOf(0x33000000), base, null));
+        }
+        /** Every tile wears the chosen accent, as on Windows Phone. Colour changes only to flag something, such as overdue tasks. */
+        void fill(boolean alert) {
+            int next = alert ? WarmWorkspace.OVERDUE : PocketDesign.accent(activity);
+            if (next != fill) { fill = next; base.setColor(fill); }
         }
         int columns() { return "wide".equals(size) ? 4 : "small".equals(size) ? 1 : 2; }
         int rows() { return "small".equals(size) ? 1 : 2; }
@@ -218,12 +230,15 @@ final class LiveTileBoard extends ViewGroup {
             return view;
         }
         void reading(LiveTileData data) {
+            fill(data.alert);
             String key = data.key(); if (key.equals(dataKey)) return; dataKey = key;
             value.setText(data.value); detail.setText(data.detail);
             name.setText(TodayTiles.label(activity, kind));
             if (!"small".equals(size) && !data.status.isEmpty()) {
                 // Status goes with the reading; the app name remains a stable scan point at the foot.
-                detail.setText(data.detail + (data.detail.isEmpty() ? "" : "\n") + data.status);
+                // An alert leads with its status, so the warning colour is never the only signal.
+                detail.setText(data.alert ? data.status + (data.detail.isEmpty() ? "" : "\n") + data.detail
+                        : data.detail + (data.detail.isEmpty() ? "" : "\n") + data.status);
                 detail.setMaxLines("wide".equals(size) ? 3 : 2);
             }
             if (android.os.Build.VERSION.SDK_INT >= 26) value.setAutoSizeTextTypeUniformWithConfiguration("small".equals(size) ? 18 : 26, "small".equals(size) ? 32 : 46, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
@@ -266,11 +281,5 @@ final class LiveTileBoard extends ViewGroup {
                 }
             }
         }
-    }
-    private static int color(String kind) {
-        if ("tasks".equals(kind) || "brief".equals(kind) || "pip".equals(kind)) return WarmWorkspace.AMBER;
-        if ("notes".equals(kind) || "paper".equals(kind)) return 0xFFDDD0B6;
-        if ("clock".equals(kind) || "focus".equals(kind)) return 0xFFD8B095;
-        return WarmWorkspace.color(kind);
     }
 }

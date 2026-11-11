@@ -13,12 +13,15 @@ final class LiveTileData {
     final String value, detail, status;
     final double[] bars;
     final int progress;
+    /** Something needs attention, such as an overdue task. The tile switches to the warning colour. */
+    final boolean alert;
 
     LiveTileData(String value, String detail, String status) { this(value, detail, status, -1, null); }
-    LiveTileData(String value, String detail, String status, int progress, double[] bars) {
-        this.value = value; this.detail = detail; this.status = status; this.progress = progress; this.bars = bars;
+    LiveTileData(String value, String detail, String status, int progress, double[] bars) { this(value, detail, status, progress, bars, false); }
+    LiveTileData(String value, String detail, String status, int progress, double[] bars, boolean alert) {
+        this.value = value; this.detail = detail; this.status = status; this.progress = progress; this.bars = bars; this.alert = alert;
     }
-    String key() { return value + "\n" + detail + "\n" + status + ":" + progress + java.util.Arrays.toString(bars); }
+    String key() { return value + "\n" + detail + "\n" + status + ":" + progress + java.util.Arrays.toString(bars) + alert; }
     static String title(String text) { return ReadableRows.excerpt(text)[0]; }
     static String time(Context c, long when) {
         boolean full = c.getSharedPreferences("text_phone", 0).getBoolean("twenty_four_hour", true);
@@ -36,12 +39,15 @@ final class LiveTileData {
                 PlannerStore.Entry chosen = planner.nextTask(entries);
                 List<String> preview = new ArrayList<>();
                 if (chosen != null) preview.add(title(chosen.text));
-                int open = 0, done = 0;
+                int open = 0, done = 0, overdue = 0; String today = PlannerDates.today();
                 for (PlannerStore.Entry e : entries) if ("task".equals(e.kind)) {
-                    if (e.done) done++; else { open++; if (preview.size() < 2 && (chosen == null || chosen.id != e.id)) preview.add(title(e.text)); }
+                    if (e.done) done++; else {
+                        open++; if (!e.due.isEmpty() && e.due.compareTo(today) < 0) overdue++;
+                        if (preview.size() < 2 && (chosen == null || chosen.id != e.id)) preview.add(title(e.text));
+                    }
                 }
-                return new LiveTileData(String.valueOf(open), preview.isEmpty() ? "All clear" : String.join("\n", preview), "open",
-                        open + done == 0 ? -1 : done * 100 / (open + done), null);
+                return new LiveTileData(String.valueOf(open), preview.isEmpty() ? "All clear" : String.join("\n", preview), overdue > 0 ? overdue + " overdue" : "open",
+                        open + done == 0 ? -1 : done * 100 / (open + done), null, overdue > 0);
             }
             case "agenda": {
                 DayPlan.Item next = DayPlan.local(c, now).next();
@@ -81,7 +87,8 @@ final class LiveTileData {
                 int count = GymStore.sessionsSince(c, GymStore.weekStart(now));
                 double[] volume = GymStore.weeklyVolume(c, 8);
                 double total = volume.length == 0 ? 0 : volume[volume.length - 1];
-                return new LiveTileData(count + "×", total > 0 ? GymStore.kg(total) + " kg lifted" : "No sets this week", "this week", -1, volume);
+                return new LiveTileData(String.valueOf(count), total > 0 ? GymStore.kg(total) + " kg lifted" : "No sets yet",
+                        (count == 1 ? "session" : "sessions") + " this week", -1, volume);
             }
             case "clock": {
                 ClockStore.Entry next = null;

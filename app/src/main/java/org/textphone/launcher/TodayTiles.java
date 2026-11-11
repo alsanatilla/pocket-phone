@@ -16,7 +16,7 @@ import org.json.JSONObject;
  */
 final class TodayTiles {
     static final String[] CATALOG = {"brief", "tasks", "agenda", "thoughts", "notes", "movement", "gym", "pip", "activity", "focus", "clock", "paper", "zines", "dice"};
-    static final String[] DEFAULTS = {"agenda", "thoughts", "tasks", "activity"};
+    static final String[] DEFAULTS = {"movement", "agenda", "thoughts", "tasks", "activity"};
     private static final String PREFERENCE = "today-tiles";
 
     static boolean known(String kind) { return Arrays.asList(CATALOG).contains(kind); }

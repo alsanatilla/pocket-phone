@@ -82,7 +82,7 @@ public class WarmConsolePreviewTest {
         appointment.minutes = 45; AgendaStore.save(context, appointment);
         seedMovement();
         JSONArray tiles = new JSONArray();
-        for (String kind : new String[]{"agenda", "thoughts", "tasks", "activity", "zines"})
+        for (String kind : new String[]{"movement", "agenda", "thoughts", "tasks", "activity", "zines"})
             tiles.put(new JSONObject().put("uid", "preview-" + kind).put("kind", kind));
         WorkspaceExtras.preference(context, "today-tiles", tiles);
         for (String label : new String[]{"Authenticator", "COROS", "Firefox", "Signal", "Spotify", "VLC"})
@@ -125,7 +125,14 @@ public class WarmConsolePreviewTest {
             assertTrue("The tasks tile shows the chosen task", tasksTile.getText().toString().contains(LiveTileData.title(planner.find(chosen).text)));
             assertNotNull(root.findViewWithTag("today_tile_agenda"));
             assertNull(root.findViewWithTag("daily_brief"));
-            assertScores(root); assertDock(root, 360);
+            // The scores move into the movement tile; the board starts under the tabs.
+            assertNull(root.findViewWithTag("dashboard_movement"));
+            assertEquals(CorosRepository.get(context).cached().scores.recovery.score + "%",
+                    ((TextView) root.findViewWithTag("live_value_movement")).getText().toString());
+            int[] tabs = new int[2], board = new int[2];
+            root.findViewWithTag("workspace_tabs").getLocationOnScreen(tabs); root.findViewWithTag("live_tile_board").getLocationOnScreen(board);
+            assertTrue("Tiles start right under the tabs", board[1] - tabs[1] < 96);
+            assertDock(root, 360);
             assertTrue(ParkingStore.find(context, thought).open());
             int taskCount = taskCount();
             click(activity, "workspace_tab_tasks");
@@ -213,6 +220,8 @@ public class WarmConsolePreviewTest {
             View small = root.findViewWithTag("today_tile_gym"), wide = root.findViewWithTag("today_tile_tasks");
             assertTrue("A wide tile spans the board", wide.getWidth() >= board.getWidth() - board.getPaddingLeft() - board.getPaddingRight() - 2);
             assertTrue("A small tile is a quarter", small.getWidth() < board.getWidth() / 3);
+            assertNotNull("A small tile shows its icon", small.findViewWithTag("live_glyph_gym"));
+            assertNull("A small tile has no room for a name", small.findViewWithTag("live_label_gym"));
             root.findViewWithTag("today_edit_tiles").performClick();
             root = save(activity, "warm-today-editing.png");
             assertTrue("Edit mode shrinks borderless tiles", root.findViewWithTag("today_tile_gym").getScaleX() < 1f);
