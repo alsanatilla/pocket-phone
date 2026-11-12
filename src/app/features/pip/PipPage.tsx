@@ -110,7 +110,7 @@ export function PipPage() {
   return (
     <main className="flex min-h-[calc(100dvh-45px)] flex-col">
       {/* One quiet line under the header: which conversation this is (it opens the list), then the two actions. */}
-      <div className="sticky top-[45px] z-[5] mb-3 flex items-center gap-1 bg-background">
+      <div className="sticky top-[45px] z-[5] mb-3 flex items-center gap-2 bg-background pt-2 pb-1">
         <Button variant="ghost" onClick={() => setListOpen(true)} aria-expanded={listOpen} aria-label="All chats"
           className="max-w-[65%] min-w-0 justify-start gap-1.5 text-xs text-dim">
           <span className="truncate">{chat?.title || "pip"}</span>

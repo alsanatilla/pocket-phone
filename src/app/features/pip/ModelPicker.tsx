@@ -74,7 +74,7 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger asChild>
           <Button type="button" variant="ghost" disabled={busy} aria-label="Choose model" title={current}
-            className="min-h-11 min-w-0 justify-start gap-1 px-2 text-xs text-dim sm:min-h-0">
+            className="min-w-0 justify-start gap-1 text-dim">
             <span className="truncate">{name}</span>
             <ChevronDown className="size-3 shrink-0" />
           </Button>
