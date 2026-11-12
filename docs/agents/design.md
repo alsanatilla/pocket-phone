@@ -37,6 +37,13 @@ these; it does not repeat their classes by hand.
 6. **Rows** are `Row`s: optional lead (a `Tick`, a time), main line, optional second line, optional end (a note, a
    key, a switch). Keys that belong to a row go at its end when there is one, or in a `Keys` line under it when
    there are two or more.
+   - **A list never repeats keys on its rows.** One key per row, times sixteen rows, is a wall of buttons (the
+     person's verdict on the chat list: "this is not good design"). In a list, pressing the row is its main
+     action, a `Switch` or `Tick` may stand at its end, and everything else is behind `RowMenu` (three quiet dots).
+     A row in such a list has no `›` either: when every row leads somewhere, the arrow says nothing. Keys belong
+     to a page, a dialog, a card or a single item, never to each of many.
+   - A row shows one line and at most one quiet note. Counts, dates and states that repeat what the section's name
+     already says (a date under "yesterday", "0 messages") are left out; empty things are not listed.
 7. **Fields are prompt lines** (`src/app/ui/SendButton.tsx`, `PipComposer.tsx`): a marker, the text, and a `go` key
    to send. Only the page's main field has the line over it (rule 2).
 8. **Rhythm.** 12px between paragraphs, 24px between sections, 16px page padding. Nothing centred except an empty

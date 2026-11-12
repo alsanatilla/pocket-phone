@@ -9,7 +9,8 @@ import { readAccess } from "../../data/ai.ts";
 import { nextLabel, PRESETS, scheduleLabel, STATUS_LABEL, type Job, type JobDraft, type JobsState } from "../../data/jobs.ts";
 import { classicHref } from "../../lib/classic.ts";
 import { confirm } from "../../ui/dialog/dialog.ts";
-import { Keys, Row, Section, Segmented } from "../../ui/kit.tsx";
+import { Keys, Row, Section, Segmented, RowMenu } from "../../ui/kit.tsx";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { PageTitle } from "../../ui/PageTitle.tsx";
 import { modelLabel } from "../settings/SettingsPage.tsx";
 import { JobEditor } from "./JobEditor.tsx";
@@ -55,28 +56,30 @@ function JobCard({ job, jobs }: { job: Job; jobs: ReturnType<typeof useJobs> }) 
   const failed = job.lastStatus === "failed";
   const draft: JobDraft = { ...job };
   return (
-    <li className={cn("pb-2", !job.enabled && "opacity-60")}>
+    <li className={cn("pb-1", !job.enabled && "opacity-60")}>
       <Row
         sub={`${KIND_NAME[job.kind]} · ${scheduleLabel(job)}${job.delivery === "quiet" ? " · quiet" : ""}`}
-        end={<Switch checked={job.enabled} disabled={training} aria-label={job.title + " enabled"}
-          onCheckedChange={enabled => void jobs.toggle({ ...draft, enabled })} />}>
+        end={<>
+          <Switch checked={job.enabled} disabled={training} aria-label={job.title + " enabled"}
+            onCheckedChange={enabled => void jobs.toggle({ ...draft, enabled })} />
+          <RowMenu label={"Options for " + job.title}>
+            <DropdownMenuItem disabled={jobs.busy === "run:" + job.id} onSelect={() => void jobs.run(job.id)}>run now</DropdownMenuItem>
+            {job.lastChat ? <DropdownMenuItem asChild><Link to="/pip" search={{ chat: job.lastChat }}>open chat</Link></DropdownMenuItem> : null}
+            {training
+              ? <DropdownMenuItem asChild><a href={classicHref("/pip")}>edit in classic</a></DropdownMenuItem>
+              : <DropdownMenuItem onSelect={() => setEditing(true)}>edit</DropdownMenuItem>}
+            {!training ? (
+              <DropdownMenuItem variant="destructive" onSelect={async () => {
+                if (await confirm({ title: "Remove “" + job.title + "”?", message: "Its notes go with it; its chat stays.", confirmLabel: "remove", danger: true })) void jobs.remove(job.id);
+              }}>remove</DropdownMenuItem>
+            ) : null}
+          </RowMenu>
+        </>}>
         {job.title}
       </Row>
-      <p className={cn("text-xs", failed ? "text-destructive" : "text-dim")}>
+      <p className={cn("-mt-1 text-xs", failed ? "text-destructive" : "text-dim")}>
         next {nextLabel(job)}{job.lastRun ? ` · last ${STATUS_LABEL[job.lastStatus] ?? job.lastStatus}` : ""}{failed && job.lastError ? ` · ${job.lastError}` : ""}
       </p>
-      <Keys className="pt-1">
-        <Button type="button" disabled={jobs.busy === "run:" + job.id} onClick={() => void jobs.run(job.id)}>run now</Button>
-        {job.lastChat ? <Button asChild><Link to="/pip" search={{ chat: job.lastChat }}>open chat</Link></Button> : null}
-        {training
-          ? <Button asChild><a href={classicHref("/pip")}>edit in classic</a></Button>
-          : <Button type="button" onClick={() => setEditing(true)}>edit</Button>}
-        {!training ? (
-          <Button type="button" variant="destructive" onClick={async () => {
-            if (await confirm({ title: "Remove “" + job.title + "”?", message: "Its notes go with it; its chat stays.", confirmLabel: "remove", danger: true })) void jobs.remove(job.id);
-          }}>remove</Button>
-        ) : null}
-      </Keys>
       {job.scratch ? (
         <Collapsible className="group/notes pt-1">
           <CollapsibleTrigger asChild><Button type="button" className="text-dim">pip's notes for this job</Button></CollapsibleTrigger>

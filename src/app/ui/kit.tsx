@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { Check as CheckIcon, ChevronRight } from "lucide-react";
+import { Check as CheckIcon, ChevronRight, MoreHorizontal } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 // Pocket's building blocks. Every screen is made of these, so a button, a row or a section looks and behaves the
@@ -103,5 +104,21 @@ export function Figure({ label, value, unit, note }: { label: ReactNode; value: 
       <p className="text-[22px] font-medium leading-[1.3] text-hi">{value}{unit ? <span className="ml-1 text-[11px] font-normal text-dim">{unit}</span> : null}</p>
       {note ? <p className="truncate text-xs text-dim">{note}</p> : null}
     </div>
+  );
+}
+
+/**
+ * What can be done with one row of a list: three quiet dots at its end that open a menu of `DropdownMenuItem`s.
+ * A list never repeats keys on every row (that makes a wall of buttons): the row itself is pressed for its main
+ * action, and everything else is here. This is the one place an icon without a fill is pressable.
+ */
+export function RowMenu({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger aria-label={label} className="-my-1.5 -mr-2.5 grid size-11 shrink-0 place-items-center rounded-[5px] text-dim outline-none transition-colors hover:text-hi focus-visible:ring-2 focus-visible:ring-ring/60 data-[state=open]:text-hi sm:size-8">
+        <MoreHorizontal aria-hidden="true" className="size-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">{children}</DropdownMenuContent>
+    </DropdownMenu>
   );
 }

@@ -55,7 +55,8 @@ describe("the memory page", () => {
 
     render(<><MemoryPage /><DialogHost /></>);
     await screen.findByText(before.text);
-    fireEvent.click(screen.getByRole("button", { name: "edit" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /^Options for/ }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "edit" }));
     const field = screen.getByRole("textbox", { name: "Edit memory" }) as HTMLTextAreaElement;
     expect(field.value).toBe(before.text);
     fireEvent.change(field, { target: { value: after.text } });
@@ -74,7 +75,8 @@ describe("the memory page", () => {
 
     render(<MemoryPage />);
     await screen.findByText(gone.text);
-    fireEvent.click(screen.getAllByRole("button", { name: "forget" })[0]!);
+    fireEvent.keyDown(screen.getAllByRole("button", { name: /^Options for/ })[0]!, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "forget" }));
 
     await waitFor(() => expect(cloud.post).toHaveBeenCalledWith("/api/pip/memory", { action: "forget", id: "m1" }));
     await waitFor(() => expect(screen.queryByText(gone.text)).toBeNull());

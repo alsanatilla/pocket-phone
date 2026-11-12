@@ -6,7 +6,8 @@ import { readChat } from "../../data/chats.ts";
 import { addMemory, editMemory, forgetMemory, useMemory, type MemoryEntry } from "../../data/memory.ts";
 import { classicHref } from "../../lib/classic.ts";
 import { prompt } from "../../ui/dialog/dialog.ts";
-import { Section, Keys, Row } from "../../ui/kit.tsx";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { Section, Row, RowMenu } from "../../ui/kit.tsx";
 import { PageTitle } from "../../ui/PageTitle.tsx";
 import { BARE_INPUT, FIELD } from "../../ui/SendButton.tsx";
 import { toast, toastError } from "../../ui/toast/toast.ts";
@@ -20,14 +21,14 @@ const shortDate = (at: number) => new Date(at).toLocaleDateString([], { day: "2-
 function Entry({ entry, busy, onEdit, onForget }: { entry: MemoryEntry; busy: boolean; onEdit: () => void; onForget: () => void }) {
   const chat = entry.chat ? readChat(entry.chat) : null;
   return (
-    <li className="pb-2">
-      <Row sub={<>since {shortDate(entry.created)}{chat ? <> · from <Link to="/pip" search={{ chat: chat.uid }} className="text-primary underline underline-offset-2">{chat.title || "chat"}</Link></> : null}</>}>
+    <li>
+      <Row end={<RowMenu label={"Options for: " + entry.text.slice(0, 60)}>
+          <DropdownMenuItem disabled={busy} onSelect={onEdit}>edit</DropdownMenuItem>
+          <DropdownMenuItem disabled={busy} variant="destructive" onSelect={onForget}>forget</DropdownMenuItem>
+        </RowMenu>}
+        sub={<>since {shortDate(entry.created)}{chat ? <> · from <Link to="/pip" search={{ chat: chat.uid }} className="text-primary underline underline-offset-2">{chat.title || "chat"}</Link></> : null}</>}>
         {entry.text}
       </Row>
-      <Keys>
-        <Button type="button" disabled={busy} onClick={onEdit}>edit</Button>
-        <Button type="button" variant="destructive" disabled={busy} onClick={onForget}>forget</Button>
-      </Keys>
     </li>
   );
 }

@@ -536,15 +536,17 @@ const STATES = [
       await page.click('button[aria-label="All chats"]');
       await until(page, 'chat-list', 'the list of chats', () => {
         const dialog = document.querySelector('[role="dialog"]');
-        return Boolean(dialog) && dialog.innerText.toLowerCase().includes('5 conversations') && dialog.innerText.includes('one ongoing conversation');
+        return Boolean(dialog) && dialog.innerText.includes('Schlafkarte') && dialog.innerText.includes('ongoing');
       });
     },
-    text: [/5 conversations/i, 'pip', 'one ongoing conversation · 45 messages', 'Schlaf und Training', 'Notiz speichern', 'Fehlgeschlagen', 'Schlafkarte', 'New chat'],
+    text: ['chats', 'pip', 'ongoing · 45 messages', 'Schlaf und Training', 'Notiz speichern', 'Fehlgeschlagen', 'Schlafkarte'],
     selectors: ['[role="dialog"]'],
     scroll: 'keep',
     async check(page) {
-      const first = await page.evaluate(() => document.querySelector('[role="dialog"] li')?.innerText ?? '');
-      if (!first.replace(/\s+/g, ' ').startsWith('pip one ongoing conversation · 45 messages')) throw new Error('the pip row is not first: ' + JSON.stringify(first));
+      const first = await page.evaluate(() => document.querySelector('[role="dialog"] [aria-current], [role="dialog"] button[type="button"]:not([data-slot])')?.innerText ?? '');
+      const list = await page.evaluate(() => document.querySelector('[role="dialog"]')?.innerText ?? '');
+      if (list.indexOf('pip') < 0 || list.indexOf('pip') > list.indexOf('Schlafkarte')) throw new Error('the pip row is not first: ' + JSON.stringify(first));
+      if (/New chat/.test(list)) throw new Error('an empty chat is listed');
     },
   },
   {
