@@ -645,7 +645,7 @@ const LAB_SCRIPT = ({ marker }) => {
   const container = (() => {
     const articles = document.querySelectorAll('main article');
     const last = articles[articles.length - 1];
-    return last?.querySelector(':scope > div.border-l-2') ?? null;
+    return last?.querySelector(':scope > [data-reply]') ?? null;
   })();
   if (!container) throw new Error('the reply container was not found');
   const lab = {

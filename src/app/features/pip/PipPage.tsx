@@ -1,4 +1,3 @@
-import { defaultConfig } from "../../data/models.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { ChevronDown, Clock3, Plus } from "lucide-react";
@@ -10,7 +9,6 @@ import { createChat, readChat, type Chat } from "../../data/chats.ts";
 import { homeChat, homeChats, homeForSend, isHome } from "../../data/home.ts";
 import { daySummary, listTasks, today } from "../../data/tasks.ts";
 import { openThoughts } from "../../data/thoughts.ts";
-import { modelLabel } from "../settings/SettingsPage.tsx";
 import { ChatList } from "./ChatList.tsx";
 import { PipComposer } from "./PipComposer.tsx";
 import { threadOf } from "./thread.ts";
@@ -110,25 +108,20 @@ export function PipPage() {
 
   const joined = threadOf(home ? screen.segments : screen.chat ? [screen.chat] : [], shown);
   const latest = chat?.turns.at(-1)?.uid ?? null;
-  const model = (() => { try { return modelLabel(chat?.config.model ?? defaultConfig().model); } catch { return "no model"; } })();
-  const reads = readAccess();
   const locked = Boolean(live) || runnerBusy();
   const askPip = (prompt: string) => { const target = home ? homeForSend() : chat; if (target) send(target.uid, prompt).catch(toastError); };
 
   return (
     <main className="flex min-h-[calc(100dvh-72px)] flex-col">
-      <div className="sticky top-[60px] z-[5] flex items-center gap-2 bg-background py-1.5">
-        <button onClick={() => setListOpen(true)} aria-expanded={listOpen} className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-foreground transition-colors hover:text-primary" aria-label="All chats">
-          <span className="truncate font-pixel text-2xl leading-none">{chat?.title || "pip"}</span>
-          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+      {/* One quiet line under the header: which conversation this is (it opens the list), then the two actions. */}
+      <div className="sticky top-[45px] z-[5] mb-3 flex items-center gap-1 bg-background">
+        <button onClick={() => setListOpen(true)} aria-expanded={listOpen} className="flex min-h-11 min-w-0 flex-1 items-center gap-1.5 text-left text-xs text-dim transition-colors hover:text-foreground" aria-label="All chats">
+          <span className="truncate">{chat?.title || "pip"}</span>
+          <ChevronDown className="size-3.5 shrink-0" />
         </button>
-        <Button asChild variant="ghost" size="icon" aria-label="Jobs: Pip on its own"><Link to="/jobs"><Clock3 /></Link></Button>
-        <Button variant="ghost" size="icon" aria-label="New chat" onClick={start}><Plus /></Button>
+        <Button asChild variant="ghost" size="icon" className="text-dim" aria-label="Jobs: Pip on its own"><Link to="/jobs"><Clock3 className="size-4" /></Link></Button>
+        <Button variant="ghost" size="icon" className="-mr-3 text-dim" aria-label="New chat" onClick={start}><Plus className="size-4" /></Button>
       </div>
-      <Link to="/settings" className="mb-1 flex min-h-11 items-center truncate text-xs text-dim no-underline hover:text-muted-foreground sm:mb-3 sm:min-h-0">
-        {model} · {reads.length ? "reads " + reads.join(", ") : "reads nothing yet"}
-      </Link>
-
       <div ref={thread} className="flex-1 space-y-8 pb-4">
         {!joined.items.length
           ? <Empty onAsk={askPip} />

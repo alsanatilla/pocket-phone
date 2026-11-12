@@ -14,7 +14,7 @@ export const Answer = memo(function Answer({ text, blocks, streaming, onAsk, at 
   const cut = useMemo(() => (blocks ? null : segmentAnswer(text)), [blocks, text]);
   const segments = blocks ?? cut ?? [];
   return (
-    <div className="text-[15px]">
+    <div>
       {segments.map((segment, index) => {
         const last = index === segments.length - 1;
         return segment.kind === "prose"

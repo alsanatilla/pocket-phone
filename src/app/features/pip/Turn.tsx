@@ -88,13 +88,16 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
 
   return (
     <article className={cn("space-y-3", Date.now() - shown.created < 4000 && "arrive")}>
-      <div className="ml-auto w-fit max-w-[85%] rounded-lg rounded-br-sm bg-secondary px-3.5 py-2">
-        <p className="whitespace-pre-wrap text-sm">{asked.text}</p>
-        {asked.id ? <p className="mt-1 text-[11px] text-dim">about a card</p> : null}
-        <p className="mt-1 text-right text-[10px] text-dim">{clock(shown.created)}</p>
+      {/* What the person wrote is a prompt line; the reply under it is plain text. No bubble, no rule beside it. */}
+      <div>
+        <div className="flex gap-2 font-medium text-hi">
+          <span aria-hidden="true" className="text-primary">›</span>
+          <p className="min-w-0 whitespace-pre-wrap break-words">{asked.text}</p>
+        </div>
+        <p className="ml-[2ch] mt-0.5 text-[11px] text-dim">{clock(shown.created)}{asked.id ? " · about a card" : ""}</p>
       </div>
 
-      <div className="space-y-2.5 border-l-2 border-primary/60 pl-3.5">
+      <div data-reply className="space-y-3">
         {rows.length ? (
           <Fold title={ledgerTitle(rows)} open={streaming || wasOpen.current}>
             <ul className="space-y-1">
@@ -135,12 +138,14 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
         ) : null}
 
         {sources.length && !streaming ? (
-          <div className="flex flex-wrap gap-1.5">
-            {sources.map(source => (
-              <a key={source.href} href={source.href.startsWith("/") ? hrefFor(source.href) : source.href} target={source.href.startsWith("/") ? undefined : "_blank"} rel="noopener noreferrer"
-                className="max-w-full truncate rounded-sm border px-2 py-0.5 text-[11px] text-muted-foreground no-underline hover:border-primary hover:text-foreground">{source.title}</a>
+          <p className="text-[11px] text-dim">
+            {sources.map((source, index) => (
+              <span key={source.href}>{index ? " · " : ""}
+                <a href={source.href.startsWith("/") ? hrefFor(source.href) : source.href} target={source.href.startsWith("/") ? undefined : "_blank"} rel="noopener noreferrer"
+                  className="text-muted-foreground underline decoration-border underline-offset-2 hover:text-foreground">{source.title}</a>
+              </span>
             ))}
-          </div>
+          </p>
         ) : null}
 
         {offers.length ? <div className="space-y-2">{offers.map(offer => <OfferCard key={offer.row.id} offer={offer} chatId={chatId} turnId={shown.uid} locked={locked && !streaming} />)}</div> : null}

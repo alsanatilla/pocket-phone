@@ -34,17 +34,17 @@ function SyncLine() {
 export function Shell() {
   return (
     <div className="mx-auto max-w-3xl px-4 pb-24">
-      <header className="sticky top-0 z-10 flex items-center gap-4 bg-background py-3.5">
-        <Link to="/today" className="font-pixel text-3xl leading-none text-primary no-underline">pocket</Link>
-        <nav aria-label="Sections" className="flex gap-3.5 font-pixel text-xl leading-none text-muted-foreground">
+      <header className="sticky top-0 z-10 flex items-center gap-3.5 border-b bg-background">
+        <Link to="/today" className="font-pixel text-[22px] leading-none text-primary no-underline">pocket</Link>
+        <nav aria-label="Sections" className="flex gap-3 text-xs text-dim">
           {SECTIONS.map(section => (
-            <Link key={section.to} to={section.to} className="py-1.5 no-underline hover:text-foreground"
-              activeProps={{ className: "text-foreground shadow-[inset_0_-2px_0_var(--primary)]", "aria-current": "page" }}>{section.label}</Link>
+            <Link key={section.to} to={section.to} className="flex min-h-11 items-center no-underline hover:text-foreground"
+              activeProps={{ className: "font-medium text-hi", "aria-current": "page" }}>{section.label}</Link>
           ))}
         </nav>
         <SyncLine />
-        <Link to="/settings" aria-label="Settings" className="grid size-11 place-items-center text-muted-foreground hover:text-foreground"
-          activeProps={{ className: "text-primary", "aria-current": "page" }}><Settings className="size-5" /></Link>
+        <Link to="/settings" aria-label="Settings" className="-mr-3 grid size-11 place-items-center text-dim hover:text-foreground"
+          activeProps={{ className: "text-hi", "aria-current": "page" }}><Settings className="size-4" /></Link>
       </header>
       <Outlet />
       <Toaster position="bottom-center" />
