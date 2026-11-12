@@ -29,7 +29,7 @@ export function Hero({ eyebrow, value, unit, caption }: { eyebrow?: string | nul
   return (
     <section className="arrive">
       {eyebrow ? <p className="text-xs text-dim">{eyebrow}</p> : null}
-      <p className="mt-1 text-[28px] font-medium leading-none text-hi">
+      <p className={cn("mt-1 leading-none text-hi", /\d/.test(String(value)) ? "text-[22px] font-medium" : "font-pixel text-[30px]")}>
         {value}{unit ? <span className="ml-1 text-[11px] text-dim">{unit}</span> : null}
       </p>
       {caption ? <p className="mt-1 text-sm text-muted-foreground">{caption}</p> : null}

@@ -26,7 +26,8 @@ export const { registry } = defineRegistry(catalog, {
       const columns = Math.max(1, Math.min(6, props.columns ?? 1));
       // Figures has two or three columns; four cells read as two rows of two, six as two rows of three.
       if (columns === 1) return <div className={cn("grid", "grid-cols-1")}>{children}</div>;
-      return <Figures columns={columns === 2 || columns === 4 ? 2 : 3}>{children}</Figures>;
+      if (columns === 2 || columns === 4) return <Figures columns={2}>{children}</Figures>;
+      return <div className="[&>div]:grid-cols-2 sm:[&>div]:grid-cols-3"><Figures columns={3}>{children}</Figures></div>;
     },
     Card: controls.Card,
     Heading: ({ props }) => {

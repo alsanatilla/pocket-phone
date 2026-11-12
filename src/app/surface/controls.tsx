@@ -1,4 +1,5 @@
-import { useId, useState, type ReactNode } from "react";
+import { useState } from "react";
+import { Accordion as AccordionPrimitive, Collapsible as CollapsiblePrimitive } from "radix-ui";
 import { useBoundProp, type BaseComponentProps } from "@json-render/react";
 import { cn } from "@/lib/utils";
 import { Button as Key } from "@/components/ui/button";
@@ -80,41 +81,36 @@ export function Tabs({ props, children, bindings, emit }: Props<{ tabs?: { value
   );
 }
 
-/** A disclosure: its title is a key, and it says whether it is open. */
-function Disclosure({ title, defaultOpen = false, children }: { title: string; defaultOpen?: boolean; children: ReactNode }) {
-  const [open, setOpen] = useState(defaultOpen);
-  const id = useId();
-  return (
-    <div>
-      <Key type="button" id={id + "-button"} size="sm" aria-expanded={open} aria-controls={id + "-content"} onClick={() => setOpen(value => !value)} className="w-full justify-between">{title}</Key>
-      {open ? <div id={id + "-content"} role="region" aria-labelledby={id + "-button"} className="mt-2 text-sm text-muted-foreground">{children}</div> : null}
-    </div>
-  );
-}
-
 export function Accordion({ props }: Props<{ items?: { title: string; content: string }[] | null; type?: "single" | "multiple" | null }>) {
-  const items = props.items ?? [];
-  const [open, setOpen] = useState<number[]>([]);
-  const multiple = props.type === "multiple";
-  const base = useId();
-  return (
-    <div className="w-full space-y-2">
-      {items.map((item, index) => {
-        const isOpen = open.includes(index);
-        return (
-          <div key={index}>
-            <Key type="button" id={base + "-button-" + index} size="sm" aria-expanded={isOpen} aria-controls={base + "-content-" + index}
-              onClick={() => setOpen(current => isOpen ? current.filter(value => value !== index) : multiple ? [...current, index] : [index])} className="w-full justify-between">{item.title}</Key>
-            {isOpen ? <p id={base + "-content-" + index} role="region" aria-labelledby={base + "-button-" + index} className="mt-2 text-sm text-muted-foreground">{item.content}</p> : null}
-          </div>
-        );
-      })}
-    </div>
-  );
+  const items = (props.items ?? []).map((item, index) => (
+    <AccordionPrimitive.Item key={index} value={"item-" + index} className="mb-2">
+      <AccordionPrimitive.Header>
+        <AccordionPrimitive.Trigger asChild><Key className="group w-full justify-between">
+          <span>{item.title}</span>
+          <span aria-hidden="true" className="text-dim group-data-[state=open]:hidden">+</span>
+          <span aria-hidden="true" className="hidden text-dim group-data-[state=open]:inline">−</span>
+        </Key></AccordionPrimitive.Trigger>
+      </AccordionPrimitive.Header>
+      <AccordionPrimitive.Content className="pb-3 text-sm text-muted-foreground">{item.content}</AccordionPrimitive.Content>
+    </AccordionPrimitive.Item>
+  ));
+  return props.type === "multiple"
+    ? <AccordionPrimitive.Root type="multiple" className="w-full">{items}</AccordionPrimitive.Root>
+    : <AccordionPrimitive.Root type="single" collapsible className="w-full">{items}</AccordionPrimitive.Root>;
 }
 
 export function Collapsible({ props, children }: Props<{ title: string; defaultOpen?: boolean | null }>) {
-  return <Disclosure title={props.title} defaultOpen={props.defaultOpen ?? false}>{children}</Disclosure>;
+  const [open, setOpen] = useState(props.defaultOpen ?? false);
+  return (
+    <CollapsiblePrimitive.Root open={open} onOpenChange={setOpen} className="w-full">
+      <CollapsiblePrimitive.Trigger asChild><Key className="group w-full justify-between">
+        {props.title}
+        <span aria-hidden="true" className="text-dim group-data-[state=open]:hidden">+</span>
+        <span aria-hidden="true" className="hidden text-dim group-data-[state=open]:inline">−</span>
+      </Key></CollapsiblePrimitive.Trigger>
+      <CollapsiblePrimitive.Content className="pb-3">{children}</CollapsiblePrimitive.Content>
+    </CollapsiblePrimitive.Root>
+  );
 }
 
 export function Button({ props, emit }: Props<{ label: string; variant?: "primary" | "secondary" | "danger" | null; disabled?: boolean | null }>) {
