@@ -7,40 +7,43 @@ The foundation is built: tokens and type in `src/app/styles/global.css`, the hea
 a reply in `src/app/features/pip/Turn.tsx` and the `.prose` rules. **Look at those before writing anything**: a
 restyled screen must look like it belongs next to them.
 
-## The rules
+## The rules (second version, 2026-11-12)
 
-1. **One typeface.** IBM Plex Mono, at the body size (`text-sm`, 13px; 14px on touch screens) with normal
-   letter-spacing. The pixel face (`font-pixel`) appears in exactly two places: the name "pocket" in the header and
-   the one big title a page may have (`PageTitle`). Never inside content, never for numbers, never for labels.
-2. **No boxes.** No bordered or filled containers around content: no cards, bubbles, pills, chips, rounded panels,
-   side rules or dashed frames. Things are separated by a hairline (`border-t` / `border-b`, the `border` colour) and
-   by space. The only filled shapes are the send button and a selected/hover row (`bg-secondary`).
-3. **Four greys and one accent.**
-   `text-hi` what the person wrote, titles, figures · `text-foreground` running text · `text-muted-foreground`
-   secondary text · `text-dim` labels, times, counts, placeholders. Amber (`text-primary`) only for the name, the
-   prompt marker `›`, the caret, the send button and a link in running text. `text-destructive` for overdue and
-   errors. Nothing else gets a colour; the chart colours are for charts.
-4. **Small labels.** A section starts with a label: `text-[10.5px] uppercase tracking-[0.06em] text-dim`, with an
-   optional count or note at the right in `text-xs text-dim` (not upper-case). No icons beside labels.
-5. **Rows.** A list is rows: `flex gap-2.5 border-t py-2`, the last one also `border-b`; main text `text-hi`, a
-   second line `text-xs text-dim truncate`, the note at the right `text-xs text-dim shrink-0`. A whole row is the
-   tap target, at least 44px tall on a touch screen (`min-h-11 sm:min-h-0`). A checkbox is the text `[ ]` / `[x]`
-   in `text-dim`; done text is `text-dim line-through`.
-6. **Figures.** A group of figures is columns divided by hairlines, between a hairline above and below:
-   `grid grid-cols-3 border-y`, each cell `border-l pl-3 py-2` (the first without the left line and padding), label
-   as in rule 4, the figure `text-[19px] font-medium text-hi` with its unit `text-[11px] text-dim ml-1`. All figures
-   of a group are the same size whatever their length.
-7. **Actions are words.** `edit`, `forget`, `pin` as lower-case text in `text-dim hover:text-foreground`, separated
-   by space, no button chrome. One primary action per screen may be a filled amber button. Icons only where a word
-   does not fit (the header's settings, the composer's send); 16px, `text-dim`.
-8. **Fields are prompt lines.** No frame: a marker (`›`, `+`, `/`) in amber or dim, then the text, on a line
-   separated from the content by `border-t`. See `PipComposer.tsx`.
-9. **One header row.** A page adds at most one quiet line under it (`text-xs text-dim`, 44px tall on touch).
-10. **Rhythm.** 12px between paragraphs, 18px between sections, 16px page padding. No large empty bands; nothing
-    centred except an empty state's one sentence.
-11. **Wording.** Lower-case labels and actions; sentences end with a full stop; no exclamation marks, no emoji, no
-    "✨". Times as `08:07`, durations as `6 s`.
-12. **Motion.** What exists stays (the caret, the short rise of a new block). Add none.
+The first version replaced boxes by hairlines and buttons by dim words. The person's verdict: "still too many
+lines, no visual hierarchy, hard to understand what is a button and what is not." These rules replace it. The
+building blocks are in code: **`src/app/ui/kit.tsx`** (`Section`, `SectionLabel`, `Row`, `Tick`, `Segmented`,
+`Keys`, `Figures`, `Figure`), **`src/app/components/ui/button.tsx`** (the key) and `switch.tsx`. A screen is made of
+these; it does not repeat their classes by hand.
+
+1. **One typeface.** IBM Plex Mono at the body size (`text-sm`), normal letter-spacing. The pixel face
+   (`font-pixel`) only for the name "pocket" and a page's one big title (`PageTitle`).
+2. **Two lines in the whole app**: under the header and over a page's prompt line. No other rule, border or
+   divider: not between rows, not around or between figures, not under labels, not around sections. Space
+   separates. (Floating surfaces, a menu, dialog or sheet, keep their one outline.)
+3. **What can be pressed has a shape; what cannot has none.**
+   - An action is a **key**: `<Button>`. Quiet by default; `variant="go"` (amber) for the one main action of a
+     screen or dialog; `variant="destructive"` for removing. Never a bare word, never an underlined word, never an
+     icon alone (except the header's settings and the composer's send key).
+   - On/off is a **`Switch`**. Done/not done is a **`Tick`**. A choice of view is a **`Segmented`**.
+   - A row that leads somewhere is a **`Row` with `onOpen`/`href`**: it ends in `›`.
+   - A link inside running text is amber and underlined.
+   - Text that is not pressable never looks like any of these: no fills, no underline, no amber, no `›`.
+4. **Three levels.** The page title (pixel, 30px). A section's name (`SectionLabel`: small, upper-case, dim) with
+   24px above it and 4px below. Content: the main line `text-hi`, a second line `text-xs text-dim`, running text
+   `text-foreground`. Figures are `Figure`s: 22px, all the same size in a group.
+5. **Colour.** `text-hi`, `text-foreground`, `text-muted-foreground`, `text-dim`; amber for the name, the prompt
+   marker, the caret, the `go` key, a switch that is on, a link in text; `text-destructive` for overdue, errors and
+   a destructive key's words. Chart colours for charts only.
+6. **Rows** are `Row`s: optional lead (a `Tick`, a time), main line, optional second line, optional end (a note, a
+   key, a switch). Keys that belong to a row go at its end when there is one, or in a `Keys` line under it when
+   there are two or more.
+7. **Fields are prompt lines** (`src/app/ui/SendButton.tsx`, `PipComposer.tsx`): a marker, the text, and a `go` key
+   to send. Only the page's main field has the line over it (rule 2).
+8. **Rhythm.** 12px between paragraphs, 24px between sections, 16px page padding. Nothing centred except an empty
+   state's one sentence.
+9. **Wording.** Lower-case labels and keys; sentences end with a full stop; no exclamation marks, no emoji. Times
+   `08:07`, durations `6 s`.
+10. **Motion.** What exists stays. Add none.
 
 ## How a restyle is done
 
@@ -173,3 +176,36 @@ Files: `src/app/features/pip/*.tsx` (not `stream/`), `src/app/features/memory/*.
 `src/app/features/settings/SettingsPage.tsx`, `src/app/components/ui/dropdown-menu.tsx`, `dialog.tsx`, `sheet.tsx`,
 `sonner.tsx`, `src/app/ui/dialog/DialogHost.tsx`, `tools/manual/chat-lab.mjs`, tests beside these files for class
 assertions only. Nothing else.
+
+
+---
+
+## Second pass: every screen on the building blocks
+
+The first pass (D1–D3) is merged but follows the first version of the rules. This pass moves every screen onto
+`kit.tsx`, `Button` and `Switch` and removes every line rule 2 does not allow.
+
+What it means in practice, for every file you are given:
+
+- Delete `border-t`, `border-b`, `border-y`, `border-l`, `divide-*` and `<hr>`/Separator uses, except the two lines
+  of rule 2 and the outline of a floating surface.
+- Every pressable word (`edit`, `forget`, `more`, `disconnect`, `continue`, `start over`, `decline`, `review`,
+  `pause`, `run now`, `remove`, `clear`, `+ new`, `+ list`, `arrange`, `keep`, `save` …) becomes a `<Button>` with
+  the right variant. One `go` key per screen or dialog at most.
+- Every `[ ]` / `[x]` text becomes a `Tick` (done/not done) or a `Switch` (on/off); `role` and labels stay.
+- Every list becomes `Row`s inside `Section`s; every label a `SectionLabel`; a view switch a `Segmented`; figures
+  `Figures`/`Figure`.
+- A row that navigates uses `onOpen`/`href`; a row that only shows something has neither.
+- Tests of behaviour must pass. Where a test looked for a word button by role and name, it still finds it (a
+  `Button` is a button). Update a test only where markup it reached into is gone, and list it.
+
+| # | Files | State |
+|---|---|---|
+| E1 | `src/app/surface/*.tsx` (cards and Today's blocks), `src/app/features/pip/stream/Card.tsx`, `CardMenu.tsx`, `src/app/features/today/*.tsx`, the `.pocket-*` and `.prose` rules in `global.css` (tables: no rules between rows, 6px row padding; code: no left rule, `bg-secondary` behind the block with `rounded-[5px]` and 10px padding, the one filled non-pressable shape allowed) | ready |
+| E2 | `src/app/features/pip/*.tsx` (not `stream/`), `src/app/ui/SendButton.tsx`, `src/app/features/notes/NotesPage.tsx`, `src/app/features/tasks/*.tsx` | ready |
+| E3 | `src/app/features/memory/*.tsx`, `src/app/features/jobs/*.tsx`, `src/app/features/settings/SettingsPage.tsx`, `src/app/components/ui/dropdown-menu.tsx`, `dialog.tsx`, `sheet.tsx`, `alert-dialog.tsx`, `src/app/ui/dialog/DialogHost.tsx`, `src/app/ui/PageTitle.tsx` | ready |
+
+Each task: lab before and after (all states), the pictures of its screens compared at phone size and described,
+the four commands. `tools/manual/chat-lab.mjs` may be changed only where a state's own check reaches into markup
+that changed (say what). `kit.tsx`, `button.tsx` and `switch.tsx` are not to be changed: if a block is missing
+something, stop and say what.
