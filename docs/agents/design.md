@@ -133,3 +133,43 @@ Files: `src/app/ui/SendButton.tsx`, `src/app/ui/PageTitle.tsx`, `src/app/feature
 `ModelPicker.tsx` (the trigger only), `PipPage.tsx` and `src/app/shell/Shell.tsx` (bottom padding only),
 `src/app/features/notes/NotesPage.tsx`, `src/app/features/tasks/*.tsx`, `tools/manual/chat-lab.mjs` (the two
 states). Nothing else.
+
+### D3 — Everything else that still has a box (ready; D1 and D2 are merged)
+
+Restyle to the rules, in this order, and stop to report after the list if time runs short rather than rushing:
+
+1. **Pip's leftovers** (`src/app/features/pip/`): the empty chat (`Empty` in `PipPage.tsx`: the small amber
+   pixel `pip` goes; one sentence in `text-muted-foreground`, starters as words with `›` before them, one per row,
+   rule 5); the source chips above the composer (`PipComposer.tsx`: `kind · title` as `text-xs text-dim` with the
+   word `remove`); the folds in `Turn.tsx` (`Fold`: the lookups are listed open as rows `✓ title · summary` with the
+   duration at the right in `text-dim`, in `text-xs`; when a reply is finished and has more than three, the list
+   folds to one line `n steps · 6 s` that opens on tap; `reasoning` stays a fold, as a word); the failed/unfinished
+   block (a `text-destructive` sentence and the words `continue` · `start over`, no dashed frame); `Offers.tsx`
+   (an approval is a label, the proposal as rows, the words `decline` · `review` · `save`, the one filled button
+   only for the final save inside the review).
+2. **The chat list** (`ChatList.tsx`): a sheet with rule-4 labels and rule-5 rows; the current row is
+   `bg-secondary` without an amber edge; `+ new chat` is a word at the top right, not a filled bar; each row's
+   options are the word `more`.
+3. **The model picker's list** (`ModelPicker.tsx`): rows; the provider as a rule-4 label; the chosen model in
+   `text-hi` with `[x]`; `free` in `text-dim`.
+4. **Menus, dialogs, sheets, toasts** (`src/app/components/ui/dropdown-menu.tsx`, `dialog.tsx`, `sheet.tsx`,
+   `sonner.tsx`, `src/app/ui/dialog/DialogHost.tsx`): a menu or dialog is the one place a surface is allowed, because
+   it floats: `bg-popover`, a 1px `border`, `rounded-sm`, no shadow beyond the existing one being reduced to none;
+   items are rows of words, 44px on touch; a dialog's actions are words at the right with the confirming one in
+   `text-primary` (a destructive one in `text-destructive`); its field is a prompt line. A toast is one line of
+   `text-xs` on `bg-popover` with a hairline, no icon.
+5. **Memory** (`src/app/features/memory/MemoryPage.tsx`): rule-5 rows without the surrounding frame; `since …` and
+   the actions `edit` · `forget` on the row's second line; the add field a `+` prompt line.
+6. **Jobs** (`src/app/features/jobs/`): each job a row with its schedule on the second line and its state at the
+   right; the editor's fields as label/value rows and prompt lines.
+7. **Settings** (`src/app/features/settings/SettingsPage.tsx`): sections under rule-4 labels, each setting a
+   label/value row; no section frames.
+
+Lab: add the states `settings`, `jobs` (two jobs, one failed), `dialog` (the rename prompt open) and `model-list`
+(the picker open); update `card-menu` and `chat-list` if their checks change. Before/after at phone size for:
+`empty`, `long-top`, `failed`, `approval`, `chat-list`, `card-menu`, `memory`, and the four new ones.
+
+Files: `src/app/features/pip/*.tsx` (not `stream/`), `src/app/features/memory/*.tsx`, `src/app/features/jobs/*.tsx`,
+`src/app/features/settings/SettingsPage.tsx`, `src/app/components/ui/dropdown-menu.tsx`, `dialog.tsx`, `sheet.tsx`,
+`sonner.tsx`, `src/app/ui/dialog/DialogHost.tsx`, `tools/manual/chat-lab.mjs`, tests beside these files for class
+assertions only. Nothing else.

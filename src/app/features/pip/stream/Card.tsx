@@ -108,7 +108,7 @@ export const Card = memo(function Card({ source, closed, streaming, onAsk, at }:
         <Renderer spec={spec} registry={registry} loading={streaming && !closed} />
       </JSONUIProvider>
       {notes.length || hasMenu ? (
-        <div className={hasMenu ? "mt-1 flex min-h-11 items-center gap-3 sm:min-h-0" : "mt-1 flex items-center gap-3"}>
+        <div className={hasMenu ? "-mb-3 flex min-h-11 items-center gap-3 sm:mb-0 sm:mt-1 sm:min-h-0" : "mt-1 flex items-center gap-3"}>
           <p className="min-w-0 flex-1 text-xs text-dim">
             {notes.map((note, index) => <Fragment key={index}>{index ? " · " : ""}<span>{note}</span></Fragment>)}
           </p>

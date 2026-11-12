@@ -675,7 +675,8 @@ async function checkState(page, state) {
   if (body.includes('```pocket')) throw new Error('a pocket fence is on screen');
   if (/"op"\s*:\s*"add"/.test(body) || /"elements"\s*:/.test(body)) throw new Error('raw card JSON is on screen');
   for (const expected of state.text ?? []) {
-    const present = expected instanceof RegExp ? expected.test(body) : body.includes(expected);
+    // Labels are drawn in capitals by a style rule, and innerText returns them as drawn: compare without case.
+    const present = expected instanceof RegExp ? expected.test(body) : body.toLowerCase().includes(expected.toLowerCase());
     if (!present) throw new Error('missing text ' + String(expected));
   }
   for (const selector of state.selectors ?? []) if (!(await page.$(selector))) throw new Error('missing element ' + selector);
