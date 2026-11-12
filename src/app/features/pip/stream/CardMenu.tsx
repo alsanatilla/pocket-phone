@@ -1,4 +1,5 @@
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
 import { cardName, sourceUrl, withCard } from "../../../../shared/pocket-card-edit.js";
 import { removeCard, setCardAlert, setCardPinned } from "../../../data/cards.ts";
 import { keepCardCurrent, stopCardWatch } from "../../../data/card-watch.ts";
@@ -49,8 +50,7 @@ export function CardMenu({ chatId, id, pinned, place, locked, source, alert, onA
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" aria-label="Card options"
-          className="min-h-11 shrink-0 text-xs text-dim hover:text-foreground data-[state=open]:text-foreground sm:min-h-0">more</button>
+        <Button type="button" size="xs" aria-label="Card options">more</Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)] [&_[role=menuitem]]:min-h-11 [&_[role=menuitem]]:px-3 sm:[&_[role=menuitem]]:min-h-9">
         <DropdownMenuItem onSelect={guard(pin)}>{pinned ? "unpin" : "pin to today"}</DropdownMenuItem>
@@ -67,15 +67,14 @@ export function CardMenu({ chatId, id, pinned, place, locked, source, alert, onA
               <DropdownMenuItem onSelect={guard(() => watch("above"))}>tell me when it rises above…</DropdownMenuItem>
             </>
           : null}
-        {place === "chat" ? <>
-          <DropdownMenuSeparator />
+        {place === "chat" ? (
           <DropdownMenuItem variant="destructive" onSelect={guard(async () => {
             if (await confirm({ title: "Remove this card?", message: "The text around it stays.", confirmLabel: "remove", danger: true })) {
               if (!removeCard(chatId, id)) throw new Error("This card could not be removed. It may have changed; try again.");
               await stopCardWatch(chatId, id);
             }
           })}>remove</DropdownMenuItem>
-        </> : null}
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -176,19 +176,20 @@
   .prose ol { list-style: decimal; padding-left: 3ch; margin: 0 0 12px; }
   .prose ol > li::marker { color: var(--dim); }
   .prose code { color: var(--hi); }
-  /* Code stands off the text by a hairline at its left, not by a box. */
-  .prose pre { padding: 0 0 0 12px; border-left: 1px solid var(--border); overflow-x: auto; margin: 0 0 14px; font-size: var(--text-xs); color: var(--muted-foreground); }
+  /* A block of code is the one filled, non-pressable shape: secondary ground, rounded, 10px of padding, no rule. */
+  .prose pre { padding: 10px; border-radius: 5px; background: var(--secondary); overflow-x: auto; margin: 0 0 14px; font-size: var(--text-xs); color: var(--muted-foreground); }
   .prose pre code { color: inherit; padding: 0; }
-  /* A table reads as rows: small labels on top, a hairline over each row, and it scrolls sideways before it breaks the page. */
+  /* A table reads as rows: small labels on top, 6px between rows, and it scrolls sideways before it breaks the page. */
   .prose table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 0 0 14px; }
-  .prose th, .prose td { padding: 5px 16px 5px 0; text-align: left; vertical-align: top; }
-  .prose td { border-top: 1px solid var(--border); }
+  .prose th, .prose td { padding: 6px 16px 6px 0; text-align: left; vertical-align: top; }
   .prose th { color: var(--dim); font-weight: 400; font-size: 0.65625rem; letter-spacing: .06em; text-transform: uppercase; }
   .prose th:last-child, .prose td:last-child { padding-right: 0; }
-  .prose blockquote { border-left: 1px solid var(--primary); margin: 0 0 10px; padding-left: 12px; color: var(--muted-foreground); }
+  .prose blockquote { margin: 0 0 12px; font-style: italic; color: var(--muted-foreground); }
+  /* A thematic break is space, never a rule (design rule 2). */
+  .prose hr { height: 12px; margin: 0; border: 0; }
   .prose .thought-line .accent { color: var(--primary); }
   .prose .meta, .prose .muted { color: var(--muted-foreground); font-size: 12px; }
-  .prose a { color: var(--primary); }
+  .prose a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
   .prose .md-pending { white-space: pre-wrap; }
 }
 
@@ -244,8 +245,8 @@
 
 /*
  * Cards inside Pip's answers: json-render markup from src/client/pip-cards.jsx (its own small catalog, which the
- * chat prompt describes). The markup is not ours to class, so it is styled here in the Terminal rules: no frame,
- * a section is a small dim label and hairlines, an action is a word, a table reads as rows.
+ * chat prompt describes). The markup is not ours to class, so it is styled here in the Terminal rules: no frame
+ * and no rule, a section is a small dim label and space, an action is a key, a table reads as rows.
  */
 @layer components {
   .pocket-card { margin: 14px 0 6px; }
@@ -258,13 +259,12 @@
   .pocket-muted { color: var(--muted-foreground); }
   .pocket-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); }
   .pocket-fields { display: flex; flex-direction: column; }
-  .pocket-row { display: grid; grid-template-columns: minmax(72px, 35%) minmax(0, 1fr); gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
-  .pocket-row:first-child { border-top: 0; }
+  .pocket-row { display: grid; grid-template-columns: minmax(72px, 35%) minmax(0, 1fr); gap: 12px; padding: 6px 0; }
   .pocket-k { font-size: 12px; color: var(--dim); }
   .pocket-v { font-size: 14px; color: var(--hi); }
   .pocket-table { display: grid; font-size: 13px; }
-  .pocket-tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 5px 0; border-top: 1px solid var(--border); }
-  .pocket-tr.pocket-thead { border-top: 0; padding-top: 0; }
+  .pocket-tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 6px 0; }
+  .pocket-tr.pocket-thead { padding-top: 0; }
   .pocket-tr.pocket-c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .pocket-tr.pocket-c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .pocket-th { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); }
@@ -274,16 +274,16 @@
   .pocket-col { flex: 1 1 0; background: var(--chart-1); }
   .pocket-h1 { height: 10%; } .pocket-h2 { height: 20%; } .pocket-h3 { height: 30%; } .pocket-h4 { height: 40%; } .pocket-h5 { height: 50%; }
   .pocket-h6 { height: 60%; } .pocket-h7 { height: 70%; } .pocket-h8 { height: 80%; } .pocket-h9 { height: 90%; } .pocket-h10 { height: 100%; }
-  .pocket-divider { height: 1px; background: var(--border); }
-  .pocket-actions { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 4px; }
+  .pocket-divider { height: 12px; }
+  .pocket-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
   .pocket-button, .pocket-link {
-    display: inline-flex; align-items: center; min-height: 44px; padding: 0;
-    font-size: 13px; color: var(--primary); cursor: pointer; text-decoration: none;
+    display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 10px;
+    border-radius: 5px; background: var(--secondary);
+    font-size: 12px; color: var(--hi); cursor: pointer; text-decoration: none;
   }
-  .pocket-button::before { content: "› "; }
-  .pocket-button:hover, .pocket-button:focus-visible, .pocket-link:hover { color: var(--hi); }
-  .pocket-button.pocket-primary { color: var(--primary); }
-  @media (min-width: 40rem) { .pocket-button, .pocket-link { min-height: 0; } }
+  .pocket-button:hover, .pocket-button:focus-visible, .pocket-link:hover { background: var(--accent); }
+  .pocket-button.pocket-primary { background: var(--primary); color: var(--primary-foreground); }
+  @media (min-width: 40rem) { .pocket-button, .pocket-link { min-height: 28px; } }
 }
 
 /* iOS zooms the page when a focused field's text is smaller than 16px and leaves it zoomed: the page is then wider

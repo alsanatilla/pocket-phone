@@ -3,6 +3,7 @@ import { JSONUIProvider, Renderer } from "@json-render/react";
 import type { Spec } from "@json-render/core";
 import { LegacyCard } from "../../../../client/pip-cards.jsx";
 import { pocketSpec, normalizeSpec } from "../../../../shared/pocket-spec.js";
+import { Row } from "../../../ui/kit.tsx";
 import { completeTask } from "../../../data/tasks.ts";
 import { parkThoughtText } from "../../../data/thoughts.ts";
 import { toast, toastError } from "../../../ui/toast/toast.ts";
@@ -15,7 +16,7 @@ import { CardMenu } from "./CardMenu.tsx";
 // A card inside a reply, built while it streams. Only complete JSON lines count (the line being written is held
 // back), each element appears as soon as its line is complete, and elements that did not change keep their
 // identity, so nothing already on screen re-mounts or re-animates while the rest arrives. The JSON is never shown.
-// A card draws no frame of its own: a finished one ends with a line of notes and the word `more` (design rule D1).
+// A card draws no frame of its own: a finished one ends with a line of notes and the `more` key (design rule 2).
 
 type Elements = Record<string, unknown>;
 
@@ -92,17 +93,16 @@ export const Card = memo(function Card({ source, closed, streaming, onAsk, at }:
   const alert = marks.alert && typeof marks.alert === "object" ? marks.alert as { below?: number; above?: number } : undefined;
   const told = alert && Number.isFinite(alert.below) ? "below " + alert.below : alert && Number.isFinite(alert.above) ? "above " + alert.above : "";
   const hasMenu = Boolean(at && marks.id && !streaming);
-  // Rule 4: the chat a pinned card comes from, with `from pip` as the note at the right.
+  // On Today a pinned card names its chat above it: the title opens the chat, `from pip` says where it came from.
   const origin = at?.place === "today" ? at : null;
   const notes = streaming ? [] : [pinned ? "pinned to today" : "", updated ? "updated " + stamp(updated) : "", told].filter(Boolean);
   return (
     <div className="not-prose relative my-3" data-card={marks.id || undefined}>
       {origin ? (
-        <div className="flex items-baseline justify-between gap-3">
-          <button type="button" onClick={() => openPath("/pip?chat=" + encodeURIComponent(origin.chatId))}
-            className="min-h-11 min-w-0 truncate text-left text-[10.5px] tracking-[0.06em] text-dim hover:text-foreground sm:min-h-0">{origin.chatTitle || "a chat"}</button>
-          <span className="shrink-0 text-xs text-dim">from pip</span>
-        </div>
+        <Row onOpen={() => openPath("/pip?chat=" + encodeURIComponent(origin.chatId))}
+          end={<span aria-hidden="true">from pip</span>} className="mb-1">
+          <span className="block truncate text-xs text-dim">{origin.chatTitle || "a chat"}</span>
+        </Row>
       ) : null}
       <JSONUIProvider registry={registry} store={momentStore()} handlers={handlers}>
         <Renderer spec={spec} registry={registry} loading={streaming && !closed} />

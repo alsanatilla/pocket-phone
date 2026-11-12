@@ -1,9 +1,10 @@
+import { Button } from "../../components/ui/button.tsx";
 import { Surface } from "../../surface/Surface.tsx";
 import { useSurface } from "../../surface/useSurface.ts";
 import { PinnedCards } from "./PinnedCards.tsx";
 
 // Today is a surface: Pocket draws the standard one at once and, with a model connected, has it arranged for
-// the moment. The line at the bottom says which one you are looking at and lets you switch: words, no chrome.
+// the moment. The line at the bottom says which one you are looking at and lets you switch: keys, no rule.
 
 export function TodayPage() {
   const { spec, store, status, error, arrange, standard } = useSurface();
@@ -14,11 +15,11 @@ export function TodayPage() {
       <PinnedCards />
       <Surface spec={spec} store={store} loading={status === "arranging"} />
 
-      <footer className="mt-6 flex min-h-11 items-center gap-4 border-t pt-2 text-xs text-dim sm:min-h-0">
+      <footer className="mt-6 flex min-h-11 flex-wrap items-center gap-2 text-xs text-dim sm:min-h-0">
         <span aria-live="polite">{status === "arranging" ? "Arranging…" : arranged ? "Arranged for now" : "Standard layout"}</span>
         <span className="flex-1" />
-        {arranged || failed ? <button type="button" onClick={standard} className="min-h-11 text-xs text-dim hover:text-foreground sm:min-h-0">standard</button> : null}
-        {status !== "arranging" ? <button type="button" onClick={() => void arrange()} className="min-h-11 text-xs text-dim hover:text-foreground sm:min-h-0">{arranged ? "rearrange" : "arrange"}</button> : null}
+        {arranged || failed ? <Button type="button" size="xs" onClick={standard}>standard</Button> : null}
+        {status !== "arranging" ? <Button type="button" size="xs" onClick={() => void arrange()}>{arranged ? "rearrange" : "arrange"}</Button> : null}
       </footer>
 
       {failed && error ? <p className="mt-2 text-xs text-dim">{error}</p> : null}

@@ -1,16 +1,16 @@
 import { lazy, Suspense, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { Button } from "../components/ui/button.tsx";
 import { useCollection } from "../data/bus.ts";
 import { chosenTask, completeTask, createTask, listTasks, today } from "../data/tasks.ts";
 import { openThoughts, parkThoughtText } from "../data/thoughts.ts";
+import { Figure, Row, Section, Tick } from "../ui/kit.tsx";
 import { toast, toastError } from "../ui/toast/toast.ts";
 
 // Pocket's own components for generated surfaces. They follow the Terminal look (docs/agents/design.md):
-//   label   a small caps line, dim (rule 4)
-//   figure  one size, one weight, the mono face; a group of figures is columns divided by hairlines (rule 6)
-//   rows    hairline rules, the main text bright, the note small and dim (rule 5)
-// A card draws no frame: only arrangement and hairlines. The lists read live data themselves, so a generated screen
-// stays true when a task is ticked off elsewhere.
+// a section is a kit Section and a label a SectionLabel, a figure is a Figure in a group of Figures, a list is
+// Rows, and a field is a prompt line. A card draws no frame and no rule: space separates. The lists read live
+// data themselves, so a generated screen stays true when a task is ticked off elsewhere.
 
 export type Tone = "accent" | "movement" | "calendar" | "thought" | "warning" | "muted" | null | undefined;
 
@@ -20,29 +20,16 @@ const TONE_VAR: Record<NonNullable<Tone>, string> = {
 };
 export const toneColor = (tone: Tone) => TONE_VAR[tone ?? "accent"];
 
-/** Rule 4: the small line that names a block, with an optional count or note at the right. */
-const LABEL = "text-[10.5px] uppercase tracking-[0.06em] text-dim";
-/** Rule 8: a field is a prompt line, not a box. */
-const LINE = "flex min-h-11 items-center gap-2 border-t py-2 sm:min-h-0";
+/** Rule 7: a field is a prompt line, with no frame of its own. */
+const LINE = "flex min-h-11 items-center gap-2 py-2 sm:min-h-0";
 const LINE_INPUT = "min-w-0 flex-1 border-0 bg-transparent px-0 py-0 text-sm text-foreground placeholder:text-dim";
 
-function Label({ children, note }: { children: ReactNode; note?: ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <p className={LABEL}>{children}</p>
-      {note === undefined || note === null ? null : <span className="shrink-0 text-xs text-dim">{note}</span>}
-    </div>
-  );
-}
-
-/** A headline: a phrase is the one title of the page (pixel face, bright); a reading is a figure. */
-const isPhrase = (value: string | number) => !/\d/.test(String(value));
-
+/** A headline: a phrase is the one title of the card, bright and in the mono face. */
 export function Hero({ eyebrow, value, unit, caption }: { eyebrow?: string | null; value: string | number; unit?: string | null; caption?: string | null; tone?: Tone }) {
   return (
     <section className="arrive">
       {eyebrow ? <p className="text-xs text-dim">{eyebrow}</p> : null}
-      <p className={cn("mt-1 leading-none text-hi", isPhrase(value) ? "font-pixel text-[30px]" : "text-[28px] font-medium")}>
+      <p className="mt-1 text-[28px] font-medium leading-none text-hi">
         {value}{unit ? <span className="ml-1 text-[11px] text-dim">{unit}</span> : null}
       </p>
       {caption ? <p className="mt-1 text-sm text-muted-foreground">{caption}</p> : null}
@@ -50,27 +37,38 @@ export function Hero({ eyebrow, value, unit, caption }: { eyebrow?: string | nul
   );
 }
 
-export function Metric({ label, value, unit, hint, onPress }: { label: string; value: string | number; unit?: string | null; hint?: string | null; tone?: Tone; onPress?: () => void }) {
-  const Tag = onPress ? "button" : "div";
+/**
+ * A reading in a group of figures. A metric that opens an area is a Row, so the whole line is the target and it
+ * ends in ›; the figure's spans are repeated here because Row's body is a span and a Figure's paragraphs cannot
+ * sit inside one (kit limitation reported with the task).
+ */
+function MetricFigure({ label, value, unit, hint }: { label: string; value: string | number; unit?: string | null; hint?: string | null }) {
   return (
-    <Tag type={onPress ? "button" : undefined} onClick={onPress} className={cn("arrive min-w-0 text-left", onPress && "block w-full")}>
-      <p className={LABEL}>{label}</p>
-      <p className="mt-1 text-[19px] font-medium leading-none text-hi">
-        {value}{unit ? <span className="ml-1 text-[11px] text-dim">{unit}</span> : null}
-      </p>
-      {hint ? <p className="mt-1 line-clamp-2 text-xs leading-tight text-dim">{hint}</p> : null}
-    </Tag>
+    <>
+      <span className="block truncate text-[10.5px] uppercase leading-5 tracking-[0.06em] text-dim">{label}</span>
+      <span className="block text-[22px] font-medium leading-[1.3] text-hi">
+        {value}{unit ? <span className="ml-1 text-[11px] font-normal text-dim">{unit}</span> : null}
+      </span>
+      {hint ? <span className="block truncate text-xs text-dim">{hint}</span> : null}
+    </>
+  );
+}
+
+export function Metric({ label, value, unit, hint, onPress }: { label: string; value: string | number; unit?: string | null; hint?: string | null; tone?: Tone; onPress?: () => void }) {
+  if (onPress) return <Row onOpen={onPress} className="arrive items-start"><MetricFigure label={label} value={value} unit={unit} hint={hint} /></Row>;
+  return (
+    <div className="arrive min-w-0">
+      <Figure label={label} value={value} unit={unit ?? undefined} note={hint ?? undefined} />
+    </div>
   );
 }
 
 export function Gauge({ label, value, caption }: { label: string; value: number; caption?: string | null; tone?: Tone }) {
   const clamped = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
   return (
-    <section className="arrive">
-      <p className={LABEL}>{label}</p>
-      <p className="mt-1 text-[19px] font-medium leading-none text-hi">{clamped}<span className="ml-1 text-[11px] text-dim">%</span></p>
-      {caption ? <p className="mt-1 text-xs text-dim">{caption}</p> : null}
-    </section>
+    <Section className="arrive mb-0">
+      <Figure label={label} value={clamped} unit="%" note={caption ?? undefined} />
+    </Section>
   );
 }
 
@@ -104,7 +102,7 @@ function SourceLine({ source, note }: { source?: Source | null; note?: string | 
   return (
     <p className="mt-2 text-xs text-dim">
       {note}{note && source ? " · " : ""}
-      {source ? <>source: {safe ? <a href={safe} target="_blank" rel="noopener noreferrer" className="text-primary underline-offset-2 hover:underline">{source.title}</a> : source.title}</> : null}
+      {source ? <>source: {safe ? <a href={safe} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">{source.title}</a> : source.title}</> : null}
     </p>
   );
 }
@@ -123,11 +121,10 @@ export function Chart({ kind, title, data, series, unit, tone, note, source }: {
   const names = useMemo(() => lines.map(line => line.name || title || ""), [lines, title]);
   if (rows.length < 2) return null;
   return (
-    <section className="arrive">
-      {title ? <Label note={unit ? unit : undefined}>{title}</Label> : null}
+    <Section className="arrive mb-0" label={title ?? undefined} note={unit ?? undefined}>
       {lines.length > 1 ? (
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-          {lines.map((line, index) => <span key={index} className="flex items-center gap-1.5 text-xs text-dim"><span className="size-2 shrink-0" style={{ background: colors[index] }} />{line.name}</span>)}
+        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+          {lines.map((line, index) => <span key={index} className="flex items-center gap-1.5 text-xs text-dim"><span aria-hidden="true" className="size-2 shrink-0" style={{ background: colors[index] }} />{line.name}</span>)}
         </div>
       ) : null}
       <div className="mt-2 h-44 w-full">
@@ -136,7 +133,7 @@ export function Chart({ kind, title, data, series, unit, tone, note, source }: {
         </Suspense>
       </div>
       <SourceLine source={source} note={note} />
-    </section>
+    </Section>
   );
 }
 
@@ -149,10 +146,9 @@ export function Table({ title, columns, rows, note, source }: { title?: string |
   // A column of numbers aligns right, so figures can be compared down the column.
   const right = head.map((_, column) => body.length > 0 && body.every(row => row[column] == null || numeric(row[column])));
   return (
-    <section className="arrive">
-      {title ? <Label>{title}</Label> : null}
+    <Section className="arrive mb-0" label={title ?? undefined}>
       {/* The table reads as rows, the same as a table in a reply: .prose table in global.css. */}
-      <div className="prose mt-2">
+      <div className="prose mt-1">
         <table>
           <thead>
             <tr>{head.map((name, column) => <th key={column} className={cn("whitespace-nowrap", right[column] ? "text-right" : "text-left")}>{name}</th>)}</tr>
@@ -171,7 +167,7 @@ export function Table({ title, columns, rows, note, source }: { title?: string |
         </table>
       </div>
       <SourceLine source={source} note={note} />
-    </section>
+    </Section>
   );
 }
 
@@ -180,23 +176,14 @@ export function Timeline({ title, items }: { title?: string | null; items: Timel
   const list = Array.isArray(items) ? items : [];
   if (!list.length) return null;
   return (
-    <section className="arrive">
-      <Label>{title ?? "today"}</Label>
-      <ol>
-        {list.map((item, index) => (
-          <li key={index} className="flex gap-2.5 border-t py-2 last:border-b">
-            <span className="w-[3.25rem] shrink-0 text-xs text-dim">{item.time}</span>
-            <span className="min-w-0 flex-1">
-              <span className={cn("block", item.past ? "text-dim" : "text-hi")}>
-                {item.title}
-                {item.now ? <span className="ml-2 text-xs font-medium text-hi">now</span> : null}
-              </span>
-              {item.detail ? <span className="block truncate text-xs text-dim">{item.detail}</span> : null}
-            </span>
-          </li>
-        ))}
-      </ol>
-    </section>
+    <Section className="arrive mb-0" label={title ?? "today"}>
+      {list.map((item, index) => (
+        <Row key={index} lead={item.time} end={item.now ? "now" : undefined}>
+          <span className={item.past ? "text-dim" : undefined}>{item.title}</span>
+          {item.detail ? <span className="block truncate text-xs text-dim">{item.detail}</span> : null}
+        </Row>
+      ))}
+    </Section>
   );
 }
 
@@ -209,33 +196,18 @@ export function TaskList({ title, source, limit }: { title?: string | null; sour
   const day = today();
   const name = title ?? (source === "due" ? "due today" : source === "chosen" ? "next" : "open tasks");
   return (
-    <section className="arrive">
-      <Label note={tasks.length}>{name}</Label>
-      {tasks.length ? (
-        <ul>
-          {tasks.slice(0, limit ?? 6).map(task => {
-            const overdue = Boolean(task.due) && task.due < day;
-            return (
-              <li key={task.uid} className="border-t last:border-b">
-                <button type="button" aria-label={"Complete " + task.text}
-                  onClick={() => { try { completeTask(task.uid); toast("Done."); } catch (error) { toastError(error); } }}
-                  className="flex min-h-11 w-full items-start gap-2.5 py-2 text-left sm:min-h-0">
-                  <span aria-hidden="true" className="shrink-0 text-dim">[ ]</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-hi">
-                      {task.important ? <span role="img" aria-label="Important" className="mr-1.5 text-dim">!</span> : null}{task.text}
-                    </span>
-                    <span className={cn("block truncate text-xs text-dim", overdue && "text-destructive")}>
-                      {overdue ? "overdue · " + task.due : task.due === day ? "today" : task.due || "no date"}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : <p className="border-t py-2 text-sm text-muted-foreground">Nothing here.</p>}
-    </section>
+    <Section className="arrive mb-0" label={name} note={tasks.length}>
+      {tasks.length ? tasks.slice(0, limit ?? 6).map(task => {
+        const overdue = Boolean(task.due) && task.due < day;
+        return (
+          <Row key={task.uid}
+            lead={<Tick checked={false} label={"Complete " + task.text} onChange={() => { try { completeTask(task.uid); toast("Done."); } catch (error) { toastError(error); } }} />}
+            sub={<span className={overdue ? "text-destructive" : undefined}>{overdue ? "overdue · " + task.due : task.due === day ? "today" : task.due || "no date"}</span>}>
+            {task.important ? <span role="img" aria-label="Important" className="mr-1.5 text-dim">!</span> : null}{task.text}
+          </Row>
+        );
+      }) : <p className="py-2 text-sm text-muted-foreground">Nothing here.</p>}
+    </Section>
   );
 }
 
@@ -246,19 +218,14 @@ export function ThoughtList({ title, source, limit }: { title?: string | null; s
   }, [source]);
   if (!thoughts.length) return null;
   return (
-    <section className="arrive">
-      <Label note={thoughts.length}>{title ?? (source === "ready" ? "to revisit" : "parked thoughts")}</Label>
-      <ul>
-        {thoughts.slice(0, limit ?? 5).map(item => (
-          <li key={item.id} className="flex min-h-11 items-start gap-2.5 border-t py-2 last:border-b sm:min-h-0">
-            <p className="min-w-0 flex-1 text-hi">{item.text}</p>
-            <button type="button" aria-label={"Make a task from " + item.text}
-              onClick={() => { try { createTask(item.text); toast("Made into a task."); } catch (error) { toastError(error); } }}
-              className="min-h-11 shrink-0 text-xs text-dim hover:text-foreground sm:min-h-0">task</button>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <Section className="arrive mb-0" label={title ?? (source === "ready" ? "to revisit" : "parked thoughts")} note={thoughts.length}>
+      {thoughts.slice(0, limit ?? 5).map(item => (
+        <Row key={item.id} end={<Button type="button" size="xs" aria-label={"Make a task from " + item.text}
+          onClick={() => { try { createTask(item.text); toast("Made into a task."); } catch (error) { toastError(error); } }}>task</Button>}>
+          {item.text}
+        </Row>
+      ))}
+    </Section>
   );
 }
 
@@ -281,7 +248,7 @@ export function Capture({ mode, placeholder, onAsk }: { mode: "thought" | "task"
     <form onSubmit={submit} className={LINE}>
       <span aria-hidden="true" className="shrink-0 font-medium text-primary">{mode === "ask" ? "›" : "+"}</span>
       <input value={text} onChange={event => setText(event.target.value)} aria-label={hint} maxLength={500} placeholder={hint} className={LINE_INPUT} />
-      <button type="submit" disabled={!text.trim()} className="min-h-11 shrink-0 text-xs text-dim hover:text-foreground disabled:text-dim sm:min-h-0">{label}</button>
+      <Button type="submit" size="xs" disabled={!text.trim()}>{label}</Button>
     </form>
   );
 }
@@ -304,9 +271,8 @@ export function Form({ title, description, fields, submitLabel, onAsk }: { title
     setValues(Object.fromEntries(fields.map(field => [field.name, field.type === "choice" ? (field.options?.[0] ?? "") : ""])));
   };
   return (
-    <section className="arrive">
-      {title ? <Label>{title}</Label> : null}
-      {description ? <p className="mt-1 text-xs text-muted-foreground">{description}</p> : null}
+    <Section className="arrive mb-0" label={title ?? undefined}>
+      {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
       <form onSubmit={submit}>
         {fields.map(field => (
           <label key={field.name} className={LINE}>
@@ -326,11 +292,10 @@ export function Form({ title, description, fields, submitLabel, onAsk }: { title
             )}
           </label>
         ))}
-        <div className="flex justify-end border-t pt-2">
-          <button type="submit" disabled={missing}
-            className="min-h-11 bg-primary px-3 text-sm text-primary-foreground disabled:bg-secondary disabled:text-dim sm:min-h-0 sm:h-8">{submitLabel?.trim().toLowerCase() || "send"}</button>
+        <div className="mt-3 flex justify-end">
+          <Button type="submit" disabled={missing}>{submitLabel?.trim().toLowerCase() || "send"}</Button>
         </div>
       </form>
-    </section>
+    </Section>
   );
 }
