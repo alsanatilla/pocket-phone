@@ -53,3 +53,83 @@ restyled screen must look like it belongs next to them.
   them with `long-phone.png`: same greys, same sizes, same lines.
 - Say in the report what you were unsure about. A screen that still has a box "because the component needs it" is
   not done: say which component, and stop.
+
+---
+
+## Tasks
+
+| # | Screens | State |
+|---|---|---|
+| D0 | Foundation: tokens, header, a reply, its Markdown, the composer's prompt line | done |
+| D1 | Cards and Today (everything the card registry draws), the card menu | ready |
+| D2 | Fields and lists: the composer's lower row, the model picker's trigger, Notes, Tasks, a task's page | ready |
+| D3 | The chat list, Memory, Jobs, Settings, dialogs and menus, toasts | not ready |
+| D4 | The note editor | not ready |
+
+### D1 — Cards and Today
+
+Everything a card or Today's surface can draw comes from `src/app/surface/` (`components.tsx`, `controls.tsx`,
+`registry.tsx`, `cards.tsx`, `Surface.tsx`, `TodayActions.tsx`, `ChartPlot.tsx`). Restyle all of it to the rules,
+then the two places that frame a card (`src/app/features/pip/stream/Card.tsx`, `CardMenu.tsx`) and Today's page
+(`src/app/features/today/TodayPage.tsx`, `PinnedCards.tsx`).
+
+- **Metric / tiles** follow rule 6 exactly. Today a tile is a bordered box and its figure is in the pixel face, at
+  a size that depends on its length ("7 h 12" small, "62" large): both go. A `Grid` of metrics is one group of
+  columns; two metrics are two columns, four are two rows of two (hairline between the rows).
+- **Card, Stack, Grid** draw no frame and no background: they only arrange. A `Card` with a title shows the title
+  as a rule-4 label.
+- **Table** as in `.prose table` (`global.css`). **TaskList / ThoughtList / schedule rows** follow rule 5.
+- **Button** in a card: a word (rule 7) in `text-primary` with `›` before it, one per line or in a row with 16px
+  between; a card's choices are not filled buttons.
+- **Chart**: no frame, no background; axis labels and ticks `text-dim` at the label size; one hairline as the
+  baseline; series in the chart colours as now. Do not change what a chart computes.
+- **Forms in a card** (`controls.tsx`): fields as prompt lines (rule 8); the submit is the one filled button.
+- **Text, Heading, Badge, Hero**: plain text in the four greys; a Hero figure is `text-[28px] font-medium text-hi`
+  in the mono face; a Badge is `text-xs text-dim` in square brackets, e.g. `[stabil]`.
+- **The card menu**: today its `⋯` button floats in an empty band above the card. Remove that band. A finished
+  card with an id gets one line under it: at the left its note (`pinned to today`, `updated 12:05`, `keeps itself
+  current`, joined with ` · `) in `text-xs text-dim`, at the right the word `more`, which opens the same menu
+  (`aria-label="Card options"` stays). 44px tall on touch. Menu items stay as they are.
+- **Today**: the date line is `text-xs text-dim`; the page's title stays in the pixel face but in `text-hi`, not
+  amber; pinned cards come first, each under a rule-4 label made of its chat title at the left and `from pip` at
+  the right; the thought field is a prompt line with `+`; the line at the bottom ("Standard layout" / `arrange`)
+  is `text-xs text-dim` words on one line, no dashed rule, no button chrome.
+
+Lab: use the existing states `long`, `card-building`, `card-menu`, `today-pinned` (do not add states: another
+agent edits the lab's table). Add to your report the before/after of those four at phone size.
+
+Files: `src/app/surface/*.tsx` (not the tests' meaning: update only class assertions), `src/app/features/pip/stream/Card.tsx`,
+`CardMenu.tsx`, `src/app/features/today/*.tsx`, and style rules for these in `src/app/styles/global.css` (the
+`.pocket-*` block for legacy cards may be restyled to the rules too). Nothing else.
+
+### D2 — Fields and lists
+
+- **`src/app/ui/SendButton.tsx`** holds the shared field pieces (`FIELD`, `BARE_INPUT`, send and stop buttons).
+  Make them rule 8: no frame, a top hairline where the field ends a page; the send button is a 32px square,
+  `rounded-sm`, amber when there is something to send, `bg-secondary text-dim` when not; stop is the same square
+  with `■`. Every user of these pieces (search with `grep -rn "SendButton\|FIELD\|BARE_INPUT" src/app`) must still
+  look right: check Tasks, Memory and Today's thought field.
+- **The composer's lower row** (`src/app/features/pip/PipComposer.tsx`, `ModelPicker.tsx`): one line under the
+  prompt line: at the left the web toggle as the word `web` (`text-hi` when on, `text-dim` when off; its
+  `aria-label` and behaviour stay), then the model's name as `text-xs text-dim` with a small chevron (the trigger
+  of the picker; the list itself is D3); at the right the send square. The row is 44px tall on touch and there is
+  no empty space under it beyond the page's bottom padding: find why the page leaves a band under the composer on
+  a phone (`PipPage.tsx` and `Shell.tsx` paddings) and remove it, keeping the safe-area inset.
+- **Notes list** (`src/app/features/notes/NotesPage.tsx`): `/` prompt line for search at the top; rule-4 labels
+  (`pinned`, `recent`); rule-5 rows: title, first line under it, date at the right; the count at the end in
+  `text-xs text-dim`. New note is the word `+ new` at the right of the header line of the page, not a filled button.
+- **Tasks** (`TasksPage.tsx`, `TaskPage.tsx`): groups under rule-4 labels with their counts at the right
+  (`overdue` in `text-destructive`); rule-5 rows with `[ ]` / `[x]`; steps progress as the second line; the new
+  task field is a `+` prompt line at the bottom. A task's page: the title in `text-hi`, its fields as label/value
+  rows, its actions as words.
+- **`src/app/ui/PageTitle.tsx`**: pixel face, `text-[30px] leading-none text-hi`, with an optional quiet line
+  under it.
+
+Lab: add the states `notes` (six notes, one pinned, one with a 120-character title) and `tasks` (overdue, today
+with one done, this week with one that has steps, later). Before/after of `notes`, `tasks`, `empty`, `long` at
+phone size in the report.
+
+Files: `src/app/ui/SendButton.tsx`, `src/app/ui/PageTitle.tsx`, `src/app/features/pip/PipComposer.tsx`,
+`ModelPicker.tsx` (the trigger only), `PipPage.tsx` and `src/app/shell/Shell.tsx` (bottom padding only),
+`src/app/features/notes/NotesPage.tsx`, `src/app/features/tasks/*.tsx`, `tools/manual/chat-lab.mjs` (the two
+states). Nothing else.
