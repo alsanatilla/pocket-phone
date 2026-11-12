@@ -1,7 +1,8 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import { XIcon } from "lucide-react"
 import { Dialog as SheetPrimitive } from "radix-ui"
+
+import { Button } from "@/components/ui/button"
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />
@@ -72,9 +73,8 @@ function SheetContent({
       >
         {children}
         {showCloseButton && (
-          <SheetPrimitive.Close className="absolute top-2 right-2 grid size-11 place-items-center text-dim transition-colors hover:text-foreground focus:outline-hidden disabled:pointer-events-none sm:size-7">
-            <XIcon className="size-4" />
-            <span className="sr-only">Close</span>
+          <SheetPrimitive.Close asChild>
+            <Button type="button" className="absolute top-2 right-1 z-10 px-1">close</Button>
           </SheetPrimitive.Close>
         )}
       </SheetPrimitive.Content>
@@ -86,7 +86,7 @@ function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="sheet-header"
-      className={cn("flex flex-col gap-1.5 p-4", className)}
+      className={cn("flex flex-col gap-1 p-4", className, "pr-14")}
       {...props}
     />
   )
@@ -109,7 +109,7 @@ function SheetTitle({
   return (
     <SheetPrimitive.Title
       data-slot="sheet-title"
-      className={cn("font-medium text-hi", className)}
+      className={cn("text-sm font-medium text-hi", className)}
       {...props}
     />
   )
@@ -122,7 +122,7 @@ function SheetDescription({
   return (
     <SheetPrimitive.Description
       data-slot="sheet-description"
-      className={cn("text-sm text-muted-foreground", className)}
+      className={cn("text-xs text-dim", className)}
       {...props}
     />
   )

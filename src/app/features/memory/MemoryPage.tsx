@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "@tanstack/react-router";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { readChat } from "../../data/chats.ts";
 import { addMemory, editMemory, forgetMemory, useMemory, type MemoryEntry } from "../../data/memory.ts";
 import { classicHref } from "../../lib/classic.ts";
 import { prompt } from "../../ui/dialog/dialog.ts";
+import { Section, Keys, Row } from "../../ui/kit.tsx";
 import { PageTitle } from "../../ui/PageTitle.tsx";
 import { BARE_INPUT, FIELD } from "../../ui/SendButton.tsx";
 import { toast, toastError } from "../../ui/toast/toast.ts";
@@ -14,26 +16,18 @@ import { toast, toastError } from "../../ui/toast/toast.ts";
 
 const MEMORY_MAX = 100;
 const shortDate = (at: number) => new Date(at).toLocaleDateString([], { day: "2-digit", month: "short" });
-const WORD = "flex min-h-11 items-center text-xs text-dim transition-colors hover:text-foreground disabled:opacity-50 sm:min-h-0";
 
-function Row({ entry, busy, onEdit, onForget }: { entry: MemoryEntry; busy: boolean; onEdit: () => void; onForget: () => void }) {
+function Entry({ entry, busy, onEdit, onForget }: { entry: MemoryEntry; busy: boolean; onEdit: () => void; onForget: () => void }) {
   const chat = entry.chat ? readChat(entry.chat) : null;
   return (
-    <li className="flex gap-2.5 border-t py-2 last:border-b">
-      <div className="min-w-0 flex-1">
-        <p className="break-words text-hi">{entry.text}</p>
-        <p className="mt-0.5 flex items-center gap-2 text-xs text-dim">
-          <span className="min-w-0 flex-1 truncate">
-            since {shortDate(entry.created)}
-            {chat ? <> · from <Link to="/pip" search={{ chat: chat.uid }} className="text-dim underline-offset-2 hover:text-foreground hover:underline">{chat.title || "chat"}</Link></> : null}
-          </span>
-          <span className="flex shrink-0 items-center gap-2">
-            <button type="button" className={WORD} disabled={busy} onClick={onEdit}>edit</button>
-            <span aria-hidden="true">·</span>
-            <button type="button" className={WORD} disabled={busy} onClick={onForget}>forget</button>
-          </span>
-        </p>
-      </div>
+    <li className="pb-2">
+      <Row sub={<>since {shortDate(entry.created)}{chat ? <> · from <Link to="/pip" search={{ chat: chat.uid }} className="text-primary underline underline-offset-2">{chat.title || "chat"}</Link></> : null}</>}>
+        {entry.text}
+      </Row>
+      <Keys>
+        <Button type="button" disabled={busy} onClick={onEdit}>edit</Button>
+        <Button type="button" variant="destructive" disabled={busy} onClick={onForget}>forget</Button>
+      </Keys>
     </li>
   );
 }
@@ -68,37 +62,39 @@ export function MemoryPage() {
 
   let body: React.ReactNode;
   if (memory.state === "loading") {
-    body = <div className="space-y-2 pt-2" aria-hidden="true">
+    body = <div className="mt-6 space-y-2" aria-hidden="true">
       <div className="shimmer h-4 w-3/4 rounded-sm" />
       <div className="shimmer h-4 w-2/3 rounded-sm" />
       <div className="shimmer h-4 w-1/2 rounded-sm" />
     </div>;
   } else if (memory.state === "signed-out") {
-    body = <p className="text-sm text-muted-foreground"><a href={classicHref("/account")} className="text-primary">Sign in</a> to give pip a memory.</p>;
+    body = <p className="mt-6 text-sm text-muted-foreground"><a href={classicHref("/account")} className="text-primary underline underline-offset-2">Sign in</a> to give pip a memory.</p>;
   } else if (memory.state === "failed") {
-    body = <div className="space-y-1 pt-2">
+    body = <div className="mt-6 space-y-2">
       <p className="text-sm text-destructive">{memory.error}</p>
-      <button type="button" onClick={memory.reload} className={WORD}>try again</button>
+      <Button type="button" onClick={memory.reload}>try again</Button>
     </div>;
   } else {
     body = <>
-      {newestFirst.length
-        ? <ul>{newestFirst.map(entry => <Row key={entry.id} entry={entry} busy={busy === "edit:" + entry.id || busy === "forget:" + entry.id}
-          onEdit={() => void edit(entry)} onForget={() => void act("forget:" + entry.id, () => forgetMemory(entry.id), () => toast("Forgotten."))} />)}</ul>
-        : <p className="text-sm text-muted-foreground">Nothing yet. Pip remembers lasting things you tell it, and you can add some here.</p>}
+      <Section className="mt-6" label="remembered" note={newestFirst.length}>
+        {newestFirst.length
+          ? <ul>{newestFirst.map(entry => <Entry key={entry.id} entry={entry} busy={busy === "edit:" + entry.id || busy === "forget:" + entry.id}
+            onEdit={() => void edit(entry)} onForget={() => void act("forget:" + entry.id, () => forgetMemory(entry.id), () => toast("Forgotten."))} />)}</ul>
+          : <p className="text-sm text-muted-foreground">Nothing yet. Pip remembers lasting things you tell it, and you can add some here.</p>}
+      </Section>
       {full
         ? <p className="text-sm text-muted-foreground">Memory is full (100). Forget something to add more.</p>
-        : <form onSubmit={add} className={FIELD + " mt-[18px]"}>
+        : <form onSubmit={add} className={FIELD}>
           <span aria-hidden="true" className="text-dim">+</span>
           <Input value={text} onChange={event => setText(event.target.value)} aria-label="Add something pip should remember"
             placeholder="add something pip should remember" maxLength={300} className={BARE_INPUT + " text-ellipsis"} />
-          <button type="submit" className={WORD} disabled={!text.trim() || Boolean(busy)}>remember</button>
+          <Button type="submit" variant="go" disabled={!text.trim() || Boolean(busy)}>remember</Button>
         </form>}
     </>;
   }
 
   return (
-    <main className="space-y-4">
+    <main className="pb-4">
       <PageTitle title="memory" meta="What pip remembers about you. It reads this in every reply." />
       {body}
     </main>
