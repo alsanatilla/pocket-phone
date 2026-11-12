@@ -529,7 +529,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
     const note = effort && effortNote(effort);
     if (note) body.instructions += '\n\n' + note;
     const limits = effortLimits(effort);
-    const researchOption = effort === 'thorough' ? { enough } : limits;
+    const researchOption = effort === 'thorough' ? { ...limits, enough } : limits;
     const reply = await streamChat(conversationView, turn, { value, body, key, fetcher, deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
       ...(researchOption ? { research: researchOption } : {}),
       onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } }); live.publish(runId, turn, meta); progress(); },

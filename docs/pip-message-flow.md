@@ -211,10 +211,15 @@ and the sentence the model reads are in `src/shared/pip-effort.js`.
 - The question is one choice named `effort`: `none`, `quick` or `thorough`. The state is the message (up to 2,000
   characters), how many sources are attached, and the last two finished turns (requests and prose answers, never a
   card's source).
-- `none` allows one lookup and no web call, `quick` three lookups and two web calls. `thorough` leaves today's
-  `RESEARCH_LIMITS` alone. `streamChat` counts a lookup as any tool call that is neither a write nor a state tool,
-  and the lookup beyond the level is answered with `research_budget_reached`, so the model answers from what it
-  has. Cards are never refused by this limit.
+- `none` allows one lookup and no web call, `quick` three lookups and two web calls, `thorough` ten lookups and five
+  web calls. `streamChat` counts a lookup as any tool call that is neither a write nor a state tool, and the lookup
+  beyond the level is answered with `research_budget_reached`, so the model answers from what it has. Cards are
+  never refused by this limit.
+- A lookup asked for after the reply has turned final (a limit was reached, or the lookups' own budget ran out) is
+  answered the same way instead of failing the reply: the model gets `research_budget_reached` and writes with what
+  it has. That is tolerated in two rounds of the reply, kept in the run's checkpoint like the other counters; the
+  round after the second is sent with no tools and `tool_choice: none`, and a provider that calls a tool anyway
+  fails the reply as before. Writes and state tools in a final round behave as they did.
 - The level is judged once per run and kept in `usage.effort`. A run continued after a pause or a restart keeps it
   without asking again, and the lookups it made before the pause count after it.
 - No OpenRouter key, no answer within 1.2 seconds, a refused request or an answer that is not one of the levels:

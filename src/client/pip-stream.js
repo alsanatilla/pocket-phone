@@ -10,6 +10,8 @@ import { cardsIn } from '../shared/pocket-card-edit.js';
 export { RESEARCH_LIMITS, CONTEXT_OVERFLOW } from './pip-limits.js';
 export { freeFallbacks } from './pip-provider.js';
 const stopped = () => new DOMException('Stopped', 'AbortError');
+/** A lookup asked for after its round turned final is refused instead of ending the reply, in this many rounds. */
+const LATE_LOOKUPS = 2;
 /** A durable run stops at a decision point instead of waiting for one; it continues in a later request. */
 export class RunPaused extends Error { constructor() { super('This reply is waiting for a decision.'); this.name = 'RunPaused'; } }
 /** Whether an error is the durable-run pause sentinel rather than a failure. */
@@ -30,10 +32,10 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   const researchLeft = Math.max(1, restored?.counters?.researchLeft ?? RESEARCH_LIMITS.deadlineMs);
   let timeout, absolute, timedOut = false, deadlineReached = false, deadlineLeft = Math.min(deadlineMs, RESEARCH_LIMITS.deadlineMs, researchLeft), deadlineFrom = 0;
   const requestBudget = deadlineLeft;
-  let calls = 0, searches = 0, lookups = 0, enoughAsked = 0, enoughLookups = 0, enoughStopped = false, toolData = 0, tokens = value.maxTokens, researchTokens = RESEARCH_LIMITS.researchTokens;
+  let calls = 0, searches = 0, lookups = 0, lateLookups = 0, lateRefused = false, enoughAsked = 0, enoughLookups = 0, enoughStopped = false, toolData = 0, tokens = value.maxTokens, researchTokens = RESEARCH_LIMITS.researchTokens;
   let finalReason = '', finalRounds = 0, finalCalls = 0, round = 0, currentRound = 0, allowance = 0, final = false, canPrepare = false, lastFinish = '', fatal = null;
   if (restored?.counters) { const saved = restored.counters;
-    calls = saved.calls || 0; searches = saved.searches || 0; lookups = saved.lookups || 0; toolData = saved.toolData || 0; tokens = saved.tokens ?? value.maxTokens;
+    calls = saved.calls || 0; searches = saved.searches || 0; lookups = saved.lookups || 0; lateLookups = saved.lateLookups || 0; lateRefused = Boolean(saved.lateRefused); toolData = saved.toolData || 0; tokens = saved.tokens ?? value.maxTokens;
     researchTokens = saved.researchTokens ?? RESEARCH_LIMITS.researchTokens;
     enoughAsked = saved.enoughAsked || 0; enoughLookups = saved.enoughLookups || 0; enoughStopped = Boolean(saved.enoughStopped);
     round = saved.round || 0; currentRound = saved.currentRound || 0; finalReason = saved.finalReason || '';
@@ -90,7 +92,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   };
   // What a pause stores: the provider messages, the remaining budgets, and the requests no client has settled yet.
   const checkpoint = extra => ({ messages: [...(base || body.messages), ...responses],
-    counters: { calls, searches, lookups, enoughAsked, enoughLookups, enoughStopped, toolData, tokens, researchTokens, round, currentRound, finalReason, finalRounds, finalCalls, final, canPrepare, researchLeft: Math.max(1, researchLeft - (requestBudget - deadlineLeft)) },
+    counters: { calls, searches, lookups, lateLookups, lateRefused, enoughAsked, enoughLookups, enoughStopped, toolData, tokens, researchTokens, round, currentRound, finalReason, finalRounds, finalCalls, final, canPrepare, researchLeft: Math.max(1, researchLeft - (requestBudget - deadlineLeft)) },
     pending: pending.map(item => ({ ...item })), previews: Object.fromEntries(previews), rows: Object.fromEntries(rows), ...extra });
   const halt = async extra => { await durable.pause(checkpoint(extra)); throw new RunPaused(); };
   const check = () => { if (controller.signal.aborted) throw stopped(); if (fatal) throw fatal; };
@@ -124,22 +126,31 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   };
   const toolsAfterLimit = name => new Error(STATE_TOOLS.includes(name) ? 'The provider requested tools instead of a final answer. Continue when you’re ready.' : 'The provider requested more tools after the research limit.');
   const allowed = name => offered.has(name) && toolNames(value).includes(name);
+  /** A lookup is a tool call that is neither a write nor a state tool, the rule the lookups counter counts. */
+  const isLookup = name => !WRITE_TOOLS.includes(name) && !STATE_TOOLS.includes(name);
   const budgetError = { error: 'research_budget_reached', message: 'The app’s call or data limit was reached; use completed observations.' };
 
   // Every tool's SDK execute. Writes reach it only after the user approved them.
   const runTool = async (name, input, { toolCallId }) => {
     check();
     const write = WRITE_TOOLS.includes(name), id = rowId(toolCallId), stateTool = STATE_TOOLS.includes(name), web = ['search_web', 'read_web_page'].includes(name);
+    // A lookup asked for after the round turned final is refused with the budget error instead of ending the reply.
+    // Two such rounds are tolerated; the round after the second offers no tools at all (see prepareStep).
+    const lookupTool = isLookup(name);
+    const refusedByResearch = lookupTool && research && (enoughStopped || (research.lookups !== undefined && lookups >= research.lookups) || (research.webCalls !== undefined && web && searches >= research.webCalls));
+    const lateLookup = final && allowed(name) && lookupTool;
     if (!write) {
       const ran = currentRound + ':' + toolCallId;
       if ([...executed].filter(item => item.startsWith(currentRound + ':')).length >= RESEARCH_LIMITS.calls + RESEARCH_LIMITS.finalCalls) { fatal = new Error('The tool request is too large.'); throw fatal; }
       if (executed.has(ran)) { fatal = new Error('The provider returned duplicate tool identifiers.'); throw fatal; }
       executed.add(ran);
-      if (final && allowed(name) && (!canPrepare || !stateTool) && !(enoughStopped && !write && !stateTool)) { fatal = toolsAfterLimit(name); throw fatal; }
+      if (final && allowed(name) && (!canPrepare || !stateTool) && !lookupTool) { fatal = toolsAfterLimit(name); throw fatal; }
+      if (lateLookup && lateLookups >= LATE_LOOKUPS) { fatal = toolsAfterLimit(name); throw fatal; }
     }
     let answer;
-    if (!allowed(name)) { answer = { error: 'tool_unavailable', message: 'This tool is not offered or its access was switched off.' }; finalReason ||= 'Unavailable tool requested'; }
-    else if (!write && !stateTool && research && (enoughStopped || (research.lookups !== undefined && lookups >= research.lookups) || (research.webCalls !== undefined && web && searches >= research.webCalls))) { answer = budgetError; finalReason ||= 'Enough looked up for this message'; }
+    if (lateLookup) { lateRefused = true; answer = budgetError; }
+    else if (!allowed(name)) { answer = { error: 'tool_unavailable', message: 'This tool is not offered or its access was switched off.' }; finalReason ||= 'Unavailable tool requested'; }
+    else if (refusedByResearch) { answer = budgetError; finalReason ||= 'Enough looked up for this message'; }
     else if (!write && (stateTool ? (final ? finalCalls >= RESEARCH_LIMITS.finalCalls : calls >= RESEARCH_LIMITS.calls) : calls >= RESEARCH_LIMITS.calls || web && searches >= RESEARCH_LIMITS.webCalls || toolData >= RESEARCH_LIMITS.toolData || finalReason === 'Research data exhausted')) { answer = budgetError; finalReason ||= 'Research calls or data exhausted'; }
     else {
       if (!write) { calls++; if (final) finalCalls++; if (web) searches++; if (!stateTool) lookups++; }
@@ -209,7 +220,9 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   const instructions = body.instructions;
   const prepareStep = async ({ messages }) => {
     check(); if (tokens < 1) return finishFromObservations('The configured reply token limit was reached. Continue when you’re ready.');
-    if (round > RESEARCH_LIMITS.continuations + 2) return finishFromObservations('The research continuation limit was reached.');
+    // Refusing a late lookup costs a round; after one, the reply may need up to two more than the usual limit to
+    // reach the tool-less round and then write its answer.
+    if (round > RESEARCH_LIMITS.continuations + 2 + (lateLookups ? LATE_LOOKUPS : 0)) return finishFromObservations('The research continuation limit was reached.');
     currentRound = round++; inputs.clear();
     if (currentRound && JSON.stringify(messages).length > 190000) return finishFromObservations('The research context limit was reached.');
     delete result.usage.last_input_tokens; delete result.usage.last_output_tokens;
@@ -226,6 +239,9 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       } catch { /* A judge that fails must never fail the reply. */ }
       final = finalNow();
     }
+    // The round after one whose final-round lookups were refused counts it; two such rounds are tolerated and the
+    // round after the second offers no tools at all, so only the answer can follow.
+    if (lateRefused) { lateLookups++; lateRefused = false; }
     canPrepare = final && finalRounds < 2 && finalCalls < RESEARCH_LIMITS.finalCalls && tokens > reserve && [...offered].some(name => STATE_TOOLS.includes(name));
     if (final) finalRounds++;
     // A round may use what is left of the reply's budget, less the reserve for the closing answer. A fixed slice per
@@ -233,7 +249,8 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     // (a card, a lookup), and the next round started the same thinking again.
     allowance = canPrepare || offered.size && !final ? Math.max(1, tokens - reserve) : tokens;
     if (!final) allowance = Math.max(1, Math.min(allowance, researchTokens + reserve));
-    const activeTools = [...offered].filter(name => allowed(name) && (!final || STATE_TOOLS.includes(name) || enoughStopped));
+    // After two rounds of refused final-round lookups this round offers no tools at all, so only the answer follows.
+    const activeTools = lateLookups >= LATE_LOOKUPS ? [] : [...offered].filter(name => allowed(name) && (!final || STATE_TOOLS.includes(name) || isLookup(name)));
     result.phase = final ? 'synthesizing' : 'requesting'; publish();
     const instruction = final ? '\n\nPocket runtime status: the app has stopped research for this reply. This is an app limit, not a user instruction, and does not mean the research is complete. Answer the current user request using the observations already collected. Do not start more research or read more sources. '
       + (canPrepare ? 'Only if the current user request asks to save or change something, request it now if it has not already been requested in this reply. An unfinished action from an earlier message must not replace the current answer. ' : 'Make no more tool calls; write the answer now. ')
@@ -280,7 +297,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       if (!CARD_TOOLS.includes(partial.name)) record(activityId(part.id), { input: partial.text });
       else if (draft?.id === part.id) { const lines = draftLines(partial.text); result.answer = result.answer.slice(0, draft.at) + '```pocket\n' + (lines ? lines + '\n' : ''); }
     } else if (part.type === 'tool-call') {
-      if (final && (!canPrepare || !STATE_TOOLS.includes(part.toolName)) && !(enoughStopped && !WRITE_TOOLS.includes(part.toolName))) { fatal = toolsAfterLimit(part.toolName); throw fatal; }
+      if (final && (!canPrepare || !STATE_TOOLS.includes(part.toolName)) && !(isLookup(part.toolName) && lateLookups < LATE_LOOKUPS)) { fatal = toolsAfterLimit(part.toolName); throw fatal; }
       if (JSON.stringify(part.input || {}).length > (CARD_TOOLS.includes(part.toolName) ? CARD_ARGUMENT_LIMIT : 8000)) throw new Error('The tool request is too large.');
       if (part.invalid) dropDraft(part.toolCallId);
       record(activityId(part.toolCallId), { name: part.toolName, title: label(part.toolName, part.input || {}), input: kept(part.toolName, part.input || {}), ...(part.invalid ? { state: 'failed', summary: 'Invalid tool request', ended: Date.now(), result: JSON.stringify({ error: 'invalid_arguments', message: 'Correct the arguments or use an available tool.' }) } : {}) });
@@ -332,7 +349,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   try {
     const model = await providerModel(value, key, { fetcher, signal: controller.signal, clock, onRetry: () => { result.phase = 'provider busy · retrying'; publish(); } });
     const guarded = callback => args => { try { return callback(args); } catch (error) { fatal = error; throw error; } };
-    const agent = new ToolLoopAgent({ model, instructions, tools, toolApproval, providerOptions: providerOptions(value), maxRetries: 2, streamRetries: 0, stopWhen: [isStepCount(RESEARCH_LIMITS.continuations + 3), () => round >= RESEARCH_LIMITS.continuations + 3 || tokens <= 0], prepareStep: guarded(prepareStep), onStepEnd: guarded(onStepEnd), onError: () => {} });
+    const agent = new ToolLoopAgent({ model, instructions, tools, toolApproval, providerOptions: providerOptions(value), maxRetries: 2, streamRetries: 0, stopWhen: [isStepCount(RESEARCH_LIMITS.continuations + 3 + LATE_LOOKUPS), () => round >= RESEARCH_LIMITS.continuations + 3 + (lateLookups ? LATE_LOOKUPS : 0) || tokens <= 0], prepareStep: guarded(prepareStep), onStepEnd: guarded(onStepEnd), onError: () => {} });
     // A continued run first answers what it paused for: the restored conversation ends with those calls.
     if (restored && pending.length) await decide();
     // Each SDK call continues from the committed messages: after the user's approval decisions, or after a
