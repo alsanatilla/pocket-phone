@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { Button } from "@/components/ui/button";
+import { Row } from "../../ui/kit.tsx";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { SendButton, StopButton } from "../../ui/SendButton.tsx";
 import { Textarea } from "@/components/ui/textarea";
@@ -6,7 +8,7 @@ import { removeSource, setDraft, type Chat } from "../../data/chats.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 
 // The message field: grows with its text, Enter sends (Shift+Enter is a new line), the chat's sources sit above it
-// as chips that can be removed, and the draft is kept on the chat, so it survives switching chats or a reload.
+// as rows that can be removed, and the draft is kept on the chat, so it survives switching chats or a reload.
 
 export function PipComposer({ chat, busy, initial, onSend, onStop }: { chat: Chat; busy: boolean; initial?: string; onSend: (text: string) => Promise<void>; onStop: () => void }) {
   const [text, setText] = useState(initial || chat.draft || "");
@@ -41,14 +43,13 @@ export function PipComposer({ chat, busy, initial, onSend, onStop }: { chat: Cha
   return (
     <form onSubmit={submit} className="border-t pt-1">
       {chat.context.length ? (
-        <div className="mb-1 flex flex-col">
+        <div className="mb-1">
           {chat.context.map((source, index) => (
-            <div key={source.kind + source.uid} className="flex min-h-11 items-center gap-2 text-xs text-dim sm:min-h-0">
-              <span className="min-w-0 flex-1 truncate">{source.kind} · {source.title}</span>
-              <button type="button" aria-label={"Remove " + source.title}
-                className="flex min-h-11 shrink-0 items-center text-xs text-dim transition-colors hover:text-foreground sm:min-h-0"
-                onClick={() => { try { removeSource(chat.uid, index); } catch (error) { toastError(error); } }}>remove</button>
-            </div>
+            <Row key={source.kind + source.uid}
+              end={<Button type="button" variant="ghost" aria-label={"Remove " + source.title}
+                onClick={() => { try { removeSource(chat.uid, index); } catch (error) { toastError(error); } }}>remove</Button>}>
+              <span className="text-xs text-dim">{source.kind} · {source.title}</span>
+            </Row>
           ))}
         </div>
       ) : null}

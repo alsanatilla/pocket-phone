@@ -1,7 +1,9 @@
 import { useRef } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Row, Section, SectionLabel } from "../../ui/kit.tsx";
 import { useCollection } from "../../data/bus.ts";
 import { listChats, pinChat, removeChat, renameChat, type Chat } from "../../data/chats.ts";
 import { isHome } from "../../data/home.ts";
@@ -48,38 +50,33 @@ export function ChatList({ open, onOpenChange, current, homeCurrent, onPick, onH
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="left" className="w-[85vw] max-w-sm gap-0 p-0">
-        <SheetHeader className="flex-row items-baseline gap-3 border-b px-4 pt-3 pb-2 pr-12">
-          <SheetTitle className="text-[10.5px] font-normal uppercase tracking-[0.06em] text-dim">chats</SheetTitle>
+        <SheetHeader className="flex-row items-center gap-3 px-4 pt-3 pb-2 pr-12">
+          <SheetTitle className="contents"><SectionLabel>chats</SectionLabel></SheetTitle>
           <SheetDescription className="text-xs text-dim">{separate.length} {separate.length === 1 ? "conversation" : "conversations"}</SheetDescription>
-          <button type="button" onClick={onNew} className="ml-auto flex min-h-11 items-center text-xs text-dim transition-colors hover:text-foreground sm:min-h-0">+ new chat</button>
+          <Button type="button" onClick={onNew} className="ml-auto">+ new chat</Button>
         </SheetHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto pb-4">
-          <ul>
-            <li className={cn("flex items-center border-b", homeCurrent && "bg-secondary")}>
-              <button type="button" className="min-h-11 min-w-0 flex-1 px-4 py-2 text-left sm:min-h-0" onClick={onHome} aria-current={homeCurrent ? "page" : undefined}>
-                <span className="block truncate text-sm text-hi">pip</span>
-                <span className="mt-0.5 block truncate text-xs text-dim">one ongoing conversation · {messages} {messages === 1 ? "message" : "messages"}</span>
-              </button>
-            </li>
-          </ul>
-          {groups.length ? groups.map(([title, list]) => <section key={title} className="pt-[18px] first:pt-0">
-            <div className="flex items-baseline justify-between px-4 pb-1">
-              <h3 className="text-[10.5px] uppercase tracking-[0.06em] text-dim">{title}</h3>
-              <span className="text-xs text-dim">{list.length}</span>
-            </div>
+          <Section className="mb-2 px-4">
+            <ul>
+              <li className={cn(homeCurrent && "bg-secondary")} aria-current={homeCurrent ? "page" : undefined}>
+                <Row onOpen={onHome} sub={<>one ongoing conversation · {messages} {messages === 1 ? "message" : "messages"}</>}>
+                  <span className="block truncate text-sm text-hi">pip</span>
+                </Row>
+              </li>
+            </ul>
+          </Section>
+          {groups.length ? groups.map(([title, list]) => <Section key={title} label={<span role="heading" aria-level={3}>{title}</span>} note={list.length} className="mb-6 px-4">
             <ul>
               {list.map(chat => {
                 const active = chat.uid === current;
-                return <li key={chat.uid} className={cn("flex items-center border-t last:border-b", active && "bg-secondary")}>
-                  <button type="button" className="min-h-11 min-w-0 flex-1 px-4 py-2 text-left sm:min-h-0" onClick={() => onPick(chat.uid)} aria-current={active ? "page" : undefined}>
-                    <span className="block truncate text-sm text-hi">{chat.title || "untitled"}</span>
-                    <span className="mt-0.5 block truncate text-xs text-dim">{when(chat.updated)} · {chat.turns.length} {chat.turns.length === 1 ? "message" : "messages"}</span>
-                  </button>
+                return <li key={chat.uid} className={cn("flex items-center", active && "bg-secondary")} aria-current={active ? "page" : undefined}>
+                  <Row onOpen={() => onPick(chat.uid)} className="min-w-0 flex-1" sub={<>{when(chat.updated)} · {chat.turns.length} {chat.turns.length === 1 ? "message" : "messages"}</>}>
+                    {chat.title || "untitled"}
+                  </Row>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button type="button" aria-label={"Options for " + (chat.title || "untitled")}
-                        className="flex min-h-11 shrink-0 items-center px-4 text-xs text-dim transition-colors hover:text-foreground data-[state=open]:text-foreground sm:min-h-0">more</button>
+                      <Button type="button" variant="ghost" aria-label={"Options for " + (chat.title || "untitled")}>more</Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem onSelect={guard(async () => { const name = await prompt({ title: "Rename chat", value: chat.title, maxLength: 100 }); if (name?.trim()) renameChat(chat.uid, name); })}>rename</DropdownMenuItem>
@@ -92,7 +89,7 @@ export function ChatList({ open, onOpenChange, current, homeCurrent, onPick, onH
                 </li>;
               })}
             </ul>
-          </section>) : <p className="px-4 pt-6 text-sm text-muted-foreground">No chats yet. <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={onNew}>start one</button>.</p>}
+          </Section>) : <p className="px-4 pt-6 text-sm text-muted-foreground">No chats yet. <Button type="button" variant="link" onClick={onNew}>start one</Button>.</p>}
         </div>
       </SheetContent>
     </Sheet>

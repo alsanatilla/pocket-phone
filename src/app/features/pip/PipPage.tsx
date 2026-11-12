@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { ChevronDown, Clock3, Plus } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Keys, Row } from "../../ui/kit.tsx";
 import { starters } from "../../../client/pip-presentation.js";
 import { readAccess } from "../../data/ai.ts";
 import { useCollection } from "../../data/bus.ts";
@@ -24,16 +25,10 @@ function Empty({ onAsk }: { onAsk: (prompt: string) => void }) {
   const { due } = daySummary(listTasks(), today());
   const ideas = starters({ enabled, overdue: due.filter(task => task.due < today()).length, thoughts: openThoughts().length });
   return (
-    <div className="space-y-[18px] py-6">
+    <div className="space-y-3 py-6">
       <p className="max-w-prose text-sm text-muted-foreground">Ask about anything you keep in Pocket. Pip only reads what you allow in settings, and nothing is saved without you.</p>
       <div>
-        {ideas.map(idea => (
-          <button key={idea.label} onClick={() => onAsk(idea.prompt)}
-            className="flex min-h-11 w-full items-start gap-2.5 border-t py-2 text-left text-sm text-hi transition-colors last:border-b hover:bg-secondary sm:min-h-0">
-            <span aria-hidden="true" className="text-primary">›</span>
-            <span className="min-w-0">{idea.label}</span>
-          </button>
-        ))}
+        {ideas.map(idea => <Row key={idea.label} onOpen={() => onAsk(idea.prompt)}>{idea.label}</Row>)}
       </div>
     </div>
   );
@@ -116,21 +111,23 @@ export function PipPage() {
     <main className="flex min-h-[calc(100dvh-45px)] flex-col">
       {/* One quiet line under the header: which conversation this is (it opens the list), then the two actions. */}
       <div className="sticky top-[45px] z-[5] mb-3 flex items-center gap-1 bg-background">
-        <button onClick={() => setListOpen(true)} aria-expanded={listOpen} className="flex min-h-11 min-w-0 flex-1 items-center gap-1.5 text-left text-xs text-dim transition-colors hover:text-foreground" aria-label="All chats">
+        <Button variant="ghost" onClick={() => setListOpen(true)} aria-expanded={listOpen} aria-label="All chats"
+          className="max-w-[65%] min-w-0 justify-start gap-1.5 text-xs text-dim">
           <span className="truncate">{chat?.title || "pip"}</span>
           <ChevronDown className="size-3.5 shrink-0" />
-        </button>
-        <Button asChild variant="ghost" size="icon" className="text-dim" aria-label="Jobs: Pip on its own"><Link to="/jobs"><Clock3 className="size-4" /></Link></Button>
-        <Button variant="ghost" size="icon" className="-mr-3 text-dim" aria-label="New chat" onClick={start}><Plus className="size-4" /></Button>
+        </Button>
+        <span className="flex-1" />
+        <Button asChild variant="ghost" className="text-dim" aria-label="Jobs: Pip on its own"><Link to="/jobs">jobs</Link></Button>
+        <Button variant="ghost" className="text-dim" aria-label="New chat" onClick={start}>new</Button>
       </div>
       <div ref={thread} className="flex-1 space-y-8 pb-4">
         {!joined.items.length
           ? <Empty onAsk={askPip} />
           : <>
             {joined.earlier ? (
-              <button type="button" onClick={showEarlier} className="flex min-h-11 w-full items-center justify-center text-xs text-dim transition-colors hover:text-muted-foreground sm:min-h-0">
-                earlier messages
-              </button>
+              <Keys>
+                <Button type="button" onClick={showEarlier} className="min-h-11 sm:min-h-0">earlier messages</Button>
+              </Keys>
             ) : null}
             {joined.items.map(item => (
               <Turn key={item.turn.uid} turn={item.turn} chatId={item.chatId} latest={item.chatId === chat?.uid && item.turn.uid === latest} locked={locked}

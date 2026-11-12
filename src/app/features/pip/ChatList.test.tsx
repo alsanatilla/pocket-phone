@@ -30,7 +30,8 @@ describe("the chat list's home row", () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]!.textContent).toContain("pip");
     expect(rows[0]!.textContent).toContain("one ongoing conversation · 3 messages");
-    expect(within(rows[0]!).getByRole("button").getAttribute("aria-current")).toBe("page");
+    expect(within(rows[0]!).getByRole("button")).toBeTruthy();
+    expect(rows[0]!.getAttribute("aria-current")).toBe("page");
     // The heading counts separate chats only, and both segments keep the one pip row.
     expect(screen.getByText(/1 conversation/)).toBeTruthy();
     expect(screen.getAllByText("pip")).toHaveLength(1);

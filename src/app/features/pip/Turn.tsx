@@ -2,7 +2,9 @@ import { memo, useCallback, useMemo, type KeyboardEvent, type MouseEvent } from 
 import { Link } from "@tanstack/react-router";
 import { Check, Circle, LoaderCircle, Minus, TriangleAlert } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Keys, Row } from "../../ui/kit.tsx";
 import { phaseLabel } from "../../../client/pip-activity.js";
 import type { ChatTurn } from "../../data/chats.ts";
 import { toastError } from "../../ui/toast/toast.ts";
@@ -28,13 +30,12 @@ function StateIcon({ state }: { state: string }) {
   return <Icon aria-label={state} className={cn("inline size-3 shrink-0 align-[-2px]", state === "failed" ? "text-destructive" : state === "done" ? "text-dim" : "text-muted-foreground", state === "running" && "animate-spin")} />;
 }
 
-/** A fold is one word on a line; what it holds is plain text under it, with no rule beside it. */
+/** A fold is one key on a line; what it holds is plain text under it, with no rule beside it. */
 function Fold({ title, open, children }: { title: string; open?: boolean; children: React.ReactNode }) {
   return (
     <Collapsible defaultOpen={open} className="group/fold">
-      {/* 44px to tap on a phone, the same small line to look at. */}
-      <CollapsibleTrigger className="-my-1 flex min-h-11 items-center text-xs text-dim transition-colors hover:text-foreground sm:my-0 sm:min-h-0">
-        {title}
+      <CollapsibleTrigger asChild>
+        <Button type="button" variant="ghost" className="text-dim">{title}</Button>
       </CollapsibleTrigger>
       <CollapsibleContent className="pt-1">{children}</CollapsibleContent>
     </Collapsible>
@@ -48,15 +49,13 @@ const durationOf = (row: LedgerRow) => secondsOf(row) ? secondsOf(row) + " s" : 
 /** The lookups as rows: a mark, what Pip looked at, and how long it took at the right. */
 function Steps({ rows }: { rows: LedgerRow[] }) {
   return (
-    <ul className="space-y-1">
+    <ul className="space-y-0.5">
       {rows.map(row => (
-        <li key={row.id} className="flex items-baseline gap-2.5 text-xs">
-          <StateIcon state={row.state} />
-          <span className="min-w-0 flex-1">
-            <span className="text-hi">{row.title}</span>
+        <li key={row.id}>
+          <Row lead={<StateIcon state={row.state} />} end={durationOf(row) || undefined}>
+            {row.title}
             {row.summary ? <span className="text-dim"> · {row.summary}</span> : null}
-          </span>
-          {durationOf(row) ? <span className="shrink-0 text-dim">{durationOf(row)}</span> : null}
+          </Row>
         </li>
       ))}
     </ul>
@@ -129,13 +128,15 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
         ) : null}
 
         {plan.length ? (
-          <ol className="space-y-0.5 text-xs">
+          <ul>
             {plan.map((step, index) => (
-              <li key={index} className={step.status === "done" ? "text-muted-foreground line-through" : step.status === "in_progress" ? "text-hi" : ""}>
-                {step.status === "done" ? "□" : step.status === "in_progress" ? "◌" : "◇"} {step.text}
+              <li key={index}>
+                <Row lead={<StateIcon state={step.status === "done" ? "done" : step.status === "in_progress" ? "running" : "queued"} />} dim={step.status === "done"}>
+                  {step.text}
+                </Row>
               </li>
             ))}
-          </ol>
+          </ul>
         ) : null}
 
         {shown.reasoning ? <Fold title="reasoning"><Prose text={shown.reasoning} streaming={streaming && !shown.answer} className="text-xs text-muted-foreground" /></Fold> : null}
@@ -149,7 +150,7 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
         {!streaming && remembered.length ? (
           <ul className="space-y-0.5 text-xs text-dim">
             {remembered.map((change, index) => <li key={index}>{change.kind}: {change.text}</li>)}
-            <li><Link to="/memory" className="text-primary underline-offset-2 hover:underline">memory</Link></li>
+            <li><Link to="/memory" className="text-primary underline underline-offset-2">memory</Link></li>
           </ul>
         ) : null}
 
@@ -158,7 +159,7 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
             {sources.map((source, index) => (
               <span key={source.href}>{index ? " · " : ""}
                 <a href={source.href.startsWith("/") ? hrefFor(source.href) : source.href} target={source.href.startsWith("/") ? undefined : "_blank"} rel="noopener noreferrer"
-                  className="text-muted-foreground underline decoration-border underline-offset-2 hover:text-foreground">{source.title}</a>
+                  className="text-primary underline underline-offset-2">{source.title}</a>
               </span>
             ))}
           </p>
@@ -169,13 +170,10 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
         {unfinished ? (
           <div className="space-y-1">
             <p className="text-sm text-destructive">{shown.error || "This reply did not finish."}</p>
-            <div className="flex items-center gap-2 text-xs text-dim">
-              <button type="button" disabled={locked} onClick={() => resume(chatId, shown.uid).catch(toastError)}
-                className="flex min-h-11 items-center text-xs text-dim transition-colors hover:text-foreground disabled:opacity-50 sm:min-h-0">continue</button>
-              <span aria-hidden="true">·</span>
-              <button type="button" disabled={locked} onClick={() => retry(chatId, shown.uid).catch(toastError)}
-                className="flex min-h-11 items-center text-xs text-dim transition-colors hover:text-foreground disabled:opacity-50 sm:min-h-0">start over</button>
-            </div>
+            <Keys>
+              <Button type="button" disabled={locked} onClick={() => resume(chatId, shown.uid).catch(toastError)}>continue</Button>
+              <Button type="button" disabled={locked} onClick={() => retry(chatId, shown.uid).catch(toastError)}>start over</Button>
+            </Keys>
           </div>
         ) : !streaming && shown.error ? <p className="text-xs text-destructive">{shown.error}</p> : null}
       </div>

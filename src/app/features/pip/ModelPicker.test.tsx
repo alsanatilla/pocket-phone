@@ -31,9 +31,11 @@ describe("composer model picker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Choose model" }));
     const choice = await screen.findByRole("button", { name: /Tool model/ });
     expect(choice.textContent).toContain("128k"); expect(choice.querySelector('[aria-label="reasons first"]')).toBeTruthy();
-    expect(screen.getByRole("button", { name: /No tools/ }).hasAttribute("disabled")).toBe(true);
-    fireEvent.change(screen.getByRole("textbox", { name: "Search models" }), { target: { value: "tool-model" } });
+    // A model without tools is shown, but it is not a key: it cannot be pressed.
+    expect(screen.getByText("No tools")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /No tools/ })).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "Search models" }), { target: { value: "tool-model" } });
+    expect(screen.queryByText("No tools")).toBeNull();
     fireEvent.click(choice);
     expect(chats.get(chat.uid)?.config.model).toBe(model.id);
   });
@@ -50,6 +52,6 @@ describe("composer model picker", () => {
   it("locks provider and web changes while a reply runs", () => {
     render(<ModelPicker chat={chats.create()} busy />);
     expect(screen.getByRole("button", { name: "Choose model" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getByRole("button", { name: "Web search" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("switch", { name: "Web search" }).hasAttribute("disabled")).toBe(true);
   });
 });

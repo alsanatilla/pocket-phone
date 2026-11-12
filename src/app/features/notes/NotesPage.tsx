@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Row, Section } from "../../ui/kit.tsx";
 import { useCollection } from "../../data/bus.ts";
 import { listNotes, noteExcerpt, noteTitle, searchNotes } from "../../data/notes.ts";
 import { noteThoughts } from "../../data/thoughts.ts";
@@ -22,19 +24,13 @@ function ThoughtMark({ note }: { note: Note }) {
   return <span className="shrink-0 text-xs text-dim">» {found.length}</span>;
 }
 
-function Row({ note }: { note: Note }) {
+function NoteRow({ note }: { note: Note }) {
   const excerpt = noteExcerpt(note);
-  return <li className="border-t last:border-b">
-    <Link to="/notes/$noteId" params={{ noteId: note.uid }} className="flex min-h-11 items-start gap-2.5 py-2 no-underline sm:min-h-0">
-      <span className="min-w-0 flex-1">
-        <span className="block break-words text-hi">{noteTitle(note)}</span>
-        {excerpt ? <span className="mt-0.5 block truncate text-xs text-dim">{excerpt}</span> : null}
-      </span>
-      <span className="flex shrink-0 items-baseline gap-2 text-xs text-dim">
-        <ThoughtMark note={note} />
-        <span>{shortDate(note.updated)}</span>
-      </span>
-    </Link>
+  return <li>
+    <Row href={"#/notes/" + note.uid} sub={excerpt || undefined}
+      end={<><ThoughtMark note={note} /><span>{shortDate(note.updated)}</span></>}>
+      {noteTitle(note)}
+    </Row>
   </li>;
 }
 
@@ -59,7 +55,7 @@ export function NotesPage() {
 
   return <main className="pb-4">
     <PageTitle title="notes" meta={`${all.length} notes`}>
-      <button type="button" onClick={fresh} className="mb-1 flex min-h-11 items-center text-sm text-dim transition-colors hover:text-foreground sm:min-h-0">+ new</button>
+      <Button type="button" onClick={fresh} className="mb-1">+ new</Button>
     </PageTitle>
 
     {/* A prompt line for the filter, separated from the page by a hairline. */}
@@ -67,23 +63,16 @@ export function NotesPage() {
       <span aria-hidden="true" className="text-dim">/</span>
       <Input type="search" value={query} placeholder="find in notes…" aria-label="Find in notes" className={BARE_INPUT}
         onChange={event => { lastQuery = event.target.value; setQuery(event.target.value); }} />
-      {query ? <button type="button" onClick={() => { lastQuery = ""; setQuery(""); }}
-        className="flex min-h-11 shrink-0 items-center text-xs text-dim transition-colors hover:text-foreground sm:min-h-0">
-        clear
-      </button> : null}
+      {query ? <Button type="button" onClick={() => { lastQuery = ""; setQuery(""); }}>clear</Button> : null}
     </div>
 
-    {groups.length ? groups.map(([title, notes]) => <section key={title} className="pt-[18px]">
-      <div className="flex items-baseline justify-between pb-1">
-        <h2 className="text-[10.5px] uppercase tracking-[0.06em] text-dim">{title}</h2>
-        <span className="text-xs text-dim">{notes.length}</span>
-      </div>
-      <ul>{notes.map(note => <Row key={note.uid} note={note} />)}</ul>
-    </section>) : <p className="pt-6 text-sm text-muted-foreground">
-      {searching ? <>No note matches “{query.trim()}”. <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => { lastQuery = ""; setQuery(""); }}>clear the search</button></>
-        : <>Nothing written yet. <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={fresh}>write the first note</button></>}
+    {groups.length ? groups.map(([title, notes], index) => <Section key={title} label={<span role="heading" aria-level={2}>{title}</span>} note={notes.length} className={index ? undefined : "mt-6"}>
+      <ul>{notes.map(note => <NoteRow key={note.uid} note={note} />)}</ul>
+    </Section>) : <p className="pt-6 text-sm text-muted-foreground">
+      {searching ? <>No note matches “{query.trim()}”. <Button type="button" variant="link" onClick={() => { lastQuery = ""; setQuery(""); }}>clear the search</Button></>
+        : <>Nothing written yet. <Button type="button" variant="link" onClick={fresh}>write the first note</Button></>}
     </p>}
 
-    <p className="pt-6 text-xs text-dim">Journal pages, history and recently deleted are still in the <a href={classicHref("/notes")} className="text-primary underline-offset-2 hover:underline">classic notes</a>.</p>
+    <p className="pt-6 text-xs text-dim">Journal pages, history and recently deleted are still in the <a href={classicHref("/notes")} className="text-primary underline underline-offset-2">classic notes</a>.</p>
   </main>;
 }
