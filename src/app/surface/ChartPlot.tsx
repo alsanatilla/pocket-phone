@@ -23,15 +23,16 @@ const LABELLED = 12;
 
 const ChartPlot = memo(function ChartPlot({ kind, rows, colors, names, unit, format }: PlotProps) {
   const id = useId().replace(/:/g, "");
-  const axis = <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: "var(--muted-foreground)", fontSize: 10 }} interval="preserveStartEnd" minTickGap={24} />;
+  // A chart has no frame and no grid: one hairline as the baseline, its labels small and dim.
+  const axis = <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: "var(--border)" }} tick={{ fill: "var(--dim)", fontSize: 10.5 }} interval="preserveStartEnd" minTickGap={24} />;
   const labelled = rows.length <= LABELLED && colors.length === 1;
-  const values = <LabelList dataKey="s0" position="top" offset={6} formatter={(value: unknown) => format(Number(value))} style={{ fill: "var(--foreground)", fontSize: 11 }} />;
+  const values = <LabelList dataKey="s0" position="top" offset={6} formatter={(value: unknown) => format(Number(value))} style={{ fill: "var(--dim)", fontSize: 10.5 }} />;
   const tooltip = <Tooltip cursor={{ fill: "var(--accent)" }} contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 12 }}
     formatter={(value: unknown, key: unknown) => [format(Number(value)) + (unit ? " " + unit : ""), names[Number(String(key).slice(1))] ?? ""]} />;
   return (
     <ResponsiveContainer width="100%" height="100%">
       {kind === "bar" ? (
-        <BarChart data={rows} margin={margin}>{axis}{tooltip}{colors.map((color, index) => <Bar key={index} dataKey={"s" + index} fill={color} radius={[2, 2, 0, 0]} maxBarSize={44} {...motion}>{labelled ? values : null}</Bar>)}</BarChart>
+        <BarChart data={rows} margin={margin}>{axis}{tooltip}{colors.map((color, index) => <Bar key={index} dataKey={"s" + index} fill={color} maxBarSize={44} {...motion}>{labelled ? values : null}</Bar>)}</BarChart>
       ) : kind === "line" ? (
         <LineChart data={rows} margin={margin}>{axis}{tooltip}{colors.map((color, index) => <Line key={index} dataKey={"s" + index} stroke={color} strokeWidth={2} dot={labelled ? { r: 2.5, fill: color, strokeWidth: 0 } : false} connectNulls {...motion}>{labelled ? values : null}</Line>)}</LineChart>
       ) : (

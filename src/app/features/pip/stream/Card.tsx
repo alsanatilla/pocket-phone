@@ -1,6 +1,4 @@
-import { memo, useMemo, useRef } from "react";
-import { Bell, Pin } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Fragment, memo, useMemo, useRef } from "react";
 import { JSONUIProvider, Renderer } from "@json-render/react";
 import type { Spec } from "@json-render/core";
 import { LegacyCard } from "../../../../client/pip-cards.jsx";
@@ -17,6 +15,7 @@ import { CardMenu } from "./CardMenu.tsx";
 // A card inside a reply, built while it streams. Only complete JSON lines count (the line being written is held
 // back), each element appears as soon as its line is complete, and elements that did not change keep their
 // identity, so nothing already on screen re-mounts or re-animates while the rest arrives. The JSON is never shown.
+// A card draws no frame of its own: a finished one ends with a line of notes and the word `more` (design rule D1).
 
 type Elements = Record<string, unknown>;
 
@@ -74,7 +73,7 @@ function visible(spec: Spec): boolean {
 
 /** Where a card will be, while its first lines arrive. */
 function Placeholder() {
-  return <div className="shimmer arrive my-3 h-28 rounded-lg" aria-hidden="true" />;
+  return <div className="shimmer arrive my-3 h-28" aria-hidden="true" />;
 }
 
 /** Where a card stands, so the person can pin, change or remove it: its chat, and whether this is the chat or Today. */
@@ -93,23 +92,29 @@ export const Card = memo(function Card({ source, closed, streaming, onAsk, at }:
   const alert = marks.alert && typeof marks.alert === "object" ? marks.alert as { below?: number; above?: number } : undefined;
   const told = alert && Number.isFinite(alert.below) ? "below " + alert.below : alert && Number.isFinite(alert.above) ? "above " + alert.above : "";
   const hasMenu = Boolean(at && marks.id && !streaming);
+  // Rule 4: the chat a pinned card comes from, with `from pip` as the note at the right.
+  const origin = at?.place === "today" ? at : null;
+  const notes = streaming ? [] : [pinned ? "pinned to today" : "", updated ? "updated " + stamp(updated) : "", told].filter(Boolean);
   return (
     <div className="not-prose relative my-3" data-card={marks.id || undefined}>
-      {/* Reserve a row: generated headings, figures and buttons can occupy any corner of the card. */}
-      {hasMenu || updated || told ? <div className="mb-1 flex min-w-0 items-center gap-2">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          {at?.place === "today" ? <Button variant="ghost" className="h-11 min-w-0 max-w-full justify-start px-0 text-xs text-foreground sm:h-9"
-            onClick={() => openPath("/pip?chat=" + encodeURIComponent(at.chatId))}>
-            <Pin aria-hidden="true" className="size-3.5 text-primary" /><span className="truncate">{at.chatTitle || "a chat"}</span>
-          </Button> : pinned ? <span className="inline-flex items-center gap-1.5"><Pin aria-hidden="true" className="size-3" />pinned to today</span> : null}
-          {updated ? <span className="whitespace-nowrap">updated <time dateTime={new Date(updated).toISOString()}>{stamp(updated)}</time></span> : null}
-          {told ? <span className="inline-flex items-center gap-1 whitespace-nowrap"><Bell aria-hidden="true" className="size-3 text-primary" />{told}</span> : null}
+      {origin ? (
+        <div className="flex items-baseline justify-between gap-3">
+          <button type="button" onClick={() => openPath("/pip?chat=" + encodeURIComponent(origin.chatId))}
+            className="min-h-11 min-w-0 truncate text-left text-[10.5px] tracking-[0.06em] text-dim hover:text-foreground sm:min-h-0">{origin.chatTitle || "a chat"}</button>
+          <span className="shrink-0 text-xs text-dim">from pip</span>
         </div>
-        {at && marks.id && hasMenu ? <CardMenu chatId={at.chatId} id={marks.id} pinned={pinned} place={at.place} locked={at.locked} source={source} alert={alert} onAsk={onAsk} /> : null}
-      </div> : null}
+      ) : null}
       <JSONUIProvider registry={registry} store={momentStore()} handlers={handlers}>
         <Renderer spec={spec} registry={registry} loading={streaming && !closed} />
       </JSONUIProvider>
+      {notes.length || hasMenu ? (
+        <div className={hasMenu ? "mt-1 flex min-h-11 items-center gap-3 sm:min-h-0" : "mt-1 flex items-center gap-3"}>
+          <p className="min-w-0 flex-1 text-xs text-dim">
+            {notes.map((note, index) => <Fragment key={index}>{index ? " · " : ""}<span>{note}</span></Fragment>)}
+          </p>
+          {at && marks.id && hasMenu ? <CardMenu chatId={at.chatId} id={marks.id} pinned={pinned} place={at.place} locked={at.locked} source={source} alert={alert} onAsk={onAsk} /> : null}
+        </div>
+      ) : null}
     </div>
   );
 });

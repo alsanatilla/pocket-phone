@@ -1,11 +1,9 @@
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { Surface } from "../../surface/Surface.tsx";
 import { useSurface } from "../../surface/useSurface.ts";
 import { PinnedCards } from "./PinnedCards.tsx";
 
 // Today is a surface: Pocket draws the standard one at once and, with a model connected, has it arranged for
-// the moment. The line at the bottom says which one you are looking at and lets you switch.
+// the moment. The line at the bottom says which one you are looking at and lets you switch: words, no chrome.
 
 export function TodayPage() {
   const { spec, store, status, error, arrange, standard } = useSurface();
@@ -16,19 +14,15 @@ export function TodayPage() {
       <PinnedCards />
       <Surface spec={spec} store={store} loading={status === "arranging"} />
 
-      <footer className="mt-8 flex items-center gap-3 border-t border-dashed pt-3">
-        <span className="flex items-center gap-1.5 text-xs text-dim" aria-live="polite">
-          <span aria-hidden="true" className={cn("size-1.5 rounded-full",
-            status === "arranging" ? "animate-pulse bg-primary" : failed ? "bg-destructive" : arranged ? "bg-primary" : "bg-muted-foreground")} />
-          {status === "arranging" ? "Arranging…" : arranged ? "Arranged for now" : "Standard layout"}
-        </span>
+      <footer className="mt-6 flex min-h-11 items-center gap-4 border-t pt-2 text-xs text-dim sm:min-h-0">
+        <span aria-live="polite">{status === "arranging" ? "Arranging…" : arranged ? "Arranged for now" : "Standard layout"}</span>
         <span className="flex-1" />
-        {arranged || failed ? <Button size="sm" variant="ghost" className="h-9 text-dim" onClick={standard}>standard</Button> : null}
-        {status !== "arranging" ? <Button size="sm" variant="outline" className="h-9" onClick={() => void arrange()}>{arranged ? "rearrange" : "arrange"}</Button> : null}
+        {arranged || failed ? <button type="button" onClick={standard} className="min-h-11 text-xs text-dim hover:text-foreground sm:min-h-0">standard</button> : null}
+        {status !== "arranging" ? <button type="button" onClick={() => void arrange()} className="min-h-11 text-xs text-dim hover:text-foreground sm:min-h-0">{arranged ? "rearrange" : "arrange"}</button> : null}
       </footer>
 
-      {failed && error ? <p className="mt-2 text-[11px] text-dim">{error}</p> : null}
-      {status === "standard" && error ? <p className="mt-2 text-[11px] text-dim">{error}</p> : null}
+      {failed && error ? <p className="mt-2 text-xs text-dim">{error}</p> : null}
+      {status === "standard" && error ? <p className="mt-2 text-xs text-dim">{error}</p> : null}
     </main>
   );
 }

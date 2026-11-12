@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { agenda, clock, clockText } from "../../client/planner.js";
+import { cn } from "@/lib/utils";
+import { clock, clockText } from "../../client/planner.js";
 import { activeAccount } from "../../client/workspace-storage.js";
 import { useCollection } from "../data/bus.ts";
 import { getTask, listTasks, completeTask, today } from "../data/tasks.ts";
@@ -10,34 +9,43 @@ import { addStep, createPrep, dailyNote, dailyNoteText, deferTask, endFocus, foc
 import type { Task } from "../data/types.ts";
 import { hrefFor } from "../lib/classic.ts";
 import { toast, toastError } from "../ui/toast/toast.ts";
-import { BARE_INPUT, FIELD, SendButton } from "../ui/SendButton.tsx";
+
+// Today's actions, drawn as Terminal rows and words: a block is a small label and hairlines, never a box; a field is
+// a prompt line; an action is a lower-case word. Live data stays live: the lists read the stores themselves.
 
 const attempt = (work: () => unknown) => { try { work(); } catch (error) { toastError(error); } };
+const LABEL = "text-[10.5px] uppercase tracking-[0.06em] text-dim";
+const ACTION = "min-h-11 text-xs text-dim hover:text-foreground disabled:text-dim sm:min-h-0";
+const FIELD_LINE = "flex min-h-11 items-center gap-2 border-t py-2 sm:min-h-0";
+const FIELD_INPUT = "min-w-0 flex-1 border-0 bg-transparent px-0 py-0 text-sm text-foreground placeholder:text-dim";
+const BARE_SELECT = "min-h-11 min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-foreground sm:min-h-0";
+
 function Block({ title, children }: { title: string; children: ReactNode }) {
-  return <section className="space-y-3 rounded-lg border bg-card p-4"><h2 className="text-xs font-medium text-primary first-letter:uppercase">{title}</h2>{children}</section>;
+  return <section className="arrive space-y-2"><h2 className={LABEL}>{title}</h2>{children}</section>;
 }
 function useNow(period = 1000) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), period); return () => clearInterval(id); }, [period]);
   return now;
 }
-const selectClass = "w-full min-w-0 rounded-md border bg-background p-2 text-sm text-foreground";
 function TaskSteps({ task }: { task: Task }) {
   const [text, setText] = useState("");
-  return <div className="space-y-2">
-    {task.steps.map((step, index) => <label key={index + step.text} className="flex items-start gap-2 py-1 text-sm">
-      <input type="checkbox" className="mt-1 accent-primary" checked={step.done} onChange={event => attempt(() => toggleStep(task.uid, index, step.text, event.target.checked))} />
-      <span className={step.done ? "text-muted-foreground line-through" : ""}>{step.text}</span>
+  return <div>
+    {task.steps.map((step, index) => <label key={index + step.text} className="flex min-h-11 items-start gap-2.5 border-t py-2 text-sm sm:min-h-0">
+      <input type="checkbox" checked={step.done} onChange={event => attempt(() => toggleStep(task.uid, index, step.text, event.target.checked))} className="peer sr-only" />
+      <span aria-hidden="true" className="shrink-0 text-dim peer-focus-visible:text-hi">[{step.done ? "x" : " "}]</span>
+      <span className={cn("min-w-0", step.done ? "text-dim line-through" : "text-hi")}>{step.text}</span>
     </label>)}
-    {!task.done ? <form className={FIELD} onSubmit={event => { event.preventDefault(); attempt(() => { addStep(task.uid, text); setText(""); }); }}>
-      <Input aria-label="New step" placeholder="add a step…" maxLength={500} value={text} onChange={event => setText(event.target.value)} className={BARE_INPUT} />
-      <SendButton label="Add step" disabled={!text.trim()} small />
+    {!task.done ? <form className={FIELD_LINE} onSubmit={event => { event.preventDefault(); attempt(() => { addStep(task.uid, text); setText(""); }); }}>
+      <span aria-hidden="true" className="text-dim">+</span>
+      <input aria-label="New step" placeholder="add a step…" maxLength={500} value={text} onChange={event => setText(event.target.value)} className={FIELD_INPUT} />
+      <button type="submit" disabled={!text.trim()} className={ACTION}>add</button>
     </form> : null}
   </div>;
 }
 function TaskNote({ task }: { task: Task }) {
   const note = useCollection(["notes.json"], () => task.source?.note_uid ? getNote(task.source.note_uid) : null, [task.source?.note_uid]);
-  return note ? <a className="block truncate text-xs text-primary" href={hrefFor("/notes/" + note.uid)}>↗ {noteTitle(note)}</a> : null;
+  return note ? <a className="block truncate text-xs text-primary underline-offset-2 hover:underline" href={hrefFor("/notes/" + note.uid)}>note: {noteTitle(note)}</a> : null;
 }
 
 export function FocusSession({ title }: { title?: string | null }) {
@@ -50,22 +58,29 @@ export function FocusSession({ title }: { title?: string | null }) {
   const remaining = session ? focusRemaining(session, now) : minutes * 60000;
   const done = Boolean(session && remaining <= 0);
   return <Block title={title ?? "focus"}>
-    {session ? <h3 className="text-base">{task?.text ?? session.title}</h3> : open.length ? <select aria-label="Focus task" className={selectClass} value={task?.uid ?? ""} onChange={event => attempt(() => selectTask(event.target.value))}>
-      {open.map(item => <option key={item.uid} value={item.uid}>{item.text}</option>)}
-    </select> : <p className="text-sm text-muted-foreground">No open task to focus on.</p>}
+    {session ? <p className="text-sm text-hi">{task?.text ?? session.title}</p> : open.length ? (
+      <label className={FIELD_LINE}>
+        <span aria-hidden="true" className="text-dim">›</span>
+        <select aria-label="Focus task" className={BARE_SELECT} value={task?.uid ?? ""} onChange={event => attempt(() => selectTask(event.target.value))}>
+          {open.map(item => <option key={item.uid} value={item.uid}>{item.text}</option>)}
+        </select>
+      </label>
+    ) : <p className="text-sm text-muted-foreground">No open task to focus on.</p>}
     {session || task ? <>
-      <div className="py-2 text-center font-pixel text-7xl leading-none text-primary" role="timer" aria-label="Focus time remaining">{done ? "done" : clockText(remaining)}</div>
-      {!session ? <div className="flex justify-center gap-2" aria-label="Focus duration">{[15, 25, 45].map(value => <Button key={value} size="sm" variant={minutes === value ? "secondary" : "ghost"} aria-pressed={minutes === value} onClick={() => setMinutes(value)}>{value} min</Button>)}</div> : null}
-      <div className="flex gap-2">
-        {!session ? <Button className="flex-1" onClick={() => attempt(() => task && startFocus(task.uid, minutes))}>start focus</Button>
+      <p className="text-[19px] font-medium leading-none text-hi" role="timer" aria-label="Focus time remaining">{done ? "done" : clockText(remaining)}</p>
+      {!session ? <div className="flex gap-4" aria-label="Focus duration">{[15, 25, 45].map(value => <button key={value} type="button" aria-pressed={minutes === value} onClick={() => setMinutes(value)}
+        className={cn(ACTION, minutes === value && "text-hi")}>{value} min</button>)}</div> : null}
+      <div className="flex gap-4">
+        {!session ? <button type="button" className={ACTION} onClick={() => attempt(() => task && startFocus(task.uid, minutes))}>start focus</button>
           : <>
-            {!done ? <Button className="flex-1" onClick={() => attempt(() => session.enabled ? clock.pause(session.uid) : clock.resume(session.uid))}>{session.enabled ? "pause" : "resume"}</Button> : null}
-            <Button variant="outline" className="flex-1" onClick={() => attempt(() => endFocus(session.uid))}>{done ? "finish session" : "end session"}</Button>
+            {!done ? <button type="button" className={ACTION} onClick={() => attempt(() => session.enabled ? clock.pause(session.uid) : clock.resume(session.uid))}>{session.enabled ? "pause" : "resume"}</button> : null}
+            <button type="button" className={ACTION} onClick={() => attempt(() => endFocus(session.uid))}>{done ? "finish session" : "end session"}</button>
           </>}
       </div>
       {task ? <>
         <TaskSteps key={task.uid} task={task} /><TaskNote task={task} />
-        {!task.done ? <Button variant="outline" size="sm" className="h-9" aria-label={"Complete " + task.text} onClick={() => attempt(() => { if (!getTask(task.uid)?.done) completeTask(task.uid); if (session) endFocus(session.uid); toast("Done."); })}>complete task</Button> : <p className="text-xs text-muted-foreground">Task completed</p>}
+        {!task.done ? <button type="button" className={ACTION} aria-label={"Complete " + task.text} onClick={() => attempt(() => { if (!getTask(task.uid)?.done) completeTask(task.uid); if (session) endFocus(session.uid); toast("Done."); })}>complete task</button>
+          : <p className="text-xs text-dim">task completed</p>}
       </> : null}
     </> : null}
   </Block>;
@@ -83,19 +98,19 @@ export function EventPrep({ title }: { title?: string | null }) {
   const sameDay = today(event.when) === today(now);
   const time = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return <Block title={title ?? "up next"}>
-    <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+    <div className="flex items-baseline justify-between gap-2 text-xs text-dim">
       <span>{sameDay ? time : when.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }) + " · " + time} · {event.minutes} min</span>
-      <span>{until <= 0 ? "now" : sameDay && until <= 60 ? "in " + until + " min" : ""}</span>
+      <span className="shrink-0">{until <= 0 ? "now" : sameDay && until <= 60 ? "in " + until + " min" : ""}</span>
     </div>
-    <h3 className="text-xl">{event.title}</h3>
-    <a href={hrefFor("/calendar/" + event.uid)} className="inline-block text-xs text-primary">open event ↗</a>
-    {task ? <div className="space-y-3 border-t pt-3">
-      <div className="flex items-center justify-between gap-2"><h4 className="text-sm">{task.text}</h4><Button size="sm" variant="ghost" onClick={() => attempt(() => linkPrep(event.uid, ""))}>unlink</Button></div>
+    <p className="text-sm text-hi">{event.title}</p>
+    <a href={hrefFor("/calendar/" + event.uid)} className="inline-flex min-h-11 items-center text-xs text-primary underline-offset-2 hover:underline sm:min-h-0">open event</a>
+    {task ? <div className="space-y-2 border-t pt-2">
+      <div className="flex items-center justify-between gap-3"><p className="text-sm text-hi">{task.text}</p><button type="button" className={ACTION} onClick={() => attempt(() => linkPrep(event.uid, ""))}>unlink</button></div>
       <TaskSteps key={task.uid} task={task} /><TaskNote task={task} />
-      {task.done ? <p className="text-xs text-movement">Ready</p> : <Button variant="outline" size="sm" onClick={() => attempt(() => { if (!getTask(task.uid)?.done) completeTask(task.uid); })}>prep done</Button>}
-    </div> : <div className="flex flex-wrap gap-2 border-t pt-3">
-      <Button variant="outline" size="sm" onClick={() => attempt(() => createPrep(event.uid))}>+ prep checklist</Button>
-      {open.length ? <select aria-label="Link preparation task" className={selectClass} value="" onChange={change => attempt(() => linkPrep(event.uid, change.target.value))}>
+      {task.done ? <p className="text-xs text-dim">ready</p> : <button type="button" className={ACTION} onClick={() => attempt(() => { if (!getTask(task.uid)?.done) completeTask(task.uid); })}>prep done</button>}
+    </div> : <div className="flex flex-wrap items-center gap-4 border-t pt-2">
+      <button type="button" className={ACTION} onClick={() => attempt(() => createPrep(event.uid))}>prep checklist</button>
+      {open.length ? <select aria-label="Link preparation task" className={cn(BARE_SELECT, "text-xs text-dim")} value="" onChange={change => attempt(() => linkPrep(event.uid, change.target.value))}>
         <option value="">link a task…</option>{open.map(item => <option key={item.uid} value={item.uid}>{item.text}</option>)}
       </select> : null}
     </div>}
@@ -108,12 +123,15 @@ function DayNote({ day }: { day: string }) {
   const [version, setVersion] = useState(note?.updated ?? 0);
   const [dirty, setDirty] = useState(false);
   useEffect(() => { if (!dirty) { setText(dailyNoteText(day)); setVersion(note?.updated ?? 0); } }, [note?.updated, day, dirty]);
-  return <form className="space-y-2 border-t pt-3" onSubmit={event => {
+  return <form className="space-y-1 border-t pt-2" onSubmit={event => {
     event.preventDefault(); attempt(() => { const saved = saveDailyNote(text, day, version); setVersion(saved.updated); setDirty(false); toast("Saved."); });
   }}>
-    <label htmlFor="today-note" className="text-xs text-muted-foreground">one line about today</label>
-    <Input id="today-note" maxLength={2000} value={text} onChange={event => { setText(event.target.value); setDirty(true); }} placeholder="worth remembering…" />
-    <Button type="submit" size="sm" variant="outline" disabled={!text.trim() || !dirty}>save note</Button>
+    <p id="today-note-label" className={LABEL}>one line about today</p>
+    <label className={FIELD_LINE}>
+      <span aria-hidden="true" className="text-dim">›</span>
+      <input id="today-note" aria-labelledby="today-note-label" maxLength={2000} value={text} onChange={event => { setText(event.target.value); setDirty(true); }} placeholder="worth remembering…" className={FIELD_INPUT} />
+      <button type="submit" disabled={!text.trim() || !dirty} className={ACTION}>save</button>
+    </label>
   </form>;
 }
 export function DayReview({ title }: { title?: string | null }) {
@@ -127,20 +145,27 @@ export function DayReview({ title }: { title?: string | null }) {
     attempt(() => { deferTask(task.uid, due); setUndo({ uid: task.uid, due: task.due, next: due }); });
   }
   return <Block title={title ?? "close the day"}>
-    <div className="flex items-baseline gap-2"><span className="font-pixel text-4xl text-movement">{finished.length}</span><span className="text-xs text-muted-foreground">done today</span></div>
-    {finished.length ? <details className="text-xs"><summary className="cursor-pointer text-muted-foreground">completed</summary><ul className="mt-2 space-y-1">{finished.map(task => <li key={task.uid}>{task.text}</li>)}</ul></details> : null}
-    {loose.length ? <ul className="divide-y">{loose.map(task => <li key={task.uid} className="py-3">
-      <p className="text-sm">{task.text}</p><div className="mt-2 flex flex-wrap gap-1">
-        <Button size="sm" variant="outline" aria-label={"Move " + task.text + " to tomorrow"} onClick={() => move(task, tomorrow())}>tomorrow ↗</Button>
-        <Button size="sm" variant="ghost" aria-label={"Defer " + task.text} onClick={() => move(task, "")}>later</Button>
-        <Button size="sm" variant="ghost" aria-label={"Complete " + task.text} onClick={() => attempt(() => { if (!getTask(task.uid)?.done) completeTask(task.uid); })}>done</Button>
+    <div>
+      <p className={LABEL}>done today</p>
+      <p className="mt-1 text-[19px] font-medium leading-none text-hi">{finished.length}</p>
+    </div>
+    {finished.length ? <details>
+      <summary className="flex min-h-11 cursor-pointer items-center text-xs text-dim hover:text-foreground sm:min-h-0">completed</summary>
+      <ul className="mt-1">{finished.map(task => <li key={task.uid} className="border-t py-2 text-sm text-muted-foreground">{task.text}</li>)}</ul>
+    </details> : null}
+    {loose.length ? <ul>{loose.map(task => <li key={task.uid} className="border-t py-2 last:border-b">
+      <p className="text-sm text-hi">{task.text}</p>
+      <div className="mt-1 flex flex-wrap gap-4">
+        <button type="button" className={ACTION} aria-label={"Move " + task.text + " to tomorrow"} onClick={() => move(task, tomorrow())}>tomorrow</button>
+        <button type="button" className={ACTION} aria-label={"Defer " + task.text} onClick={() => move(task, "")}>later</button>
+        <button type="button" className={ACTION} aria-label={"Complete " + task.text} onClick={() => attempt(() => { if (!getTask(task.uid)?.done) completeTask(task.uid); })}>done</button>
       </div>
     </li>)}</ul> : <p className="text-sm text-muted-foreground">Nothing left due today.</p>}
-    {undo ? <Button size="sm" variant="ghost" onClick={() => attempt(() => {
+    {undo ? <button type="button" className={ACTION} onClick={() => attempt(() => {
       if (getTask(undo.uid)?.due !== undo.next) throw new Error("This task changed since you moved it.");
       deferTask(undo.uid, undo.due); setUndo(null);
-    })}>undo move</Button> : null}
-    {first ? <div className="border-t pt-3"><p className="text-xs text-muted-foreground">tomorrow</p><p className="mt-1 text-sm">{first.text}</p></div> : null}
+    })}>undo move</button> : null}
+    {first ? <div className="border-t pt-2"><p className={LABEL}>tomorrow</p><p className="mt-1 text-sm text-hi">{first.text}</p></div> : null}
     <DayNote key={activeAccount() + day} day={day} />
   </Block>;
 }
