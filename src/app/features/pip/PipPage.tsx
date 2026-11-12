@@ -24,13 +24,14 @@ function Empty({ onAsk }: { onAsk: (prompt: string) => void }) {
   const { due } = daySummary(listTasks(), today());
   const ideas = starters({ enabled, overdue: due.filter(task => task.due < today()).length, thoughts: openThoughts().length });
   return (
-    <div className="space-y-4 py-8">
-      <p className="font-pixel text-5xl leading-none text-primary">pip</p>
+    <div className="space-y-[18px] py-6">
       <p className="max-w-prose text-sm text-muted-foreground">Ask about anything you keep in Pocket. Pip only reads what you allow in settings, and nothing is saved without you.</p>
-      <div className="grid gap-2">
+      <div>
         {ideas.map(idea => (
-          <button key={idea.label} onClick={() => onAsk(idea.prompt)} className="rounded-lg border bg-card px-3.5 py-3 text-left text-sm transition-colors hover:border-primary">
-            {idea.label}
+          <button key={idea.label} onClick={() => onAsk(idea.prompt)}
+            className="flex min-h-11 w-full items-start gap-2.5 border-t py-2 text-left text-sm text-hi transition-colors last:border-b hover:bg-secondary sm:min-h-0">
+            <span aria-hidden="true" className="text-primary">›</span>
+            <span className="min-w-0">{idea.label}</span>
           </button>
         ))}
       </div>

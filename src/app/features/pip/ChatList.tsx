@@ -1,6 +1,4 @@
 import { useRef } from "react";
-import { MoreHorizontal, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
@@ -11,8 +9,7 @@ import { confirm, prompt } from "../../ui/dialog/dialog.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 
 // Every conversation, pinned first, then the most recent day by day, with the one big chat above them all. Rename,
-// pin and delete live in each row's menu; the chat you are in is marked with an amber edge and its title, not only
-// a lighter row.
+// pin and delete live in each row's menu; the chat you are in is the lighter row, with no other mark.
 
 const when = (at: number) => {
   const date = new Date(at), today = new Date();
@@ -51,38 +48,39 @@ export function ChatList({ open, onOpenChange, current, homeCurrent, onPick, onH
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="left" className="w-[85vw] max-w-sm gap-0 p-0">
-        <SheetHeader className="border-b px-4 pt-3 pb-2.5 pr-12">
-          <SheetTitle className="font-pixel text-2xl leading-none font-normal">chats</SheetTitle>
-          <SheetDescription className="text-[11px] uppercase tracking-[0.08em] text-dim">{separate.length} {separate.length === 1 ? "conversation" : "conversations"}</SheetDescription>
+        <SheetHeader className="flex-row items-baseline gap-3 border-b px-4 pt-3 pb-2 pr-12">
+          <SheetTitle className="text-[10.5px] font-normal uppercase tracking-[0.06em] text-dim">chats</SheetTitle>
+          <SheetDescription className="text-xs text-dim">{separate.length} {separate.length === 1 ? "conversation" : "conversations"}</SheetDescription>
+          <button type="button" onClick={onNew} className="ml-auto flex min-h-11 items-center text-xs text-dim transition-colors hover:text-foreground sm:min-h-0">+ new chat</button>
         </SheetHeader>
 
-        <div className="px-3 pt-3 pb-1">
-          <Button className="h-10 w-full" onClick={onNew}><Plus className="size-4" /> new chat</Button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-          <ul className="pt-1">
-            <li className={cn("group flex items-center rounded-md border-l-2", homeCurrent ? "border-primary bg-accent" : "border-transparent hover:bg-accent/50")}>
-              <button type="button" className="min-w-0 flex-1 px-2 py-2.5 text-left" onClick={onHome} aria-current={homeCurrent ? "page" : undefined}>
-                <p className={cn("truncate text-sm", homeCurrent && "text-primary")}>pip</p>
-                <p className="mt-0.5 text-[11px] leading-tight text-dim">one ongoing conversation · {messages} {messages === 1 ? "message" : "messages"}</p>
+        <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+          <ul>
+            <li className={cn("flex items-center border-b", homeCurrent && "bg-secondary")}>
+              <button type="button" className="min-h-11 min-w-0 flex-1 px-4 py-2 text-left sm:min-h-0" onClick={onHome} aria-current={homeCurrent ? "page" : undefined}>
+                <span className="block truncate text-sm text-hi">pip</span>
+                <span className="mt-0.5 block truncate text-xs text-dim">one ongoing conversation · {messages} {messages === 1 ? "message" : "messages"}</span>
               </button>
             </li>
           </ul>
-          {groups.length ? groups.map(([title, list]) => <section key={title} className="pt-3 first:pt-1">
-            <h3 className="flex items-baseline justify-between px-2 pb-1 text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
-              {title}<span className="text-dim">{list.length}</span>
-            </h3>
+          {groups.length ? groups.map(([title, list]) => <section key={title} className="pt-[18px] first:pt-0">
+            <div className="flex items-baseline justify-between px-4 pb-1">
+              <h3 className="text-[10.5px] uppercase tracking-[0.06em] text-dim">{title}</h3>
+              <span className="text-xs text-dim">{list.length}</span>
+            </div>
             <ul>
               {list.map(chat => {
                 const active = chat.uid === current;
-                return <li key={chat.uid} className={cn("group flex items-center rounded-md border-l-2", active ? "border-primary bg-accent" : "border-transparent hover:bg-accent/50")}>
-                  <button type="button" className="min-w-0 flex-1 px-2 py-2.5 text-left" onClick={() => onPick(chat.uid)} aria-current={active ? "page" : undefined}>
-                    <p className={cn("truncate text-sm", active && "text-primary")}>{chat.title || "untitled"}</p>
-                    <p className="mt-0.5 text-[11px] leading-tight text-dim">{when(chat.updated)} · {chat.turns.length} {chat.turns.length === 1 ? "message" : "messages"}</p>
+                return <li key={chat.uid} className={cn("flex items-center border-t last:border-b", active && "bg-secondary")}>
+                  <button type="button" className="min-h-11 min-w-0 flex-1 px-4 py-2 text-left sm:min-h-0" onClick={() => onPick(chat.uid)} aria-current={active ? "page" : undefined}>
+                    <span className="block truncate text-sm text-hi">{chat.title || "untitled"}</span>
+                    <span className="mt-0.5 block truncate text-xs text-dim">{when(chat.updated)} · {chat.turns.length} {chat.turns.length === 1 ? "message" : "messages"}</span>
                   </button>
                   <DropdownMenu>
-                    <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="mr-1 size-9 text-dim" aria-label={"Options for " + (chat.title || "untitled")}><MoreHorizontal /></Button></DropdownMenuTrigger>
+                    <DropdownMenuTrigger asChild>
+                      <button type="button" aria-label={"Options for " + (chat.title || "untitled")}
+                        className="flex min-h-11 shrink-0 items-center px-4 text-xs text-dim transition-colors hover:text-foreground data-[state=open]:text-foreground sm:min-h-0">more</button>
+                    </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem onSelect={guard(async () => { const name = await prompt({ title: "Rename chat", value: chat.title, maxLength: 100 }); if (name?.trim()) renameChat(chat.uid, name); })}>rename</DropdownMenuItem>
                       <DropdownMenuItem onSelect={guard(() => pinChat(chat.uid, !chat.pinned))}>{chat.pinned ? "unpin" : "pin"}</DropdownMenuItem>
@@ -94,7 +92,7 @@ export function ChatList({ open, onOpenChange, current, homeCurrent, onPick, onH
                 </li>;
               })}
             </ul>
-          </section>) : <p className="px-2 pt-6 text-sm text-muted-foreground">No chats yet. <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={onNew}>start one</button>.</p>}
+          </section>) : <p className="px-4 pt-6 text-sm text-muted-foreground">No chats yet. <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={onNew}>start one</button>.</p>}
         </div>
       </SheetContent>
     </Sheet>

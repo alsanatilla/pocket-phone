@@ -2,35 +2,45 @@ import { useState, type ReactNode } from "react";
 import {
   AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { BARE_INPUT } from "../SendButton.tsx";
 import { useOpenDialog, type ChooseRequest, type ConfirmRequest, type OpenDialog, type PromptRequest } from "./dialog.ts";
 
 // Draws the open dialog (see dialog.ts) with shadcn's AlertDialog: focus trap, Escape and an inert page come
-// from Radix. Escape, "cancel" and dismissing resolve as cancelled.
+// from Radix. Escape, "cancel" and dismissing resolve as cancelled. It floats, so it is one of the few surfaces:
+// a hairline, a small radius, no shadow; its actions are words, its field a prompt line.
 
 type Resolve = (value: unknown) => void;
 
+const WORD = "h-auto min-h-11 shrink-0 border-0 bg-transparent px-0 text-sm shadow-none hover:bg-transparent dark:bg-transparent dark:hover:bg-transparent sm:min-h-0";
+const BARE_AREA = "min-h-24 w-full resize-none rounded-none border-0 bg-transparent p-0 text-sm shadow-none placeholder:text-dim focus-visible:ring-0 dark:bg-transparent";
+
+function Cancel() {
+  return <AlertDialogCancel type="button" className={WORD + " text-dim hover:text-foreground"}>cancel</AlertDialogCancel>;
+}
+
+function Submit({ children, danger }: { children: ReactNode; danger?: boolean }) {
+  return <button type="submit" autoFocus className={danger ? "min-h-11 text-sm text-destructive sm:min-h-0" : "min-h-11 text-sm text-primary hover:text-hi sm:min-h-0"}>{children}</button>;
+}
+
 function Frame({ title, description, children, footer, onSubmit }: { title: string; description?: string; children?: ReactNode; footer: ReactNode; onSubmit?: () => void }) {
   return (
-    <form onSubmit={event => { event.preventDefault(); onSubmit?.(); }} className="grid gap-4">
-      <AlertDialogHeader>
-        <AlertDialogTitle className="font-pixel text-2xl font-normal leading-tight">{title}</AlertDialogTitle>
+    <form onSubmit={event => { event.preventDefault(); onSubmit?.(); }} className="grid gap-3">
+      <AlertDialogHeader className="place-items-start gap-1 text-left">
+        <AlertDialogTitle className="text-sm font-medium leading-tight text-hi">{title}</AlertDialogTitle>
         {description ? <AlertDialogDescription>{description}</AlertDialogDescription> : null}
       </AlertDialogHeader>
       {children}
-      <AlertDialogFooter>{footer}</AlertDialogFooter>
+      <AlertDialogFooter className="flex-row items-center justify-end border-t pt-1">{footer}</AlertDialogFooter>
     </form>
   );
 }
 
-const Cancel = () => <AlertDialogCancel type="button">cancel</AlertDialogCancel>;
-
 function ConfirmBody({ request, resolve }: { request: ConfirmRequest; resolve: Resolve }) {
   return (
     <Frame title={request.title} description={request.message} onSubmit={() => resolve(true)}
-      footer={<><Cancel /><Button type="submit" variant={request.danger ? "destructive" : "default"} autoFocus>{request.confirmLabel}</Button></>} />
+      footer={<><Cancel /><Submit danger={request.danger}>{request.confirmLabel}</Submit></>} />
   );
 }
 
@@ -39,10 +49,16 @@ function PromptBody({ request, resolve }: { request: PromptRequest; resolve: Res
   const field = { value, placeholder: request.placeholder, maxLength: request.maxLength, autoFocus: true, "aria-label": request.title };
   return (
     <Frame title={request.title} description={request.hint} onSubmit={() => resolve(value)}
-      footer={<><Cancel /><Button type="submit">{request.okLabel ?? "save"}</Button></>}>
+      footer={<><Cancel /><Submit>{request.okLabel ?? "save"}</Submit></>}>
       {request.multiline
-        ? <Textarea {...field} rows={5} onChange={event => setValue(event.target.value)} />
-        : <Input {...field} type={request.password ? "password" : "text"} onChange={event => setValue(event.target.value)} />}
+        ? <label className="flex items-start gap-2 border-t py-2">
+            <span aria-hidden="true" className="pt-0.5 text-dim">›</span>
+            <Textarea {...field} rows={5} onChange={event => setValue(event.target.value)} className={BARE_AREA} />
+          </label>
+        : <label className="flex items-center gap-2 border-t">
+            <span aria-hidden="true" className="text-dim">›</span>
+            <Input {...field} type={request.password ? "password" : "text"} onChange={event => setValue(event.target.value)} className={BARE_INPUT} />
+          </label>}
     </Frame>
   );
 }
@@ -52,8 +68,8 @@ function ChooseBody({ request, resolve }: { request: ChooseRequest; resolve: Res
     <Frame title={request.title} footer={<Cancel />}>
       <div className="flex max-h-[50dvh] flex-col overflow-y-auto">
         {request.options.map((option, index) => (
-          <Button key={index} type="button" variant="ghost" className="h-auto min-h-11 justify-start whitespace-normal border-t border-dashed text-left"
-            onClick={() => resolve(index)}>{option}</Button>
+          <button key={index} type="button" onClick={() => resolve(index)}
+            className="flex min-h-11 items-center border-t py-2 text-left text-sm text-hi transition-colors last:border-b hover:bg-secondary sm:min-h-0">{option}</button>
         ))}
       </div>
     </Frame>
@@ -71,7 +87,7 @@ export function DialogHost() {
   const dialog = useOpenDialog();
   return (
     <AlertDialog open={Boolean(dialog)} onOpenChange={open => { if (!open && dialog) dialog.resolve(dialog.request.kind === "confirm" ? false : null); }}>
-      <AlertDialogContent>
+      <AlertDialogContent className="rounded-sm border bg-popover p-4 shadow-none">
         {dialog ? <Body key={dialog.id} dialog={dialog} /> : null}
       </AlertDialogContent>
     </AlertDialog>

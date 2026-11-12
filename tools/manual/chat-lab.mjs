@@ -208,7 +208,7 @@ const LONG_CHAT = chatRecord('lablong', 'Schlaf und Training', [{
   uid: 'long-turn-1', text: 'Wie hab ich geschlafen und was soll ich heute trainieren? Bitte mit Karte und Quellen.',
   context: [], created: NOW - 12 * MINUTE, updated: NOW - 11 * MINUTE, owner: 'phone', attempt: 'attempt-long',
   answer: LONG_ANSWER, reasoning: 'Ich schaue zuerst in die Schlafdaten und danach in den Kalender …', error: '',
-  status: 'done', usage: { runtime: 'pocket-server' }, activity: longActivity,
+  status: 'done', usage: { runtime: 'pocket-server', input_tokens: 12400, output_tokens: 3100, request_identity: 'compatible|' + CONFIG.baseUrl + '|' + CONFIG.model }, activity: longActivity,
   sources: [{ href: 'https://example.com/hrv', title: 'HRV and readiness' }, { href: LONG_URL, title: 'Schlaf, HRV und Ruhepuls' }],
   phase: 'done',
 }]);
@@ -287,6 +287,16 @@ const MEMORY_ROWS = [
 ];
 const MEMORY_CHAT = 'lablong';
 
+// Pip on its own and the settings screen: two jobs, one whose last run failed, and the two accounts a person has
+// connected, so both pages show what they show after being used rather than an empty first visit.
+const JOB_ROWS = [
+  { kind: 'checkin', title: 'Morning check-in', time: '07:30', days: [1, 2, 3, 4, 5], delivery: 'notify' },
+  {
+    kind: 'watch', title: 'Bike prices', prompt: 'Tell me when a used road bike under 900 € shows up near Berlin.',
+    every: 120, activeHours: { start: '08:00', end: '22:00' }, delivery: 'notify',
+  },
+];
+
 // The notes and tasks lists: six notes (one pinned, one title as long as a phone line allows) and tasks in every
 // group the page can draw (overdue, today with one done, this week with steps, later).
 const NOTE_TITLE_120 = 'Notes from the harbour walks, the fish market and the ferry terminal, with a long stop on the pier before the rain came.';
@@ -340,6 +350,45 @@ function labDocuments() {
   };
 }
 
+/** A key on the account, sealed the way the vault stores it; unlike saveKey it makes no DNS lookup. */
+async function seedKey(ctx, provider, baseUrl, key) {
+  const endpoint = ctx.keys.endpoint(provider, baseUrl);
+  await ctx.execute({
+    sql: `INSERT INTO pocket_pip_keys (user_id, endpoint, provider, sealed, hint, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, endpoint) DO UPDATE SET provider = excluded.provider, sealed = excluded.sealed, hint = excluded.hint, updated_at = excluded.updated_at`,
+    args: [USER, endpoint, provider, ctx.secrets.seal(USER, { provider, endpoint, key }), key.slice(-4), NOW],
+  });
+}
+
+/** The settings screen's data: two connected accounts, how Pip is set up, and some of what it may read. */
+async function seedSettings(page, ctx) {
+  await ctx.execute({ sql: 'DELETE FROM pocket_pip_keys WHERE user_id = ?', args: [USER] });
+  await seedKey(ctx, 'compatible', CONFIG.baseUrl, 'lab-opencode-key-1234');
+  await seedKey(ctx, 'compatible', 'https://openrouter.ai/api/v1', 'lab-openrouter-key-5678');
+  await page.evaluate(({ scope, endpoint, config }) => {
+    localStorage.setItem(scope + 'pocket:pip-settings', JSON.stringify(config));
+    localStorage.setItem(scope + 'pocket:pip-access:compatible|' + endpoint, JSON.stringify(['notes', 'tasks', 'thoughts']));
+  }, { scope: `pocket:account:${USER}:`, endpoint: CONFIG.baseUrl, config: CONFIG });
+}
+
+/** The jobs screen's data: its own key and settings, two routines, and a failed run on the watch. */
+async function seedJobs(ctx) {
+  for (const table of ['pocket_pip_routines', 'pocket_pip_routine_runs', 'pocket_pip_routine_memory', 'pocket_pip_background']) {
+    await ctx.execute({ sql: 'DELETE FROM ' + table + ' WHERE user_id = ?', args: [USER] });
+  }
+  await ctx.background.saveBackground(USER, {
+    ...CONFIG, grants: ['notes', 'tasks', 'thoughts'], dailyTokens: 200_000, timezone: 'Europe/Berlin', enabled: true, useAccountKey: false,
+  }, 'lab-background-key-12345678');
+  let state = null;
+  for (const row of JOB_ROWS) state = await ctx.background.saveRoutine(USER, row);
+  const failed = state.routines.find(routine => routine.title === 'Bike prices');
+  await ctx.background.recordRun(USER, failed.id, { status: 'failed', error: 'The provider did not answer (502).' }, NOW - 50 * MINUTE);
+  await ctx.execute({
+    sql: 'UPDATE pocket_pip_routines SET last_run = ?, last_error = ? WHERE user_id = ? AND id = ?',
+    args: [NOW - 50 * MINUTE, 'The provider did not answer (502).', USER, failed.id],
+  });
+}
+
 const STATES = [
   {
     name: 'empty',
@@ -354,7 +403,7 @@ const STATES = [
       await openStaticChat(page, ctx, 'long', 'lablong', 'Was die Werte sagen');
       await until(page, 'long', 'the rendered table and code', () => Boolean(document.querySelector('main table')) && Boolean(document.querySelector('main pre')));
     },
-    text: ['Was die Werte sagen', 'Intervalle', 'const pace = distance / time;', 'Notes + Tasks + Calendar + Web · 5 steps', LONG_WORD, 'sehr-langer-pfad-mit-vielen-segmenten', 'HRV and readiness'],
+    text: ['Was die Werte sagen', 'Intervalle', 'const pace = distance / time;', '5 steps · 16 s', LONG_WORD, 'sehr-langer-pfad-mit-vielen-segmenten', 'HRV and readiness'],
     selectors: ['main table', 'main pre', '[data-card="klong01"]', '[aria-label="Card options"]'],
   },
   {
@@ -520,6 +569,61 @@ const STATES = [
     text: ['What pip remembers about you. It reads this in every reply.', 'Nothing yet. Pip remembers lasting things you tell it, and you can add some here.', 'remember'],
     selectors: ['input[placeholder="add something pip should remember"]'],
     scroll: 'top',
+  },
+  {
+    name: 'settings',
+    async run(page, ctx) {
+      await seedSettings(page, ctx);
+      await page.goto(ctx.origin + '/#/settings', { waitUntil: 'domcontentloaded' });
+      await until(page, 'settings', 'the connected accounts', () => document.body.innerText.includes('OpenCode Go') && document.body.innerText.includes('connected') && document.body.innerText.includes('OpenRouter'));
+    },
+    text: ['settings', 'AI connections', 'OpenCode Go', 'OpenRouter', 'Anthropic', 'connected', 'what pip may read', 'this month'],
+    scroll: 'top',
+    async check(page) {
+      const notes = await page.evaluate(() => [...document.querySelectorAll('[role="switch"]')]
+        .find(node => node.getAttribute('aria-label') === 'Notes')?.getAttribute('aria-checked'));
+      if (notes !== 'true') throw new Error('the seeded read access is not shown');
+    },
+  },
+  {
+    name: 'jobs',
+    async run(page, ctx) {
+      await seedJobs(ctx);
+      await page.goto(ctx.origin + '/#/jobs', { waitUntil: 'domcontentloaded' });
+      await until(page, 'jobs', 'the two jobs and the failed run', () => document.body.innerText.includes('Morning check-in') && document.body.innerText.includes('Bike prices') && document.body.innerText.includes('last failed'));
+    },
+    text: ['jobs', 'Morning check-in', 'Bike prices', 'last failed', 'recent runs'],
+    scroll: 'top',
+  },
+  {
+    name: 'dialog',
+    async run(page, ctx) {
+      await openStaticChat(page, ctx, 'dialog', 'lablong', 'Was die Werte sagen');
+      await page.click('button[aria-label="All chats"]');
+      await until(page, 'dialog', 'the options for the chat', () => Boolean(document.querySelector('button[aria-label="Options for Schlaf und Training"]')));
+      await page.click('button[aria-label="Options for Schlaf und Training"]');
+      await until(page, 'dialog', 'the rename item', () => Boolean(document.querySelector('[role="menu"] [role="menuitem"]')));
+      await page.click('[role="menu"] [role="menuitem"]');
+      await until(page, 'dialog', 'the rename prompt', () => Boolean(document.querySelector('[role="alertdialog"]')));
+    },
+    text: ['Rename chat', 'cancel', 'save'],
+    selectors: ['[role="alertdialog"]'],
+    scroll: 'keep',
+  },
+  {
+    name: 'model-list',
+    async run(page, ctx) {
+      await openStaticChat(page, ctx, 'model-list', 'lablong', 'Was die Werte sagen');
+      await page.click('button[aria-label="Choose model"]');
+      await until(page, 'model-list', 'the model list', () => Boolean(document.querySelector('[aria-label="Chat models"]')));
+      await untilFor(page, 'model-list', 'the model list to finish loading', 20000, () => {
+        const list = document.querySelector('[aria-label="Chat models"]');
+        return Boolean(list) && !list.innerText.includes('Loading models') && list.innerText.includes('connect');
+      });
+    },
+    text: ['OpenCode Go', 'GLM 5.3', 'connect'],
+    selectors: ['[aria-label="Chat models"]'],
+    scroll: 'keep',
   },
   {
     name: 'thinking',
@@ -966,6 +1070,9 @@ async function main() {
     const objects = await import('file://' + join(ROOT, 'src/server/objects.js'));
     const workspace = await import('file://' + join(ROOT, 'src/server/workspace.js'));
     const memory = await import('file://' + join(ROOT, 'src/server/pip-memory-store.js'));
+    const secrets = await import('file://' + join(ROOT, 'src/server/secrets.js'));
+    const keys = await import('file://' + join(ROOT, 'src/server/pip-keys.js'));
+    const background = await import('file://' + join(ROOT, 'src/server/pip-background.js'));
     const { ensureSchema, execute } = database;
     await ensureSchema();
     await execute({
@@ -998,7 +1105,7 @@ async function main() {
     for (const chat of [EMPTY_CHAT, LONG_CHAT, FAILED_CHAT, APPROVAL_CHAT, PINNED_CHAT, HOME_EARLIER_CHAT, HOME_CURRENT_CHAT]) await objects.writeObject(USER, 'chats', chat);
     await workspace.syncDocuments(USER, labDocuments());
 
-    const ctx = { browser: null, origin, out, eventsSecret, insertRun, finishRun, signInLink: auth.signInLink, memory };
+    const ctx = { browser: null, origin, out, eventsSecret, insertRun, finishRun, signInLink: auth.signInLink, memory, execute, secrets, keys, background };
     browser = ctx.browser = await launchBrowser();
     await signIn(ctx);
     console.log('chat lab → ' + out);

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ModelPicker } from "./ModelPicker.tsx";
-import { X } from "lucide-react";
 import { SendButton, StopButton } from "../../ui/SendButton.tsx";
 import { Textarea } from "@/components/ui/textarea";
 import { removeSource, setDraft, type Chat } from "../../data/chats.ts";
@@ -42,13 +41,14 @@ export function PipComposer({ chat, busy, initial, onSend, onStop }: { chat: Cha
   return (
     <form onSubmit={submit} className="border-t pt-1">
       {chat.context.length ? (
-        <div className="mb-2 flex flex-wrap gap-1.5">
+        <div className="mb-1 flex flex-col">
           {chat.context.map((source, index) => (
-            <span key={source.kind + source.uid} className="flex items-center gap-1 rounded-sm border px-2 py-0.5 text-[11px] text-muted-foreground">
-              {source.kind} · {source.title}
-              <button type="button" aria-label={"Remove " + source.title} className="hover:text-foreground"
-                onClick={() => { try { removeSource(chat.uid, index); } catch (error) { toastError(error); } }}><X className="size-3" /></button>
-            </span>
+            <div key={source.kind + source.uid} className="flex min-h-11 items-center gap-2 text-xs text-dim sm:min-h-0">
+              <span className="min-w-0 flex-1 truncate">{source.kind} · {source.title}</span>
+              <button type="button" aria-label={"Remove " + source.title}
+                className="flex min-h-11 shrink-0 items-center text-xs text-dim transition-colors hover:text-foreground sm:min-h-0"
+                onClick={() => { try { removeSource(chat.uid, index); } catch (error) { toastError(error); } }}>remove</button>
+            </div>
           ))}
         </div>
       ) : null}
