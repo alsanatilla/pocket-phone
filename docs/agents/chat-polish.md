@@ -455,3 +455,70 @@ Run the real pipeline against the provider fixture, as `tools/pip-cards.test.mjs
 ### Do not
 
 Do not change `maxTokens`, the reserve, the other limits, or what a reply costs to report. No UI.
+
+---
+
+## P7 — Thorough looking-up ends with an answer, and sooner (ready)
+
+Measured on 2026-11-11 with real models (two "thorough" questions over six short notes, DeepSeek V4.1 Flash and
+GLM 5.3): replies take 28 to 46 seconds, make up to 19 lookups by searching for synonym after synonym, and one in
+four still **fails** with "The provider requested more tools after the research limit": Pocket tells the model the
+round is final, the model asks for one more lookup anyway, and Pocket ends the reply as failed instead of letting
+it write. P4's "is this enough?" did not help and stays recording only.
+
+Read P2, P4 and P6 above and the code they added before anything else.
+
+### 1. A lookup asked for in a final round is refused, not fatal (`src/client/pip-stream.js`)
+
+Today, in a final round, a tool call that is not allowed there makes the reply fail (`toolsAfterLimit`, set as
+`fatal` in `runTool` and in the stream-part handler). P4 already made an exception when research was stopped by
+"enough" (`enoughStopped`): the lookup is answered with the existing `budgetError` and the model gets to write.
+
+Make that the rule for every final round, whatever made it final:
+
+- A **lookup** (not a write, not a state tool) requested in a final round is answered with `budgetError`. The reply
+  does not fail.
+- This is tolerated **twice** in a reply (a counter, stored in the checkpoint counters like the others). After the
+  second, the next round is sent with no tools and `toolChoice: 'none'`, so the model can only write. If a provider
+  ignores that and calls a tool again, the existing fatal path applies.
+- Writes and state tools in a final round keep exactly today's behaviour.
+- The `enoughStopped` special case becomes this general rule; do not keep two mechanisms. P4's tests must pass
+  unchanged.
+
+### 2. "Thorough" has a ceiling (`src/shared/pip-effort.js`, `drive` in `src/server/pip-runs.js`)
+
+- `effortLimits('thorough')` → `{ lookups: 10, webCalls: 5 }` (it returned `null`). A reply without a level keeps
+  today's limits.
+- `effortNote('thorough')` →
+  `Pocket judged that this message deserves thorough looking-up: up to ten lookups. Search with other words only when the first words found nothing, read what you found once, then answer.`
+- In `drive`, a thorough reply's `research` option is those limits together with P4's `enough` callback.
+
+### 3. Tests
+
+Add to `tools/pip-effort.test.mjs` and `tools/pip-budget.test.mjs` (read their helpers first):
+
+1. A final round reached by the lookups' ceiling: the model asks for one more lookup; it is answered with
+   `research_budget_reached`; the next provider request follows and the reply finishes with the model's text
+   (today: failed).
+2. The same when the round is final for another reason (the continuation limit, the lookups' token budget).
+3. Three such requests in a row: the first two are refused, the third round's provider request offers no tools
+   and `tool_choice` none; the reply finishes with the text that round returns.
+4. A write requested in a final round behaves as it did before this task (find the existing test of that and
+   assert it still passes; name it in the report).
+5. Level `thorough`: ten lookups run, the eleventh is refused; the note is in the provider's instructions; five web
+   lookups run, the sixth is refused.
+6. No level (JEV unavailable): eleven lookups all run, as today.
+7. A pause between the first and the second tolerated request keeps the count.
+8. Every existing test in `tools/pip-effort.test.mjs`, `pip-budget.test.mjs`, `pip-runs.test.mjs`,
+   `pip-reliability.test.mjs`, `pip-cards.test.mjs` passes. If one asserts the old failure on purpose (search for
+   `after the research limit`), do not edit it: name it and say what it expected.
+
+### Files you may touch
+
+`src/client/pip-stream.js`, `src/shared/pip-effort.js` + `.d.ts`, `src/server/pip-runs.js` (`drive` only),
+`tools/pip-effort.test.mjs`, `tools/pip-budget.test.mjs`, `docs/pip-message-flow.md` (extend the section "Pip looks
+up as much as the message deserves").
+
+### Do not
+
+Do not change `RESEARCH_LIMITS`, the levels `none` and `quick`, the tab path or jobs. No UI.
