@@ -112,7 +112,7 @@ export function PipPage() {
   const askPip = (prompt: string) => { const target = home ? homeForSend() : chat; if (target) send(target.uid, prompt).catch(toastError); };
 
   return (
-    <main className="flex min-h-[calc(100dvh-72px)] flex-col">
+    <main className="flex min-h-[calc(100dvh-45px)] flex-col">
       {/* One quiet line under the header: which conversation this is (it opens the list), then the two actions. */}
       <div className="sticky top-[45px] z-[5] mb-3 flex items-center gap-1 bg-background">
         <button onClick={() => setListOpen(true)} aria-expanded={listOpen} className="flex min-h-11 min-w-0 flex-1 items-center gap-1.5 text-left text-xs text-dim transition-colors hover:text-foreground" aria-label="All chats">

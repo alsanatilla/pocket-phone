@@ -1,10 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentProps } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ChevronDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useCollection } from "../../data/bus.ts";
@@ -14,6 +11,7 @@ import { completeTask, createTask, getTask } from "../../data/tasks.ts";
 import { tasks as store } from "../../../client/store.js";
 import type { Step, Task } from "../../data/types.ts";
 import { PageTitle } from "../../ui/PageTitle.tsx";
+import { BARE_INPUT } from "../../ui/SendButton.tsx";
 import { confirm } from "../../ui/dialog/dialog.ts";
 import { toast, toastError } from "../../ui/toast/toast.ts";
 
@@ -26,7 +24,19 @@ interface Draft { text: string; due: string; list: string; important: boolean; s
 
 const draftOf = (task: Task | null): Draft => ({ text: task?.text ?? "", due: task?.due ?? "", list: task?.list ?? "", important: Boolean(task?.important), steps: task?.steps ?? [] });
 
-const LABEL = "text-xs font-medium text-muted-foreground first-letter:uppercase";
+const LABEL = "text-[10.5px] uppercase tracking-[0.06em] text-dim";
+
+/** An action on a task is a word, with a 44px tap target on a touch screen. */
+function Action({ className, children, type = "button", ...props }: ComponentProps<"button">) {
+  return <button type={type} {...props}
+    className={cn("flex min-h-11 items-center text-sm text-dim transition-colors hover:text-foreground disabled:opacity-50 sm:min-h-0", className)}>{children}</button>;
+}
+
+/** A step's checkbox is the text [ ] or [x], not a box of its own. */
+function StepCheck({ done, onClick, label }: { done: boolean; onClick: () => void; label: string }) {
+  return <button type="button" role="checkbox" aria-checked={done} aria-label={label} onClick={onClick}
+    className="flex min-h-11 shrink-0 items-start text-dim sm:min-h-0">{done ? "[x]" : "[ ]"}</button>;
+}
 
 export function TaskPage() {
   const { taskId } = useParams({ from: "/tasks/$taskId" });
@@ -41,8 +51,8 @@ export function TaskPage() {
   // A task that arrives from sync while the sheet is open fills the fields once; later edits are the person's.
   useEffect(() => { if (task && !saved) setDraft(draftOf(task)); }, [task, saved]);
 
-  if (!fresh && !task) return <main className="pt-4">
-    <button type="button" onClick={() => void navigate({ to: "/tasks" })} className="text-sm text-muted-foreground hover:text-foreground">‹ tasks</button>
+  if (!fresh && !task) return <main className="pb-4">
+    <Action onClick={() => void navigate({ to: "/tasks" })} className="mt-4 text-xs">‹ tasks</Action>
     <p className="mt-6 text-sm text-muted-foreground">This task was removed.</p>
   </main>;
 
@@ -81,73 +91,71 @@ export function TaskPage() {
   }
 
   return <main className="pb-4">
-    <button type="button" onClick={() => void navigate({ to: "/tasks" })} className="mt-4 text-sm text-muted-foreground hover:text-foreground">‹ tasks</button>
+    <Action onClick={() => void navigate({ to: "/tasks" })} className="mt-4 text-xs">‹ tasks</Action>
     <PageTitle title={fresh ? "new task" : "task"} meta={task ? (task.done ? "done" : "open") : "not saved yet"} />
 
-    <div className="mt-6 space-y-6">
-      <div>
-        <Label htmlFor="task-text" className={LABEL}>what will you do?</Label>
+    <div className="mt-[18px]">
+      {/* The task itself reads as the page's title; the other fields follow as label/value rows. */}
+      <div className="border-t pt-2">
+        <label htmlFor="task-text" className={LABEL}>what will you do?</label>
         <Textarea id="task-text" value={draft.text} maxLength={500} rows={2} placeholder="one action, one line… “call the bank tomorrow !”"
-          onChange={event => set("text", event.target.value)} className="mt-2" />
-        {hint.labels.length ? <p className="mt-2 flex flex-wrap items-center gap-1.5" aria-live="polite">
-          {hint.labels.map((label, index) => <span key={index} className="rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground">{label}</span>)}
-          <span className="text-[10px] text-dim">from the text, applied on save</span>
-        </p> : null}
+          onChange={event => set("text", event.target.value)}
+          className="mt-1 min-h-11 resize-none rounded-none border-0 bg-transparent px-0 py-1 text-hi shadow-none placeholder:text-dim focus-visible:ring-0 dark:bg-transparent" />
       </div>
+      {hint.labels.length ? <p className="text-xs text-dim" aria-live="polite">
+        {hint.labels.join(" · ")} · applied on save
+      </p> : null}
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="task-due" className={LABEL}>date</Label>
-          <Input id="task-due" type="date" value={draft.due} onChange={event => set("due", event.target.value)} className="mt-2 h-10" />
+      <div className="mt-2">
+        <div className="flex min-h-11 items-center gap-3 border-t py-2 sm:min-h-0">
+          <label htmlFor="task-due" className={cn(LABEL, "shrink-0")}>date</label>
+          <Input id="task-due" type="date" value={draft.due} onChange={event => set("due", event.target.value)} className={cn(BARE_INPUT, "text-right")} />
         </div>
-        <div>
-          <Label htmlFor="task-list" className={LABEL}>list</Label>
-          <div className="relative mt-2">
+        <div className="flex min-h-11 items-center gap-3 border-t py-2 sm:min-h-0">
+          <label htmlFor="task-list" className={cn(LABEL, "shrink-0")}>list</label>
+          <div className="relative min-w-0 flex-1">
             <select id="task-list" value={draft.list} onChange={event => set("list", event.target.value)}
-              className="h-10 w-full appearance-none rounded-md border border-input bg-transparent pr-9 pl-3 text-sm text-foreground outline-none focus-visible:border-ring">
+              className="min-h-11 w-full appearance-none rounded-none border-0 bg-transparent pr-6 pl-0 text-right text-sm text-foreground outline-none focus-visible:ring-0 sm:min-h-0">
               <option value="">inbox</option>
               {listsNow.map(list => <option key={list.uid} value={list.uid}>{list.name}</option>)}
             </select>
-            <ChevronDown aria-hidden="true" className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <ChevronDown aria-hidden="true" className="pointer-events-none absolute top-1/2 right-0 size-3.5 -translate-y-1/2 text-dim" />
           </div>
         </div>
-      </div>
-
-      <div className="flex items-center justify-between border-t border-dashed pt-5">
-        <Label htmlFor="task-important" className="text-sm">important</Label>
-        <Switch id="task-important" checked={draft.important} onCheckedChange={value => set("important", value)} />
-      </div>
-
-      <section className="border-t border-dashed pt-5">
-        <div className="flex items-baseline justify-between">
-          <h2 className={LABEL}>steps</h2>
-          <span className="text-[11px] text-dim">{draft.steps.filter(item => item.done).length}/{draft.steps.length}</span>
+        <div className="flex min-h-11 items-center gap-3 border-t py-2 sm:min-h-0">
+          <span className={cn(LABEL, "shrink-0")}>important</span>
+          <Action role="switch" aria-checked={draft.important} aria-label="important" onClick={() => set("important", !draft.important)}
+            className="ml-auto justify-end">{draft.important ? "[x]" : "[ ]"}</Action>
         </div>
-        {draft.steps.length ? <ul className="mt-1">{draft.steps.map((item, index) => <li key={index} className="flex min-h-11 items-center gap-1 border-t border-dashed">
-          <button type="button" role="checkbox" aria-checked={item.done} aria-label={(item.done ? "Reopen step " : "Complete step ") + item.text}
-            onClick={() => setDraft(current => ({ ...current, steps: current.steps.map((old, at) => at === index ? { ...old, done: !old.done } : old) }))}
-            className="-ml-3 grid size-11 shrink-0 place-items-center rounded-md">
-            <span aria-hidden="true" className={cn("grid size-5 place-items-center rounded-sm border text-[11px] leading-none transition-colors",
-              item.done ? "border-primary bg-primary text-primary-foreground" : "border-border text-transparent hover:border-primary")}>✓</span>
-          </button>
-          <span className={cn("min-w-0 flex-1 break-words text-sm", item.done && "text-dim line-through")}>{item.text}</span>
-          <Button size="sm" variant="ghost" className="text-dim" aria-label={"Remove step " + item.text}
-            onClick={() => setDraft(current => ({ ...current, steps: current.steps.filter((_, at) => at !== index) }))}>×</Button>
-        </li>)}</ul> : null}
-        <form className="mt-2 flex gap-2" onSubmit={event => { event.preventDefault(); addStep(); }}>
-          <Input value={step} maxLength={160} placeholder="add a step…" aria-label="New step" onChange={event => setStep(event.target.value)} className="h-10" />
-          <Button type="submit" variant="secondary" disabled={!step.trim()} className="h-10">add</Button>
+      </div>
+
+      <section className="mt-[18px] border-t pt-2">
+        <div className="flex items-baseline justify-between pb-1">
+          <h2 className={LABEL}>steps</h2>
+          <span className="text-xs text-dim">{draft.steps.filter(item => item.done).length}/{draft.steps.length}</span>
+        </div>
+        {draft.steps.length ? <ul>
+          {draft.steps.map((item, index) => <li key={index} className="flex gap-2.5 border-t py-2 last:border-b">
+            <StepCheck done={item.done} label={(item.done ? "Reopen step " : "Complete step ") + item.text}
+              onClick={() => setDraft(current => ({ ...current, steps: current.steps.map((old, at) => at === index ? { ...old, done: !old.done } : old) }))} />
+            <span className={cn("min-w-0 flex-1 text-sm", item.done ? "text-dim line-through" : "text-hi")}>{item.text}</span>
+            <Action aria-label={"Remove step " + item.text} onClick={() => setDraft(current => ({ ...current, steps: current.steps.filter((_, at) => at !== index) }))}
+              className="shrink-0 items-start text-xs">remove</Action>
+          </li>)}
+        </ul> : null}
+        <form className="flex min-h-11 items-center gap-2 border-t sm:min-h-0" onSubmit={event => { event.preventDefault(); addStep(); }}>
+          <span aria-hidden="true" className="text-dim">+</span>
+          <Input value={step} maxLength={160} placeholder="add a step…" aria-label="New step" onChange={event => setStep(event.target.value)} className={BARE_INPUT} />
+          <Action type="submit" disabled={!step.trim()} className="shrink-0 text-xs">add</Action>
         </form>
       </section>
     </div>
 
-    <div className="mt-8 space-y-3">
-      <Button onClick={save} className="h-11 w-full">save task</Button>
-      <div className="flex gap-2">
-        {task ? <Button variant="outline" className="h-10 flex-1" onClick={() => attempt(() => { completeTask(task.uid); void navigate({ to: "/tasks" }); })}>{task.done ? "reopen" : "complete"}</Button> : null}
-        <Button variant="ghost" className="h-10 flex-1" onClick={() => void navigate({ to: "/tasks" })}>cancel</Button>
-        {task ? <Button variant="ghost" className="h-10 text-destructive" onClick={() => void remove()}>delete</Button> : null}
-      </div>
+    <div className="mt-[18px] flex flex-wrap items-center gap-x-4 border-t pt-2">
+      <Action onClick={save}>save task</Action>
+      {task ? <Action onClick={() => attempt(() => { completeTask(task.uid); void navigate({ to: "/tasks" }); })}>{task.done ? "reopen" : "complete"}</Action> : null}
+      <Action onClick={() => void navigate({ to: "/tasks" })}>cancel</Action>
+      {task ? <Action onClick={() => void remove()}>delete</Action> : null}
     </div>
   </main>;
 }

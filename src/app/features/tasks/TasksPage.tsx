@@ -1,8 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { MoreHorizontal } from "lucide-react";
 import { BARE_INPUT, FIELD, SendButton } from "../../ui/SendButton.tsx";
-import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -16,7 +14,7 @@ import { confirm, prompt } from "../../ui/dialog/dialog.ts";
 import { toast, toastError } from "../../ui/toast/toast.ts";
 
 // Tasks: four views, your own lists, and a template of a list you can start again. One task keeps a date, a list,
-// a flag and steps; nothing else. The screen reads top to bottom: what you add, where you are, then the tasks.
+// a flag and steps; nothing else. The screen reads top to bottom: where you are, the tasks, then the field to add one.
 
 const attempt = (work: () => unknown) => { try { work(); } catch (error) { toastError(error); } };
 const atNoon = (value: string) => new Date(value + "T12:00:00");
@@ -32,11 +30,11 @@ function dueLabel(task: Task, current: string): { text: string; late: boolean; n
   return { text: atNoon(task.due).toLocaleDateString([], { day: "numeric", month: "short" }), late: false, now: false };
 }
 
+/** A checkbox is the text [ ] or [x], and the whole square around it is the tap target on a phone. */
 function Check({ done, onClick, label }: { done: boolean; onClick: () => void; label: string }) {
   return <button type="button" role="checkbox" aria-checked={done} aria-label={label} onClick={onClick}
-    className="-ml-3 mt-0.5 grid size-11 shrink-0 place-items-center rounded-md">
-    <span aria-hidden="true" className={cn("grid size-5 place-items-center rounded-sm border text-[11px] leading-none transition-colors",
-      done ? "border-primary bg-primary text-primary-foreground" : "border-border text-transparent hover:border-primary hover:bg-primary/10 hover:text-primary/50")}>✓</span>
+    className="flex min-h-11 shrink-0 items-start pt-2 text-dim sm:min-h-0 sm:pt-0">
+    {done ? "[x]" : "[ ]"}
   </button>;
 }
 
@@ -44,15 +42,15 @@ interface RowProps { task: Task; list?: TaskList | null; showList: boolean; curr
 function Row({ task, list, showList, current }: RowProps) {
   const due = dueLabel(task, current);
   const done = (task.steps ?? []).filter(step => step.done).length;
-  return <li className="flex items-start gap-2 border-t border-dashed">
+  return <li className="flex gap-2.5 border-t last:border-b">
     <Check done={task.done} label={(task.done ? "Reopen " : "Complete ") + task.text} onClick={() => attempt(() => completeTask(task.uid))} />
-    <Link to="/tasks/$taskId" params={{ taskId: task.uid }} className="group min-h-11 min-w-0 flex-1 py-2.5 pr-1 no-underline">
+    <Link to="/tasks/$taskId" params={{ taskId: task.uid }} className="min-h-11 min-w-0 flex-1 py-2 pr-1 no-underline sm:min-h-0">
       <span className="flex items-start gap-1.5 leading-snug">
-        {task.important ? <span role="img" aria-label="Important" className="mt-px shrink-0 text-primary">!</span> : null}
-        <span className={cn("break-words group-hover:text-primary", task.done && "text-dim line-through")}>{task.text}</span>
+        {task.important ? <span role="img" aria-label="Important" className="shrink-0 text-dim">!</span> : null}
+        <span className={cn("break-words text-hi", task.done && "text-dim line-through")}>{task.text}</span>
       </span>
-      <span className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] leading-tight text-dim">
-        {due ? <span className={cn(due.late && "text-destructive", due.now && "text-primary")}>{due.text}</span> : null}
+      <span className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-dim">
+        {due ? <span className={cn(due.late && "text-destructive")}>{due.text}</span> : null}
         {task.steps?.length ? <span>{done}/{task.steps.length} steps</span> : null}
         {showList && list ? <span className="truncate"># {list.name}</span> : null}
       </span>
@@ -68,8 +66,8 @@ const MODES = [
 
 function ModeButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return <button type="button" onClick={onClick} aria-pressed={active}
-    className={cn("relative min-h-10 px-0.5 pb-2 text-sm transition-colors",
-      active ? "text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-primary" : "text-muted-foreground hover:text-foreground")}>{children}</button>;
+    className={cn("flex min-h-11 items-center text-sm transition-colors sm:min-h-0",
+      active ? "font-medium text-hi" : "text-dim hover:text-foreground")}>{children}</button>;
 }
 
 /** Which tasks a view shows, and under which headings. */
@@ -167,7 +165,10 @@ export function TasksPage() {
   return <main className="pb-4">
     <PageTitle title={currentList?.name ?? "tasks"} meta={currentList ? `${countOf(currentList.uid)} open` : `${dueToday} due · ${open.length} open`}>
       {currentList ? <DropdownMenu>
-        <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={"Options for " + currentList.name}><MoreHorizontal /></Button></DropdownMenuTrigger>
+        <DropdownMenuTrigger asChild>
+          <button type="button" aria-label={"Options for " + currentList.name}
+            className="mb-1 flex min-h-11 items-center text-sm text-dim transition-colors hover:text-foreground sm:min-h-0">more</button>
+        </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onSelect={() => void rename(currentList)}>rename</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => makeTemplate(currentList)}>save as template</DropdownMenuItem>
@@ -176,57 +177,58 @@ export function TasksPage() {
       </DropdownMenu> : null}
     </PageTitle>
 
-    {/* The one place to add a task: a date or an ! in the text is read as you type. */}
-    <form onSubmit={add} className={cn("mt-4", FIELD)}>
-      <Input ref={addRef} value={text} onChange={event => setText(event.target.value)} aria-label="New task" maxLength={500}
-        placeholder="add a task, e.g. call the bank tomorrow !" className={BARE_INPUT} />
-      <SendButton label="Add task (Enter)" disabled={!parsed.text.trim()} />
-    </form>
-    {text.trim() && parsed.labels.length ? <p className="mt-2 flex flex-wrap items-center gap-1.5" aria-live="polite">
-      {parsed.labels.map((label, index) => <span key={index} className="rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground">{label}</span>)}
-      <span className="text-xs text-dim">from the text</span>
-    </p> : null}
-
-    <nav aria-label="Task views" className="mt-6 flex items-end gap-5 border-b border-dashed">
+    <nav aria-label="Task views" className="mt-4 flex flex-wrap items-center gap-x-4">
       {MODES.map(mode => <ModeButton key={mode.key} active={view === mode.key} onClick={() => go(mode.key)}>{mode.label}</ModeButton>)}
       <ModeButton active={view === "done"} onClick={() => go("done")}>done</ModeButton>
     </nav>
 
-    <nav aria-label="Lists" className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2.5">
+    <nav aria-label="Lists" className="flex flex-wrap items-center gap-x-4">
       {listsNow.map(list => <button key={list.uid} type="button" onClick={() => go("list:" + list.uid)} aria-pressed={view === "list:" + list.uid}
-        className={cn("group flex min-h-9 items-baseline gap-1.5 text-sm transition-colors",
-          view === "list:" + list.uid ? "text-primary" : "text-muted-foreground hover:text-foreground")}>
+        className={cn("flex min-h-11 items-center gap-1.5 text-sm transition-colors sm:min-h-0",
+          view === "list:" + list.uid ? "font-medium text-hi" : "text-dim hover:text-foreground")}>
         <span className="truncate"># {list.name}</span>
         <span className="text-xs text-dim">{countOf(list.uid)}</span>
       </button>)}
-      <button type="button" onClick={() => void newList()} className="min-h-9 text-sm text-dim transition-colors hover:text-foreground">+ list</button>
+      <button type="button" onClick={() => void newList()} className="flex min-h-11 items-center text-sm text-dim transition-colors hover:text-foreground sm:min-h-0">+ list</button>
     </nav>
 
-    {groups.length ? groups.map(([title, tasks]) => <section key={title} className="pt-6 first:pt-3">
+    {groups.length ? groups.map(([title, tasks]) => <section key={title} className="pt-[18px]">
       <div className="flex items-baseline justify-between pb-1">
-        <h2 className={cn("text-xs font-medium first-letter:uppercase", title === "overdue" ? "text-destructive" : "text-muted-foreground")}>{title}</h2>
+        <h2 className={cn("text-[10.5px] uppercase tracking-[0.06em]", title === "overdue" ? "text-destructive" : "text-dim")}>{title}</h2>
         <span className="text-xs text-dim">{tasks.length}</span>
       </div>
-      <ul className="flex flex-col">{tasks.map(task => <Row key={task.uid} task={task} list={listsByUid.get(task.list ?? "") ?? null} showList={showList} current={current} />)}</ul>
-    </section>) : <p className="pt-8 text-sm text-muted-foreground">
+      <ul>{tasks.map(task => <Row key={task.uid} task={task} list={listsByUid.get(task.list ?? "") ?? null} showList={showList} current={current} />)}</ul>
+    </section>) : <p className="pt-6 text-sm text-muted-foreground">
       {view === "done" ? "Nothing done yet."
         : view === "next" ? "Nothing planned for the next seven days."
         : view === "today" ? "Nothing due today."
         : currentList ? "This list is empty." : "The inbox is empty."}
     </p>}
 
-    {templatesNow.length && view !== "done" ? <section className="pt-10">
-      <h2 className="text-xs font-medium text-muted-foreground">Templates</h2>
-      <ul className="mt-1 flex flex-col">
-        {templatesNow.map(template => <li key={template.uid} className="flex min-h-11 items-center gap-3 border-t border-dashed">
-          <span className="min-w-0 flex-1 py-2">
-            <span className="block truncate">{template.name}</span>
-            <span className="text-[11px] text-dim">{templateItemsOf(template.uid)} {templateItemsOf(template.uid) === 1 ? "item" : "items"} · dated from today</span>
+    {templatesNow.length && view !== "done" ? <section className="pt-[18px]">
+      <h2 className="text-[10.5px] uppercase tracking-[0.06em] text-dim">templates</h2>
+      <ul className="mt-1">
+        {templatesNow.map(template => <li key={template.uid} className="flex items-center gap-2.5 border-t py-2 last:border-b">
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-hi">{template.name}</span>
+            <span className="block text-xs text-dim">{templateItemsOf(template.uid)} {templateItemsOf(template.uid) === 1 ? "item" : "items"} · dated from today</span>
           </span>
-          <Button size="sm" variant="outline" onClick={() => startTemplate(template)}>use</Button>
+          <button type="button" onClick={() => startTemplate(template)}
+            className="flex min-h-11 shrink-0 items-center text-xs text-dim transition-colors hover:text-foreground sm:min-h-0">use</button>
         </li>)}
       </ul>
     </section> : null}
+
+    {/* The one place to add a task: a date or an ! in the text is read as you type. */}
+    <form onSubmit={add} className={cn("mt-[18px]", FIELD)}>
+      <span aria-hidden="true" className="text-dim">+</span>
+      <Input ref={addRef} value={text} onChange={event => setText(event.target.value)} aria-label="New task" maxLength={500}
+        placeholder="add a task, e.g. call the bank tomorrow !" className={BARE_INPUT} />
+      <SendButton label="Add task (Enter)" disabled={!parsed.text.trim()} />
+    </form>
+    {text.trim() && parsed.labels.length ? <p className="text-xs text-dim" aria-live="polite">
+      {parsed.labels.join(" · ")} · from the text
+    </p> : null}
   </main>;
 }
 

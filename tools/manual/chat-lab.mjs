@@ -287,6 +287,34 @@ const MEMORY_ROWS = [
 ];
 const MEMORY_CHAT = 'lablong';
 
+// The notes and tasks lists: six notes (one pinned, one title as long as a phone line allows) and tasks in every
+// group the page can draw (overdue, today with one done, this week with steps, later).
+const NOTE_TITLE_120 = 'Notes from the harbour walks, the fish market and the ferry terminal, with a long stop on the pier before the rain came.';
+const NOTE_ROWS = [
+  { uid: 'labnote1', title: 'Lighthouse', line: 'The keeper leaves the light on until the last ferry has passed the point.', pinned: true, days: 0 },
+  { uid: 'labnote2', title: 'Blue car', line: 'The dealer in Almada has the estate, 21,000 euros, with the service history.', pinned: false, days: 1 },
+  { uid: 'labnote3', title: NOTE_TITLE_120, line: 'Everything smelled of salt and diesel, and nobody was in a hurry.', pinned: false, days: 2 },
+  { uid: 'labnote4', title: 'Sunday run', line: 'Eight kilometres along the river, slow at the start and easy at the end.', pinned: false, days: 5 },
+  { uid: 'labnote5', title: 'Lisbon in April', line: 'Book the flat near the market before the prices climb for the holiday.', pinned: false, days: 9 },
+  { uid: 'labnote6', title: 'Insurance', line: 'The renewal letter wants an answer before the end of the month.', pinned: false, days: 14 },
+];
+
+const dayFromNow = offset => {
+  const at = new Date(NOW);
+  at.setDate(at.getDate() + offset);
+  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
+};
+const TASK_ROWS = [
+  { uid: 'labtask1', text: 'Send the insurance form', due: dayFromNow(-2), done: false, important: true, steps: [] },
+  { uid: 'labtask2', text: 'Call the dentist about the crown', due: dayFromNow(0), done: false, important: false, steps: [] },
+  { uid: 'labtask3', text: 'Water the plants on the balcony', due: dayFromNow(0), done: true, important: false, steps: [] },
+  { uid: 'labtask4', text: 'Plan the long run for Saturday', due: dayFromNow(3), done: false, important: true, steps: [
+    { text: 'Pick a route', done: true }, { text: 'Check the weather', done: true },
+    { text: 'Fill the bottles', done: false }, { text: 'Send the route to Sam', done: false },
+  ] },
+  { uid: 'labtask5', text: 'Book the train to Lisbon', due: dayFromNow(20), done: false, important: false, steps: [] },
+];
+
 /** Forgets everything this account remembered, so a state starts from a known list. */
 async function resetMemory(ctx) {
   for (const entry of await ctx.memory.listMemory(USER)) await ctx.memory.forget(USER, entry.id);
@@ -296,6 +324,20 @@ async function resetMemory(ctx) {
 async function seedMemory(ctx) {
   await resetMemory(ctx);
   for (const row of MEMORY_ROWS) await ctx.memory.remember(USER, row.text, { chat: row.chat || '' });
+}
+
+/** The notes and tasks records as synced documents, the way the phone leaves them. */
+function labDocuments() {
+  return {
+    'notes.json': { v: 1, notes: NOTE_ROWS.map((row, index) => ({
+      uid: row.uid, text: row.title + '\n\n' + row.line, pinned: row.pinned,
+      created: NOW - (row.days + 3) * 24 * 3600_000, updated: NOW - row.days * 24 * 3600_000 + index, deleted: false,
+    })) },
+    'tasks.json': { v: 1, tasks: TASK_ROWS.map((row, index) => ({
+      uid: row.uid, text: row.text, done: row.done, due: row.due, important: row.important, steps: row.steps, list: '',
+      created: NOW - (20 - index) * 3600_000, updated: NOW - index * 60_000, deleted: false,
+    })), lists: [], next: { uid: '', updated: 0 } },
+  };
 }
 
 const STATES = [
@@ -416,6 +458,26 @@ const STATES = [
     },
     text: ['Schlafkarte', 'Schlaf', '7 h 12'],
     selectors: ['[aria-label="Pinned cards"]', '[data-card="kpinned1"]'],
+    scroll: 'top',
+  },
+  {
+    name: 'notes',
+    async run(page, ctx) {
+      await page.goto(ctx.origin + '/#/notes', { waitUntil: 'domcontentloaded' });
+      await until(page, 'notes', 'the seeded notes', () => document.body.innerText.includes('Lighthouse') && document.body.innerText.includes('Insurance'));
+    },
+    text: ['notes', /pinned/i, /recent/i, 'Lighthouse', NOTE_TITLE_120, 'Insurance'],
+    selectors: ['main input[type="search"]'],
+    scroll: 'top',
+  },
+  {
+    name: 'tasks',
+    async run(page, ctx) {
+      await page.goto(ctx.origin + '/#/tasks', { waitUntil: 'domcontentloaded' });
+      await until(page, 'tasks', 'the seeded tasks', () => document.body.innerText.includes('Send the insurance form') && document.body.innerText.includes('Call the dentist'));
+    },
+    text: ['tasks', /overdue/i, /today/i, 'Send the insurance form', 'Call the dentist about the crown'],
+    selectors: ['main input[aria-label="New task"]'],
     scroll: 'top',
   },
   {
@@ -901,6 +963,7 @@ async function main() {
     const database = await import('file://' + join(ROOT, 'src/server/database.js'));
     const auth = await import('file://' + join(ROOT, 'src/server/auth.js'));
     const objects = await import('file://' + join(ROOT, 'src/server/objects.js'));
+    const workspace = await import('file://' + join(ROOT, 'src/server/workspace.js'));
     const memory = await import('file://' + join(ROOT, 'src/server/pip-memory-store.js'));
     const { ensureSchema, execute } = database;
     await ensureSchema();
@@ -932,6 +995,7 @@ async function main() {
     };
 
     for (const chat of [EMPTY_CHAT, LONG_CHAT, FAILED_CHAT, APPROVAL_CHAT, PINNED_CHAT, HOME_EARLIER_CHAT, HOME_CURRENT_CHAT]) await objects.writeObject(USER, 'chats', chat);
+    await workspace.syncDocuments(USER, labDocuments());
 
     const ctx = { browser: null, origin, out, eventsSecret, insertRun, finishRun, signInLink: auth.signInLink, memory };
     browser = ctx.browser = await launchBrowser();

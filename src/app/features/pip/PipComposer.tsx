@@ -59,8 +59,8 @@ export function PipComposer({ chat, busy, initial, onSend, onStop }: { chat: Cha
           placeholder="message pip" aria-label="Message Pip"
           className="max-h-60 min-h-11 flex-1 resize-none rounded-none border-0 bg-transparent px-0 py-2.5 shadow-none placeholder:text-dim focus-visible:ring-0 dark:bg-transparent" />
       </div>
-      {/* One quiet row: what the reply may use on the left, the one action on the right. */}
-      <div className="flex items-center gap-1">
+      {/* One quiet row: what the reply may use on the left, the one action on the right. 44px to tap on a phone. */}
+      <div className="flex min-h-11 items-center gap-1 sm:min-h-0">
         <ModelPicker chat={chat} busy={busy} />
         <span className="flex-1" />
         {busy ? <StopButton label="Stop the reply" onClick={onStop} /> : <SendButton label="Send (Enter)" disabled={!text.trim()} />}

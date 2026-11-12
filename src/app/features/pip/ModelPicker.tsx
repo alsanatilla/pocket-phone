@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Popover } from "radix-ui";
-import { ArrowUpRight, Brain, Check, ChevronDown, Globe, Search } from "lucide-react";
+import { ArrowUpRight, Brain, Check, ChevronDown, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Chat } from "../../data/chats.ts";
@@ -44,7 +44,6 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
     return () => { cancelled = true; };
   }, [open, isOpenRouter, attempt]);
   const selected = isOpenRouter ? models.find(model => model.id === chat.config.model) : undefined;
-  const free = isOpenRouter && (chat.config.model === "openrouter/free" || chat.config.model.endsWith(":free"));
   const name = selected?.name ?? modelLabel(chat.config.model);
   const choose = (model: ModelChoice) => {
     if (busy) return;
@@ -64,19 +63,19 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
   const connectedGroups = groups.filter(group => connections[group.provider] !== false);
   const unconnected = GROUPS.filter(group => connections[group.provider] === false && (group.provider !== "custom" || custom));
   return (
-    <div className="flex min-w-0 items-center gap-0.5 text-xs text-muted-foreground">
+    <div className="flex min-w-0 items-center gap-3 text-xs">
       <button type="button" disabled={busy} aria-label="Web search" aria-pressed={chat.config.webSearch}
         title={chat.config.webSearch ? "Web search on" : "Web search off"}
-        className={cn("flex size-9 shrink-0 items-center justify-center rounded-md transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:opacity-50", chat.config.webSearch && "text-primary hover:text-primary")}
+        className={cn("flex min-h-11 shrink-0 items-center text-xs transition-colors disabled:opacity-50 sm:min-h-0", chat.config.webSearch ? "text-hi" : "text-dim hover:text-foreground")}
         onClick={() => { try { chats.update(chat.uid, value => { value.config.webSearch = !value.config.webSearch; }); } catch (error) { toastError(error); } }}>
-        <Globe className="size-4" />
+        web
       </button>
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger asChild>
           <button type="button" disabled={busy} aria-label="Choose model" title={current}
-            className="flex h-9 min-w-0 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:opacity-50 data-[state=open]:bg-accent data-[state=open]:text-foreground">
+            className="flex min-h-11 min-w-0 items-center gap-1 text-xs text-dim transition-colors hover:text-foreground disabled:opacity-50 data-[state=open]:text-foreground sm:min-h-0">
             <span className="truncate">{name}</span>
-            {free && !/free/i.test(name) ? <span className="text-movement">free</span> : null}<ChevronDown className="size-3.5 shrink-0" />
+            <ChevronDown className="size-3 shrink-0" />
           </button>
         </Popover.Trigger>
         <Popover.Portal>

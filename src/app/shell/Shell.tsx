@@ -33,7 +33,7 @@ function SyncLine() {
 
 export function Shell() {
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-24">
+    <div className="mx-auto max-w-3xl px-4 pb-[env(safe-area-inset-bottom)]">
       <header className="sticky top-0 z-10 flex items-center gap-3.5 border-b bg-background">
         <Link to="/today" className="font-pixel text-[22px] leading-none text-primary no-underline">pocket</Link>
         <nav aria-label="Sections" className="flex gap-3 text-xs text-dim">
