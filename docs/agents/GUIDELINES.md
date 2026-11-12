@@ -39,8 +39,9 @@ Layout you need:
    says so.
 7. **Nothing leaves the machine.** Do not push, do not deploy (`flyctl`), do not open pull requests, do not touch the
    production database. Commit only if your task says so, and only your own files.
-8. **Do not change the UI's look.** Fonts, colours, spacing and wording on screen stay as they are unless the task
-   names the change.
+8. **Anything a person sees follows `docs/DESIGN.md`.** Read it before a UI task. Fonts, colours, spacing and
+   wording stay as they are unless the task names the change; what you build passes the guide's review (section 21)
+   on a phone-size picture, and your report says which screens you looked at and which you did not.
 
 ## How code is written here
 

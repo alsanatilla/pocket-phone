@@ -7,50 +7,12 @@ The foundation is built: tokens and type in `src/app/styles/global.css`, the hea
 a reply in `src/app/features/pip/Turn.tsx` and the `.prose` rules. **Look at those before writing anything**: a
 restyled screen must look like it belongs next to them.
 
-## The rules (second version, 2026-11-12)
+## The rules
 
-The first version replaced boxes by hairlines and buttons by dim words. The person's verdict: "still too many
-lines, no visual hierarchy, hard to understand what is a button and what is not." These rules replace it. The
-building blocks are in code: **`src/app/ui/kit.tsx`** (`Section`, `SectionLabel`, `Row`, `Tick`, `Segmented`,
-`Keys`, `Figures`, `Figure`), **`src/app/components/ui/button.tsx`** (the key) and `switch.tsx`. A screen is made of
-these; it does not repeat their classes by hand.
-
-1. **One typeface.** IBM Plex Mono at the body size (`text-sm`), normal letter-spacing. The pixel face
-   (`font-pixel`) only for the name "pocket" and a page's one big title (`PageTitle`).
-2. **Two lines in the whole app**: under the header and over a page's prompt line. No other rule, border or
-   divider: not between rows, not around or between figures, not under labels, not around sections. Space
-   separates. (Floating surfaces, a menu, dialog or sheet, keep their one outline.)
-3. **What can be pressed has a shape; what cannot has none.**
-   - An action is a **key**: `<Button>`. Quiet by default; `variant="go"` (amber) for the one main action of a
-     screen or dialog; `variant="destructive"` for removing. Never a bare word, never an underlined word, never an
-     icon alone (except the header's settings and the composer's send key).
-   - On/off is a **`Switch`**. Done/not done is a **`Tick`**. A choice of view is a **`Segmented`**.
-   - A row that leads somewhere is a **`Row` with `onOpen`/`href`**: it ends in `›`.
-   - A link inside running text is amber and underlined.
-   - Text that is not pressable never looks like any of these: no fills, no underline, no amber, no `›`.
-4. **Three levels.** The page title (pixel, 30px). A section's name (`SectionLabel`: small, upper-case, dim) with
-   24px above it and 4px below. Content: the main line `text-hi`, a second line `text-xs text-dim`, running text
-   `text-foreground`. Figures are `Figure`s: 22px, all the same size in a group.
-5. **Colour.** `text-hi`, `text-foreground`, `text-muted-foreground`, `text-dim`; amber for the name, the prompt
-   marker, the caret, the `go` key, a switch that is on, a link in text; `text-destructive` for overdue, errors and
-   a destructive key's words. Chart colours for charts only.
-6. **Rows** are `Row`s: optional lead (a `Tick`, a time), main line, optional second line, optional end (a note, a
-   key, a switch). Keys that belong to a row go at its end when there is one, or in a `Keys` line under it when
-   there are two or more.
-   - **A list never repeats keys on its rows.** One key per row, times sixteen rows, is a wall of buttons (the
-     person's verdict on the chat list: "this is not good design"). In a list, pressing the row is its main
-     action, a `Switch` or `Tick` may stand at its end, and everything else is behind `RowMenu` (three quiet dots).
-     A row in such a list has no `›` either: when every row leads somewhere, the arrow says nothing. Keys belong
-     to a page, a dialog, a card or a single item, never to each of many.
-   - A row shows one line and at most one quiet note. Counts, dates and states that repeat what the section's name
-     already says (a date under "yesterday", "0 messages") are left out; empty things are not listed.
-7. **Fields are prompt lines** (`src/app/ui/SendButton.tsx`, `PipComposer.tsx`): a marker, the text, and a `go` key
-   to send. Only the page's main field has the line over it (rule 2).
-8. **Rhythm.** 12px between paragraphs, 24px between sections, 16px page padding. Nothing centred except an empty
-   state's one sentence.
-9. **Wording.** Lower-case labels and keys; sentences end with a full stop; no exclamation marks, no emoji. Times
-   `08:07`, durations `6 s`.
-10. **Motion.** What exists stays. Add none.
+**The rules are in [`docs/DESIGN.md`](../DESIGN.md).** Read all of it before a UI task: what Pocket looks like, the
+five shapes of things that can be pressed, how a list is built, the catalogue of mistakes that were shipped and
+rejected, and the review every changed screen must pass. This file only lists the restyling tasks; where a task
+below says something the guide contradicts (the first pass was written under earlier rules), the guide wins.
 
 ## How a restyle is done
 
