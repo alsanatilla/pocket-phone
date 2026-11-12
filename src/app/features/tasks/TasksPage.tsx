@@ -223,7 +223,7 @@ export function TasksPage() {
     <form onSubmit={add} className={cn("mt-[18px]", FIELD)}>
       <span aria-hidden="true" className="text-dim">+</span>
       <Input ref={addRef} value={text} onChange={event => setText(event.target.value)} aria-label="New task" maxLength={500}
-        placeholder="add a task, e.g. call the bank tomorrow !" className={BARE_INPUT} />
+        placeholder="add a task" className={BARE_INPUT} />
       <SendButton label="Add task (Enter)" disabled={!parsed.text.trim()} />
     </form>
     {text.trim() && parsed.labels.length ? <p className="text-xs text-dim" aria-live="polite">
