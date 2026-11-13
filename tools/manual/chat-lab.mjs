@@ -272,6 +272,13 @@ const WRITING_TURN = streamingTurn('writing-turn-1', QUESTION, {
   phase: 'writing', answer: WRITING_TEXT,
   activity: [{ id: 'writing-a1', kind: 'records', name: 'search_notes', title: 'search notes “Schlaf”', state: 'done', summary: '3 notes', input: '{"query":"Schlaf"}', result: '{"notes":3}', started: NOW - 9000, ended: NOW - 8000, sources: [] }],
 });
+// Two messages sent while the reply above is written: they wait their turn on the server (a run row `waiting`
+// whose config names its chat's queue), one of them as long as a person writes when they hand over a task.
+const QUEUED_TURN = streamingTurn('queued-turn-1', QUESTION, { phase: 'writing', answer: WRITING_TEXT });
+const QUEUED_MESSAGES = [
+  'Und danach: Plane mir den langen Lauf am Samstag, mit Strecke, Tempo und wann ich losgehen sollte, damit ich vor dem Regen zurück bin.',
+  'Erinnere mich morgen an die Donaudampfschifffahrtsgesellschaft.',
+];
 const BUILDING_TURN = streamingTurn('building-turn-1', 'Zeig mir die Werte als Karte.', {
   phase: 'drawing',
   answer: 'Die Werte als Karte:\n\n' + openFence(BUILD_LINES.slice(0, 5)),
@@ -653,6 +660,38 @@ const STATES = [
     },
     text: ['Guten Abend', 'am Nachmittag'],
     selectors: ['.caret', '[aria-label="Stop the reply"]'],
+  },
+  {
+    name: 'queued',
+    async run(page, ctx) {
+      const chat = 'labqueued';
+      for (const [index, text] of QUEUED_MESSAGES.entries()) {
+        const turn = { ...streamingTurn('queued-wait-' + index, text), phase: 'requesting' };
+        await ctx.insertRun({ runId: 'queued-wait-run-' + index, chat, requestId: 'queued-wait-req-' + index, turn, status: 'waiting', created: NOW + index + 1,
+          config: { lane: chat, header: { uid: chat, title: 'Lage', created: NOW, config: CONFIG }, grants: null, timezone: 'Europe/Berlin' } });
+      }
+      await openStreamingState(page, ctx, 'queued', chatRecord(chat, 'Lage', [QUEUED_TURN]), 'queued-run', 'queued-req', QUEUED_TURN);
+      await until(page, 'queued', 'both queued messages', () => document.body.innerText.includes('langen Lauf') && document.body.innerText.includes('Donaudampfschifffahrtsgesellschaft'));
+    },
+    text: ['Guten Abend', 'langen Lauf', 'Donaudampfschifffahrtsgesellschaft', 'queued', 'take back'],
+    selectors: ['[aria-label="Stop the reply"]', '[aria-label^="Take back"]'],
+  },
+  {
+    // The person stopped the reply while the two messages waited: the queue is paused until resume or clear.
+    name: 'queue-paused',
+    async run(page, ctx) {
+      const chat = 'labpaused';
+      for (const [index, text] of QUEUED_MESSAGES.entries()) {
+        const turn = { ...streamingTurn('paused-wait-' + index, text), phase: 'requesting' };
+        await ctx.insertRun({ runId: 'paused-wait-run-' + index, chat, requestId: 'paused-wait-req-' + index, turn, status: 'held', created: NOW + index + 1,
+          config: { lane: chat, header: { uid: chat, title: 'Lage', created: NOW, config: CONFIG }, grants: null, timezone: 'Europe/Berlin' } });
+      }
+      const stopped = { ...streamingTurn('paused-turn-1', QUESTION, { answer: WRITING_TEXT }), status: 'stopped', phase: 'stopped', error: 'Stopped. Continue or retry when you’re ready.' };
+      await page.evaluate(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: chatKey(chat), value: chatRecord(chat, 'Lage', [stopped]) });
+      await page.goto(ctx.origin + '/#/pip?chat=' + encodeURIComponent(chat), { waitUntil: 'domcontentloaded' });
+      await until(page, 'queue-paused', 'the paused queue', () => document.body.innerText.includes('2 messages wait'));
+    },
+    text: ['Guten Abend', 'langen Lauf', 'paused', '2 messages wait', 'resume', 'clear'],
   },
   {
     name: 'card-building',
@@ -1082,12 +1121,12 @@ async function main() {
       args: [USER, 'Ada', 'ada@example.com', NOW, NOW],
     });
 
-    const insertRun = async ({ runId, chat, requestId, turn, status, expiresAt = 0, requests = [] }) => {
+    const insertRun = async ({ runId, chat, requestId, turn, status, expiresAt = 0, requests = [], config = CONFIG, created = NOW }) => {
       await execute({
         sql: `INSERT OR IGNORE INTO pocket_pip_runs (user_id, run_id, chat_uid, request_id, turn_uid, device, status, turn, checkpoint, config, device_tools, lease_id, lease_until, expires_at, created, updated)
           VALUES (?, ?, ?, ?, ?, 'phone', ?, ?, NULL, ?, '[]', ?, ?, ?, ?, ?)`,
-        args: [USER, runId, chat, requestId, turn.uid, status, JSON.stringify(turn), JSON.stringify(CONFIG),
-          status === 'running' ? 'chat-lab-lease' : '', status === 'running' ? NOW + 12 * 3600_000 : 0, expiresAt, NOW, NOW],
+        args: [USER, runId, chat, requestId, turn.uid, status, JSON.stringify(turn), JSON.stringify(config),
+          status === 'running' ? 'chat-lab-lease' : '', status === 'running' ? NOW + 12 * 3600_000 : 0, expiresAt, created, created],
       });
       for (const request of requests) {
         await execute({

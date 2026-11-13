@@ -81,8 +81,9 @@ the socket too, as requests (`pip.runs`) that the web process hands to `/api/pip
 origin, so they are checked exactly like a POST. Without the socket (Vercel, dev server, a dropped connection) a
 tab sends them as POSTs, follows a reply over its SSE stream and syncs on its usual schedule.
 
-A message sent while a reply runs in the chat (another tab or device) is refused with code `run_active`: it goes
-back to the composer and the tab shows the running reply instead of recording a failed turn.
+A message sent while a reply runs in the chat waits its turn on the server (see the last section). Only a retry or
+continue of a turn while another reply runs is still refused with code `run_active`: it goes back to the composer and
+the tab shows the running reply instead of recording a failed turn.
 
 ## Cards are a tool call (show_card)
 
@@ -273,3 +274,85 @@ messages` adding 30 more without moving the message at the top of the screen. Th
 the separate chats and leaves the segments out of its count. `withContext` (the app's "ask pip" buttons) adds a
 source to the chat last opened, or to home when there is none.
 
+
+## A message sent while Pip replies waits its turn
+
+Pip is someone the person hands work to without waiting. A message sent while a reply runs in a chat is accepted
+and answered next, on the server, with no tab open (`src/server/pip-runs.js`, from "A message sent while Pip replies
+waits its turn" down).
+
+**Where the queue lives.** In the run records: a queued message is a row of `pocket_pip_runs` with status
+`waiting`. That table already has what the queue needs: the client's `requestId` under a unique key (a retried submit
+finds the same row), the turn the person wrote, the device, and the run events every tab hears. No new table, no new
+column. Nothing is written to the chat until the message starts, so its segment, model and key are decided then.
+While it waits, the row's `config` holds the request it will start with (`{ lane, header, grants, timezone }`); when
+it starts it holds the run's settings like every other run, plus `lane`.
+
+A chat's queue is its **lane**: the chat itself, or `home` for every segment of the one big chat (a reply runs in one
+segment while the next message may belong in a new one). A lane is busy while it has a run that is `queued`,
+`running`, `awaiting` or `stopping`: for a chat, a run in that chat; for home, a run in any home segment or a run a
+queued home message started (its `config.lane`, which covers a new segment whose chat is not written yet).
+
+| State | Meaning | Left by |
+|---|---|---|
+| `waiting` | sent while the lane was busy; starts when it is free, oldest first | start, take back, a stop (→ `held`) |
+| `held` | the person stopped the reply in front of it | `resume` (→ `waiting`), `clear` or take back (→ `withdrawn`) |
+| `withdrawn` | taken back before it started; never shown, never run | — |
+| then as any run | `running` (or `queued` for a worker), `awaiting`, `done`, `failed`, `stopped` | |
+
+`serverRunState` and `runView` never treat a `waiting`, `held` or `withdrawn` row as the chat's run.
+
+**How a message joins.** `submitRun` looks at the lane first: busy, or with `waiting` messages already, and the
+message is queued (`queueMessage`): the count and the insert share one transaction, the run event `waiting` is
+recorded, and the answer is the row (status `waiting`). Its key, budget and segment are not checked then. A submit that
+loses the race for the chat's unique index to another device is queued the same way.
+
+**How the next one starts.** When a run stops being active (`done`, `failed`, `stopped`, or ended because its process
+died), whatever ended it calls `settleLane`: after a stop it pauses the lane, otherwise it starts the lane's oldest
+`waiting` message (`startNext`). That happens after `drive` has charged the tokens the ended reply spent. The start
+is one conditional update: the row must still be `waiting` and nothing may be busy in the lane, so of two processes
+starting the same lane one wins; the chat's unique index on active runs refuses it too. A message that a submit would
+refuse at that moment (no key for its provider any more, today's token limit reached, the chat removed or full) ends
+as a failed turn in its chat with the same sentence a submit would have given, and the next one is tried. A home
+message goes to the segment `homeForSend` would choose then: the newest home segment, or a new one when that is
+full (a failure is written to the newest segment, so no segment is created for it). A reply ends in the segment it
+started in.
+
+Who calls `startNext`: on the long-running server (`PIP_RUNS_MODE=inprocess`) the process that ran the reply, in the
+background; with a worker (`PIP_RUNS_DETACHED=1`) the worker step that ended it, which hands the next one to the
+worker queue (`queued`); elsewhere (Vercel, dev) the request that ran the reply runs the next one too, within the same
+request, one stretch per reply.
+
+**Survives a restart.** The rows are in the database. A reply that was running when the process stopped is continued
+or ended as before ("A reply survives a restart"), and its end starts the next one. A lane that has `waiting`
+messages and nothing busy (the process stopped between one end and the next start) is started by the worker's sweep
+(`sweepRuns`, counted as `advanced`), and on the long-running server also by the next read of the queue.
+
+**Approval.** A reply waiting for the person's decision keeps the lane busy: queued messages wait until it is decided
+(or expires, or is stopped). The composer then says in one dim line: "Queued messages start once you decide the
+change above."
+
+**Stop.** Stopping the reply ends that reply and pauses the lane: its `waiting` messages become `held`. The thread then
+shows them marked `paused`, and after them one line, `2 messages wait`, with two keys, `resume` and `clear`. A stop
+usually means "not like this": starting the next message at once would answer something the person may no longer
+want, and dropping them silently would lose what they wrote. A new message sent while the lane is paused and idle
+starts at once; the held ones keep waiting for resume or clear.
+
+**Limits.** At most five messages wait per lane (`waiting` and `held`); the sixth is refused with code `queue_full`
+and "Five messages already wait in this chat. Send this one when Pip has answered one of them.", and goes back to the
+composer. A retry or continue of a turn while the lane is busy is still refused with `run_active`.
+
+**Every device sees the same queue.** Each change is a run event (`waiting`, `withdrawn`, `held`, `resumed`, and the
+usual `started`, `done`, …) on the live socket. An open chat reads its lane's queue again (`action: 'queue'`, which
+answers `{ queue, active }`) after any step of a run, at most once per 100 ms, and when its socket connects. Take
+back, resume and clear are run commands too (`withdraw { runId }`, `resume { chat }`, `clear { chat }`), safe to
+repeat, and answer the queue.
+
+**On screen.** While a reply runs in a chat on the server, the composer keeps its field and, once something is typed,
+shows the send key beside the stop key. A queued message is drawn after the last turn as the person's next question,
+with a dim `›` (it has not been asked yet, and amber stays for what is live), and under it one line like a card's: the
+dim word `queued` (or `paused`) and one quiet key, `take back`. A queued message the server has already written into
+the chat is shown as the chat's turn and no longer as queued.
+
+**Guests and the tab path** have no queue: a reply that runs in the tab keeps today's behaviour (the composer sends
+nothing while it runs). There is no second queue in the browser.

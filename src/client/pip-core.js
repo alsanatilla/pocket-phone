@@ -329,7 +329,7 @@ export class ReplyRunner {
       if (force || Date.now() - lastSave >= 120) { this.store.update(uid, c => Object.assign(c.turns.find(t => t.uid === turn.uid), turn)); lastSave = Date.now(); }
       this.onChange({ type: "delta", chatId: uid, turn: copy(turn), ...(blocks ? { blocks } : {}) });
     };
-    let outcome = null, refused = null;
+    let outcome = null, refused = null, queued = false;
     try {
       // An earlier reply whose card this reply changed (update_card) is kept in the store; the run on the server keeps its own.
       const saveTurn = changed => this.store.update(uid, c => { const earlier = c.turns.find(t => t.uid === changed.uid); if (earlier) { earlier.answer = changed.answer; earlier.updated = changed.updated; } });
@@ -341,7 +341,12 @@ export class ReplyRunner {
       outcome = reply;
       update({ ...reply, status: "done" }, true);
     } catch (error) {
-      if (error?.code === "run_active" && !retry && !resume && this.active === active) {
+      if (error?.code === "queued" && !retry && !resume && this.active === active) {
+        // Pip was already answering in this chat on the server: the message was accepted there and waits its turn.
+        // The server writes the turn when it starts; until then the chat shows it as queued, not as a turn here.
+        this.store.update(uid, c => { c.turns = c.turns.filter(t => t.uid !== turn.uid); });
+        queued = true;
+      } else if (["run_active", "queue_full"].includes(error?.code) && !retry && !resume && this.active === active) {
         // Pip is already answering in this chat, from another tab or device. This message was never sent: it goes
         // back to the composer, and this tab shows the reply that is running instead.
         this.store.update(uid, c => { c.turns = c.turns.filter(t => t.uid !== turn.uid); c.draft = turn.text; });
@@ -355,6 +360,7 @@ export class ReplyRunner {
       if (this.active === active) { this.active = null; this.onChange({ type: "finished", chatId: uid }); }
     }
     if (refused) { void this.attach(uid); throw refused; }
+    if (queued) { void this.attach(uid); return; }
     // After its first answer a chat names itself, so the sidebar never keeps "New chat" or a whole pasted question.
     // It runs in the background, on its own credential, and never touches the reply the user already has.
     if (this.title && outcome?.answer && !outcome.error) {

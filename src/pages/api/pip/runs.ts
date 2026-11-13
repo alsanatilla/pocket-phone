@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { signedIn } from '../../../server/auth.js';
 import { ensureSchema } from '../../../server/database.js';
 import { json, failure, sameOrigin, readJson } from '../../../server/http.js';
-import { serverRunState, submitRun, decideRun, continueRun, stopRun, runView, followView } from '../../../server/pip-runs.js';
+import { serverRunState, submitRun, decideRun, continueRun, stopRun, runView, followView, queueView, changeQueue } from '../../../server/pip-runs.js';
 
 // Pip's shared conversations: any device linked to the account submits, watches, decides and stops the same
 // run. GET watches (with an event cursor); POST changes it. Nothing here trusts a device's own history. continue
@@ -30,6 +30,9 @@ export const POST: APIRoute = async ({ request }) => {
     if (body.action === 'decide') return json({ accountId: user.id, ...await decideRun(user.id, body) });
     if (body.action === 'continue') { await continueRun(user.id, String(body.runId || '')); return json({ accountId: user.id, ...await runView(user.id, { runId: String(body.runId || '') }) }); }
     if (body.action === 'stop') return json({ accountId: user.id, ...await stopRun(user.id, body) });
+    // The messages waiting their turn in a chat; withdraw, resume and clear change them (docs/pip-message-flow.md).
+    if (body.action === 'queue') return json({ accountId: user.id, ...await queueView(user.id, { chat: String(body.chat || '') }) });
+    if (['withdraw', 'resume', 'clear'].includes(body.action)) return json({ accountId: user.id, ...await changeQueue(user.id, body) });
     return json({ error: 'Unknown Pip run request.' }, 404);
   } catch (error) { return failure(error); }
 };

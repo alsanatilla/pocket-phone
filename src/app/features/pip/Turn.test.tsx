@@ -5,7 +5,7 @@ vi.mock("../../ui/Markdown.tsx", () => ({ Markdown: ({ text }: { text: string })
 import { chats, type ChatTurn } from "../../data/chats.ts";
 import { listTasks } from "../../data/tasks.ts";
 import { toastError } from "../../ui/toast/toast.ts";
-import { Turn } from "./Turn.tsx";
+import { QueuedTurn, Turn } from "./Turn.tsx";
 
 function seed(activity: unknown[], extra: Partial<ChatTurn> = {}) {
   const chat = chats.create();
@@ -40,5 +40,16 @@ describe("a reply in Pip", () => {
     expect(screen.getByText(/Continue or retry/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "continue" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "start over" })).toBeTruthy();
+  });
+
+  it("shows a message waiting its turn as the next question, marked queued, with one key to take it back", async () => {
+    const takeBack = vi.fn(() => Promise.resolve());
+    const view = render(<QueuedTurn text="And the red one?" state="waiting" onTakeBack={takeBack} />);
+    expect(screen.getByText("And the red one?")).toBeTruthy();
+    expect(screen.getByText("queued")).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Take back: And the red one?" })); });
+    expect(takeBack).toHaveBeenCalledTimes(1);
+    view.rerender(<QueuedTurn text="And the red one?" state="held" onTakeBack={takeBack} />);
+    expect(screen.getByText("paused")).toBeTruthy();
   });
 });

@@ -168,6 +168,8 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
       if (turnNow) onUpdate({ answer: turnNow.answer || '', reasoning: turnNow.reasoning || '', activity: turnNow.activity || [],
         sources: turnNow.sources || [], usage: { ...(turnNow.usage || {}), runtime: 'pocket-server' }, model: turnNow.model || turn?.model, phase: turnNow.phase || 'requesting', ...(turnNow.blocks ? { blocks: turnNow.blocks } : {}) });
     }
+    // The chat was busy on the server (another tab or device): the message was accepted and waits its turn there.
+    if (run.status === 'waiting' || run.status === 'held') throw Object.assign(new Error('Pip is still answering in this chat. Your message waits its turn.'), { code: 'queued' });
     if (run.status === 'done') return { ...turnNow, phase: 'done' };
     if (run.status === 'failed') throw new Error(turnNow?.error || 'The server reply failed.');
     if (run.status === 'stopped') throw Object.assign(new Error(turnNow?.error || 'Stopped. Continue or retry when you’re ready.'), { name: 'RunStopped' });
@@ -282,4 +284,34 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
     if (id) await command({ action: 'stop', accountId: owner.id, runId: id, device }).catch(() => {});
     throw new DOMException('Stopped', 'AbortError');
   }
+}
+
+/** The chat's header as a submit carries it, so the server can start a chat it has not seen yet. */
+const chatHeader = chat => ({ uid: chat.uid, title: chat.title, titled: Boolean(chat.titled), home: Boolean(chat.home), created: chat.created, config: chat.config });
+
+/**
+ * Sends a message while a reply runs in the chat: the server keeps it and answers it next (docs/pip-message-flow.md,
+ * "A message sent while Pip replies waits its turn"). Nothing is added to the chat here; the server writes the turn
+ * when it starts. A retried command keeps its request id, so it is the same message. Answers the run (`waiting`).
+ */
+export async function queueReply(chat, { text, context = [] }, storage = globalThis.localStorage) {
+  const owner = account();
+  if (!owner) throw new Error('Sign in to Pocket to send while Pip is answering.');
+  const id = crypto.randomUUID();
+  return command({ action: 'submit', accountId: owner.id, requestId: id, attempt: id, turnUid: crypto.randomUUID(), device: deviceId(storage), chatUid: chat.uid,
+    text, context, grants: access(chat.config, storage), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, chat: chatHeader(chat) });
+}
+
+/** The messages waiting their turn in a chat (the whole one big chat for a home segment), and what its reply is doing. */
+export async function chatQueue(chatUid) {
+  const owner = account();
+  if (!owner) return { queue: [], active: '' };
+  return command({ action: 'queue', accountId: owner.id, chat: chatUid });
+}
+
+/** Takes one waiting message back (`withdraw`), or lets a paused queue run again (`resume`) or empties it (`clear`). */
+export async function changeQueue(action, { chat = '', runId = '' } = {}) {
+  const owner = account();
+  if (!owner) throw new Error('Sign in to Pocket to change what waits for Pip.');
+  return command({ action, accountId: owner.id, chat, runId });
 }

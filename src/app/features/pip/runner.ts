@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { ReplyRunner, streamReply, type Decision, type RunnerEvent } from "../../../client/pip-core.js";
 import { resolve } from "../../../client/pip-credentials.js";
-import { streamReplyRemote } from "../../../client/pip-remote.js";
+import { changeQueue, chatQueue, queueReply, streamReplyRemote, type ChatQueue } from "../../../client/pip-remote.js";
 import { connected } from "../../../client/cloud.js";
 import * as liveSocket from "../../../client/live.js";
 import { suggestTitle } from "../../../client/pip-title.js";
@@ -13,7 +13,8 @@ import type { Segment } from "../../../shared/pip-reply.js";
 // - a signed-in chat always runs on Pocket's server (it survives a closed tab); a guest's runs in this tab;
 // - a COROS training routine's chat answers through its own path with the account's key;
 // - a fresh chat names itself after its first answer;
-// - writes Pip asks for wait for the person's decision (approvals).
+// - writes Pip asks for wait for the person's decision (approvals);
+// - a message sent while a reply runs waits its turn on the server (queueSend), shown to every device (useQueue).
 // Views read the live turn and the approval state through useLiveReply().
 
 /** `blocks`: the reply already cut into prose and cards by the server, while it streams from there. */
@@ -50,6 +51,8 @@ const runner = new ReplyRunner(chats, {
     // A delta waits for the next frame; the start, approvals and the end of a reply paint at once.
     if (event.type === "delta") schedule();
     else { if (frame) { (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout)(frame); frame = 0; } emit(); }
+    // The reply this tab showed ended, after the end is drawn: the chat's next message may have started meanwhile.
+    if (event.type === "finished") setTimeout(() => afterReply?.(), 0);
   },
 });
 
@@ -78,12 +81,62 @@ export function stop(): void { runner.stop(); live = null; emit(); }
 export function watchChat(chatId: string): () => void {
   if (!connected()) return () => {};
   const look = () => { if (!runner.active) void runner.attach(chatId).catch(() => {}); };
-  look();
-  return liveSocket.on(message => {
-    if (message.type === "hello") look();
+  // Every step of any run may change this chat's queue (a home message can run in another segment): read it again,
+  // once for a burst of steps.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const reread = () => { clearTimeout(timer); timer = setTimeout(() => void refreshQueue(chatId), 100); };
+  const again = () => { look(); reread(); };
+  // Only a chat with a message waiting can have a next reply to show; the queue read redraws the page either way.
+  afterReply = () => { if (queue?.chatId === chatId && queue.queue.some(item => item.state === "waiting")) look(); reread(); };
+  // The queue is read once the account's socket is up (now, or at its hello): it is what tells this tab of changes.
+  look(); if (liveSocket.connected()) reread();
+  const off = liveSocket.on(message => {
+    if (message.type === "hello") again();
     if (message.type === "event" && message.event === "run" && message.data.chat === chatId && ["queued", "started", "delta", "continued"].includes(message.data.kind)) look();
+    if (message.type === "event" && message.event === "run" && message.data.kind !== "delta") reread();
   });
+  const mine = afterReply;
+  return () => { off(); clearTimeout(timer); if (afterReply === mine) afterReply = null; };
 }
+/** What the chat on screen does when the reply this tab showed has ended. */
+let afterReply: (() => void) | null = null;
+
+// The queue of the chat on screen: messages sent while Pip replies, kept on the server and the same on every device
+// (docs/pip-message-flow.md). A guest's chat, or one that answers in this tab, has none.
+const NO_QUEUE: ChatQueue = { queue: [], active: "" };
+let queue: (ChatQueue & { chatId: string }) | null = null;
+let asked = 0;
+const queueListeners = new Set<() => void>();
+const setQueue = (chatId: string, next: ChatQueue) => { queue = { chatId, queue: next.queue ?? [], active: next.active ?? "" }; queueListeners.forEach(listener => listener()); };
+async function refreshQueue(chatId: string): Promise<void> {
+  if (!canQueue(chatId)) return;
+  const ask = ++asked;
+  // A failed read keeps what is shown; the next step of a run reads it again.
+  const next = await chatQueue(chatId).catch(() => null);
+  if (next && ask === asked) setQueue(chatId, next);
+}
+
+/** Whether a message sent while a reply runs in this chat can wait its turn: a signed-in chat that runs on the server. */
+export const canQueue = (chatId: string): boolean => connected() && !trainingChatRoutine(chatId);
+/** Sends `text` to wait its turn behind the reply running in `chatId`, with the chat's sources. */
+export async function queueSend(chatId: string, text: string): Promise<void> {
+  const chat = chats.get(chatId);
+  if (!chat) throw new Error("This chat was removed.");
+  await queueReply(chat, { text, context: chat.context ?? [] }).catch(error => { throw plain(error); });
+  if (chat.context?.length) chats.update(chatId, current => { current.context = []; });
+  await refreshQueue(chatId);
+}
+/** Takes back a message that has not started. */
+export const withdraw = (chatId: string, runId: string): Promise<void> => changeQueue("withdraw", { runId }).then(next => setQueue(chatId, next), error => { throw plain(error); });
+/** Lets the messages paused by a stop run again, in order. */
+export const resumeQueue = (chatId: string): Promise<void> => changeQueue("resume", { chat: chatId }).then(next => setQueue(chatId, next), error => { throw plain(error); });
+/** Takes back every message paused by a stop. */
+export const clearQueue = (chatId: string): Promise<void> => changeQueue("clear", { chat: chatId }).then(next => setQueue(chatId, next), error => { throw plain(error); });
+/** The queue of `chatId` (for a home segment: the one big chat's), as the server last said. */
+export const useQueue = (chatId: string | null | undefined): ChatQueue => useSyncExternalStore(
+  listener => { queueListeners.add(listener); return () => { queueListeners.delete(listener); }; },
+  () => (queue && chatId && queue.chatId === chatId ? queue : NO_QUEUE), () => NO_QUEUE,
+);
 
 export const busy = (): boolean => Boolean(runner.active);
 export const approvalOf = (turnId: string, rowId: string) => runner.approvalOf(turnId, rowId);

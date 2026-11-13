@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, type KeyboardEvent, type MouseEvent } from "react";
+import { memo, useCallback, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Link } from "@tanstack/react-router";
 import { Check, Circle, LoaderCircle, Minus, TriangleAlert } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -75,6 +75,29 @@ function useCardButtons(chatId: string, locked: boolean) {
     onClick: (event: MouseEvent) => { if (act(event.target)) event.preventDefault(); },
     onKeyDown: (event: KeyboardEvent) => { if ((event.key === "Enter" || event.key === " ") && act(event.target)) event.preventDefault(); },
   };
+}
+
+/**
+ * A message sent while Pip replies, waiting its turn on the server: the person's next question as a prompt line whose
+ * marker is dim (it has not been asked yet), and one line under it like a card's: the dim word `queued` (or `paused`
+ * after a stop) and one quiet key to take it back before it starts. The key reaches 44px to the touch by itself, so
+ * the line stays as close to the message as the time under a question.
+ */
+export function QueuedTurn({ text, state, onTakeBack }: { text: string; state: "waiting" | "held"; onTakeBack: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const takeBack = () => { setBusy(true); onTakeBack().catch(error => { setBusy(false); toastError(error); }); };
+  return (
+    <article>
+      <div className="flex gap-2 font-medium text-hi">
+        <span aria-hidden="true" className="text-dim">›</span>
+        <p className="min-w-0 whitespace-pre-wrap break-words">{text}</p>
+      </div>
+      <div className="ml-[2ch] mt-0.5 flex items-center gap-3">
+        <p className="min-w-0 flex-1 text-xs text-dim">{state === "held" ? "paused" : "queued"}</p>
+        <Button type="button" size="xs" disabled={busy} onClick={takeBack} aria-label={"Take back: " + text.slice(0, 60)}>take back</Button>
+      </div>
+    </article>
+  );
 }
 
 interface TurnProps { turn: ChatTurn; live: Partial<ChatTurn> | null; blocks?: Segment[]; chatId: string; latest: boolean; locked: boolean }

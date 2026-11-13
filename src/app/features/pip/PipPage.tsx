@@ -13,8 +13,8 @@ import { openThoughts } from "../../data/thoughts.ts";
 import { ChatList } from "./ChatList.tsx";
 import { PipComposer } from "./PipComposer.tsx";
 import { threadOf } from "./thread.ts";
-import { Turn } from "./Turn.tsx";
-import { busy as runnerBusy, send, stop, useLiveReply, watchChat } from "./runner.ts";
+import { QueuedTurn, Turn } from "./Turn.tsx";
+import { busy as runnerBusy, canQueue, clearQueue, queueSend, resumeQueue, send, stop, useLiveReply, useQueue, watchChat, withdraw } from "./runner.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 
 // Pip: one ongoing conversation, plus the separate chats in a side sheet. The header says which model answers and
@@ -106,6 +106,22 @@ export function PipPage() {
   const latest = chat?.turns.at(-1)?.uid ?? null;
   const locked = Boolean(live) || runnerBusy();
   const askPip = (prompt: string) => { const target = home ? homeForSend() : chat; if (target) send(target.uid, prompt).catch(toastError); };
+  // Messages sent while Pip replies wait on the server and show as the person's next messages until they start. One
+  // the server has already written into the chat is the chat's own turn by then, so it is not drawn twice.
+  const queue = useQueue(watched);
+  const queueing = Boolean(watched && canQueue(watched));
+  const asked = new Set(joined.items.map(item => item.turn.uid));
+  const queued = queue.queue.filter(item => !asked.has(item.turnUid));
+  const held = queued.filter(item => item.state === "held").length;
+  // A reply waiting for the person's decision holds the queue: the composer says so in one dim line.
+  const note = queued.length > held && queue.active === "awaiting"
+    ? <p className="py-1 text-xs text-dim">Queued messages start once you decide the change above.</p>
+    : null;
+  const sendFromComposer = (text: string) => {
+    const target = home ? homeForSend() : chat;
+    if (!target) return Promise.resolve();
+    return locked && canQueue(target.uid) ? queueSend(target.uid, text) : send(target.uid, text);
+  };
 
   return (
     <main className="flex min-h-[calc(100dvh-45px)] flex-col">
@@ -134,13 +150,26 @@ export function PipPage() {
                 live={live && live.chatId === item.chatId && live.turnId === item.turn.uid ? live.turn : null}
                 blocks={live && live.chatId === item.chatId && live.turnId === item.turn.uid ? live.blocks : undefined} />
             ))}
+            {watched ? queued.map(item => (
+              <QueuedTurn key={item.runId} text={item.text} state={item.state} onTakeBack={() => withdraw(watched, item.runId)} />
+            )) : null}
+            {/* After a stop the queue is paused: one line with how many wait, and whether they go on or go. */}
+            {watched && held ? (
+              <div className="flex items-center gap-3">
+                <p className="min-w-0 flex-1 text-xs text-dim">{held === 1 ? "1 message waits" : held + " messages wait"}</p>
+                <Keys>
+                  <Button type="button" onClick={() => resumeQueue(watched).catch(toastError)}>resume</Button>
+                  <Button type="button" onClick={() => clearQueue(watched).catch(toastError)}>clear</Button>
+                </Keys>
+              </div>
+            ) : null}
           </>
         }
       </div>
 
       <div className="sticky bottom-0 bg-background pt-2 pb-3">
         {chat
-          ? <PipComposer key={chat.uid + (ask ?? "")} chat={chat} busy={locked} initial={ask} onSend={text => send((home ? homeForSend() : chat).uid, text)} onStop={stop} />
+          ? <PipComposer key={chat.uid + (ask ?? "")} chat={chat} busy={locked} queueing={queueing} note={note} initial={ask} onSend={sendFromComposer} onStop={stop} />
           : null}
       </div>
 

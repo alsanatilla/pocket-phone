@@ -13,7 +13,7 @@ import { config as pipConfig, requestBody, contextCoverage } from '../client/pip
 import { execute as runTool, preview as previewTool, label, WRITE_TOOLS } from '../client/pip-tools.js';
 import { settle } from '../client/pip-activity.js';
 import { objectId, validObject } from '../shared/objects.js';
-import { homeSegments, homeTail } from '../shared/pip-home.js';
+import { HOME_TITLE, homeFull, homeSegments, homeTail } from '../shared/pip-home.js';
 import { effortLimits, effortNote } from '../shared/pip-effort.js';
 import { replyNotice, waitingNotice } from '../shared/pip-notice.js';
 import { notify, watched, watching, unwatch, forgetWatches } from './pip-notify.js';
@@ -38,6 +38,8 @@ const RUN_DEADLINE = 150000, HEARTBEAT = 2000, LEASE = 20000, PROGRESS_REQUEST =
 /** A chat run on a vaulted key has no dedicated daily budget; this bounds a runaway day without a settings page. */
 const VAULT_TOKENS = 200000;
 const ACTIVE = ['queued', 'running', 'awaiting', 'stopping'];
+/** A run that was asked of the model, as opposed to a message still waiting its turn (or taken back before it began). */
+const STARTED = "status NOT IN ('waiting', 'held', 'withdrawn')";
 /** Detached runs are queued in Turso and executed by a worker process (services/pip), not by the request. */
 const detached = () => process.env.PIP_RUNS_DETACHED === '1' && !inProcess();
 /**
@@ -74,10 +76,14 @@ if (inProcess()) process.once('SIGTERM', () => {
   const limit = new Promise(resolve => setTimeout(resolve, 25000).unref());
   Promise.race([Promise.allSettled([settledRuns(), settledSurfaces()]), limit]).finally(() => process.exit(0));
 });
-/** Executes a stretch: in this process without waiting when the server runs on, inside the request otherwise. */
+/**
+ * Executes a stretch: in this process without waiting when the server runs on, inside the request otherwise. A
+ * stretch that ended the reply hands its chat to the next message waiting there (settleLane).
+ */
 function executeStretch(userId, run, leaseId, options) {
-  if (!inProcess()) return drive(userId, run, leaseId, options);
-  const work = drive(userId, run, leaseId, options).catch(error => console.error(JSON.stringify({ level: 'error', message: 'Pip run failed', run: String(run.run_id), error: String(error?.message || error).slice(0, 300) })));
+  const stretch = () => drive(userId, run, leaseId, options).then(() => settleLane(userId, String(run.run_id), options));
+  if (!inProcess()) return stretch();
+  const work = stretch().catch(error => console.error(JSON.stringify({ level: 'error', message: 'Pip run failed', run: String(run.run_id), error: String(error?.message || error).slice(0, 300) })));
   executing.add(work); work.finally(() => executing.delete(work));
   return Promise.resolve();
 }
@@ -97,6 +103,12 @@ const NOTE = '\n\nThis reply runs on your Pocket account\'s server and is shared
 const no = (message, status = 400, code = '') => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 /** A reply is already running in this chat (from this or another device): the client follows that one instead. */
 const RUN_ACTIVE = 'Pip is still answering in this chat. Wait for it, or stop it first.';
+/** What a submit is refused with, and what a queued message ends with when the same is true as it starts. */
+const NOT_SET_UP = 'Pip on the server is not set up for the selected provider. Connect that provider in Pip settings.',
+  NO_TOKENS = 'Today’s token limit for Pip on the server is used up.', CHAT_FULL = 'This chat is full. Start a new one.';
+/** How many messages may wait their turn in one chat (waiting and held). */
+const QUEUE_LIMIT = 5;
+const QUEUE_FULL = 'Five messages already wait in this chat. Send this one when Pip has answered one of them.';
 const allowedId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value);
 const parse = raw => { try { return JSON.parse(String(raw)); } catch { return null; } };
 
@@ -137,8 +149,8 @@ export async function serverRunState(userId, chat = '', asked = null) {
   const saved = await account(userId, target ? selected : null);
   const available = Boolean(saved), settings = saved?.settings || null;
   const row = chat && objectId(chat)
-    ? (await sql({ sql: 'SELECT * FROM pocket_pip_runs WHERE user_id = ? AND chat_uid = ? ORDER BY created DESC LIMIT 1', args: [userId, chat] })).rows[0]
-    : (await sql({ sql: 'SELECT * FROM pocket_pip_runs WHERE user_id = ? ORDER BY created DESC LIMIT 1', args: [userId] })).rows[0];
+    ? (await sql({ sql: `SELECT * FROM pocket_pip_runs WHERE user_id = ? AND chat_uid = ? AND ${STARTED} ORDER BY created DESC LIMIT 1`, args: [userId, chat] })).rows[0]
+    : (await sql({ sql: `SELECT * FROM pocket_pip_runs WHERE user_id = ? AND ${STARTED} ORDER BY created DESC LIMIT 1`, args: [userId] })).rows[0];
   return { available, grants: settings ? serverGrants(settings) : [], web: Boolean(settings?.webSearch),
     tokensLeft: saved ? Math.max(0, tokensLeft(saved)) : (available ? VAULT_TOKENS : 0), run: row ? await view(userId, await recover(userId, row), 0) : null };
 }
@@ -206,7 +218,7 @@ async function closeRun(userId, runId, leaseId, status, turn, data = {}) {
  * Ends a run no request is executing. A stop ends a waiting run; recovery ends a run whose request died, which
  * the lease shows. Its open requests are dropped so they cannot be answered later.
  */
-async function endIdle(userId, run, { stop = false, device = '' } = {}) {
+async function endIdle(userId, run, { stop = false, device = '', fetcher } = {}) {
   const now = Date.now(), stopping = stop || String(run.status) === 'stopping', status = stopping ? 'stopped' : 'failed';
   const turn = endTurn(parse(run.turn), status, stopping ? STOPPED : INTERRUPTED);
   const row = (await sql({ sql: `UPDATE pocket_pip_runs SET status = ?, turn = ?, checkpoint = NULL, lease_id = '', lease_until = 0, updated = ?
@@ -217,6 +229,7 @@ async function endIdle(userId, run, { stop = false, device = '' } = {}) {
   if (stopping) await finishJob(userId, String(run.run_id), 'done', 'stopped', now);
   const saved = await writeTurn(userId, String(row.chat_uid), turn);
   await event(userId, String(run.run_id), stopping ? 'stopped' : 'interrupted', { ...(device ? { device } : {}), ...(saved ? {} : { chat: 'not_saved' }) }, now);
+  await settleLane(userId, String(run.run_id), { fetcher });
   return row;
 }
 /**
@@ -244,7 +257,7 @@ async function recover(userId, run, { fetcher } = {}) {
     const claimed = await restart(userId, run, { fetcher });
     if (claimed) { await executeStretch(userId, claimed, String(claimed.lease_id), { fetcher }); return claimed; }
   }
-  return await endIdle(userId, run) || await runRow(userId, String(run.run_id));
+  return await endIdle(userId, run, { fetcher }) || await runRow(userId, String(run.run_id));
 }
 
 /**
@@ -262,11 +275,16 @@ export async function submitRun(userId, body, { fetcher, now = Date.now() } = {}
   // The key may come from the account's “on its own” settings or from the key vault for this chat's own endpoint.
   const clientConfig = (() => { try { return pipConfig(header?.config); } catch { return null; } })();
   const timezone = validTimezone(body.timezone) ? body.timezone : '';
+  // A reply already runs in this chat, or messages already wait there: this one waits its turn behind them. Its key,
+  // budget and segment are checked when it starts, not now.
+  const lane = await laneOf(userId, uid, header), active = await activeIn(userId, lane);
+  const busy = active && ACTIVE.includes(String((await recover(userId, active, { fetcher }))?.status));
+  if (busy || (await laneRows(userId, lane, ['waiting'])).length) return queueMessage(userId, body, { uid, lane, header, clientConfig, timezone, now, fetcher });
   const saved = await account(userId, clientConfig, body.grants, timezone);
-  if (!saved) throw no('Pip on the server is not set up for the selected provider. Connect that provider in Pip settings.', 409);
-  if (saved.source === 'routines' && tokensLeft(saved, now) <= 0) throw no('Today’s token limit for Pip on the server is used up.', 429);
+  if (!saved) throw no(NOT_SET_UP, 409);
+  if (saved.source === 'routines' && tokensLeft(saved, now) <= 0) throw no(NO_TOKENS, 429);
   const value = { ...runValue(saved.settings, body.grants), timezone: saved.settings.timezone || 'UTC' }, chat = await conversation(userId, uid, header, value, now);
-  if (chat.turns.length >= 1990) throw no('This chat is full. Start a new one.', 413);
+  if (chat.turns.length >= 1990) throw no(CHAT_FULL, 413);
   const device = String(body.device || '').slice(0, 100);
   // The client's attempt id is kept: a synced server turn then carries the same attempt the tab is running, so the
   // tab's own progress updates are not mistaken for another run's. The runtime marker travels with the turn, so
@@ -278,8 +296,6 @@ export async function submitRun(userId, body, { fetcher, now = Date.now() } = {}
   const turn = { uid: turnUid, text, context: Array.isArray(body.context) ? body.context : [], created: now, updated: now, owner: device || 'pocket-server', attempt,
     answer: '', reasoning: '', error: '', status: 'streaming', usage: { runtime: 'pocket-server' }, activity: [], sources: [], phase: 'requesting', model: value.model };
   if (!validObject('chats', { ...chat, updated: now, turns: [turn] })) throw no('Check the message and its attached sources: up to three, each with a title and up to 8,000 characters.');
-  const active = (await sql({ sql: `SELECT * FROM pocket_pip_runs WHERE user_id = ? AND chat_uid = ? AND status IN ('queued', 'running', 'awaiting', 'stopping')`, args: [userId, uid] })).rows[0];
-  if (active && ACTIVE.includes(String((await recover(userId, active))?.status))) throw no(RUN_ACTIVE, 409, 'run_active');
   const deviceTools = [...new Set((Array.isArray(body.deviceTools) ? body.deviceTools : []).filter(name => DEVICE_TOOLS.includes(name)))];
   const runId = randomUUID(), leaseId = randomUUID(), deferred = detached(), status = deferred ? 'queued' : 'running';
   let inserted;
@@ -288,8 +304,8 @@ export async function submitRun(userId, body, { fetcher, now = Date.now() } = {}
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, ?, ?) ON CONFLICT(user_id, request_id) DO NOTHING RETURNING *`,
       args: [userId, runId, uid, requestId, turn.uid, device, status, JSON.stringify(turn), JSON.stringify(value), JSON.stringify(deviceTools), deferred ? '' : leaseId, deferred ? 0 : Date.now() + LEASE, now, now] })).rows[0];
   } catch (error) {
-    // Another device started a reply in this conversation at the same moment.
-    if (/UNIQUE constraint failed/i.test(String(error?.message))) throw no(RUN_ACTIVE, 409, 'run_active');
+    // Another device started a reply in this conversation at the same moment: this message waits behind it.
+    if (/UNIQUE constraint failed/i.test(String(error?.message))) return queueMessage(userId, body, { uid, lane, header, clientConfig, timezone, now, fetcher });
     throw error;
   }
   if (!inserted) return view(userId, await recover(userId, await requestRow(userId, requestId)), 0);
@@ -580,6 +596,7 @@ export async function sweepRuns({ fetcher, now = Date.now(), deadline = Date.now
     await finishJob(userId, runId, 'failed', turn.error, now);
     await writeTurn(userId, String(moved.chat_uid), turn);
     await event(userId, runId, 'failed', { error: turn.error }, now);
+    await settleLane(userId, runId, { fetcher }).catch(() => { /* The stalled-lane pass below and the next sweep retry. */ });
   }
   for (const row of (await sql({ sql: "SELECT * FROM pocket_pip_runs WHERE status IN ('running', 'stopping') AND lease_until <= ? LIMIT 50", args: [Date.now()] })).rows) {
     const userId = String(row.user_id);
@@ -605,7 +622,14 @@ export async function sweepRuns({ fetcher, now = Date.now(), deadline = Date.now
     if (Date.now() + RUN_DEADLINE > deadline) { more = true; break; }
     try { if (await continueRun(String(row.user_id), String(row.run_id), { fetcher })) continued++; } catch { /* The next sweep retries. */ }
   }
-  return { interrupted, expired, continued, restarted, more };
+  // A chat whose reply ended while nothing started its next message (the process stopped in between) starts it here.
+  let advanced = 0;
+  const stalled = (await sql({ sql: "SELECT DISTINCT user_id, json_extract(config, '$.lane') AS lane FROM pocket_pip_runs WHERE status = 'waiting' LIMIT 50" })).rows;
+  for (const row of stalled) {
+    if (Date.now() + RUN_DEADLINE > deadline) { more = true; break; }
+    try { if (await startNext(String(row.user_id), String(row.lane), { fetcher })) advanced++; } catch { /* The next sweep retries. */ }
+  }
+  return { interrupted, expired, continued, restarted, advanced, more };
 }
 
 /** What a client shows: the run, what it waits for, and the events since its cursor. */
@@ -722,6 +746,7 @@ export async function workerStep({ fetcher, now = Date.now() } = {}) {
     if (!claimed) { await finishJob(userId, runId, 'done', 'claimed elsewhere'); return { userId, runId, state: 'claimed' }; }
     await event(userId, runId, 'started', { attempt: job.attempts, worker: process.pid }, now);
     await drive(userId, claimed, leaseId, { fetcher });
+    await settleLane(userId, runId, { fetcher });
     const after = await runRow(userId, runId), status = String(after?.status || '');
     if (!after || ['running', 'queued'].includes(status)) { await releaseJob(userId, runId, { now: Date.now() }); return { userId, runId, state: 'retry' }; }
     await finishJob(userId, runId, 'done', '');
@@ -735,6 +760,214 @@ export async function workerStep({ fetcher, now = Date.now() } = {}) {
   }
 }
 
+// --- A message sent while Pip replies waits its turn -------------------------------------------------------------
+// docs/pip-message-flow.md has the states and the decisions. A queued message is a run row with status `waiting`
+// (or `held` after a stop, `withdrawn` once taken back); its `config` holds the request it starts with, and its lane
+// says which chat's queue it is in: the chat's uid, or `home` for every segment of the one big chat.
+
+/** The queue a chat's messages wait in: `home` for any segment of the one big chat, else the chat itself. */
+async function laneOf(userId, uid, header = null) {
+  const chat = await chatObject(userId, uid);
+  return (chat ? chat.home === true : header?.home === true) ? 'home' : uid;
+}
+/**
+ * The SQL condition (on alias `r`) for a run that keeps a lane busy: queued for a worker, running, waiting for a
+ * decision or stopping. For home it is any active run in a home segment, or one a queued home message started (its
+ * config keeps `lane`), which also covers a new segment whose chat is not written yet.
+ */
+const BUSY = `r.status IN ('queued', 'running', 'awaiting', 'stopping')`;
+const busyIn = lane => lane === 'home'
+  ? { sql: `${BUSY} AND (json_extract(r.config, '$.lane') = 'home' OR EXISTS (SELECT 1 FROM pocket_objects o WHERE o.user_id = r.user_id AND o.collection = 'chats'
+      AND o.uid = r.chat_uid AND json_extract(o.payload, '$.home') = 1 AND COALESCE(json_extract(o.payload, '$.deleted'), 0) = 0))`, args: [] }
+  : { sql: `${BUSY} AND r.chat_uid = ?`, args: [lane] };
+/** The run that keeps a lane busy, if any. */
+async function activeIn(userId, lane) {
+  const busy = busyIn(lane);
+  return (await sql({ sql: `SELECT r.* FROM pocket_pip_runs r WHERE r.user_id = ? AND ${busy.sql} ORDER BY r.created LIMIT 1`, args: [userId, ...busy.args] })).rows[0] || null;
+}
+/** A lane's queued messages in these states, oldest first. */
+async function laneRows(userId, lane, states) {
+  return (await sql({ sql: `SELECT * FROM pocket_pip_runs WHERE user_id = ? AND status IN (${states.map(() => '?').join(', ')}) AND json_extract(config, '$.lane') = ?
+    ORDER BY created, rowid`, args: [userId, ...states, lane] })).rows;
+}
+
+/**
+ * Accepts a message while its chat is busy: it waits as a run row until the reply in front of it ends. The count and
+ * the insert share one transaction, so two devices cannot pass the limit together; the request id makes a retried
+ * submit find the same row.
+ */
+async function queueMessage(userId, body, { uid, lane, header, clientConfig, timezone, now, fetcher }) {
+  const requestId = String(body.requestId), text = String(body.text || '').trim(), device = String(body.device || '').slice(0, 100);
+  const chat = await conversation(userId, uid, header, clientConfig || pipConfig(), now);
+  const turnUid = typeof body.turnUid === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(body.turnUid) ? body.turnUid : randomUUID();
+  // A retry or continue of a turn already in the chat is not a new message: it waits for nobody.
+  if ((chat.turns || []).some(item => item.uid === turnUid)) throw no(RUN_ACTIVE, 409, 'run_active');
+  const attempt = typeof body.attempt === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(body.attempt) ? body.attempt : randomUUID();
+  const turn = { uid: turnUid, text, context: Array.isArray(body.context) ? body.context : [], created: now, updated: now, owner: device || 'pocket-server', attempt,
+    answer: '', reasoning: '', error: '', status: 'streaming', usage: { runtime: 'pocket-server' }, activity: [], sources: [], phase: 'requesting', model: clientConfig?.model || chat.config?.model || '' };
+  if (!validObject('chats', { ...chat, updated: now, turns: [turn] })) throw no('Check the message and its attached sources: up to three, each with a title and up to 8,000 characters.');
+  const deviceTools = [...new Set((Array.isArray(body.deviceTools) ? body.deviceTools : []).filter(name => DEVICE_TOOLS.includes(name)))];
+  const request = { lane, header: { ...header, uid }, grants: Array.isArray(body.grants) ? body.grants : null, timezone };
+  const runId = randomUUID();
+  let inserted;
+  const tx = await database().transaction('write');
+  try {
+    const waiting = Number((await tx.execute({ sql: `SELECT COUNT(*) AS n FROM pocket_pip_runs WHERE user_id = ? AND status IN ('waiting', 'held') AND json_extract(config, '$.lane') = ?`, args: [userId, lane] })).rows[0].n);
+    if (waiting >= QUEUE_LIMIT) throw no(QUEUE_FULL, 409, 'queue_full');
+    inserted = (await tx.execute({ sql: `INSERT INTO pocket_pip_runs (user_id, run_id, chat_uid, request_id, turn_uid, device, status, turn, checkpoint, config, device_tools, lease_id, lease_until, expires_at, created, updated)
+      VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, NULL, ?, ?, '', 0, 0, ?, ?) ON CONFLICT(user_id, request_id) DO NOTHING RETURNING run_id`,
+      args: [userId, runId, uid, requestId, turn.uid, device, JSON.stringify(turn), JSON.stringify(request), JSON.stringify(deviceTools), now, now] })).rows[0];
+    await tx.commit();
+  } catch (error) { await tx.rollback().catch(() => {}); throw error; }
+  finally { tx.close(); }
+  if (!inserted) return view(userId, await requestRow(userId, requestId), 0);
+  await event(userId, runId, 'waiting', { chat: uid, turn: turn.uid, device }, now);
+  // The reply in front may have ended while this was written; then nothing else would start it.
+  await startNext(userId, lane, { fetcher });
+  return view(userId, await runRow(userId, runId), 0);
+}
+
+/** Ends a queued message that cannot run as a failed turn in its chat, with the sentence a submit would have given. */
+async function failQueued(userId, row, turn, uid, error) {
+  const failed = endTurn(turn, 'failed', error), now = Date.now();
+  const moved = (await sql({ sql: `UPDATE pocket_pip_runs SET status = 'failed', chat_uid = ?, turn = ?, updated = ? WHERE user_id = ? AND run_id = ? AND status = 'waiting' RETURNING run_id`,
+    args: [uid, JSON.stringify(failed), now, userId, String(row.run_id)] })).rows[0];
+  if (!moved) return;
+  const chat = await chatObject(userId, uid);
+  const saved = chat && !chat.deleted ? await writeObject(userId, 'chats', { ...chat, updated: Math.max(now, chat.updated + 1), turns: [failed] }, { appendTurns: true }).then(() => true, () => false) : false;
+  await event(userId, String(row.run_id), 'failed', { error, chat: saved ? uid : 'not_saved' }, now);
+}
+
+/**
+ * Starts the oldest message waiting in a lane when nothing runs there. Every check a submit makes is made now; a
+ * message that fails one ends as a failed turn and the next is tried. The claim is conditional on `waiting`, and the
+ * unique index on active runs refuses it while another run is active, so two processes never start two.
+ */
+async function startNext(userId, lane, { fetcher } = {}) {
+  for (let tries = 0; tries <= QUEUE_LIMIT * 2; tries++) {
+    const next = (await laneRows(userId, lane, ['waiting']))[0];
+    if (!next || await activeIn(userId, lane)) return false;
+    const request = parse(next.config) || {}, turn = parse(next.turn) || {}, runId = String(next.run_id), now = Date.now();
+    let uid = String(next.chat_uid), header = request.header || {}, failIn = uid;
+    // The one big chat: the segment homeForSend would choose now, a new one when the newest is full. A message that
+    // cannot start says so in the newest segment, so no segment is created for a failure.
+    if (lane === 'home') {
+      const current = (await homeSegmentsOf(userId)).at(-1);
+      if (current) failIn = uid = String(current.uid);
+      if (current && homeFull(current)) { uid = randomUUID(); header = { uid, title: HOME_TITLE, titled: true, home: true, created: now, config: current.config }; }
+    }
+    const clientConfig = (() => { try { return pipConfig(header.config); } catch { return null; } })();
+    let refusal = '', value = null, chat = null;
+    try {
+      const saved = await account(userId, clientConfig, request.grants, request.timezone || '');
+      if (!saved) refusal = NOT_SET_UP;
+      else if (saved.source === 'routines' && tokensLeft(saved, now) <= 0) refusal = NO_TOKENS;
+      else value = { ...runValue(saved.settings, request.grants), timezone: saved.settings.timezone || 'UTC' };
+      chat = await conversation(userId, uid, header, value || clientConfig || pipConfig(), now);
+      if (!refusal && chat.turns.length >= 1990) refusal = CHAT_FULL;
+    } catch (error) { refusal ||= String(error?.message || 'This message could not be started.').slice(0, 300); }
+    if (refusal) { await failQueued(userId, next, turn, failIn, refusal); continue; }
+    Object.assign(turn, { status: 'streaming', phase: 'requesting', model: value.model, updated: now });
+    const leaseId = randomUUID(), deferred = detached();
+    let claimed;
+    try {
+      // One statement: it starts this message only while nothing else is busy in the lane, so of two processes
+      // starting the lane at once one claims it (the unique index alone covers only one chat, not every home segment).
+      const busy = busyIn(lane);
+      claimed = (await sql({ sql: `UPDATE pocket_pip_runs SET status = ?, chat_uid = ?, turn = ?, config = ?, lease_id = ?, lease_until = ?, updated = ?
+        WHERE user_id = ? AND run_id = ? AND status = 'waiting' AND NOT EXISTS (SELECT 1 FROM pocket_pip_runs r WHERE r.user_id = pocket_pip_runs.user_id AND ${busy.sql}) RETURNING *`,
+        args: [deferred ? 'queued' : 'running', uid, JSON.stringify(turn), JSON.stringify({ ...value, lane }), deferred ? '' : leaseId, deferred ? 0 : Date.now() + LEASE, now, userId, runId, ...busy.args] })).rows[0];
+    } catch (error) {
+      // Another reply started in this chat first; this message keeps waiting for it.
+      if (/UNIQUE constraint failed/i.test(String(error?.message))) return false;
+      throw error;
+    }
+    // Another process started a message of the lane first (its end starts the next), or this one was taken back.
+    if (!claimed) { if (await activeIn(userId, lane)) return false; continue; }
+    try { await writeObject(userId, 'chats', { ...chat, updated: Math.max(now, chat.updated + 1), turns: [turn] }, { appendTurns: true }); }
+    catch (error) {
+      const failed = endTurn(turn, 'failed', String(error?.message || 'This chat could not be saved.').slice(0, 300));
+      await sql({ sql: `UPDATE pocket_pip_runs SET status = 'failed', turn = ?, lease_id = '', lease_until = 0, updated = ? WHERE user_id = ? AND run_id = ? AND status IN ('queued', 'running')`,
+        args: [JSON.stringify(failed), Date.now(), userId, runId] });
+      await event(userId, runId, 'failed', { error: failed.error }, Date.now());
+      continue;
+    }
+    if (deferred) {
+      await enqueue(userId, runId, { now });
+      await event(userId, runId, 'queued', { chat: uid, turn: turn.uid, device: String(next.device || '') }, now);
+    } else {
+      await event(userId, runId, 'started', { chat: uid, turn: turn.uid, device: String(next.device || '') }, now);
+      await executeStretch(userId, claimed, leaseId, { fetcher });
+    }
+    return true;
+  }
+  return false;
+}
+
+/** Pauses a lane after a stop: its waiting messages are held until the person resumes or clears them. */
+async function holdLane(userId, lane) {
+  const now = Date.now();
+  const held = (await sql({ sql: `UPDATE pocket_pip_runs SET status = 'held', updated = ? WHERE user_id = ? AND status = 'waiting' AND json_extract(config, '$.lane') = ? RETURNING run_id, chat_uid`,
+    args: [now, userId, lane] })).rows;
+  for (const row of held) await event(userId, String(row.run_id), 'held', { chat: String(row.chat_uid) }, now);
+}
+
+/**
+ * After a run stopped being active: a stop pauses its chat's queue; any other end (done, failed, interrupted) starts
+ * the next message. A run that only paused for a decision keeps the chat busy, so nothing happens then.
+ */
+async function settleLane(userId, runId, { fetcher } = {}) {
+  const row = await runRow(userId, runId);
+  if (!row || ACTIVE.includes(String(row.status)) || ['waiting', 'held', 'withdrawn'].includes(String(row.status))) return;
+  const lane = await laneOf(userId, String(row.chat_uid));
+  if (String(row.status) === 'stopped') await holdLane(userId, lane);
+  else await startNext(userId, lane, { fetcher });
+}
+
+/**
+ * The messages waiting their turn in a chat's lane, oldest first, and what the lane's reply is doing (`awaiting`
+ * when it waits for a decision). On the long-running server a lane left with nothing running is started here.
+ */
+export async function queueView(userId, { chat = '', fetcher } = {}) {
+  if (!objectId(chat)) throw no('Open a Pip chat first.');
+  const lane = await laneOf(userId, chat);
+  if (inProcess() && !await activeIn(userId, lane)) await startNext(userId, lane, { fetcher });
+  const active = await activeIn(userId, lane);
+  const queue = (await laneRows(userId, lane, ['waiting', 'held'])).map(row => {
+    const turn = parse(row.turn) || {};
+    return { runId: String(row.run_id), requestId: String(row.request_id), chat: String(row.chat_uid), turnUid: String(row.turn_uid), text: String(turn.text || ''), created: Number(row.created), state: String(row.status) };
+  });
+  return { queue, active: active ? String(active.status) : '' };
+}
+
+/**
+ * The person changes a chat's queue from any device: `withdraw` takes one message back before it starts, `resume`
+ * lets held messages run again, `clear` takes back every held one. Each is safe to repeat. Answers the queue.
+ */
+export async function changeQueue(userId, body, { fetcher } = {}) {
+  const action = String(body.action || ''), now = Date.now();
+  if (action === 'withdraw') {
+    const runId = String(body.runId || '');
+    if (!allowedId(runId)) throw no('This message is incomplete.');
+    const row = (await sql({ sql: `UPDATE pocket_pip_runs SET status = 'withdrawn', updated = ? WHERE user_id = ? AND run_id = ? AND status IN ('waiting', 'held') RETURNING chat_uid`, args: [now, userId, runId] })).rows[0];
+    if (row) await event(userId, runId, 'withdrawn', { chat: String(row.chat_uid) }, now);
+    const kept = row || await runRow(userId, runId);
+    if (!kept) throw no('This message is no longer available.', 404);
+    return queueView(userId, { chat: String(kept.chat_uid), fetcher });
+  }
+  const chat = String(body.chat || '');
+  if (!objectId(chat)) throw no('Open a Pip chat first.');
+  const lane = await laneOf(userId, chat);
+  if (action === 'resume') {
+    const rows = (await sql({ sql: `UPDATE pocket_pip_runs SET status = 'waiting', updated = ? WHERE user_id = ? AND status = 'held' AND json_extract(config, '$.lane') = ? RETURNING run_id, chat_uid`, args: [now, userId, lane] })).rows;
+    for (const row of rows) await event(userId, String(row.run_id), 'resumed', { chat: String(row.chat_uid) }, now);
+    await startNext(userId, lane, { fetcher });
+  } else if (action === 'clear') {
+    const rows = (await sql({ sql: `UPDATE pocket_pip_runs SET status = 'withdrawn', updated = ? WHERE user_id = ? AND status = 'held' AND json_extract(config, '$.lane') = ? RETURNING run_id, chat_uid`, args: [now, userId, lane] })).rows;
+    for (const row of rows) await event(userId, String(row.run_id), 'withdrawn', { chat: String(row.chat_uid) }, now);
+  } else throw no('Unknown Pip queue request.', 404);
+  return queueView(userId, { chat, fetcher });
+}
 
 async function view(userId, run, cursor = 0) {
   if (!run) return { run: null, requests: [], events: [], cursor };

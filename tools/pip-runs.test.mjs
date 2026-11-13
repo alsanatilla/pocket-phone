@@ -208,13 +208,18 @@ test('a refused submit leaves no run behind', async () => {
   assert.equal(later.run.status, 'done', 'the same request id works once it is valid');
 });
 
-test('one unfinished reply per conversation; another device attaches instead', async () => {
+test('one unfinished reply per conversation; another message waits its turn, and a retry is still refused', async () => {
   const userId = await account(), { submitted } = await waiting(userId, 'chat-one');
-  await assert.rejects(() => runs.submitRun(userId, { requestId: 'req-second', chat: header('chat-one'), text: 'Something else', device: 'browser-1' }, { fetcher: noProvider }),
+  const queued = await runs.submitRun(userId, { requestId: 'req-second', chat: header('chat-one'), text: 'Something else', device: 'browser-1' }, { fetcher: noProvider });
+  assert.equal(queued.run.status, 'waiting');
+  assert.equal((await runs.runView(userId, { chat: 'chat-one' })).run.runId, submitted.run.runId, 'another device attaches to the running reply');
+  // Retrying the turn that is running is not a new message: it is refused as before and goes back to the composer.
+  await assert.rejects(() => runs.submitRun(userId, { requestId: 'req-retry', chat: header('chat-one'), turnUid: submitted.run.turnUid, text: 'Save the blue car price as a note.', device: 'browser-1' }, { fetcher: noProvider }),
     error => error.code === 'run_active' && error.status === 409 && /still answering/.test(error.message));
-  assert.equal((await runs.runView(userId, { chat: 'chat-one' })).run.runId, submitted.run.runId);
   await runs.stopRun(userId, { runId: submitted.run.runId, device: 'browser-1' });
-  const next = await runs.submitRun(userId, { requestId: 'req-second', chat: header('chat-one'), text: 'Something else', device: 'browser-1' }, { fetcher: provider([], compatibleMessage({ text: 'Sure.' })) });
+  assert.deepEqual((await runs.queueView(userId, { chat: 'chat-one' })).queue.map(item => item.state), ['held']);
+  await runs.changeQueue(userId, { action: 'resume', chat: 'chat-one' }, { fetcher: provider([], compatibleMessage({ text: 'Sure.' })) });
+  const next = await runs.runView(userId, { request: 'req-second' });
   assert.equal(next.run.status, 'done', next.run.turn.error);
 });
 

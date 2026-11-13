@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Row } from "../../ui/kit.tsx";
 import { ModelPicker } from "./ModelPicker.tsx";
@@ -9,8 +9,10 @@ import { toastError } from "../../ui/toast/toast.ts";
 
 // The message field: grows with its text, Enter sends (Shift+Enter is a new line), the chat's sources sit above it
 // as rows that can be removed, and the draft is kept on the chat, so it survives switching chats or a reload.
+// With `queueing` (a chat that runs on the server), a message can be sent while a reply runs: it waits its turn there.
+// `note` is one dim line above the field saying why queued messages wait (a change waiting for a decision).
 
-export function PipComposer({ chat, busy, initial, onSend, onStop }: { chat: Chat; busy: boolean; initial?: string; onSend: (text: string) => Promise<void>; onStop: () => void }) {
+export function PipComposer({ chat, busy, queueing = false, note, initial, onSend, onStop }: { chat: Chat; busy: boolean; queueing?: boolean; note?: ReactNode; initial?: string; onSend: (text: string) => Promise<void>; onStop: () => void }) {
   const [text, setText] = useState(initial || chat.draft || "");
   const area = useRef<HTMLTextAreaElement>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -31,7 +33,7 @@ export function PipComposer({ chat, busy, initial, onSend, onStop }: { chat: Cha
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
     const value = text.trim();
-    if (!value || busy) return;
+    if (!value || (busy && !queueing)) return;
     setText(""); clearTimeout(saveTimer.current);
     try { setDraft(chat.uid, ""); await onSend(value); }
     catch (error) { setText(current => current || value); toastError(error); }
@@ -42,6 +44,7 @@ export function PipComposer({ chat, busy, initial, onSend, onStop }: { chat: Cha
 
   return (
     <form onSubmit={submit} className="border-t pt-1">
+      {note}
       {chat.context.length ? (
         <div className="mb-1">
           {chat.context.map((source, index) => (
@@ -64,7 +67,8 @@ export function PipComposer({ chat, busy, initial, onSend, onStop }: { chat: Cha
       <div className="flex min-h-11 items-center gap-1 sm:min-h-0">
         <ModelPicker chat={chat} busy={busy} />
         <span className="flex-1" />
-        {busy ? <StopButton label="Stop the reply" onClick={onStop} /> : <SendButton label="Send (Enter)" disabled={!text.trim()} />}
+        {busy ? <StopButton label="Stop the reply" onClick={onStop} /> : null}
+        {!busy || (queueing && text.trim()) ? <SendButton label={busy ? "Send when Pip has answered (Enter)" : "Send (Enter)"} disabled={!text.trim()} /> : null}
       </div>
     </form>
   );
