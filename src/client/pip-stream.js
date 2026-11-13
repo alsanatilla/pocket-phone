@@ -264,7 +264,10 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     for (const [name, count] of Object.entries({ input_tokens: input, output_tokens: usage.outputTokens, cache_read_input_tokens: usage.inputTokenDetails.cacheReadTokens, cache_creation_input_tokens: usage.inputTokenDetails.cacheWriteTokens })) if (typeof count === 'number' && Number.isFinite(count)) result.usage[name] = (result.usage[name] || 0) + count;
     if (typeof usage.inputTokens === 'number') result.usage.last_input_tokens = usage.inputTokens;
     if (typeof usage.outputTokens === 'number') result.usage.last_output_tokens = usage.outputTokens;
-    if (step.toolCalls.length && step.toolCalls.every(call => !WRITE_TOOLS.includes(call.toolName) && !STATE_TOOLS.includes(call.toolName))) researchTokens -= usage.outputTokens || allowance;
+    // A round that ends in tool calls is working, not answering: it is paid from the lookups' budget. Only a round
+    // that draws a card writes part of the answer (the text before the card stays), so that one is the answer's.
+    // A model that keeps its plan beside every lookup (update_plan) used to drain the answer's tokens this way.
+    if (step.toolCalls.length && !step.toolCalls.some(call => CARD_TOOLS.includes(call.toolName))) researchTokens -= usage.outputTokens || allowance;
     else tokens -= usage.outputTokens || allowance;
     result.model = step.response.modelId || result.model;
     if (step.finishReason === 'length') { finalReason ||= 'Finish within the remaining reply token budget'; if (final) finalRounds = 2; result.activity = settle(result.activity, 'failed', 'Tool request did not finish within this round’s token allowance'); }
