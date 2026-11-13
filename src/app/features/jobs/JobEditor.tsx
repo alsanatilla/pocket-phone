@@ -46,10 +46,13 @@ function Form({ draft, onSave, busy }: { draft: JobDraft; onSave: (draft: JobDra
   const [end, setEnd] = useState(draft.activeHours?.end === "00:00" ? "24:00" : draft.activeHours?.end ?? "22:00");
   const [at, setAt] = useState(() => localInput(draft.at || Date.now() + 3600000));
   const [notify, setNotify] = useState(draft.delivery !== "quiet");
+  // A job made here reports into the big chat; one that exists keeps where it reported until this is changed.
+  const [home, setHome] = useState(draft.id ? draft.to === "home" : true);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const base: JobDraft = { kind: draft.kind, ...(draft.id ? { id: draft.id } : {}), title: title.trim(), prompt: prompt.trim(), enabled: draft.enabled ?? true, delivery: notify ? "notify" : "quiet" };
+    const base: JobDraft = { kind: draft.kind, ...(draft.id ? { id: draft.id } : {}), title: title.trim(), prompt: prompt.trim(), enabled: draft.enabled ?? true, delivery: notify ? "notify" : "quiet",
+      to: home ? "home" : "own", ...(draft.grants ? { grants: draft.grants } : {}), ...(draft.web === false ? { web: false } : {}) };
     const schedule: Partial<JobDraft> = mode === "once" ? { at: new Date(at).getTime() }
       : mode === "every" ? { every, days, ...(windowed ? { activeHours: { start, end } } : {}) }
       : { time, days };
@@ -125,8 +128,14 @@ function Form({ draft, onSave, busy }: { draft: JobDraft; onSave: (draft: JobDra
 
       <div className="grid gap-1">
         <Row className="min-w-0" end={<Switch checked={notify} onCheckedChange={setNotify} aria-label="Notify me" />}>notify me</Row>
-        <p className="text-xs text-dim">{notify ? "A push when Pip has something; nothing when a watch finds nothing." : "Quiet: Pip writes in the job's chat without a push."}</p>
+        <p className="text-xs text-dim">{notify ? "A push when Pip has something; nothing when a watch finds nothing." : "Quiet: Pip writes without a push."}</p>
       </div>
+
+      {/* A watch that keeps a card current answers where the card is. */}
+      {!draft.chat ? <div className="grid gap-1">
+        <Row className="min-w-0" end={<Switch checked={home} onCheckedChange={setHome} aria-label="Report in pip" />}>report in pip</Row>
+        <p className="text-xs text-dim">{home ? "Its reports are turns in your one conversation with Pip." : "Its reports go to a chat of its own."}</p>
+      </div> : null}
 
       <DialogFooter className="flex-row items-center justify-end pt-1">
         <Button type="submit" variant="go" disabled={busy || (!fixed && (!title.trim() || !prompt.trim())) || (mode !== "once" && !days.length)}>

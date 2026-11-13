@@ -233,6 +233,21 @@ const APPROVAL_TURN = streamingTurn('approval-turn-1', 'Speichere den Preis für
 });
 const APPROVAL_CHAT = chatRecord('labapproval', 'Notiz speichern', [APPROVAL_TURN]);
 
+// A reply that set up a job (the line under it says so) after a job's own report, as it lands in the big chat.
+const SCHEDULED_ROW = {
+  id: 'row-scheduled', kind: 'tool', name: 'create_job', title: 'set up a job · Bike prices', state: 'done', summary: 'scheduled · Bike prices',
+  input: '{"kind":"prompt","title":"Bike prices","prompt":"Remind me to check the bike prices.","time":"08:00","days":["mon"]}',
+  result: '{"kind":"job","done":"scheduled","id":"jlab01","title":"Bike prices","type":"prompt","schedule":"Mon 08:00","enabled":true,"to":"home","next":"2026-11-16 08:00","timezone":"Europe/Berlin"}',
+  started: NOW - 50_000, ended: NOW - 49_000, sources: [],
+};
+const SCHEDULED_CHAT = chatRecord('labscheduled', 'Erinnerungen', [{
+  uid: 'scheduled-turn-0', text: 'Due tomorrow (job)', context: [], created: NOW - 14 * MINUTE, updated: NOW - 14 * MINUTE, owner: 'pip-routine', attempt: 'attempt-job',
+  answer: 'Tomorrow: the dentist at 09:30, and the tax form is due. Nothing else is open.', reasoning: '', error: '', status: 'done', usage: {}, activity: [], sources: [], phase: 'done',
+}, {
+  uid: 'scheduled-turn-1', text: 'Erinnere mich jeden Montag um 8, die Fahrradpreise zu prüfen.', context: [], created: NOW - 60_000, updated: NOW - 48_000, owner: 'phone', attempt: 'attempt-scheduled',
+  answer: 'Mache ich: jeden Montag um 08:00 erinnere ich dich hier daran.', reasoning: '', error: '', status: 'done', usage: {}, activity: [SCHEDULED_ROW], sources: [], phase: 'done',
+}], NOW - 3 * 24 * 60 * MINUTE); // older than the other chats, so the list the dialog state uses keeps its order
+
 const PINNED_CHAT = chatRecord('labpinned', 'Schlafkarte', [{
   uid: 'pinned-turn-1', text: 'Zeig mir meine Schlafwerte als Karte.', context: [], created: NOW - 15 * MINUTE,
   updated: NOW - 14 * MINUTE, owner: 'phone', attempt: 'attempt-pinned',
@@ -494,6 +509,19 @@ const STATES = [
     text: [/needs your approval/i, 'Blue car', 'decline', 'review'],
   },
   {
+    name: 'scheduled',
+    async run(page, ctx) {
+      await openStaticChat(page, ctx, 'scheduled', 'labscheduled', 'scheduled: Mon 08:00');
+    },
+    text: ['Due tomorrow (job)', 'scheduled: Mon 08:00 · Bike prices', 'jobs'],
+    async check(page) {
+      const link = await page.evaluate(() => [...document.querySelectorAll('main a')].find(item => item.textContent === 'jobs')?.getAttribute('href') || '');
+      if (!link.includes('jobs')) throw new Error('the line under the reply does not link to jobs');
+      const ledger = await page.evaluate(() => document.body.innerText.includes('set up a job'));
+      if (ledger) throw new Error('the job step is listed as a lookup as well as said under the reply');
+    },
+  },
+  {
     name: 'card-menu',
     async run(page, ctx) {
       await openStaticChat(page, ctx, 'card-menu', 'lablong', 'Was die Werte sagen');
@@ -603,6 +631,21 @@ const STATES = [
     },
     text: ['jobs', 'Morning check-in', 'Bike prices', 'last failed', 'recent runs'],
     scroll: 'top',
+  },
+  {
+    name: 'job-editor',
+    async run(page, ctx) {
+      await seedJobs(ctx);
+      await page.goto(ctx.origin + '/#/jobs', { waitUntil: 'domcontentloaded' });
+      await until(page, 'job-editor', 'the jobs', () => document.body.innerText.includes('Bike prices'));
+      await page.click('button[aria-label="Options for Bike prices"]');
+      await until(page, 'job-editor', 'the job menu', () => Boolean(document.querySelector('[role="menu"]')));
+      await page.evaluate(() => [...document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent.trim() === 'edit')?.click());
+      await until(page, 'job-editor', 'the editor', () => Boolean(document.querySelector('[role="dialog"]')) && document.body.innerText.includes('report in pip'));
+    },
+    text: ['edit job', 'notify me', 'report in pip', 'Its reports go to a chat of its own.', 'save'],
+    selectors: ['[role="dialog"] [role="switch"][aria-label="Report in pip"]'],
+    scroll: 'keep',
   },
   {
     name: 'dialog',
@@ -1143,7 +1186,7 @@ async function main() {
       });
     };
 
-    for (const chat of [EMPTY_CHAT, LONG_CHAT, FAILED_CHAT, APPROVAL_CHAT, PINNED_CHAT, HOME_EARLIER_CHAT, HOME_CURRENT_CHAT]) await objects.writeObject(USER, 'chats', chat);
+    for (const chat of [EMPTY_CHAT, LONG_CHAT, FAILED_CHAT, APPROVAL_CHAT, PINNED_CHAT, SCHEDULED_CHAT, HOME_EARLIER_CHAT, HOME_CURRENT_CHAT]) await objects.writeObject(USER, 'chats', chat);
     await workspace.syncDocuments(USER, labDocuments());
 
     const ctx = { browser: null, origin, out, eventsSecret, insertRun, finishRun, signInLink: auth.signInLink, memory, execute, secrets, keys, background };

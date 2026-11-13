@@ -12,6 +12,10 @@ export interface Job {
   id: string; kind: JobKind; title: string; prompt: string; enabled: boolean;
   time: string; days: number[]; every?: number; at?: number; activeHours?: { start: string; end: string };
   delivery?: "notify" | "quiet"; chat?: string; card?: string;
+  /** Where its report goes: the one big chat, or a chat of its own (jobs without it report in their own). */
+  to?: "home" | "own";
+  /** Set when Pip set the job up in a chat: it reads at most what that chat could. */
+  grants?: string[]; web?: boolean;
   nextRun: number; lastRun: number; lastStatus: RunStatus; lastError: string; lastChat: string; scratch: string;
 }
 export interface JobRun { routine: string; title: string; kind: string; at: number; status: RunStatus; error: string; chat: string }
@@ -22,7 +26,7 @@ export interface JobsState {
 }
 
 /** What a new job may be sent with; the server validates and fills in the rest. */
-export type JobDraft = Partial<Pick<Job, "id" | "kind" | "title" | "prompt" | "enabled" | "time" | "days" | "every" | "at" | "activeHours" | "delivery" | "chat" | "card">> & { kind: JobKind };
+export type JobDraft = Partial<Pick<Job, "id" | "kind" | "title" | "prompt" | "enabled" | "time" | "days" | "every" | "at" | "activeHours" | "delivery" | "chat" | "card" | "to" | "grants" | "web">> & { kind: JobKind };
 
 async function call<T>(body?: Record<string, unknown>): Promise<T> {
   const response = await fetch("/api/pip/background", body ? {

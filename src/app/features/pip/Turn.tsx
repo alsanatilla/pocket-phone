@@ -11,7 +11,7 @@ import { toastError } from "../../ui/toast/toast.ts";
 import { OfferCard } from "./Offers.tsx";
 import { Answer, Thinking } from "./stream/Answer.tsx";
 import { Prose } from "./stream/Prose.tsx";
-import { ledger, memoryOf, offersOf, planOf, sourcesOf } from "./reply.ts";
+import { jobsOf, ledger, memoryOf, offersOf, planOf, sourcesOf } from "./reply.ts";
 import { resume, retry, send } from "./runner.ts";
 import { hrefFor } from "../../lib/classic.ts";
 import type { Segment } from "../../../shared/pip-reply.js";
@@ -122,7 +122,7 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
   const streaming = Boolean(live);
   const rows = ledger(shown, streaming);
   const plan = planOf(rows), offers = offersOf(rows), sources = sourcesOf(shown, rows);
-  const remembered = memoryOf(shown);
+  const remembered = memoryOf(shown), jobs = jobsOf(shown);
   const cards = useCardButtons(chatId, locked);
   const ask = useCallback((prompt: string) => { if (!locked) send(chatId, prompt).catch(toastError); }, [chatId, locked]);
   const place = useMemo(() => ({ chatId, place: "chat" as const, locked }), [chatId, locked]);
@@ -174,6 +174,14 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
           <ul className="space-y-0.5 text-xs text-dim">
             {remembered.map((change, index) => <li key={index}>{change.kind}: {change.text}</li>)}
             <li><Link to="/memory" className="text-primary underline underline-offset-2">memory</Link></li>
+          </ul>
+        ) : null}
+
+        {/* A job Pip set up or changed in this reply: said in a line, with the page where it can be undone. */}
+        {!streaming && jobs.length ? (
+          <ul className="space-y-0.5 text-xs text-dim">
+            {jobs.map((change, index) => <li key={index}>{change.kind}: {change.text}</li>)}
+            <li><Link to="/jobs" className="text-primary underline underline-offset-2">jobs</Link></li>
           </ul>
         ) : null}
 

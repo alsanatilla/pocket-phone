@@ -6,6 +6,7 @@ import { writeObject } from './objects.js';
 import { serverRecordSource } from './pip-source.js';
 import { listMemory, memoryNote, memoryTool, MEMORY_INSTRUCTIONS } from './pip-memory-store.js';
 import { applyApprovedWrite } from './pip-writes.js';
+import { jobTool, jobPreview, JOB_TOOLS } from './pip-job-tools.js';
 import { backgroundAccount, keyOf, chargeTokens, localDay, tokensLeft, validTimezone, JOB_BUDGET } from './pip-background.js';
 import { readKey } from './pip-keys.js';
 import { judgeEffort, judgeEnough } from './pip-effort.js';
@@ -163,7 +164,7 @@ const chatObject = async (userId, uid) => {
   return row ? parse(row.payload) : null;
 };
 /** The account's home segments, oldest first, for a reply that runs in one. The LIKE keeps ordinary chats unread. */
-async function homeSegmentsOf(userId) {
+export async function homeSegmentsOf(userId) {
   const rows = (await sql({ sql: `SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND payload LIKE '%"home":true%'`, args: [userId] })).rows;
   const chats = [];
   for (const row of rows) {
@@ -509,7 +510,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
     saved = await account(userId, snapshot, snapshot.grants, snapshot.timezone);
     if (!saved) return await end('failed', 'Pip on the server is no longer set up for this account.');
     // The provider and model stay as the reply started, so its reasoning continues; access is what the account allows now.
-    const value = { ...snapshot, memory: true, grants: (snapshot.grants || []).filter(grant => serverGrants(saved.settings).includes(grant)) };
+    const value = { ...snapshot, memory: true, jobs: true, grants: (snapshot.grants || []).filter(grant => serverGrants(saved.settings).includes(grant)) };
     const chat = await chatObject(userId, chatUid);
     if (!chat || chat.deleted) return await end('stopped', 'This chat was removed.');
     // JEV decides how much looking-up this message deserves; it answers while the run's source and requests are read.
@@ -554,9 +555,10 @@ async function drive(userId, run, leaseId, { fetcher }) {
       // A card changed in an earlier reply (update_card) is written to the chat at once; every device pulls it.
       saveTurn: async changed => { if (!await writeTurn(userId, chatUid, changed)) throw new Error('The chat could not be saved.'); },
       executeTool: (value, name, input, signal, context) => name === 'remember' || name === 'forget' ? memoryTool(userId, chatUid, name, input)
+        : JOB_TOOLS.includes(name) ? jobTool(userId, name, input, { chat: chatUid, turn: turn.uid, eventId: context.eventId, value })
         : WRITE_TOOLS.includes(name) ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId: context.eventId, name, input })
         : runTool(value, name, input, signal, { ...context, source }),
-      previewTool: (value, name, input, signal) => previewTool(value, name, input, signal, source) });
+      previewTool: (value, name, input, signal) => JOB_TOOLS.includes(name) ? jobPreview(userId, name, input) : previewTool(value, name, input, signal, source) });
     segment = reply.usage || segment;
     Object.assign(turn, reply, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } });
     await end('done');

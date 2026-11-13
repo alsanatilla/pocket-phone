@@ -26,6 +26,17 @@ const cardElements = z.array(z.object({
 })).min(1).max(60);
 const cardRoot = z.string().max(80).meta({ description: 'The id of the top element.' });
 
+// A job's schedule as create_job and change_job take it: what the Jobs page offers, in words a model gets right.
+const JOB_SCHEDULE = {
+  time: optional(z.string().max(5), 'HH:MM, 24-hour, for a time on the chosen days.'),
+  days: optional(z.array(z.enum(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'])).max(7), 'The weekdays it runs on.'),
+  every: optional(z.number().int(), 'Minutes between runs (15 to 1440), instead of a time.'),
+  at: optional(z.string().max(20), 'YYYY-MM-DD HH:MM, for a job that runs once.'),
+  active_from: optional(z.string().max(5), 'HH:MM: with every, the start of the hours it runs in.'),
+  active_until: optional(z.string().max(5), 'HH:MM: with every, the end of those hours.'),
+  quiet: optional(z.boolean(), 'true: no push notification, the report only appears in the chat.'),
+  to: optional(z.enum(['home', 'own']), 'Where it reports: home, the person\'s one conversation with Pip (the default), or own, a chat of its own.')
+};
 const DEFINITIONS = {
   update_training_preferences: ['Remember training preferences the user states in this conversation. Keep the existing brief when changing only days or pausing. When replacing the brief, retain still-valid goals, equipment and constraints; do not invent them. Put temporary soreness or fatigue in dated feedback, not permanent goals. Save before claiming to remember it. enabled pauses/resumes automatic planning only when the user asks.', object({
     brief: z.string().min(1).max(4000).optional(), trainingDays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
@@ -50,6 +61,19 @@ const DEFINITIONS = {
     text: z.string().min(1).max(300).meta({ description: 'The fact, in one short sentence.' }), replaces: optional(z.string().min(1).max(7), 'The id of the memory this corrects.')
   })],
   forget: ['Remove one thing from your memory by its id, when the person asks you to forget it or it is no longer true.', object({ id: z.string().min(1).max(7).meta({ description: 'The id of the memory to remove.' }) })],
+  // Loose on purpose, like show_card: Pocket checks a job with the same rules as the Jobs page and answers with the
+  // sentence that says what to correct (pip-job-tools.js).
+  list_jobs: ['List the jobs Pip runs for the person on its own (scheduled prompts, standing watches, check-ins, briefs, the training planner): id, name, schedule in the account\'s timezone, on or paused, the next run. Use it to answer what Pip does on its own and to find the id of a job the person refers to.', object({})],
+  create_job: ['Set up a job Pip runs on its own when the person asks for something later or regularly ("remind me every Monday at 8 to …", "each evening tell me what is due tomorrow", "tell me when …"). kind: prompt (a reminder or a task Pip does at that time; prompt is what Pip is told then), watch (prompt says what to look for; Pip stays silent when nothing new matches), checkin (fixed: a morning look at open tasks and readiness) or brief (fixed: a nightly summary of what changed in Pocket); those two take no prompt, so anything in your own words is kind prompt. Schedule, in the account\'s timezone: time with days for a time on chosen days; every (minutes) with optional days and active_from/active_until; or at for once. Saved at once and shown to the person under your reply; say in one line what you set up.', z.object({
+    kind: z.enum(['prompt', 'watch', 'checkin', 'brief']), title: optional(z.string().max(120), 'A short name, e.g. "Bike prices".'),
+    prompt: optional(z.string().max(4000), 'What Pip is told when the job runs, written as the person\'s request, e.g. "Remind me to check the bike prices."'),
+    ...JOB_SCHEDULE
+  })],
+  change_job: ['Change, pause (enabled false) or resume (enabled true) one of the person\'s jobs by its id from list_jobs. Give only what changes; a new time, every or at replaces the old schedule. Saved at once and shown to the person under your reply.', z.object({
+    id: z.string().min(1).max(40).meta({ description: 'The job\'s id from list_jobs.' }), title: optional(z.string().max(120)), prompt: optional(z.string().max(4000)),
+    enabled: optional(z.boolean(), 'false pauses the job, true resumes it.'), ...JOB_SCHEDULE
+  })],
+  remove_job: ['Remove one of the person\'s jobs by its id from list_jobs, when they ask to stop or delete it for good (to stop it for a while, pause it with change_job). The person approves the removal first; its notes go with it.', object({ id: z.string().min(1).max(40).meta({ description: 'The job\'s id from list_jobs.' }) })],
   // Loose on purpose: Pocket checks the card itself and answers with the exact problems (pocket-card-tool.js),
   // which a model can act on; a schema rejection would only say that the arguments were invalid.
   show_card: [CARD_TOOL_DESCRIPTION, z.object({ root: cardRoot, elements: cardElements })],

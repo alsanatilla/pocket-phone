@@ -375,3 +375,84 @@ the chat is shown as the chat's turn and no longer as queued.
 
 **Guests and the tab path** have no queue: a reply that runs in the tab keeps today's behaviour (the composer sends
 nothing while it runs). There is no second queue in the browser.
+
+## Jobs are set up by saying so, and report into the big chat
+
+"Remind me every Monday at 8 to check the bike prices." "Each evening, tell me what is due tomorrow." "Stop the
+Monday reminder." Pip hands work to itself without a form, and what it does on its own lands in the one big chat.
+
+**The tools** (`src/server/pip-job-tools.js`, schemas in `src/client/pip-sdk-tools.js`):
+
+| Tool | Does | Saved |
+|---|---|---|
+| `list_jobs {}` | the account's jobs: id, name, kind, schedule, on or paused, where it reports, the next run, whether Pip on its own is on | read only |
+| `create_job { kind, title, prompt?, time?, days?, every?, at?, active_from?, active_until?, quiet?, to? }` | a scheduled prompt, standing watch, check-in or brief | at once |
+| `change_job { id, …the same, enabled? }` | changes, pauses (`enabled: false`) or resumes one | at once |
+| `remove_job { id }` | removes one | after the person approves |
+
+- **The validator is the contract.** The tools take exactly what `backgroundRoutine` / `saveRoutine` take, in
+  words a model gets right: days as `mon`…`sun`, a moment as `YYYY-MM-DD HH:MM`, active hours as two clocks. They
+  are turned into the routine and saved with `saveRoutine`; whatever it refuses (no name, every 5 minutes, a moment
+  in the past, the thirteenth job) comes back as `{ error: 'invalid_job', message }` with its own sentence, and the
+  model corrects itself. The schemas only check types, so the sentence, not a schema error, is what the model reads.
+- **Times are in the account's timezone**, the one in the background settings, which `list_jobs` and every result
+  name. A moment is turned into an instant there (`zonedTime`).
+- **The training planner is not reachable**: the kinds are the four above, and `change_job` / `remove_job` refuse
+  the planner's id.
+- **The model and the key.** A job runs as every job does: with the provider, model and key of Pip on its own (the
+  background settings, the dedicated key or the account key they name). A job created in conversation does not
+  carry the chat's model: there is one way a job chooses its model, and the background settings are it. When the
+  person's chat uses the same model (the usual case: `/jobs` turns Pip on its own on with the chat's model) nothing
+  changes; when they differ, the Jobs page shows the job's model as it does today.
+- **Saving is idempotent.** A job created in a reply gets an id derived from the chat, the turn and the tool call,
+  so a reply that is continued after a restart and calls again updates the same job instead of adding one.
+
+**Seen and undone.** Create, change, pause and resume save at once, like memory: the person sees a dim line under
+the reply (`scheduled: Mon 08:00 · Bike prices`, `paused: …`, `resumed: …`, `changed: …`) with a link to `jobs`,
+where every job can be edited, paused or removed by hand; asking Pip ("stop that") undoes it in conversation.
+Removing needs approval first (`remove_job` is a write tool, so the run pauses at an approval card like a note or a
+task), because it cannot be undone: the job's notes go with it. Asking before every creation would add a tap to the
+one thing the person asked for in words, and a wrong creation is harmless and visible; a wrong removal is neither.
+
+**Limits and safety.**
+
+- The existing limit of 12 jobs and the daily token limit apply unchanged (`saveRoutine`, `runRoutine`).
+- **A job never has more access than the chat that created it.** `create_job` stores the chat's record grants
+  (within Pip on its own's grants) as the job's `grants` and whether the chat could use the web as `web`; `runRoutine`
+  runs the job with the background grants narrowed to those, and without web search when `web` is false.
+  `change_job` narrows them further to the changing chat's. A job without `grants` (made on the Jobs page) runs with
+  the background grants as before.
+- **A job never creates jobs.** The tools are offered only when the run's value says `jobs: true`, which only `drive`
+  sets (server runs, like `memory: true`). `runRoutine` never sets it, and `permitted` refuses the tools to any value
+  with `backgroundJob`. The tab path never sets it either.
+
+**Where a job reports: `to`.** A job has `to: 'home' | 'own'`. `own` is today's behaviour: one chat per job and
+month (`Pip · Nightly brief`). `home` writes the report as a turn in the current home segment. Jobs created in
+conversation default to `home`; jobs that exist keep `own` (a stored job without `to` reads as `own`) until the
+person changes it in the job's editor (one `Switch`, "report in pip"). A watch that keeps a card current (`chat` set)
+answers in the card's chat as before and is always `own`.
+
+- **The segment.** `runRoutine` reads the home segments (`homeSegments`), takes the current one (`currentHome`) and,
+  when it is full (`homeFull`) or there is none, a new segment made in memory with the marks the app gives one
+  (`home`, `title: pip`, `titled`, the previous segment's config). It is written only when the job writes its turn,
+  so a job that has nothing to say never makes an empty segment. The segment is chosen when the job starts and the
+  turn ends there.
+- **The turn.** The model is sent the job's full instruction, as today. The stored turn's text is the job's name and
+  `(job)`, e.g. `› Bike prices (job)`, in the existing turn shape; its owner stays `pip-routine`. Only a finished
+  report is written: a watch that answers SKIP writes nothing, and a failed run writes nothing to the big chat (the
+  failure shows on the Jobs page and pushes once per streak, as before) because a failed turn there would offer the
+  person "continue" and "start over" for a message they never sent.
+- **What the model sees.** The job reads the segment, plus the tail of the segment before it (`homeTail`), as its
+  earlier turns: its own earlier reports are there, which a watch needs to stay quiet about what it said, and so are
+  its cards. When the person later talks in the home chat, the job's turns are ordinary earlier turns: the request
+  is the job's name, the answer is the report. Nothing marks them further: the person reads them in the chat, and
+  the model should be able to answer "what did the bike job say?".
+- **A card in an earlier turn.** `update_card` searches the turns the job sees, newest first, including the tail
+  of the previous segment. The changed turn is written at once to the segment that holds it (`appendTurns`), so a
+  watch that only moved a figure and answers SKIP still keeps the card current, wherever it stands.
+- **At the same time as the person.** A job never takes the chat's active-run slot (`pocket_pip_runs`, which
+  refuses a second run with `run_active`): it runs outside it, holds its turn in memory and writes it once, when it
+  finishes, with `appendTurns`. `writeObject` merges by turn id inside one transaction, so the person's streaming
+  turn and the job's report both stay, ordered by when each started. The person is never refused because a job
+  runs, and a job is never refused because the person is talking.
+- **Notifications** link to the segment (which opens home) and are titled `Pip · <job name>`.

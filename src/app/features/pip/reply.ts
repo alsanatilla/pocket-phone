@@ -27,10 +27,13 @@ export function ledger(turn: ChatTurn, streaming: boolean): ActivityRow[] {
   const rows = !streaming && turn.status === "streaming" ? settle(turn.activity ?? [], "stopped", "Interrupted") : activity(turn.activity ?? []);
   // A drawn card stands in the answer itself; its tool call is not a lookup to list.
   // What Pip remembered or forgot is said under the answer, in words (memoryOf), not listed as a step.
-  return rows.filter(row => row.name !== "show_card" && !(MEMORY_TOOLS.includes(row.name) && row.state === "done"));
+  // So is a job Pip set up, changed or removed (jobsOf).
+  return rows.filter(row => row.name !== "show_card" && !(SAID_TOOLS.includes(row.name) && row.state === "done"));
 }
 
 const MEMORY_TOOLS = ["remember", "forget"];
+const JOB_CHANGES = ["create_job", "change_job", "remove_job"];
+const SAID_TOOLS = [...MEMORY_TOOLS, ...JOB_CHANGES];
 export interface MemoryChange { kind: "remembered" | "corrected" | "forgot"; text: string }
 /** What this reply changed in Pip's memory of the person, in the order it happened. */
 export function memoryOf(turn: ChatTurn): MemoryChange[] {
@@ -42,6 +45,19 @@ export function memoryOf(turn: ChatTurn): MemoryChange[] {
     if (row.name === "forget") { if (value?.forgotten) changes.push({ kind: "forgot", text }); }
     else if (value?.replaced) changes.push({ kind: "corrected", text });
     else if (value?.added) changes.push({ kind: "remembered", text });
+  }
+  return changes;
+}
+
+export interface JobChange { kind: "scheduled" | "changed" | "paused" | "resumed" | "removed"; text: string }
+/** The jobs this reply set up, changed, paused, resumed or removed, as "Mon 08:00 · Bike prices". */
+export function jobsOf(turn: ChatTurn): JobChange[] {
+  const changes: JobChange[] = [];
+  for (const row of activity(turn.activity ?? [])) {
+    if (!JOB_CHANGES.includes(row.name) || row.state !== "done") continue;
+    const value = json(row.result), kind = value?.done as JobChange["kind"] | undefined;
+    if (value?.kind !== "job" || !kind || typeof value.title !== "string") continue;
+    changes.push({ kind, text: (typeof value.schedule === "string" && value.schedule ? value.schedule + " · " : "") + value.title });
   }
   return changes;
 }

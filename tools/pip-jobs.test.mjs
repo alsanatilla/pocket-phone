@@ -158,3 +158,143 @@ test('a watch keeps an earlier card current without a new message or a push', as
     assert.equal(service.pushed.length, pushed, 'and nobody is buzzed');
   } finally { service.restore(); }
 });
+
+// ── Jobs that report into the big chat (to: 'home') ──
+const { writeObject } = await import('../src/server/objects.js');
+const runs = await import('../src/server/pip-runs.js');
+const CHAT_CONFIG = { provider: 'compatible', model: 'fixture-model', baseUrl: 'https://model.example/v1', maxTokens: 2048, thinking: false, webSearch: false };
+const doneTurn = (uid, text, answer, created) => ({ uid, text, answer, status: 'done', created, updated: created, context: [], activity: [], sources: [], reasoning: '', error: '' });
+async function homeSegment(userId, uid, created, turns = []) {
+  await writeObject(userId, 'chats', { uid, title: 'pip', titled: true, home: true, created, updated: created, draft: '', context: [], turns, config: CHAT_CONFIG });
+}
+const filler = (count, created) => Array.from({ length: count }, (_, index) => doneTurn('f' + created + '-' + index, 'Message ' + index, 'Answer ' + index, created + index));
+const chatsOf = async userId => (await execute({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats'", args: [userId] })).rows.map(row => JSON.parse(String(row.payload)));
+const segmentsOf = async userId => (await chatsOf(userId)).filter(chat => chat.home).sort((a, b) => a.created - b.created);
+
+test('a job that reports home writes one turn in the current segment, named after the job', async () => {
+  const userId = await account(), start = Date.now() - 100000, sent = [];
+  await homeSegment(userId, 'home-a', start, filler(3, start));
+  const { routines } = await background.saveRoutine(userId, { kind: 'prompt', title: 'Bike prices', prompt: 'Remind me to check the bike prices.', time: '08:00', days: [1], to: 'home' });
+  assert.equal(routines[0].to, 'home');
+  const result = await background.runClaimed(userId, routines[0].id, { force: true, fetcher: async (url, options) => { sent.push(JSON.parse(options.body)); return response(compatibleMessage({ text: 'Time to check the bike prices.' })); } });
+  assert.equal(result.status, 'done', result.error);
+  assert.equal(result.chat, 'home-a');
+  const [segment] = await segmentsOf(userId);
+  assert.equal(segment.turns.length, 4);
+  const turn = segment.turns.at(-1);
+  assert.deepEqual([turn.text, turn.answer, turn.owner, turn.status], ['Bike prices (job)', 'Time to check the bike prices.', 'pip-routine', 'done']);
+  assert.ok(!(await chatsOf(userId)).some(chat => chat.title === 'Pip · Bike prices'), 'no chat of its own');
+  // The model was given the job's full instruction and the segment's earlier turns.
+  const user = sent[0].messages.filter(message => message.role === 'user').map(message => String(message.content));
+  assert.ok(user.at(-1).includes('Remind me to check the bike prices.'));
+  assert.ok(user.some(text => text.includes('Message 2')), 'the segment is its history');
+  // When the person talks next, the job's turn is an ordinary earlier turn.
+  const later = [];
+  const view = await runs.submitRun(userId, { requestId: 'req-home-later', chat: { uid: 'home-a', title: 'pip', created: start, config: CHAT_CONFIG, home: true }, text: 'What did the bike job say?', device: 'browser-1' },
+    { fetcher: async (url, options) => { later.push(JSON.parse(options.body)); return response(compatibleMessage({ text: 'To check the prices.' })); } });
+  assert.equal(view.run.status, 'done', view.run.turn.error);
+  const replayed = later[0].messages.map(message => String(message.content || '')).join('\n');
+  assert.ok(replayed.includes('Bike prices (job)') && replayed.includes('Time to check the bike prices.'));
+});
+
+test('a full segment gets a new one for the job\'s report, with the marks and config of the one before', async () => {
+  const userId = await account(), start = Date.now() - 200000;
+  await homeSegment(userId, 'home-full', start, filler(60, start));
+  const { routines } = await background.saveRoutine(userId, { kind: 'prompt', title: 'Evening', prompt: 'Tell me what is due tomorrow.', time: '19:00', days: [1], to: 'home' });
+  const result = await background.runClaimed(userId, routines[0].id, { force: true, fetcher: async () => response(compatibleMessage({ text: 'Nothing is due tomorrow.' })) });
+  assert.equal(result.status, 'done', result.error);
+  const segments = await segmentsOf(userId);
+  assert.equal(segments.length, 2);
+  assert.equal(segments[0].turns.length, 60, 'the full segment is untouched');
+  assert.deepEqual([segments[1].uid, segments[1].title, segments[1].titled, segments[1].home, segments[1].config.model], [result.chat, 'pip', true, true, 'fixture-model']);
+  assert.deepEqual(segments[1].turns.map(turn => turn.text), ['Evening (job)']);
+});
+
+test('a quiet watch that answers SKIP writes nothing home, not even a new segment; a failed job writes nothing either', async () => {
+  const userId = await account(), start = Date.now() - 300000;
+  await homeSegment(userId, 'home-quiet', start, filler(60, start));
+  const { routines } = await background.saveRoutine(userId, { kind: 'watch', title: 'Bike watch', prompt: 'A red bike under 800.', time: '08:00', days: [1], to: 'home' });
+  const before = JSON.stringify(await segmentsOf(userId));
+  assert.equal((await background.runClaimed(userId, routines[0].id, { force: true, fetcher: async () => response(compatibleMessage({ text: 'SKIP' })) })).status, 'unchanged');
+  assert.equal(JSON.stringify(await segmentsOf(userId)), before);
+  const failed = await background.runClaimed(userId, routines[0].id, { force: true, fetcher: async () => new Response('down', { status: 500 }) });
+  assert.equal(failed.status, 'failed');
+  assert.equal(JSON.stringify(await segmentsOf(userId)), before, 'the failure shows on the Jobs page, not as a turn');
+  assert.equal((await background.backgroundState(userId)).routines[0].lastStatus, 'failed');
+});
+
+test('a watch reporting home finds its card in an earlier segment, changes it there and stays silent', async () => {
+  const { cardIds } = await import('../src/shared/pocket-card-tool.js');
+  const card = value => ({ root: 'main', elements: [{ id: 'main', type: 'Metric', props: { label: 'Red bike', value: String(value), unit: 'EUR' }, children: [] }] });
+  const userId = await account(), start = Date.now() - 400000;
+  await homeSegment(userId, 'home-cards', start, filler(59, start));
+  const { routines } = await background.saveRoutine(userId, { kind: 'watch', title: 'Bike price', prompt: 'Keep the red bike price current.', time: '08:00', days: [1], to: 'home' });
+  let replies = [compatibleMessage({ text: 'The red bike today:', calls: [{ name: 'show_card', input: card(900), id: 'call_draw' }] }), compatibleMessage({ text: 'I will keep it current.' })];
+  const fetcher = async () => response(replies.shift());
+  assert.equal((await background.runClaimed(userId, routines[0].id, { force: true, fetcher })).status, 'done');
+  let [segment] = await segmentsOf(userId);
+  assert.equal(segment.turns.length, 60, 'the report filled the segment');
+  const [id] = cardIds(segment.turns.at(-1).answer);
+  assert.ok(id);
+
+  replies = [compatibleMessage({ calls: [{ name: 'update_card', input: { id, ...card(850) }, id: 'call_update' }] }), compatibleMessage({ text: 'SKIP' })];
+  assert.equal((await background.runClaimed(userId, routines[0].id, { force: true, fetcher })).status, 'unchanged');
+  const segments = await segmentsOf(userId);
+  assert.equal(segments.length, 1, 'nothing to say: no new segment');
+  segment = segments[0];
+  assert.match(segment.turns.at(-1).answer, /850/);
+  assert.doesNotMatch(segment.turns.at(-1).answer, /"900"/);
+  assert.equal(segment.turns.length, 60);
+});
+
+test('a job and a person\'s reply in the home segment at the same time: neither is refused, both end up intact', async () => {
+  const userId = await account(), start = Date.now() - 500000;
+  await homeSegment(userId, 'home-both', start, filler(2, start));
+  const { routines } = await background.saveRoutine(userId, { kind: 'prompt', title: 'Bike prices', prompt: 'Remind me to check the bike prices.', time: '08:00', days: [1], to: 'home' });
+  let openJob, openPerson, jobAsked, personAsked;
+  const jobGate = new Promise(resolve => { openJob = resolve; }), personGate = new Promise(resolve => { openPerson = resolve; });
+  const jobStarted = new Promise(resolve => { jobAsked = resolve; }), personStarted = new Promise(resolve => { personAsked = resolve; });
+  const job = background.runClaimed(userId, routines[0].id, { force: true, fetcher: async () => { jobAsked(); await jobGate; return response(compatibleMessage({ text: 'Check the bike prices.' })); } });
+  await jobStarted;
+  // The job is running; the person writes in the same segment and is not refused.
+  const person = runs.submitRun(userId, { requestId: 'req-home-both', chat: { uid: 'home-both', title: 'pip', created: start, config: CHAT_CONFIG, home: true }, text: 'How far is Potsdam by bike?', device: 'browser-1' },
+    { fetcher: async () => { personAsked(); await personGate; return response(compatibleMessage({ text: 'About 35 km.' })); } });
+  await personStarted;
+  // The job finishes while the person's reply still streams.
+  openJob();
+  assert.equal((await job).status, 'done');
+  let [segment] = await segmentsOf(userId);
+  assert.ok(segment.turns.some(turn => turn.text === 'Bike prices (job)' && turn.status === 'done'));
+  assert.ok(segment.turns.some(turn => turn.text === 'How far is Potsdam by bike?' && turn.status === 'streaming'), 'the person\'s turn is still there while it streams');
+  openPerson();
+  const view = await person;
+  assert.equal(view.run.status, 'done', view.run.turn.error);
+  [segment] = await segmentsOf(userId);
+  const texts = segment.turns.map(turn => [turn.text, turn.status, turn.answer]);
+  assert.deepEqual(texts.slice(2).sort(), [['Bike prices (job)', 'done', 'Check the bike prices.'], ['How far is Potsdam by bike?', 'done', 'About 35 km.']].sort());
+  // And the other way round: a job that starts while the person's reply runs is not refused either.
+  const blocked = runs.submitRun(userId, { requestId: 'req-home-both-2', chat: { uid: 'home-both', title: 'pip', created: start, config: CHAT_CONFIG, home: true }, text: 'And to Brandenburg?', device: 'browser-1' },
+    { fetcher: async () => { await new Promise(resolve => setTimeout(resolve, 50)); return response(compatibleMessage({ text: 'About 70 km.' })); } });
+  const second = await background.runClaimed(userId, routines[0].id, { force: true, fetcher: async () => response(compatibleMessage({ text: 'Bike prices again.' })) });
+  assert.equal(second.status, 'done', second.error);
+  assert.equal((await blocked).run.status, 'done');
+  [segment] = await segmentsOf(userId);
+  assert.equal(segment.turns.length, 6);
+  assert.ok(segment.turns.every(turn => turn.status === 'done'));
+});
+
+test('existing jobs keep their own chat: a stored job without `to` reports where it always did', async () => {
+  const userId = await account(), start = Date.now() - 600000;
+  await homeSegment(userId, 'home-old', start, filler(1, start));
+  // Stored as a job was before `to` existed.
+  await execute({ sql: 'INSERT INTO pocket_pip_routines (user_id, id, payload, next_run) VALUES (?, ?, ?, ?)',
+    args: [userId, 'oldjob', JSON.stringify({ id: 'oldjob', kind: 'prompt', title: 'Old job', prompt: 'Summarise my notes.', time: '07:00', days: [1], enabled: true, delivery: 'notify' }), 1] });
+  const result = await background.runClaimed(userId, 'oldjob', { force: true, fetcher: async () => response(compatibleMessage({ text: 'Your notes are about a bike.' })) });
+  assert.equal(result.status, 'done', result.error);
+  const own = (await chatsOf(userId)).find(chat => chat.uid === result.chat);
+  assert.equal(own.title, 'Pip · Old job');
+  assert.equal((await segmentsOf(userId))[0].turns.length, 1, 'home is untouched');
+  assert.equal((await background.backgroundState(userId)).routines[0].to, undefined, 'the stored job is not rewritten');
+  assert.equal(background.backgroundRoutine({ kind: 'prompt', title: 'x', prompt: 'x', time: '07:00', days: [1] }).to, 'own', 'a job saved without a choice reports in its own chat');
+  assert.equal(background.backgroundRoutine({ kind: 'watch', title: 'x', prompt: 'x', every: 360, chat: 'c1', card: 'k1', to: 'home' }).to, 'own', 'a card watch answers where its card is');
+});

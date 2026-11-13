@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatTurn } from "../../data/chats.ts";
-import { changeLabel, ledger, ledgerTitle, memoryOf, offersOf, planOf, sourcesOf } from "./reply.ts";
+import { changeLabel, jobsOf, ledger, ledgerTitle, memoryOf, offersOf, planOf, sourcesOf } from "./reply.ts";
 
 const row = (fields: Record<string, unknown>) => ({ id: String(Math.random()), name: "search_tasks", title: "Tasks", state: "done", started: 1, ended: 2, ...fields });
 const turn = (activity: unknown[], extra: Partial<ChatTurn> = {}): ChatTurn => ({ uid: "t", text: "q", answer: "a", created: 1, status: "done", activity: activity as ChatTurn["activity"], ...extra });
@@ -54,5 +54,25 @@ describe("what a reply changed in Pip's memory", () => {
     ]);
     // The lookup and the memory step that failed stay as steps; the ones that worked are said under the answer.
     expect(ledger(value, false).map(item => item.name)).toEqual(["search_notes", "remember"]);
+  });
+});
+
+describe("what a reply changed in Pip's jobs", () => {
+  it("says which job was scheduled, paused or removed, leaves those steps out of the ledger, and keeps a refusal and a waiting removal", () => {
+    const value = turn([
+      row({ name: "list_jobs", result: JSON.stringify({ kind: "jobs", jobs: [] }) }),
+      row({ name: "create_job", result: JSON.stringify({ kind: "job", done: "scheduled", title: "Bike prices", schedule: "Mon 08:00" }) }),
+      row({ name: "change_job", result: JSON.stringify({ kind: "job", done: "paused", title: "Nightly brief", schedule: "daily 21:00" }) }),
+      row({ name: "create_job", state: "failed", result: JSON.stringify({ error: "invalid_job", message: "Run every 15 minutes to 24 hours." }) }),
+      row({ name: "remove_job", state: "awaiting", result: JSON.stringify({ action: { title: "Monday reminder · Mon 08:00" } }) }),
+      row({ name: "remove_job", result: JSON.stringify({ kind: "job", done: "removed", title: "Old watch", schedule: "every hour" }) }),
+    ]);
+    expect(jobsOf(value)).toEqual([
+      { kind: "scheduled", text: "Mon 08:00 · Bike prices" },
+      { kind: "paused", text: "daily 21:00 · Nightly brief" },
+      { kind: "removed", text: "every hour · Old watch" },
+    ]);
+    expect(ledger(value, false).map(item => item.name)).toEqual(["list_jobs", "create_job", "remove_job"]);
+    expect(offersOf(ledger(value, false))).toMatchObject([{ type: "approval", title: "Monday reminder · Mon 08:00" }]);
   });
 });

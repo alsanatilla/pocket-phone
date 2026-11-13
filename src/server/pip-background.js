@@ -11,7 +11,8 @@ import { execute as runTool, recordSource, WRITE_TOOLS } from '../client/pip-too
 import { trainingRuntime, trainingObservation, trainingCheckpoint, trainingChanged, rememberTraining, sweepMissedSessions, TRAINING_GRANTS, TRAINING_CHECK_INTERVAL } from './pip-training.js';
 import { listMemory, memoryNote, memoryTool, MEMORY_INSTRUCTIONS } from './pip-memory-store.js';
 import { trainingChatRoutine } from '../shared/pip-training-chat.js';
-import { sweepRuns } from './pip-runs.js';
+import { sweepRuns, homeSegmentsOf } from './pip-runs.js';
+import { currentHome, homeFull, homeTail, HOME_TITLE } from '../shared/pip-home.js';
 import { notify } from './pip-notify.js';
 import { replyNotice } from '../shared/pip-notice.js';
 import { patternDigest } from './pip-patterns.js';
@@ -145,7 +146,13 @@ export function backgroundRoutine(value) {
   const chat = typeof value.chat === 'string' ? value.chat : '';
   if (value.card !== undefined && (!chat || typeof value.card !== 'string' || !/^[A-Za-z0-9_/-]{1,140}$/.test(value.card))) throw invalid('Choose the card this routine keeps current.');
   const card = chat && typeof value.card === 'string' ? value.card : '';
-  return { id, kind, title, prompt, time, days, enabled: value.enabled !== false, delivery,
+  // Where its report goes: the one big chat, or a chat of its own (what every job did before, and still does when
+  // nothing says otherwise). A watch that keeps a card current always answers in that card's chat.
+  const to = value.to === 'home' && !chat ? 'home' : 'own';
+  // A job set up in a chat reads at most what that chat could; one made on the Jobs page carries no limit of its own.
+  if (value.grants !== undefined && !Array.isArray(value.grants)) throw invalid('Choose what this job may read.');
+  const limits = { ...(Array.isArray(value.grants) ? { grants: BACKGROUND_GRANTS.filter(grant => value.grants.includes(grant)) } : {}), ...(value.web === false ? { web: false } : {}) };
+  return { id, kind, title, prompt, time, days, enabled: value.enabled !== false, delivery, to, ...limits,
     ...(mode === 'once' ? { at: value.at } : {}), ...(mode === 'every' ? { every: value.every } : {}), ...(activeHours ? { activeHours } : {}),
     ...(chat ? { chat, card } : {}),
     ...(kind === 'training' ? { trainingDays, feedback } : {}) };
@@ -357,12 +364,18 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
       }
     } catch { /* an unreadable revision is no reason to skip the run */ }
   }
-  const chat = await routineChat(userId, routine, settings, now);
+  // A job that reports into the big chat answers in its current segment, or in a new one when that is full; a new
+  // segment is only written with the job's turn, so a job with nothing to say never leaves an empty one.
+  const home = !conversation && reportsHome(routine);
+  const segments = home ? await homeSegmentsOf(userId) : [];
+  const chat = home ? homeSegment(segments, settings, now) : await routineChat(userId, routine, settings, now);
   if (!chat) return { status: 'skipped', error: routine.chat ? 'The chat this card was in was deleted.' : 'This month\'s chat for the routine was deleted.' };  if (conversation && (routine.kind !== 'training' || message.chat !== chat.uid || trainingChatRoutine(message.chat) !== routine.id)) throw invalid('Open your current training chat to continue.');
   const earlier = conversation ? chat.turns.find(turn => turn.uid === message.uid) : null;
   if (earlier && earlier.text !== message.text) throw invalid('This message already has different text.');
   if (earlier?.status === 'done') return { status: 'done', chat: chat.uid, turn: earlier.uid, reply: earlier };
-  const key = await keyOf(userId, saved), value = { ...pipConfig(settings), memory: true, grants: settings.grants, trainingConversation: conversation };
+  // A job set up in a chat keeps that chat's limits: the background grants narrowed to its own, no web when it had none.
+  const grants = Array.isArray(routine.grants) ? settings.grants.filter(grant => routine.grants.includes(grant)) : settings.grants;
+  const key = await keyOf(userId, saved), value = { ...pipConfig(settings), ...(routine.web === false ? { webSearch: false } : {}), memory: true, grants, trainingConversation: conversation };
   let training, trainingLoad, observation, checkpoint, dailyReview;
   const formats = [];
   const authorized = async () => {
@@ -400,7 +413,8 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   const job = !conversation && routine.kind !== 'training';
   if (job) value.backgroundJob = true;
   const notes = job ? await readScratch(userId, routine.id) : '';
-  const view = { ...chat, config: value }, body = requestBody(view, turn);
+  // In the big chat the job reads the segment and the end of the one before it, as a reply of the person's does.
+  const view = { ...chat, config: value, ...(home ? { turns: [...homeTail(segments, chat), ...chat.turns] } : {}) }, body = requestBody(view, turn);
   body.tools = body.tools.filter(name => !WRITE_TOOLS.includes(name) || (conversation ? ['coros_write', 'create_record', 'update_training_preferences'].includes(name) : training?.tools.includes(name)));
   // A job and the training conversation remember the person like a server reply does.
   const remembered = memoryNote(await listMemory(userId));
@@ -453,7 +467,8 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
     const reply = await streamChat(view, turn, { value, body, key, fetcher, signal, deadlineMs: RUN_DEADLINE, coverage: contextCoverage(view, turn),
       onUpdate: update => Object.assign(turn, update),
       // A card changed in an earlier report: the chat is written when the run ends, even one that reports nothing new.
-      saveTurn: () => { revised = true; },
+      // In the big chat it is written at once to the segment that holds it, which may be the one before.
+      saveTurn: home ? changed => writeHomeTurn(userId, segments, changed) : () => { revised = true; },
       ...(training || conversation ? { previewTool: prepare, approve: async requests => new Map(requests.map(request => [request.toolCallId, { approved: true }])) } : {}),
       executeTool: async (value, name, input, signal, context) => {
         if (name === 'remember' || name === 'forget') return memoryTool(userId, chat.uid, name, input);
@@ -481,12 +496,40 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
     await sql({ sql: 'UPDATE pocket_pip_background SET used_day = ?, used_tokens = ? WHERE user_id = ?', args: [today, used + spent, userId] });
     return { status: 'unchanged' };
   }
-  turn.updated = chat.updated = Math.max(Date.now(), chat.updated + 1);
-  await writeObject(userId, 'chats', chat);
+  if (home) {
+    // Only a finished report reaches the big chat, appended to whatever the person wrote there meanwhile; a failure
+    // is shown on the Jobs page instead of offering "continue" for a message the person never sent.
+    if (turn.status === 'done') {
+      turn.text = routine.title + ' (job)';
+      turn.updated = chat.updated = Math.max(Date.now(), chat.updated + 1);
+      await writeObject(userId, 'chats', { ...chat, turns: [turn] }, { appendTurns: true });
+    }
+  } else {
+    turn.updated = chat.updated = Math.max(Date.now(), chat.updated + 1);
+    await writeObject(userId, 'chats', chat);
+  }
   if (!conversation && training?.complete && turn.status === 'done') await rememberTraining(userId, routine.id, observation, dailyReview ? today : checkpoint?.reviewDay || '');
   const spent = (turn.usage?.input_tokens || 0) + (turn.usage?.output_tokens || 0);
   await sql({ sql: 'UPDATE pocket_pip_background SET used_day = ?, used_tokens = ? WHERE user_id = ?', args: [today, used + spent, userId] });
   return { status: turn.status, chat: chat.uid, turn: turn.uid, ...(conversation ? { reply: turn } : {}), ...(turn.error ? { error: turn.error } : {}) };
+}
+/** Whether a job's report is a turn in the big chat. A watch that keeps a card current answers in the card's chat. */
+const reportsHome = routine => routine.to === 'home' && !routine.chat && routine.kind !== 'training';
+/** The home segment a job writes in: the current one, or a new one (not stored yet) when it is full or missing. */
+function homeSegment(segments, settings, now) {
+  const last = currentHome(segments);
+  if (last && !homeFull(last)) return last;
+  const { grants, dailyTokens, timezone, enabled, useAccountKey, ...config } = settings;
+  const fresh = { uid: 'home-' + randomUUID().replaceAll('-', '').slice(0, 20), title: HOME_TITLE, titled: true, home: true, created: now, updated: now, draft: '', context: [], turns: [], config: last?.config || config };
+  segments.push(fresh);
+  return fresh;
+}
+/** An earlier turn a job changed (a card it keeps current), written to the home segment that holds it. */
+async function writeHomeTurn(userId, segments, changed) {
+  const owner = segments.find(segment => (segment.turns || []).some(item => item.uid === changed.uid));
+  if (!owner) throw new Error('The chat could not be saved.');
+  owner.updated = Math.max(Date.now(), owner.updated + 1, (changed.updated || 0) + 1);
+  await writeObject(userId, 'chats', { ...owner, turns: [changed] }, { appendTurns: true });
 }
 /** Claims a routine so two jobs never run it at once, runs it and schedules its next time. */
 export async function runClaimed(userId, id, { force = false, fetcher, now = Date.now(), trainingServices, message, signal } = {}) {
@@ -522,7 +565,7 @@ async function notifyRoutine(userId, routine, result) {
   try {
     const row = (await sql({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, result.chat] })).rows[0];
     const chat = row ? parse(row.payload) : null, turn = chat?.turns?.find(item => item.uid === result.turn);
-    await notify(userId, replyNotice({ uid: result.chat, title: chat?.title || 'Pip · ' + routine.title }, turn || { status: result.status, error: result.error }));
+    await notify(userId, replyNotice({ uid: result.chat, title: reportsHome(routine) || !chat?.title ? 'Pip · ' + routine.title : chat.title }, turn || { status: result.status, error: result.error }));
   } catch { /* A notification is not part of the run. */ }
 }
 export async function runPipJob({ fetcher, now = Date.now() } = {}) {
