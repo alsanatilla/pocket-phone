@@ -143,6 +143,18 @@ describe("Today", () => {
     expect(screen.getByText("Flat viewing, Lindenstraße 12")).toBeTruthy();
   });
 
+  it("after midnight: still the evening before, its tasks not yet late and the new day's appointments as tomorrow", () => {
+    vi.setSystemTime(at(1, 0, 10));
+    agenda.save({ title: "Flat viewing, Lindenstraße 12", when: at(9, 0, 10), minutes: 60 });
+    createTask("Call the landlord", { due: "2026-11-09" });
+    const view = render(<TodayPage />);
+    expect(screen.getByText("Mon 9 Nov · evening")).toBeTruthy();
+    expect(within(view.container).getByText("tomorrow")).toBeTruthy();
+    expect(screen.getByText("Flat viewing, Lindenstraße 12")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Done: Call the landlord" })).toBeTruthy();
+    expect(screen.queryByText("1 day late")).toBeNull();
+  });
+
   it("sends what is written to the big chat and opens it", async () => {
     render(<TodayPage />);
     const field = screen.getByRole("textbox", { name: "Message Pip" });

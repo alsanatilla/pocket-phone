@@ -96,13 +96,27 @@ export function saveDailyNote(text: string, day: string, expectedVersion: number
 const HOUR = 3_600_000, DAY_MS = 24 * HOUR;
 /** The two shapes of Today: the morning's (today's plan) and the evening's (what got done, what is left, tomorrow). */
 export type DayPart = "morning" | "evening";
+/** The hour a new day starts for Today: a look before it still belongs to the evening before. */
+const DAY_TURNS = 4;
+/**
+ * A moment on the day Today shows for `now`: `now` itself, or before 04:00 the same time on the day before. The date,
+ * the tasks (late, tomorrow, finished), the appointments and the day's note all count from it, so a look at 01:00 shows
+ * the evening it belongs to as a whole instead of half of the next day.
+ */
+export function dayMoment(now = Date.now()): number {
+  const date = new Date(now);
+  if (date.getHours() < DAY_TURNS) date.setDate(date.getDate() - 1);
+  return date.getTime();
+}
+/** The date ("2026-11-09") of the day Today shows. */
+export const dayOf = (now = Date.now()): string => today(dayMoment(now));
 /** Evening from 17:00 until 04:00, so a late look still closes the day it belongs to. */
 export function dayPart(now = Date.now()): DayPart {
   const hour = new Date(now).getHours();
-  return hour >= 17 || hour < 4 ? "evening" : "morning";
+  return hour >= 17 || hour < DAY_TURNS ? "evening" : "morning";
 }
-/** "Fri 14 Nov". */
-export const dayTitle = (now = Date.now()): string => new Date(now).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }).replace(",", "");
+/** "Fri 14 Nov": the day Today shows, which after midnight is still the evening's. */
+export const dayTitle = (now = Date.now()): string => new Date(dayMoment(now)).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }).replace(",", "");
 /** "08:07". */
 export const clockAt = (at: number): string => new Date(at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
 
@@ -130,7 +144,7 @@ const daysBetween = (from: string, to: string) => Math.round((Date.parse(to + "T
  * them, as what got done).
  */
 export function dayTasks(list: readonly Task[], part: DayPart, now = Date.now()): DayTask[] {
-  const day = today(now), next = tomorrow(now);
+  const day = dayOf(now), next = tomorrow(dayMoment(now));
   const open = list.filter(task => !task.done && task.due && (task.due <= day || (part === "evening" && task.due === next)))
     .sort((a, b) => a.due.localeCompare(b.due) || Number(b.important) - Number(a.important) || a.created - b.created)
     .map(task => {
@@ -138,15 +152,15 @@ export function dayTasks(list: readonly Task[], part: DayPart, now = Date.now())
       // Due today needs no word on a page called today; only late and tomorrow tell rows apart.
       return { task, late: late > 0, note: late ? late + (late === 1 ? " day late" : " days late") : task.due === day ? "" : "tomorrow" };
     });
-  const finished = list.filter(task => task.done && today(task.updated) === day && (part === "evening" || (task.due && task.due <= day)))
+  const finished = list.filter(task => task.done && dayOf(task.updated) === day && (part === "evening" || (task.due && task.due <= day)))
     .sort((a, b) => a.updated - b.updated).map(task => ({ task, note: "", late: false }));
   return [...open, ...finished];
 }
 
-/** The appointments Today lists: the morning's that have not ended yet, or in the evening tomorrow's. */
+/** The appointments Today lists: the morning's that have not ended yet, or in the evening the next day's. */
 export function dayAppointments(all: readonly AgendaEvent[], part: DayPart, now = Date.now()): AgendaEvent[] {
-  const start = new Date(now); start.setHours(0, 0, 0, 0);
-  if (part === "evening" && new Date(now).getHours() >= 4) start.setDate(start.getDate() + 1);
+  const start = new Date(dayMoment(now)); start.setHours(0, 0, 0, 0);
+  if (part === "evening") start.setDate(start.getDate() + 1);
   const end = new Date(start); end.setDate(end.getDate() + 1);
   return all.filter(event => event.when < end.getTime() && event.when + event.minutes * 60_000 > Math.max(start.getTime(), part === "morning" ? now : 0))
     .sort((a, b) => a.when - b.when);

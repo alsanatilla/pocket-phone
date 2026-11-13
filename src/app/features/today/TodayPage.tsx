@@ -11,7 +11,7 @@ import { useCollection } from "../../data/bus.ts";
 import { pinnedCards } from "../../data/cards.ts";
 import { listChats, readChat } from "../../data/chats.ts";
 import { homeForSend } from "../../data/home.ts";
-import { BRIEF_KINDS, clockAt, dailyNote, dayAppointments, dayPart, dayTasks, dayTitle, fromPip, JOB_OWNER, lastVisit, latestBrief, markVisit, type PipItem } from "../../data/today.ts";
+import { BRIEF_KINDS, clockAt, dailyNote, dayAppointments, dayOf, dayPart, dayTasks, dayTitle, fromPip, JOB_OWNER, lastVisit, latestBrief, markVisit, type PipItem } from "../../data/today.ts";
 import { loadJobs, type JobsState } from "../../data/jobs.ts";
 import { completeTask, listTasks, today } from "../../data/tasks.ts";
 import { noteTitle } from "../../data/notes.ts";
@@ -59,9 +59,9 @@ function TodayView({ account, signedIn, local }: { account: string; signedIn: bo
   const chats = useCollection(["chats"], listChats);
   const brief = jobs ? latestBrief(jobs.runs, chats, now) : null;
   const items = fromPip(chats, work.assignments, since, brief?.turn.uid);
-  const tasks = useCollection(["tasks.json"], () => dayTasks(listTasks(), part, now), [part, today(now)]);
+  const tasks = useCollection(["tasks.json"], () => dayTasks(listTasks(), part, now), [part, dayOf(now)]);
   const events = useCollection(["agenda.json"], () => dayAppointments(agenda.all(), part, now), [part, Math.floor(now / 60_000)]);
-  const note = useCollection(["notes.json"], () => (part === "evening" ? dailyNote(today(now)) : null), [part, today(now)]);
+  const note = useCollection(["notes.json"], () => (part === "evening" ? dailyNote(dayOf(now)) : null), [part, dayOf(now)]);
   const hasPinned = useCollection(["chats"], () => pinnedCards().length > 0);
   const nothing = !brief && !work.decisions.length && !items.length && !events.length && !tasks.length && !note && !hasPinned;
 

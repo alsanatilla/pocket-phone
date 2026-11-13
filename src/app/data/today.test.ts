@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clock } from "../../client/planner.js";
 import { completeTask, createTask, getTask, today } from "./tasks.ts";
-import { addStep, dailyNoteText, dayAppointments, dayPart, dayTasks, deferTask, excerpt, focusRemaining, focusSession, FIRST_VISIT, fromPip, lastVisit, latestBrief, markVisit, reportTitle, saveDailyNote, startFocus, tomorrow, toggleStep } from "./today.ts";
+import { addStep, dailyNoteText, dayAppointments, dayOf, dayPart, dayTasks, dayTitle, deferTask, excerpt, focusRemaining, focusSession, FIRST_VISIT, fromPip, lastVisit, latestBrief, markVisit, reportTitle, saveDailyNote, startFocus, tomorrow, toggleStep } from "./today.ts";
 import type { Assignment } from "../../client/pip-remote.js";
 import type { Chat, ChatTurn } from "./chats.ts";
 import type { JobRun } from "./jobs.ts";
@@ -149,6 +149,40 @@ describe("the day's tasks", () => {
   });
   it("in the evening: tomorrow's too, and everything finished today", () => {
     expect(dayTasks(list, "evening", at(19)).map(item => item.task.uid)).toEqual(["late", "today", "tomorrow", "done", "done-undated"]);
+  });
+});
+
+describe("the day a late look belongs to", () => {
+  // Monday the 9th at 18:00 and Tuesday the 10th at 01:00 are the same evening: the same date, tasks and appointments.
+  const list = [
+    task("late", "Submit the tax return", { due: "2026-11-08" }),
+    task("today", "Call the landlord", { due: "2026-11-09" }),
+    task("tomorrow", "Pack the climbing bag", { due: "2026-11-10" }),
+    task("after", "Book the train", { due: "2026-11-11" }),
+    task("done-evening", "Renew bike insurance", { done: true, updated: at(22) }),
+    task("done-night", "Water the plants", { done: true, updated: at(0, 30, 10) }),
+    task("done-sunday", "Old thing", { done: true, updated: at(20, 0, 8) }),
+  ];
+  const events = [
+    { uid: "monday", title: "Climbing", when: at(19), minutes: 90 },
+    { uid: "tuesday", title: "Flat viewing", when: at(9, 0, 10), minutes: 60 },
+    { uid: "wednesday", title: "Dentist", when: at(9, 0, 11), minutes: 30 },
+  ];
+  for (const [label, now] of [["18:00", at(18)], ["01:00 the night after", at(1, 0, 10)]] as const) {
+    it("at " + label + ": Monday's evening, with Tuesday as tomorrow", () => {
+      expect(dayPart(now)).toBe("evening");
+      expect(dayOf(now)).toBe("2026-11-09");
+      expect(dayTitle(now)).toBe("Mon 9 Nov");
+      expect(dayTasks(list, "evening", now).map(item => [item.task.uid, item.note])).toEqual([
+        ["late", "1 day late"], ["today", ""], ["tomorrow", "tomorrow"], ["done-evening", ""], ["done-night", ""]]);
+      expect(dayAppointments(events, "evening", now).map(event => event.uid)).toEqual(["tuesday"]);
+    });
+  }
+  it("from 04:00 it is the next day's morning", () => {
+    const now = at(4, 0, 10);
+    expect([dayPart(now), dayOf(now), dayTitle(now)]).toEqual(["morning", "2026-11-10", "Tue 10 Nov"]);
+    expect(dayTasks(list, "morning", now).map(item => [item.task.uid, item.note])).toEqual([["late", "2 days late"], ["today", "1 day late"], ["tomorrow", ""]]);
+    expect(dayAppointments(events, "morning", now).map(event => event.uid)).toEqual(["tuesday"]);
   });
 });
 
