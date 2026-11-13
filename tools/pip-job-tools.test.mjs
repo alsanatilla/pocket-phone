@@ -242,3 +242,49 @@ test('without background settings a moment is read in the chat\'s timezone, and 
   // A timezone that is not one falls back to UTC.
   assert.equal((await jobTool(id, 'list_jobs', {}, { value: { timezone: 'Mars/Olympus' } })).timezone, 'UTC');
 });
+
+test('a create_job call made again after the person changed, paused or removed the job saves nothing', async () => {
+  const userId = await account(), context = { chat: 'chat-replay', turn: 'turn-1', eventId: 'row-1' };
+  const input = { kind: 'prompt', title: 'Bike prices', prompt: 'Remind me to check the bike prices.', time: '08:00', days: ['mon'] };
+  const first = await jobTool(userId, 'create_job', input, context);
+  // The person pauses it and moves it to 09:00 on the Jobs page.
+  const [made] = await jobs(userId);
+  await background.saveRoutine(userId, { ...made, enabled: false, time: '09:00' });
+  const replay = await jobTool(userId, 'create_job', input, context);
+  assert.deepEqual([replay.id, replay.existing, replay.enabled, replay.schedule], [first.id, true, false, 'Mon 09:00']);
+  const [after] = await jobs(userId);
+  assert.deepEqual([after.enabled, after.time, after.nextRun], [false, '09:00', 0], 'still paused, still at 09:00, not rescheduled');
+  // Removed, the call made again does not bring it back.
+  await jobTool(userId, 'remove_job', { id: first.id }, { chat: 'chat-replay', turn: 'turn-2', eventId: 'row-2' });
+  const gone = await jobTool(userId, 'create_job', input, context);
+  assert.equal(gone.error, 'job_removed');
+  assert.equal((await jobs(userId)).length, 0);
+  // The same call twice at once is one job.
+  const both = await Promise.all([0, 1].map(() => jobTool(userId, 'create_job', { ...input, title: 'Twice' }, { chat: 'chat-replay', turn: 'turn-3', eventId: 'row-3' })));
+  assert.equal(both[0].id, both[1].id);
+  assert.equal((await jobs(userId)).length, 1);
+});
+
+test('dates, times and days that do not exist are refused, not moved; an hour that repeats is its later one', async () => {
+  const userId = await account(), context = n => ({ chat: 'chat-dates', turn: 't', eventId: 'e' + n });
+  const make = (n, extra) => jobTool(userId, 'create_job', { kind: 'prompt', title: 'Call Sam', prompt: 'Remind me to call Sam.', ...extra }, context(n));
+  const year = new Date().getUTCFullYear() + 1;
+  assert.match((await make(1, { at: year + '-02-30 08:00' })).message, /not a date and time on the calendar/);
+  assert.match((await make(2, { at: year + '-04-31 08:00' })).message, /not a date and time on the calendar/);
+  assert.match((await make(3, { at: year + '-05-01 24:00' })).message, /not a date and time on the calendar/);
+  assert.match((await make(4, { at: year + '-05-01 08:60' })).message, /not a date and time on the calendar/);
+  assert.match((await make(5, { time: '08:00', days: ['mon', 'funday'] })).message, /mon, tue, wed, thu, fri, sat or sun/);
+  assert.match((await make(6, { time: '08:00', days: 'mon' })).message, /mon, tue, wed, thu, fri, sat or sun/);
+  // Europe/Berlin skips 02:00–03:00 on the last Sunday of March and repeats it on the last Sunday of October.
+  const lastSunday = (y, month) => { const day = new Date(Date.UTC(y, month, 0)); return new Date(Date.UTC(y, month - 1, day.getUTCDate() - day.getUTCDay())); };
+  const date = value => value.toISOString().slice(0, 10);
+  assert.match((await make(7, { at: date(lastSunday(year, 3)) + ' 02:30' })).message, /does not exist in Europe\/Berlin/);
+  assert.equal((await jobs(userId)).length, 0, 'nothing refused was saved');
+  const now = Date.now(), back = [lastSunday(year - 1, 10), lastSunday(year, 10)].find(day => day.getTime() > now + 86400000);
+  const repeated = await make(8, { at: date(back) + ' 02:30' });
+  assert.equal(repeated.schedule, 'once · ' + date(back) + ' 02:30');
+  const [saved] = await jobs(userId);
+  assert.equal(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Berlin', timeZoneName: 'short' }).format(saved.at).split(' ').at(-1), 'CET', 'the later 02:30, after the clocks went back');
+  // Full day names are read as days.
+  assert.deepEqual((await make(9, { title: 'Weekly', time: '08:00', days: ['Monday', 'fri'] })).schedule, 'Mon Fri 08:00');
+});

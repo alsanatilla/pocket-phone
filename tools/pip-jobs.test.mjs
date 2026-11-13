@@ -322,3 +322,114 @@ test('a scheduled report repeated after a restart is not delivered twice to the 
   assert.equal((await background.runClaimed(userId, id, { fetcher })).status, 'done');
   assert.equal((await segmentsOf(userId))[0].turns.filter(turn => turn.text === 'Bike prices (job)').length, 2);
 });
+
+// ── Delivered once, wherever it goes, and in the segment that is current when it is written ──
+/** A provider reply that waits until opened: `started` resolves when the request is sent. */
+function gated(text) {
+  let open, started;
+  const gate = new Promise(resolve => { open = resolve; }), asked = new Promise(resolve => { started = resolve; });
+  return { open, asked, fetcher: async () => { started(); await gate; return response(compatibleMessage({ text })); } };
+}
+const due = (userId, id, slot) => execute({ sql: 'UPDATE pocket_pip_routines SET next_run = ?, lock_until = 0 WHERE user_id = ? AND id = ?', args: [slot, userId, id] });
+
+test('a report written before the next time was saved is not delivered again: in its own chat in a new month, and home after its segment went', async () => {
+  const userId = await account(), slot = Date.now() - 60000;
+  let asked = 0;
+  const fetcher = async () => { asked++; return response(compatibleMessage({ text: 'Your notes are about a bike.' })); };
+  // A job with a chat of its own: the month's chat would be another one when the run is repeated in the next month.
+  await execute({ sql: 'INSERT INTO pocket_pip_routines (user_id, id, payload, next_run) VALUES (?, ?, ?, ?)',
+    args: [userId, 'ownjob', JSON.stringify({ id: 'ownjob', kind: 'prompt', title: 'Own job', prompt: 'Summarise my notes.', time: '07:00', days: [1], enabled: true, delivery: 'quiet' }), slot] });
+  const first = await background.runClaimed(userId, 'ownjob', { fetcher });
+  assert.equal(first.status, 'done', first.error);
+  await due(userId, 'ownjob', slot);
+  const again = await background.runClaimed(userId, 'ownjob', { fetcher, now: Date.now() + 40 * 86400000 });
+  assert.deepEqual([again.status, again.chat, again.turn, asked], ['done', first.chat, first.turn, 1]);
+  const own = (await chatsOf(userId)).filter(chat => chat.title === 'Pip · Own job');
+  assert.equal(own.length, 1, 'no second chat for the next month');
+  assert.equal(own[0].turns.filter(turn => turn.status === 'done').length, 1);
+
+  // Home: the segment holding the report was deleted before the run was repeated; the key, not a search, says it went.
+  await homeSegment(userId, 'home-gone', Date.now() - 50000, filler(2, Date.now() - 50000));
+  const { routines } = await background.saveRoutine(userId, { kind: 'prompt', title: 'Bike prices', prompt: 'Remind me to check the bike prices.', time: '08:00', days: [1], to: 'home', delivery: 'quiet' });
+  const home = routines.find(item => item.title === 'Bike prices');
+  await due(userId, home.id, slot);
+  const delivered = await background.runClaimed(userId, home.id, { fetcher });
+  assert.deepEqual([delivered.status, delivered.chat, asked], ['done', 'home-gone', 2]);
+  const [segment] = await segmentsOf(userId);
+  await writeObject(userId, 'chats', { ...segment, deleted: true, updated: segment.updated + 1 });
+  await due(userId, home.id, slot);
+  const repeated = await background.runClaimed(userId, home.id, { fetcher });
+  assert.deepEqual([repeated.status, repeated.chat, repeated.turn, asked], ['done', delivered.chat, delivered.turn, 2]);
+  assert.equal((await chatsOf(userId)).filter(chat => chat.home && !chat.deleted).length, 0, 'no new segment for a report delivered already');
+});
+
+test('the same scheduled time claimed twice (a lock that ran out mid-run): one report, both runs charged, the later lock kept', async () => {
+  const userId = await account(), slot = Date.now() - 60000;
+  await homeSegment(userId, 'home-race', Date.now() - 80000, filler(2, Date.now() - 80000));
+  const { routines } = await background.saveRoutine(userId, { kind: 'prompt', title: 'Bike prices', prompt: 'Remind me to check the bike prices.', time: '08:00', days: [1], to: 'home', delivery: 'quiet' });
+  const id = routines[0].id;
+  await due(userId, id, slot);
+  const one = gated('First run.'), two = gated('Second run.');
+  const first = background.runClaimed(userId, id, { fetcher: one.fetcher });
+  await one.asked;
+  // The first run stalls past its lock; the same scheduled time is due and claimed again.
+  await execute({ sql: 'UPDATE pocket_pip_routines SET lock_until = 0 WHERE user_id = ? AND id = ?', args: [userId, id] });
+  const second = background.runClaimed(userId, id, { fetcher: two.fetcher, now: Date.now() + 1000 });
+  await two.asked;
+  one.open();
+  const a = await first;
+  assert.equal(a.status, 'done', a.error);
+  const lock = Number((await execute({ sql: 'SELECT lock_until FROM pocket_pip_routines WHERE user_id = ? AND id = ?', args: [userId, id] })).rows[0].lock_until);
+  assert.ok(lock > Date.now(), 'the first run leaves the second run\'s lock in place');
+  two.open();
+  const b = await second;
+  assert.deepEqual([b.status, b.chat, b.turn], ['done', a.chat, a.turn], 'the second run answers with the report the first delivered');
+  const reports = (await segmentsOf(userId)).flatMap(segment => segment.turns).filter(turn => turn.text === 'Bike prices (job)');
+  assert.deepEqual(reports.map(turn => turn.answer), ['First run.']);
+  // Both runs asked the model, so both are charged.
+  const spent = (reports[0].usage.input_tokens || 0) + (reports[0].usage.output_tokens || 0);
+  assert.ok(spent > 0);
+  assert.equal((await background.backgroundState(userId)).usedToday, 2 * spent);
+});
+
+test('two jobs of one account finish around a full segment: the segment is chosen when each writes, and the person\'s message stays', async () => {
+  // 58 turns; the person writes the 59th while both jobs run. The first report fills the segment, the second starts the next.
+  const userId = await account(), start = Date.now() - 90000;
+  await homeSegment(userId, 'home-edge', start, filler(58, start));
+  const made = [];
+  for (const title of ['Morning', 'Evening']) made.push((await background.saveRoutine(userId, { kind: 'prompt', title, prompt: title + ' note.', time: '08:00', days: [1], to: 'home', delivery: 'quiet' })).routines.find(item => item.title === title));
+  const one = gated('Morning report.'), two = gated('Evening report.');
+  const first = background.runClaimed(userId, made[0].id, { force: true, fetcher: one.fetcher });
+  const second = background.runClaimed(userId, made[1].id, { force: true, fetcher: two.fetcher });
+  await Promise.all([one.asked, two.asked]);
+  const [open] = await segmentsOf(userId);
+  await writeObject(userId, 'chats', { ...open, updated: open.updated + 1, turns: [doneTurn('person-1', 'Are you there?', 'Yes.', Date.now())] }, { appendTurns: true });
+  one.open();
+  assert.equal((await first).status, 'done');
+  two.open();
+  const late = await second;
+  assert.equal(late.status, 'done', late.error);
+  const segments = await segmentsOf(userId);
+  assert.equal(segments.length, 2);
+  assert.equal(segments[0].turns.length, 60, 'the segment is not written past full');
+  assert.ok(segments[0].turns.some(turn => turn.uid === 'person-1'), 'the person\'s message stays');
+  assert.ok(segments[0].turns.some(turn => turn.text === 'Morning (job)'), 'the first report fills the segment');
+  assert.deepEqual([segments[1].uid, segments[1].home, segments[1].title, segments[1].turns.map(turn => turn.text)], [late.chat, true, 'pip', ['Evening (job)']]);
+
+  // Already full when both start: they share the one new segment instead of making one each.
+  const other = await account(), begin = Date.now() - 90000;
+  await homeSegment(other, 'home-full-both', begin, filler(60, begin));
+  const jobs = [];
+  for (const title of ['Morning', 'Evening']) jobs.push((await background.saveRoutine(other, { kind: 'prompt', title, prompt: title + ' note.', time: '08:00', days: [1], to: 'home', delivery: 'quiet' })).routines.find(item => item.title === title));
+  const three = gated('Morning report.'), four = gated('Evening report.');
+  const runs3 = [background.runClaimed(other, jobs[0].id, { force: true, fetcher: three.fetcher }), background.runClaimed(other, jobs[1].id, { force: true, fetcher: four.fetcher })];
+  await Promise.all([three.asked, four.asked]);
+  three.open(); four.open();
+  const results = await Promise.all(runs3);
+  const after = await segmentsOf(other);
+  assert.equal(after.length, 2, 'one new segment, not two');
+  assert.equal(results[0].chat, results[1].chat);
+  assert.deepEqual(after[1].turns.map(turn => turn.text).sort(), ['Evening (job)', 'Morning (job)']);
+  // Nothing of one account is written into another's.
+  assert.ok(!(await segmentsOf(userId)).some(segment => segment.uid === after[1].uid));
+});
