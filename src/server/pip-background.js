@@ -532,17 +532,8 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
     // is shown on the Jobs page instead of offering "continue" for a message the person never sent.
     if (turn.status === 'done') {
       turn.text = routine.title + ' (job)';
-      target = await deliver(userId, routine.id, once, turn.uid, true, async tx => {
-        // Chosen in the writing transaction: two jobs finishing together see each other's report and the segment
-        // the first one started, and neither writes into a segment that filled up while it ran.
-        const current = currentHome(await homeSegmentsOf(userId, tx));
-        const stamp = Math.max(Date.now(), (current?.updated || 0) + 1);
-        turn.updated = stamp;
-        if (current && !homeFull(current)) return { ...current, updated: stamp, turns: [turn] };
-        const { grants, dailyTokens, timezone, enabled, useAccountKey, ...config } = settings;
-        return { uid: 'home-' + randomUUID().replaceAll('-', '').slice(0, 20), title: HOME_TITLE, titled: true, home: true,
-          created: Math.max(Date.now(), (current?.created || 0) + 1), updated: stamp, draft: '', context: [], turns: [turn], config: current?.config || config };
-      });
+      const { grants, dailyTokens, timezone, enabled, useAccountKey, ...config } = settings;
+      target = await deliver(userId, routine.id, once, turn.uid, true, tx => homeReport(userId, tx, turn, config));
     }
   } else {
     turn.updated = chat.updated = Math.max(Date.now(), chat.updated + 1);
@@ -579,6 +570,20 @@ async function deliver(userId, routineId, once, turnUid, appendTurns, choose) {
     return target;
   } });
   return written ? { chat: written.value.uid, turn: turnUid } : earlier;
+}
+/**
+ * The home segment a report is appended to, chosen inside the transaction that writes it: the current segment, or a
+ * new one when it is full or there is none. Two reports finishing together (jobs, assignments) see each other's turn
+ * and the segment the first one started, so neither writes into a full segment and only one new segment is made.
+ * `config` is the new segment's model when there is no segment to copy it from. Stamps the turn.
+ */
+export async function homeReport(userId, tx, turn, config) {
+  const current = currentHome(await homeSegmentsOf(userId, tx));
+  const stamp = Math.max(Date.now(), (current?.updated || 0) + 1);
+  turn.updated = stamp;
+  if (current && !homeFull(current)) return { ...current, updated: stamp, turns: [turn] };
+  return { uid: 'home-' + randomUUID().replaceAll('-', '').slice(0, 20), title: HOME_TITLE, titled: true, home: true,
+    created: Math.max(Date.now(), (current?.created || 0) + 1), updated: stamp, draft: '', context: [], turns: [turn], config: current?.config || config };
 }
 /** Whether a job's report is a turn in the big chat. A watch that keeps a card current answers in the card's chat. */
 const reportsHome = routine => routine.to === 'home' && !routine.chat && routine.kind !== 'training';

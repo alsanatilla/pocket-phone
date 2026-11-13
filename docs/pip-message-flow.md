@@ -485,3 +485,48 @@ answers in the card's chat as before and is always `own`.
 - **Tokens.** A job's tokens are added to the day's total in one statement (`chargeTokens`), so a chat reply charged
   while the job ran keeps its tokens.
 - **Notifications** link to the segment (which opens home) and are titled `Pip · <job name>`.
+
+## An assignment: work Pip does in the background and reports into the big chat
+
+"Find out what the three bikes cost and tell me." "Look through my notes on the move and report back." The person
+hands Pip a piece of research and keeps talking; the result arrives later as its own message in the one big chat.
+An assignment is one bounded, read-only reply that nobody waits for. It is not a new engine: it is a run row in
+`pocket_pip_runs`, executed by `drive` like every server reply, with the lease, heartbeat, stop, restart and sweep
+that already exist, and it reports into home with the transaction a job's report uses
+(`src/server/pip-runs.js`, from "An assignment" down; the segment choice is `homeReport` in
+`src/server/pip-background.js`).
+
+**How one starts.** Only Pip starts one, by calling `start_assignment { title, brief }` during a server reply
+(`src/client/pip-sdk-tools.js`). The brief is self-contained: the assignment sees no earlier turns. Nothing else
+is taken from the model: what the assignment may read, its provider, model and key are the chat reply's own.
+
+| Rule | How |
+|---|---|
+| Owner | Every row and query is filtered by `user_id`; an assignment id from another account is "no longer available" (404), and cancel and retry only act on rows of the assignment lane, never on a chat's reply. |
+| Submitted once | The row's `request_id` is derived from the chat, the turn and the tool call (`as-<hash>`); the unique index makes a tool call made again (a reply continued after a restart) answer with the assignment it started, never a second one. A retry from the person carries its own request id and is idempotent the same way. |
+| Never blocks the chat | The row's `chat_uid` is `@assign-<run id>` (not a chat id, so the unique index on a chat's active run never sees it) and its lane is `@assign`, never `home`, so the person's messages are neither queued nor refused while it works. It writes nothing to a chat until its report. |
+| Bounded | At most 2 assignments work at once per account and 3 more wait (`waiting`, oldest first); the sixth is refused with `assignments_full`. Each is one stretch: at most 150 s (`RUN_DEADLINE`), the `thorough` lookup limits (10 lookups, 5 web calls), and the reply token ceiling of a thorough reply (`maxTokens` + 16,000 + the reserve). Its tokens count against the account's daily limit, which is checked when it starts. |
+| Read-only | Write tools are not offered and are refused if called, so nothing waits for an approval and nothing is ever approved for the person. No `remember`/`forget`, no job tools, no `start_assignment` (no recursive background work), no device tools. |
+| No escalation | The grants and web access are the starting reply's (`config` of the row), narrowed again to what the account allows when it starts; a retry reuses the stored ones. A brief cannot name tools or grants. Text the assignment reads (notes, pages, results) is material, never instructions, and cannot give it a tool it was not started with. |
+| Delivered once | When it finishes, one write transaction (`writeObject`'s `prepare`) moves the row from `running` to `done` on its own lease and appends the report to the current home segment, or to a new one when that is full (`homeReport`, the job rule). Losing the lease (it was stopped or presumed dead) delivers nothing. Two assignments finishing together are serialised by the transaction, so neither writes past a full segment and only one new segment is made. The person's own turns in the segment stay (appendTurns merge). |
+| The report | A turn in home: `› <title> (assignment)`, owner `pip-assignment`, the answer as written. A failure or a stop writes nothing to home (no "continue" for a message the person never sent); it stays in the row and in the list below. A finished or failed assignment pushes one notification when no tab follows it. |
+| Stop | `cancel_assignment { id }`: a waiting one is `withdrawn`; a working one is stopped like any reply (`stopRun`), within a heartbeat. A stop does not hold the others: the next waiting one starts. Safe to repeat. |
+| Restart | A process that stops lets go of its runs (`drainRuns`); the next page view in the web process or the worker's sweep restarts a running assignment once, keeping its finished lookups, as for a reply. A waiting one left behind is started by the sweep (`advanced`). |
+| Retry | `retry_assignment { id, requestId }` on a failed or stopped assignment submits a new one with the same title, brief and stored access, under the limits above. |
+
+**Where it runs.** Production (Fly, `PIP_RUNS_MODE=inprocess`) runs it in the web process that received the chat
+reply, detached from it: the chat reply returns at once. With a worker (`PIP_RUNS_DETACHED=1`) it is queued for the
+worker. Elsewhere (Vercel, the dev server without that mode) it waits for the next sweep (`/api/jobs/pip` or the
+worker's routine timer), because starting it inside the chat's request would make the chat wait for it.
+
+**What a screen reads.** `POST /api/pip/runs { action: 'assignments' }` (also over the socket) answers
+`{ assignments, decisions }`: the newest 20 assignments, each `{ id, title, state: waiting | working | done |
+failed | stopped, created, started, ended, origin: { chat, turn }, report: { chat, turn } | null, error, lookups }`,
+and every reply waiting for the person's decision, each `{ runId, chat, requests: [{ id, tool, title }] }`, so
+Today can show what is working, what came back and what waits for the person. Every change is a run event
+(`waiting`, `started`, `done`, `failed`, `stopped`, `withdrawn`) on the live socket, without a `chat`, so no open
+chat attaches to it.
+
+**Not in this release.** Writes (an assignment that wants a change describes it in its report; the person asks for
+it in the chat, where approval works as always), the screens (the mock is `docs/mockups/today-assignments.html`),
+a list tool for the model, and starting an assignment from a key instead of from the chat.

@@ -74,6 +74,10 @@ const DEFINITIONS = {
     enabled: optional(z.boolean(), 'false pauses the job, true resumes it.'), ...JOB_SCHEDULE
   })],
   remove_job: ['Remove one of the person\'s jobs by its id from list_jobs, when they ask to stop or delete it for good (to stop it for a while, pause it with change_job). The person approves the removal first; its notes go with it.', object({ id: z.string().min(1).max(40).meta({ description: 'The job\'s id from list_jobs.' }) })],
+  start_assignment: ['Hand a piece of research to yourself to do in the background, when the person asks you to look into something and report back ("find out … and tell me", "research this and get back to me") or when looking it up properly would take minutes. The person keeps talking with you meanwhile; the report arrives in the big chat as its own message, usually within a few minutes. The assignment reads what this chat may read (notes, tasks, the web when it is on), cannot save or change anything, and sees nothing of this conversation but the brief. Say in one line that you started it; do not do the research yourself as well.', object({
+    title: z.string().min(1).max(80).meta({ description: 'A short name the person recognises, e.g. "Bike prices".' }),
+    brief: z.string().min(1).max(4000).meta({ description: 'Everything the assignment needs, self-contained, written as the person\'s request: what to find out, what to compare, what the report should contain.' })
+  })],
   // Loose on purpose: Pocket checks the card itself and answers with the exact problems (pocket-card-tool.js),
   // which a model can act on; a schema rejection would only say that the arguments were invalid.
   show_card: [CARD_TOOL_DESCRIPTION, z.object({ root: cardRoot, elements: cardElements })],
