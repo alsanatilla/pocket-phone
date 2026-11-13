@@ -73,7 +73,7 @@ describe("a reply in Pip", () => {
     const started = { id: "row-a", name: "start_assignment", title: "start an assignment · Bike prices", state: "done", started: 1, ended: 2, result: JSON.stringify({ kind: "assignment", done: "started", id: "a1", title: "Bike prices" }) };
     const { chatId, turn } = seed([started], { answer: "I am looking into it." });
     const base: Assignment = { id: "a1", title: "Bike prices", state: "working", created: 1, started: 1, ended: 0, origin: { chat: chatId, turn: turn.uid }, report: null, error: "", lookups: 3, retryOf: "", retried: "" };
-    const state = (assignments: Assignment[]): AssignmentsState => ({ account: "user-a", status: "ready", assignments, decisions: [] });
+    const state = (assignments: Assignment[]): AssignmentsState => ({ account: "user-a", status: "ready", assignments, decisions: [], error: "" });
     vi.mocked(useAssignments).mockReturnValue(state([base]));
     const view = render(<Turn turn={turn} chatId={chatId} latest live={null} locked={false} />);
     expect(screen.getByText("assignment · working · 3 lookups")).toBeTruthy();
