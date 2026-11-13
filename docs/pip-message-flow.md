@@ -400,6 +400,12 @@ Monday reminder." Pip hands work to itself without a form, and what it does on i
   setting; the chat's timezone (the device's, sent with the message) stands in, so "tomorrow at 18:30" is still the
   person's 18:30. Such a job is saved but does not run until Pip on its own is on: the result says `off: true` and the
   line under the reply ends in `· pip on its own is off`.
+- **Only real moments and days.** A date that is not on the calendar (`2027-02-30`, `24:00`) and a day that is not one
+  (`funday`) are refused with a sentence; nothing is rolled over or dropped. Across a change of the clocks: a moment
+  in the hour that is skipped (02:30 on the morning the clocks go forward) is refused, since moving it would schedule
+  a time the person did not say; a moment in the hour that repeats (the morning they go back) is the later of the two.
+  A daily time is not refused for one day a year: on the morning the clocks skip it, the scheduler's `nextRun` runs
+  it an hour later, as every job on the Jobs page does.
 - **The training planner is not reachable**: the kinds are the four above, and `change_job` / `remove_job` refuse
   the planner's id.
 - **The model and the key.** A job runs as every job does: with the provider, model and key of Pip on its own (the
@@ -408,7 +414,10 @@ Monday reminder." Pip hands work to itself without a form, and what it does on i
   person's chat uses the same model (the usual case: `/jobs` turns Pip on its own on with the chat's model) nothing
   changes; when they differ, the Jobs page shows the job's model as it does today.
 - **Saving is idempotent.** A job created in a reply gets an id derived from the chat, the turn and the tool call,
-  so a reply that is continued after a restart and calls again updates the same job instead of adding one. A second
+  and the creation takes the key `create:<id>` in `pocket_pip_job_once` in the transaction that inserts the job (the
+  limit of 12 is counted in it too). A reply continued after a restart that makes the same call again saves nothing:
+  it answers with the job as it stands, paused or changed by the person since, or `job_removed` when the person
+  removed it, which does not bring it back. A second
   `create_job` for a job that exists already (the same kind, name, ignoring case, instruction and schedule) saves
   nothing and answers with the one that exists (`existing: true`). A `remove_job` whose job is gone by the time it
   runs (a decision sent twice, a reply continued after a restart) answers `job_not_found` with "removed already".
@@ -434,15 +443,17 @@ one thing the person asked for in words, and a wrong creation is harmless and vi
 
 **Where a job reports: `to`.** A job has `to: 'home' | 'own'`. `own` is today's behaviour: one chat per job and
 month (`Pip · Nightly brief`). `home` writes the report as a turn in the current home segment. Jobs created in
-conversation default to `home`; jobs that exist keep `own` (a stored job without `to` reads as `own`) until the
-person changes it in the job's editor (one `Switch`, "report in pip"). A watch that keeps a card current (`chat` set)
+conversation default to `home`; a job made on the Jobs page starts as `own`, as before, and jobs that exist keep
+`own` (a stored job without `to` reads as `own`) until the person changes it in the job's editor (one `Switch`,
+"report in pip"). A watch that keeps a card current (`chat` set)
 answers in the card's chat as before and is always `own`.
 
-- **The segment.** `runRoutine` reads the home segments (`homeSegments`), takes the current one (`currentHome`) and,
-  when it is full (`homeFull`) or there is none, a new segment made in memory with the marks the app gives one
-  (`home`, `title: pip`, `titled`, the previous segment's config). It is written only when the job writes its turn,
-  so a job that has nothing to say never makes an empty segment. The segment is chosen when the job starts and the
-  turn ends there.
+- **The segment.** What the job reads is the current segment when it starts. Where its report goes is chosen again
+  when it is written, inside the write transaction (`writeObject`'s `prepare`, with `homeSegmentsOf` reading in that
+  transaction): the current segment (`currentHome`) or, when it is full (`homeFull`) or there is none, a new one
+  with the marks the app gives one (`home`, `title: pip`, `titled`, the previous segment's config). Two jobs finishing
+  together are serialised by the transaction, so the second sees the segment the first filled or started and never
+  writes past full or makes a second new segment. A job that has nothing to say never makes an empty segment.
 - **The turn.** The model is sent the job's full instruction, as today. The stored turn's text is the job's name and
   `(job)`, e.g. `› Bike prices (job)`, in the existing turn shape; its owner stays `pip-routine`. Only a finished
   report is written: a watch that answers SKIP writes nothing, and a failed run writes nothing to the big chat (the
@@ -461,8 +472,16 @@ answers in the card's chat as before and is always `own`.
   finishes, with `appendTurns`. `writeObject` merges by turn id inside one transaction, so the person's streaming
   turn and the job's report both stay, ordered by when each started. The person is never refused because a job
   runs, and a job is never refused because the person is talking.
-- **Delivered once.** A scheduled run's turn id is derived from the job and the scheduled time it was claimed for. A
-  run repeated for the same time (the process stopped after the report was written and before the next time was
-  saved, so the lock ran out and the job was due again) finds that turn in a home segment, sends no request and
-  writes nothing. "run now" from the Jobs page is a new report each time.
+- **Delivered once.** A scheduled report, home or in a chat of its own, takes the key `report:<job>:<scheduled time>`
+  in `pocket_pip_job_once` in the same transaction that writes it; the key keeps the chat and turn it went to. A run
+  repeated for the same time (the process stopped after the report was written and before the next time was saved,
+  so the lock ran out and the job was due again) reads the key before it starts, sends no request and answers with
+  that chat and turn, even when the segment was deleted since or the month's chat would now be another. Two runs of
+  the same time at once (a run that outlived its lock) both ask the model and are both charged, but only the first
+  to write delivers; the other answers with the first one's report. A run releases the lock only while it is still
+  its own. A failed run in a chat of its own is written without the key, so the repeated run may still deliver. Keys
+  older than a week go when the job reports again, and with the job. "run now" from the Jobs page is a new report
+  each time. The training planner keeps its own checkpoints and takes no key.
+- **Tokens.** A job's tokens are added to the day's total in one statement (`chargeTokens`), so a chat reply charged
+  while the job ran keeps its tokens.
 - **Notifications** link to the segment (which opens home) and are titled `Pip · <job name>`.
