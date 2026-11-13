@@ -374,3 +374,74 @@ test('an assignment reads only what the chat could, and what it reads cannot mak
     assert.match(decisions[0].requests[0].title, /Blue bike/);
   });
 });
+
+test('the same tool call made twice at once, one below the limit, is one assignment and neither call is refused', async () => {
+  const userId = await account(), m = model();
+  try {
+    for (let index = 1; index <= 4; index++) await assign(userId, m, { title: 'Job ' + index, event: 'cap-' + index });
+    // Both calls find no row before either inserts; the second must still find the first's, not count it as the fifth.
+    const [one, two] = await Promise.all([assign(userId, m, { event: 'cap-5' }), assign(userId, m, { event: 'cap-5' })]);
+    assert.equal(one.error, undefined); assert.equal(two.error, undefined);
+    assert.equal(one.id, two.id);
+    assert.equal((await view(userId)).assignments.length, 5);
+    assert.equal((await assign(userId, m, { title: 'Job 6', event: 'cap-6' })).error, 'assignments_full');
+  } finally { await tidy(userId); }
+});
+
+test('a retry belongs to the assignment it retries: another run\'s request id is never taken for it, and two devices retrying start one', async () => {
+  const userId = await account(), m = model();
+  try {
+    await home(userId);
+    const failed = await assign(userId, m, { title: 'Broken', event: 'r1' }), other = await assign(userId, m, { title: 'Other', event: 'r2' });
+    await execute({ sql: "UPDATE pocket_pip_runs SET status = 'failed' WHERE user_id = ? AND run_id IN (?, ?)", args: [userId, failed.id, other.id] });
+    // A chat reply already uses the request id this device sends with its retry.
+    const reply = await runs.submitRun(userId, { requestId: 'shared-id', chat: homeHeader('home-1'), text: 'Hello.', device: 'phone-1' }, { fetcher: m.fetcher });
+    await runs.retryAssignment(userId, { id: failed.id, requestId: 'shared-id' });
+    let items = (await view(userId)).assignments;
+    const retry = items.find(item => item.retryOf === failed.id);
+    assert.ok(retry, 'the retry was not started');
+    assert.notEqual(retry.id, reply.run.runId);
+    assert.equal(retry.title, 'Broken');
+    assert.equal(items.find(item => item.id === failed.id).retried, retry.id);
+    // Another device presses retry with its own request id: the retry already started answers it.
+    await runs.retryAssignment(userId, { id: failed.id, requestId: 'tablet-id' });
+    assert.equal((await view(userId)).assignments.filter(item => item.retryOf === failed.id).length, 1);
+    // The same request id for another assignment is that assignment's own retry, not the first one's.
+    await runs.retryAssignment(userId, { id: other.id, requestId: 'shared-id' });
+    items = (await view(userId)).assignments;
+    assert.equal(items.filter(item => item.retryOf === other.id).length, 1);
+    assert.equal(items.filter(item => item.retryOf === failed.id).length, 1);
+  } finally { await tidy(userId); }
+});
+
+test('a stop that meets the waiting assignment just as it starts stops it instead of losing the stop', async () => {
+  const userId = await account(), m = model();
+  try {
+    const { id } = await assign(userId, m, { title: 'Racing', event: 'race' });
+    // The claim lands between the stop's read and its own update, as when another assignment ends at that moment:
+    // a trigger starts the row the moment the stop tries to take it back.
+    await execute(`CREATE TEMP TRIGGER claim_first BEFORE UPDATE OF status ON pocket_pip_runs WHEN NEW.status = 'withdrawn' BEGIN
+      UPDATE pocket_pip_runs SET status = 'running', lease_id = 'elsewhere', lease_until = CAST(strftime('%s', 'now') AS INTEGER) * 1000 + 20000 WHERE user_id = OLD.user_id AND run_id = OLD.run_id;
+      SELECT RAISE(IGNORE); END`);
+    try { await runs.cancelAssignment(userId, { id }); } finally { await execute('DROP TRIGGER claim_first'); }
+    const row = (await execute({ sql: 'SELECT status FROM pocket_pip_runs WHERE user_id = ? AND run_id = ?', args: [userId, id] })).rows[0];
+    assert.equal(String(row.status), 'stopping');
+  } finally { await tidy(userId); }
+});
+
+test('a stop accepted before the report is written wins: the assignment ends stopped and home stays as it was', async () => {
+  const userId = await account();
+  await inProcess(userId, async () => {
+    await home(userId);
+    const m = model({ gate: true });
+    const { id } = await assign(userId, m, { title: 'Late stop' });
+    await until(() => m.waiting() === 1, 'it did not start');
+    // Stopped, and the model answers before the next heartbeat notices the stop.
+    await execute({ sql: "UPDATE pocket_pip_runs SET status = 'stopping' WHERE user_id = ? AND run_id = ?", args: [userId, id] });
+    m.open();
+    const item = await until(async () => { const found = (await view(userId)).assignments.find(entry => entry.id === id); return ['done', 'stopped'].includes(found.state) ? found : null; }, 'it did not end');
+    assert.equal(item.state, 'stopped');
+    assert.equal(item.report, null);
+    assert.deepEqual((await chatOf(userId, 'home-1')).turns, []);
+  });
+});

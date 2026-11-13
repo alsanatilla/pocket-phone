@@ -1031,27 +1031,36 @@ const assignmentRow = async (userId, id) => {
 const WORKING = `FROM pocket_pip_runs r WHERE r.user_id = ? AND r.status IN ('queued', 'running', 'awaiting', 'stopping') AND json_extract(r.config, '$.lane') = '${ASSIGN_LANE}'`;
 
 /**
- * Accepts an assignment: one row, waiting, with the starting reply's access stored as its config. The open count and
- * the insert share one transaction, and the request id makes the same submit find the same row.
+ * Accepts an assignment: one row, waiting, with the starting reply's access stored as its config. The request id,
+ * the open count and the insert share one write transaction, in that order: the same submit made again finds its
+ * row even when the account is at the limit, and two submits cannot pass the limit together. A retry (`retryOf`)
+ * is refused in the same transaction when a retry of that assignment is already open or finished, so two devices
+ * pressing retry start one.
  */
-async function submitAssignment(userId, { requestId, title, brief, origin, value }, { fetcher } = {}) {
-  const existing = await requestRow(userId, requestId);
-  if (existing) return { row: existing, existing: true };
+async function submitAssignment(userId, { requestId, title, brief, origin, value, retryOf = '' }, { fetcher } = {}) {
   const now = Date.now(), runId = randomUUID();
   const config = { ...pipConfig(value), grants: (Array.isArray(value.grants) ? value.grants : []).filter(grant => typeof grant === 'string'),
     timezone: validTimezone(value.timezone) ? value.timezone : 'UTC', lane: ASSIGN_LANE,
-    assignment: { title, brief, origin: { chat: String(origin?.chat || ''), turn: String(origin?.turn || '') } } };
+    assignment: { title, brief, origin: { chat: String(origin?.chat || ''), turn: String(origin?.turn || '') }, ...(retryOf ? { retryOf } : {}) } };
   const turn = { uid: randomUUID(), text: brief, context: [], created: now, updated: now, owner: ASSIGN_OWNER, attempt: randomUUID(),
     answer: '', reasoning: '', error: '', status: 'streaming', usage: { runtime: 'pocket-server' }, activity: [], sources: [], phase: 'requesting', model: config.model };
-  const inserted = await writeTransaction(async tx => {
+  const result = await writeTransaction(async tx => {
+    const earlier = (await tx.execute({ sql: 'SELECT * FROM pocket_pip_runs WHERE user_id = ? AND request_id = ?', args: [userId, requestId] })).rows[0];
+    if (earlier) return { row: earlier, existing: true };
+    if (retryOf) {
+      const retried = (await tx.execute({ sql: `SELECT * FROM pocket_pip_runs WHERE user_id = ? AND json_extract(config, '$.lane') = ? AND json_extract(config, '$.assignment.retryOf') = ?
+        AND status <> 'withdrawn' ORDER BY created DESC LIMIT 1`, args: [userId, ASSIGN_LANE, retryOf] })).rows[0];
+      if (retried) return { row: retried, existing: true };
+    }
     const open = Number((await tx.execute({ sql: `SELECT COUNT(*) AS n FROM pocket_pip_runs WHERE user_id = ? AND status IN ('waiting', 'queued', 'running', 'awaiting', 'stopping')
       AND json_extract(config, '$.lane') = ?`, args: [userId, ASSIGN_LANE] })).rows[0].n);
     if (open >= ASSIGN_OPEN) throw no(ASSIGN_FULL, 409, 'assignments_full');
-    return (await tx.execute({ sql: `INSERT INTO pocket_pip_runs (user_id, run_id, chat_uid, request_id, turn_uid, device, status, turn, checkpoint, config, device_tools, lease_id, lease_until, expires_at, created, updated)
-      VALUES (?, ?, ?, ?, ?, '', 'waiting', ?, NULL, ?, '[]', '', 0, 0, ?, ?) ON CONFLICT(user_id, request_id) DO NOTHING RETURNING run_id`,
-      args: [userId, runId, '@assign-' + runId, requestId, turn.uid, JSON.stringify(turn), JSON.stringify(config), now, now] })).rows[0];
+    await tx.execute({ sql: `INSERT INTO pocket_pip_runs (user_id, run_id, chat_uid, request_id, turn_uid, device, status, turn, checkpoint, config, device_tools, lease_id, lease_until, expires_at, created, updated)
+      VALUES (?, ?, ?, ?, ?, '', 'waiting', ?, NULL, ?, '[]', '', 0, 0, ?, ?)`,
+      args: [userId, runId, '@assign-' + runId, requestId, turn.uid, JSON.stringify(turn), JSON.stringify(config), now, now] });
+    return null;
   });
-  if (!inserted) return { row: await requestRow(userId, requestId), existing: true };
+  if (result) return result;
   await event(userId, runId, 'waiting', {}, now);
   // On the long-running server it starts now, beside the reply that asked for it; with a worker it is queued for it.
   // Elsewhere the sweep starts it, because starting it here would make the chat's request wait for it.
@@ -1136,11 +1145,16 @@ async function finishAssignment(userId, run, leaseId, status, turn, error, confi
       const written = await writeObject(userId, 'chats', null, { appendTurns: true, prepare: async tx => {
         const segment = await homeReport(userId, tx, report, pipConfig(config));
         const moved = await tx.execute({ sql: `UPDATE pocket_pip_runs SET status = 'done', turn = ?, checkpoint = NULL, lease_id = '', lease_until = 0,
-          config = json_set(config, '$.delivered', ?), updated = ? WHERE user_id = ? AND run_id = ? AND lease_id = ? AND status IN ('running', 'stopping') RETURNING run_id`,
+          config = json_set(config, '$.delivered', ?), updated = ? WHERE user_id = ? AND run_id = ? AND lease_id = ? AND status = 'running' RETURNING run_id`,
           args: [JSON.stringify(report), segment.uid, Date.now(), userId, runId, leaseId] });
         return moved.rows.length ? segment : null;
       } });
-      if (!written) return false;
+      if (!written) {
+        // A stop accepted before the report was written wins: the row ends stopped and home stays as it was.
+        const current = await runRow(userId, runId);
+        if (String(current?.status) === 'stopping' && String(current?.lease_id) === leaseId) return finishAssignment(userId, run, leaseId, 'stopped', endTurn(turn, 'stopped', STOPPED), STOPPED, config);
+        return false;
+      }
       target = { chat: written.value.uid, turn: report };
     } catch (failure) {
       return finishAssignment(userId, run, leaseId, 'failed', endTurn(turn, 'failed', 'The report could not be saved: ' + String(failure?.message || 'unknown error').slice(0, 200)), turn.error, config);
@@ -1159,28 +1173,42 @@ async function finishAssignment(userId, run, leaseId, status, turn, error, confi
   return true;
 }
 
-/** Stops an assignment from any device: a waiting one is taken back, a working one stopped like a reply. Safe to repeat. */
+/**
+ * Stops an assignment from any device: a waiting one is taken back, a working one stopped like a reply. Safe to
+ * repeat. A waiting one that starts while this runs (the sweep or another one ending promoted it) is read again and
+ * stopped as a working one, so an accepted stop never leaves it working.
+ */
 export async function cancelAssignment(userId, body, { fetcher } = {}) {
-  const id = String(body.id || ''), row = await assignmentRow(userId, id);
+  const id = String(body.id || '');
+  let row = await assignmentRow(userId, id);
   if (!row) throw no('This assignment is no longer available.', 404);
-  const status = String(row.status), now = Date.now();
-  if (status === 'waiting') {
+  if (String(row.status) === 'waiting') {
+    const now = Date.now();
     const moved = (await sql({ sql: `UPDATE pocket_pip_runs SET status = 'withdrawn', updated = ? WHERE user_id = ? AND run_id = ? AND status = 'waiting' RETURNING run_id`, args: [now, userId, id] })).rows[0];
     if (moved) await event(userId, id, 'withdrawn', {}, now);
-  } else if (ACTIVE.includes(status)) await stopRun(userId, { runId: id, device: body.device });
+    else row = await assignmentRow(userId, id);
+  }
+  if (row && ACTIVE.includes(String(row.status))) await stopRun(userId, { runId: id, device: body.device });
   return assignmentsView(userId, { fetcher });
 }
 
-/** Tries a failed or stopped assignment again, as a new one with the same brief and stored access. */
+/**
+ * Tries a failed or stopped assignment again, as a new one with the same brief and stored access. The new row's
+ * request id is derived from the assignment and the device's request id (`ar-<hash>`), so it can never be another
+ * run's id, and the row records which assignment it retries; a retry already started for this assignment (from any
+ * device) is answered with that one instead of a second.
+ */
 export async function retryAssignment(userId, body, { fetcher } = {}) {
-  const id = String(body.id || ''), requestId = String(body.requestId || ''), row = await assignmentRow(userId, id);
-  if (!allowedId(requestId)) throw no('A retry needs a request id.');
+  const id = String(body.id || ''), asked = String(body.requestId || ''), row = await assignmentRow(userId, id);
+  if (!allowedId(asked)) throw no('A retry needs a request id.');
   if (!row) throw no('This assignment is no longer available.', 404);
+  const requestId = 'ar-' + createHash('sha256').update(id + '\n' + asked).digest('hex').slice(0, 40);
   const again = await requestRow(userId, requestId);
+  if (again && parse(again.config)?.assignment?.retryOf !== id) throw no('This retry does not belong to this assignment.', 409);
   if (!again) {
     if (!['failed', 'stopped'].includes(String(row.status))) throw no('Only a failed or stopped assignment can be tried again.', 409);
     const config = parse(row.config) || {};
-    await submitAssignment(userId, { requestId, title: config.assignment?.title, brief: config.assignment?.brief, origin: config.assignment?.origin, value: config }, { fetcher });
+    await submitAssignment(userId, { requestId, title: config.assignment?.title, brief: config.assignment?.brief, origin: config.assignment?.origin, value: config, retryOf: id }, { fetcher });
   }
   return assignmentsView(userId, { fetcher });
 }
@@ -1198,6 +1226,8 @@ export async function assignmentsView(userId, { fetcher } = {}) {
   const steps = ids.length ? (await sql({ sql: `SELECT run_id, kind, created FROM pocket_pip_run_events WHERE user_id = ? AND run_id IN (${ids.map(() => '?').join(', ')})
     AND kind IN ('started', 'queued', 'done', 'failed', 'stopped', 'interrupted') ORDER BY seq`, args: [userId, ...ids] })).rows : [];
   const at = (id, kinds, last = false) => { const found = steps.filter(step => String(step.run_id) === id && kinds.includes(String(step.kind))); return Number((last ? found.at(-1) : found[0])?.created) || 0; };
+  // A retry names the assignment it retries, so a failed one shows that it was tried again from any device.
+  const retries = new Map(rows.map(row => [parse(row.config)?.assignment?.retryOf, String(row.run_id)]).filter(([of]) => typeof of === 'string').reverse());
   const assignments = rows.map(row => {
     const id = String(row.run_id), config = parse(row.config) || {}, turn = parse(row.turn) || {}, status = String(row.status);
     const state = status === 'waiting' ? 'waiting' : ['done', 'failed', 'stopped'].includes(status) ? status : 'working';
@@ -1205,7 +1235,8 @@ export async function assignmentsView(userId, { fetcher } = {}) {
       ended: ['done', 'failed', 'stopped'].includes(state) ? at(id, ['done', 'failed', 'stopped', 'interrupted'], true) || Number(row.updated) : 0,
       origin: config.assignment?.origin || null, report: state === 'done' && config.delivered ? { chat: String(config.delivered), turn: String(turn.uid || '') } : null,
       error: state === 'failed' || state === 'stopped' ? String(turn.error || '') : '',
-      lookups: (turn.activity || []).filter(item => item?.state === 'done' && !STATE_TOOLS.includes(item.name)).length };
+      lookups: (turn.activity || []).filter(item => item?.state === 'done' && !STATE_TOOLS.includes(item.name)).length,
+      retryOf: typeof config.assignment?.retryOf === 'string' ? config.assignment.retryOf : '', retried: retries.get(id) || '' };
   });
   const waiting = (await sql({ sql: `SELECT r.run_id, r.chat_uid, q.request_id, q.tool, q.payload FROM pocket_pip_runs r JOIN pocket_pip_run_requests q ON q.user_id = r.user_id AND q.run_id = r.run_id
     WHERE r.user_id = ? AND r.status = 'awaiting' AND q.state = 'pending' AND q.kind = 'write' ORDER BY q.created`, args: [userId] })).rows;
