@@ -298,3 +298,27 @@ test('existing jobs keep their own chat: a stored job without `to` reports where
   assert.equal(background.backgroundRoutine({ kind: 'prompt', title: 'x', prompt: 'x', time: '07:00', days: [1] }).to, 'own', 'a job saved without a choice reports in its own chat');
   assert.equal(background.backgroundRoutine({ kind: 'watch', title: 'x', prompt: 'x', every: 360, chat: 'c1', card: 'k1', to: 'home' }).to, 'own', 'a card watch answers where its card is');
 });
+
+test('a scheduled report repeated after a restart is not delivered twice to the big chat', async () => {
+  const userId = await account(), start = Date.now() - 700000;
+  await homeSegment(userId, 'home-restart', start, filler(2, start));
+  const { routines } = await background.saveRoutine(userId, { kind: 'prompt', title: 'Bike prices', prompt: 'Remind me to check the bike prices.', time: '08:00', days: [1], to: 'home' });
+  const id = routines[0].id, slot = Date.now() - 60000;
+  await execute({ sql: 'UPDATE pocket_pip_routines SET next_run = ? WHERE user_id = ? AND id = ?', args: [slot, userId, id] });
+  let asked = 0;
+  const fetcher = async () => { asked++; return response(compatibleMessage({ text: 'Time to check the bike prices.' })); };
+  const first = await background.runClaimed(userId, id, { fetcher });
+  assert.equal(first.status, 'done', first.error);
+  assert.equal(asked, 1);
+  // The process stopped after the report was written and before the next time was saved: the same slot is due again.
+  await execute({ sql: 'UPDATE pocket_pip_routines SET next_run = ?, lock_until = 0 WHERE user_id = ? AND id = ?', args: [slot, userId, id] });
+  const again = await background.runClaimed(userId, id, { fetcher });
+  assert.deepEqual([again.status, again.chat, again.turn], ['done', first.chat, first.turn]);
+  assert.equal(asked, 1, 'no second request for a report already delivered');
+  const [segment] = await segmentsOf(userId);
+  assert.equal(segment.turns.filter(turn => turn.text === 'Bike prices (job)').length, 1, 'one report, not two');
+  // The next scheduled time is a new report.
+  await execute({ sql: 'UPDATE pocket_pip_routines SET next_run = ?, lock_until = 0 WHERE user_id = ? AND id = ?', args: [slot + 1000, userId, id] });
+  assert.equal((await background.runClaimed(userId, id, { fetcher })).status, 'done');
+  assert.equal((await segmentsOf(userId))[0].turns.filter(turn => turn.text === 'Bike prices (job)').length, 2);
+});

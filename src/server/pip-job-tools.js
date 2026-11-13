@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { backgroundAccount, backgroundState, removeRoutine, saveRoutine, zonedTime, BACKGROUND_GRANTS } from './pip-background.js';
+import { backgroundAccount, backgroundRoutine, backgroundState, removeRoutine, saveRoutine, validTimezone, zonedTime, BACKGROUND_GRANTS } from './pip-background.js';
 
 // Pip sets up the account's jobs when the person asks in words ("remind me every Monday at 8 …"). The tools take
 // what saveRoutine validates, in words a model gets right (day names, a local moment), and answer a refusal with
@@ -13,10 +13,14 @@ const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const SHOWN_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const refused = message => ({ error: 'invalid_job', message });
 
-/** The account's timezone for jobs: the background settings', else UTC (jobs do not run until those exist). */
-async function settingsOf(userId) {
+/**
+ * The account's timezone for jobs: the background settings', else the chat's (the device's), else UTC. Jobs do not
+ * run until the background settings exist, but a moment said now must mean the person's local time.
+ */
+async function settingsOf(userId, fallback = '') {
   const saved = await backgroundAccount(userId);
-  return { settings: saved?.settings || null, timezone: saved?.settings?.timezone || 'UTC', on: Boolean(saved?.settings?.enabled && (saved?.credentials || saved?.accountKey)) };
+  const timezone = saved?.settings?.timezone || (validTimezone(fallback) ? fallback : 'UTC');
+  return { settings: saved?.settings || null, timezone, on: Boolean(saved?.settings?.enabled && (saved?.credentials || saved?.accountKey)) };
 }
 
 const wall = (at, timeZone) => new Intl.DateTimeFormat('sv-SE', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(at).replace(',', '');
@@ -77,6 +81,13 @@ async function save(userId, routine, timeZone) {
     throw error;
   }
 }
+/** Whether a stored job is the one these fields describe: the same kind, name, instruction and schedule. */
+function sameJob(routine, fields, timeZone) {
+  let wanted;
+  try { wanted = backgroundRoutine(fields); } catch { return false; }
+  return routine.kind === wanted.kind && routine.title.toLowerCase() === wanted.title.toLowerCase() && routine.prompt === wanted.prompt
+    && scheduleWords(routine, timeZone) === scheduleWords(wanted, timeZone);
+}
 const current = async (userId, id) => (await backgroundState(userId)).routines.find(item => item.id === String(id || '')) || null;
 const notTraining = routine => routine.kind === 'training' ? refused('The training planner is changed in its own training chat, not with this tool.') : null;
 
@@ -85,7 +96,7 @@ const notTraining = routine => routine.kind === 'training' ? refused('The traini
  * run's value, whose grants and web access bound the job.
  */
 export async function jobTool(userId, name, input = {}, { chat = '', turn = '', eventId = '', value = {} } = {}) {
-  const { timezone, on } = await settingsOf(userId);
+  const { timezone, on } = await settingsOf(userId, value?.timezone);
   if (name === 'list_jobs') {
     const { routines } = await backgroundState(userId);
     return { kind: 'jobs', timezone, on, limit: 12, jobs: routines.map(routine => shown(routine, timezone)) };
@@ -96,12 +107,21 @@ export async function jobTool(userId, name, input = {}, { chat = '', turn = '', 
     if (FIXED.includes(input.kind) && String(input.prompt || '').trim()) return refused('A check-in and a brief have fixed instructions and take no prompt; for your own instruction use kind prompt.');
     const { fields, problem } = routineFields(input, timezone);
     if (problem) return refused(problem);
-    const routine = { to: 'home', ...fields, id: jobId(chat, turn, eventId), ...chatAccess(value) };
+    const id = jobId(chat, turn, eventId);
+    const off = on ? {} : { off: true, note: 'Pip on its own is off, so this job will not run until the person turns it on in jobs.' };
+    // The same job asked for twice (a model that repeats its call, a message sent again) is one job: the one that
+    // exists is the answer. Its own call made again after a restart has the same id and is saved over itself.
+    const twin = (await backgroundState(userId)).routines.find(item => item.id !== id && sameJob(item, fields, timezone));
+    if (twin) return { kind: 'job', done: 'scheduled', ...shown(twin, timezone), timezone, existing: true, ...off };
+    const routine = { to: 'home', ...fields, id, ...chatAccess(value) };
     const saved = await save(userId, routine, timezone);
     if (!saved || saved.problem) return refused(saved?.problem || 'The job could not be saved.');
-    return { kind: 'job', done: 'scheduled', ...shown(saved, timezone), timezone, ...(on ? {} : { note: 'Pip on its own is off, so this job will not run until the person turns it on in jobs.' }) };
+    return { kind: 'job', done: 'scheduled', ...shown(saved, timezone), timezone, ...off };
   }
   const old = await current(userId, input.id);
+  // A removal is approved for a job that existed; gone by the time it runs, it was removed already (a decision sent
+  // twice, a reply continued after a restart, or by hand on the Jobs page).
+  if (!old && name === 'remove_job') return { error: 'job_not_found', message: 'The job "' + String(input.id || '') + '" no longer exists; it was removed already.' };
   if (!old) return { error: 'job_not_found', message: 'There is no job with id "' + String(input.id || '') + '". Call list_jobs for the ids.' };
   const training = notTraining(old);
   if (training) return training;
@@ -127,12 +147,12 @@ export async function jobTool(userId, name, input = {}, { chat = '', turn = '', 
 }
 
 /** What the person approves before a job is removed: its name and schedule. */
-export async function jobPreview(userId, name, input = {}) {
+export async function jobPreview(userId, name, input = {}, value = {}) {
   if (name !== 'remove_job') return { error: 'tool_unavailable', message: 'This tool is unavailable.' };
   const old = await current(userId, input.id);
   if (!old) return { error: 'job_not_found', message: 'There is no job with id "' + String(input.id || '') + '". Call list_jobs for the ids.' };
   const training = notTraining(old);
   if (training) return training;
-  const { timezone } = await settingsOf(userId);
+  const { timezone } = await settingsOf(userId, value?.timezone);
   return { action: { tool: name, kind: 'job', title: old.title + ' · ' + scheduleWords(old, timezone) } };
 }

@@ -558,7 +558,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
         : JOB_TOOLS.includes(name) ? jobTool(userId, name, input, { chat: chatUid, turn: turn.uid, eventId: context.eventId, value })
         : WRITE_TOOLS.includes(name) ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId: context.eventId, name, input })
         : runTool(value, name, input, signal, { ...context, source }),
-      previewTool: (value, name, input, signal) => JOB_TOOLS.includes(name) ? jobPreview(userId, name, input) : previewTool(value, name, input, signal, source) });
+      previewTool: (value, name, input, signal) => JOB_TOOLS.includes(name) ? jobPreview(userId, name, input, value) : previewTool(value, name, input, signal, source) });
     segment = reply.usage || segment;
     Object.assign(turn, reply, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } });
     await end('done');

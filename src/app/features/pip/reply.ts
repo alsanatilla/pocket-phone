@@ -57,7 +57,8 @@ export function jobsOf(turn: ChatTurn): JobChange[] {
     if (!JOB_CHANGES.includes(row.name) || row.state !== "done") continue;
     const value = json(row.result), kind = value?.done as JobChange["kind"] | undefined;
     if (value?.kind !== "job" || !kind || typeof value.title !== "string") continue;
-    changes.push({ kind, text: (typeof value.schedule === "string" && value.schedule ? value.schedule + " · " : "") + value.title });
+    // A job set up while Pip on its own is off would not run: the line says so instead of only "scheduled".
+    changes.push({ kind, text: (typeof value.schedule === "string" && value.schedule ? value.schedule + " · " : "") + value.title + (value.off === true ? " · pip on its own is off" : "") });
   }
   return changes;
 }

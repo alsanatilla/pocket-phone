@@ -134,7 +134,7 @@ function Form({ draft, onSave, busy }: { draft: JobDraft; onSave: (draft: JobDra
       {/* A watch that keeps a card current answers where the card is. */}
       {!draft.chat ? <div className="grid gap-1">
         <Row className="min-w-0" end={<Switch checked={home} onCheckedChange={setHome} aria-label="Report in pip" />}>report in pip</Row>
-        <p className="text-xs text-dim">{home ? "Its reports are turns in your one conversation with Pip." : "Its reports go to a chat of its own."}</p>
+        <p className="text-xs text-dim">{home ? "Its reports land in your pip chat." : "Its reports go to a chat of its own."}</p>
       </div> : null}
 
       <DialogFooter className="flex-row items-center justify-end pt-1">

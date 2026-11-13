@@ -214,3 +214,31 @@ test('the thirteenth job is refused with the sentence the Jobs page shows', asyn
   const refused = await jobTool(userId, 'create_job', { kind: 'prompt', title: 'One more', prompt: 'x', time: '07:00', days: ['mon'] }, { chat: 'c', turn: 't', eventId: 'e' });
   assert.deepEqual([refused.error, refused.message], ['invalid_job', 'Keep up to 12 routines.']);
 });
+
+test('the same job asked for twice is one job; a removal replayed after it went is said plainly', async () => {
+  const userId = await account(), input = { kind: 'prompt', title: 'Bike prices', prompt: 'Remind me to check the bike prices.', time: '08:00', days: ['mon'] };
+  const first = await jobTool(userId, 'create_job', input, { chat: 'c', turn: 't1', eventId: 'a' });
+  const twin = await jobTool(userId, 'create_job', { ...input, title: 'bike prices' }, { chat: 'c', turn: 't2', eventId: 'b' });
+  assert.deepEqual([twin.done, twin.id, twin.existing], ['scheduled', first.id, true]);
+  assert.equal((await jobs(userId)).length, 1);
+  // A different time is a different job.
+  assert.notEqual((await jobTool(userId, 'create_job', { ...input, time: '09:00' }, { chat: 'c', turn: 't3', eventId: 'c' })).id, first.id);
+  assert.equal((await jobs(userId)).length, 2);
+  await jobTool(userId, 'remove_job', { id: first.id }, { chat: 'c', turn: 't4', eventId: 'd' });
+  const replay = await jobTool(userId, 'remove_job', { id: first.id }, { chat: 'c', turn: 't4', eventId: 'd' });
+  assert.equal(replay.error, 'job_not_found');
+  assert.match(replay.message, /removed already/);
+});
+
+test('without background settings a moment is read in the chat\'s timezone, and the receipt says the job will not run yet', async () => {
+  const id = 'jobtools-bare-' + ++users, now = Date.now();
+  await execute({ sql: 'INSERT INTO pocket_user (id, name, email, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)', args: [id, 'Fixture', id + '@example.com', now, now] });
+  const day = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now + 7 * 86400000);
+  const made = await jobTool(id, 'create_job', { kind: 'prompt', title: 'Call Sam', prompt: 'Remind me to call Sam.', at: day + ' 18:30' }, { chat: 'c', turn: 't', eventId: 'e', value: { timezone: 'America/New_York' } });
+  assert.equal(made.timezone, 'America/New_York');
+  assert.equal(made.off, true);
+  const [year, month, date] = day.split('-').map(Number);
+  assert.equal((await jobs(id))[0].at, background.zonedTime(year, month, date, 18, 30, 'America/New_York'));
+  // A timezone that is not one falls back to UTC.
+  assert.equal((await jobTool(id, 'list_jobs', {}, { value: { timezone: 'Mars/Olympus' } })).timezone, 'UTC');
+});

@@ -66,11 +66,13 @@ describe("what a reply changed in Pip's jobs", () => {
       row({ name: "create_job", state: "failed", result: JSON.stringify({ error: "invalid_job", message: "Run every 15 minutes to 24 hours." }) }),
       row({ name: "remove_job", state: "awaiting", result: JSON.stringify({ action: { title: "Monday reminder · Mon 08:00" } }) }),
       row({ name: "remove_job", result: JSON.stringify({ kind: "job", done: "removed", title: "Old watch", schedule: "every hour" }) }),
+      row({ name: "create_job", result: JSON.stringify({ kind: "job", done: "scheduled", title: "Due tomorrow", schedule: "daily 19:00", off: true }) }),
     ]);
     expect(jobsOf(value)).toEqual([
       { kind: "scheduled", text: "Mon 08:00 · Bike prices" },
       { kind: "paused", text: "daily 21:00 · Nightly brief" },
       { kind: "removed", text: "every hour · Old watch" },
+      { kind: "scheduled", text: "daily 19:00 · Due tomorrow · pip on its own is off" },
     ]);
     expect(ledger(value, false).map(item => item.name)).toEqual(["list_jobs", "create_job", "remove_job"]);
     expect(offersOf(ledger(value, false))).toMatchObject([{ type: "approval", title: "Monday reminder · Mon 08:00" }]);

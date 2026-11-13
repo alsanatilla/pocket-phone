@@ -396,7 +396,10 @@ Monday reminder." Pip hands work to itself without a form, and what it does on i
   in the past, the thirteenth job) comes back as `{ error: 'invalid_job', message }` with its own sentence, and the
   model corrects itself. The schemas only check types, so the sentence, not a schema error, is what the model reads.
 - **Times are in the account's timezone**, the one in the background settings, which `list_jobs` and every result
-  name. A moment is turned into an instant there (`zonedTime`).
+  name. A moment is turned into an instant there (`zonedTime`). Before Pip on its own is set up there is no such
+  setting; the chat's timezone (the device's, sent with the message) stands in, so "tomorrow at 18:30" is still the
+  person's 18:30. Such a job is saved but does not run until Pip on its own is on: the result says `off: true` and the
+  line under the reply ends in `· pip on its own is off`.
 - **The training planner is not reachable**: the kinds are the four above, and `change_job` / `remove_job` refuse
   the planner's id.
 - **The model and the key.** A job runs as every job does: with the provider, model and key of Pip on its own (the
@@ -405,7 +408,10 @@ Monday reminder." Pip hands work to itself without a form, and what it does on i
   person's chat uses the same model (the usual case: `/jobs` turns Pip on its own on with the chat's model) nothing
   changes; when they differ, the Jobs page shows the job's model as it does today.
 - **Saving is idempotent.** A job created in a reply gets an id derived from the chat, the turn and the tool call,
-  so a reply that is continued after a restart and calls again updates the same job instead of adding one.
+  so a reply that is continued after a restart and calls again updates the same job instead of adding one. A second
+  `create_job` for a job that exists already (the same kind, name, ignoring case, instruction and schedule) saves
+  nothing and answers with the one that exists (`existing: true`). A `remove_job` whose job is gone by the time it
+  runs (a decision sent twice, a reply continued after a restart) answers `job_not_found` with "removed already".
 
 **Seen and undone.** Create, change, pause and resume save at once, like memory: the person sees a dim line under
 the reply (`scheduled: Mon 08:00 · Bike prices`, `paused: …`, `resumed: …`, `changed: …`) with a link to `jobs`,
@@ -455,4 +461,8 @@ answers in the card's chat as before and is always `own`.
   finishes, with `appendTurns`. `writeObject` merges by turn id inside one transaction, so the person's streaming
   turn and the job's report both stay, ordered by when each started. The person is never refused because a job
   runs, and a job is never refused because the person is talking.
+- **Delivered once.** A scheduled run's turn id is derived from the job and the scheduled time it was claimed for. A
+  run repeated for the same time (the process stopped after the report was written and before the next time was
+  saved, so the lock ran out and the job was due again) finds that turn in a home segment, sends no request and
+  writes nothing. "run now" from the Jobs page is a new report each time.
 - **Notifications** link to the segment (which opens home) and are titled `Pip · <job name>`.

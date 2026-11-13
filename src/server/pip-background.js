@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execute as sql } from './database.js';
 import { seal, open } from './secrets.js';
 import { keyStatus, readKey } from './pip-keys.js';
@@ -337,7 +337,7 @@ async function routineChat(userId, routine, settings, now) {
   const legacy = routine.kind === 'training' ? (await sql({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, 'pip-routine-' + routine.id + '-' + month] })).rows[0] : null;
   return { uid, title: 'Pip · ' + routine.title, titled: true, created: now, updated: now, draft: '', context: [], turns: legacy ? (parse(legacy.payload)?.turns || []).slice(-20) : [], config };
 }
-export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.now(), force = false, trainingServices, message = null, signal } = {}) {
+export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.now(), force = false, trainingServices, message = null, signal, slot = 0 } = {}) {
   if (message) message = trainingMessage(message);
   const saved = await stored(userId);
   const conversation = Boolean(message);
@@ -368,6 +368,11 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   // segment is only written with the job's turn, so a job with nothing to say never leaves an empty one.
   const home = !conversation && reportsHome(routine);
   const segments = home ? await homeSegmentsOf(userId) : [];
+  // A scheduled report has one turn id per scheduled time. A run repeated after a restart (its lock ran out before the
+  // next time was saved) finds that report in the big chat already and writes no second one.
+  const delivery = home && !force && slot ? 'job-' + createHash('sha256').update(routine.id + '\n' + slot).digest('hex').slice(0, 24) : '';
+  const delivered = delivery ? segments.find(segment => (segment.turns || []).some(item => item.uid === delivery && item.status === 'done')) : null;
+  if (delivered) return { status: 'done', chat: delivered.uid, turn: delivery };
   const chat = home ? homeSegment(segments, settings, now) : await routineChat(userId, routine, settings, now);
   if (!chat) return { status: 'skipped', error: routine.chat ? 'The chat this card was in was deleted.' : 'This month\'s chat for the routine was deleted.' };  if (conversation && (routine.kind !== 'training' || message.chat !== chat.uid || trainingChatRoutine(message.chat) !== routine.id)) throw invalid('Open your current training chat to continue.');
   const earlier = conversation ? chat.turns.find(turn => turn.uid === message.uid) : null;
@@ -406,7 +411,7 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
     if (!force && !dailyReview && !trainingChanged(checkpoint, observation)) return { status: 'unchanged' };
     await getTraining();
   }
-  const turn = Object.assign(earlier || {}, { uid: message?.uid || randomUUID(), text: message?.text || (routine.kind === 'checkin' ? CHECKIN : routine.kind === 'brief' ? BRIEF : routine.kind === 'watch' ? watchMessage(routine, lastRun ? new Date(lastRun).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'the beginning') : routine.kind === 'training' ? 'Check my latest workouts and recovery, using what we discussed, and adjust only the next sessions if needed.' : routine.prompt), context: message?.context || [], created: earlier?.created || now, owner: conversation ? 'pip-training-chat' : BACKGROUND_OWNER, attempt: message?.attempt || randomUUID(), answer: '', reasoning: '', error: '', status: 'streaming', usage: {}, activity: [], sources: [], phase: 'requesting' });
+  const turn = Object.assign(earlier || {}, { uid: message?.uid || delivery || randomUUID(), text: message?.text || (routine.kind === 'checkin' ? CHECKIN : routine.kind === 'brief' ? BRIEF : routine.kind === 'watch' ? watchMessage(routine, lastRun ? new Date(lastRun).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'the beginning') : routine.kind === 'training' ? 'Check my latest workouts and recovery, using what we discussed, and adjust only the next sessions if needed.' : routine.prompt), context: message?.context || [], created: earlier?.created || now, owner: conversation ? 'pip-training-chat' : BACKGROUND_OWNER, attempt: message?.attempt || randomUUID(), answer: '', reasoning: '', error: '', status: 'streaming', usage: {}, activity: [], sources: [], phase: 'requesting' });
   if (!earlier) chat.turns.push(turn);
   if (conversation) { chat.updated = now; await writeObject(userId, 'chats', chat); }
   // An unattended job (not the training planner, not a conversation) keeps notes between its runs.
@@ -533,12 +538,12 @@ async function writeHomeTurn(userId, segments, changed) {
 }
 /** Claims a routine so two jobs never run it at once, runs it and schedules its next time. */
 export async function runClaimed(userId, id, { force = false, fetcher, now = Date.now(), trainingServices, message, signal } = {}) {
-  const claimed = (await sql({ sql: `UPDATE pocket_pip_routines SET lock_until = ? WHERE user_id = ? AND id = ? AND lock_until <= ? ${force ? '' : 'AND next_run <= ?'} RETURNING payload`,
+  const claimed = (await sql({ sql: `UPDATE pocket_pip_routines SET lock_until = ? WHERE user_id = ? AND id = ? AND lock_until <= ? ${force ? '' : 'AND next_run <= ?'} RETURNING payload, next_run`,
     args: [now + 10 * 60000, userId, id, now, ...(force ? [] : [now])] })).rows[0];
   if (!claimed) throw Object.assign(new Error('This routine is already running.'), { status: 409 });
   const routine = parse(claimed.payload);
   let result;
-  try { result = await runRoutine(userId, routine, { fetcher, now, force, trainingServices, message, signal }); }
+  try { result = await runRoutine(userId, routine, { fetcher, now, force, trainingServices, message, signal, slot: force ? 0 : Number(claimed.next_run) || 0 }); }
   catch (error) { result = { status: 'failed', error: String(error?.message || 'The routine could not run.').slice(0, 500) }; }
   const saved = await stored(userId);
   const current = (await routines(userId)).find(item => item.id === id);
