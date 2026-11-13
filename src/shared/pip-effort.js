@@ -50,15 +50,13 @@ export function effortFromAnswers(answers) {
 export function effortLimits(level) {
   if (level === 'none') return { lookups: 1, webCalls: 0 };
   if (level === 'quick') return { lookups: 3, webCalls: 2 };
-  if (level === 'thorough') return { lookups: 10, webCalls: 5 };
   return null;
 }
 
-/** The sentence the model reads for a level, or nothing for a level Pocket does not know. */
+/** The sentence the model reads for a level; nothing for thorough, which needs no explanation. */
 export function effortNote(level) {
   if (level === 'none') return 'Pocket judged that this message needs no looking-up: answer directly; look something up only if you cannot answer without it.';
   if (level === 'quick') return 'Pocket judged that this message needs one or two lookups: make them and answer.';
-  if (level === 'thorough') return 'Pocket judged that this message deserves thorough looking-up: up to ten lookups. Search with other words only when the first words found nothing, read what you found once, then answer.';
   return '';
 }
 

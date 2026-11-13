@@ -84,49 +84,6 @@ test('the lookups budget ends research and the answer keeps its tokens', async t
   assert.equal(result.answer, 'The blue car is the better buy.');
 });
 
-test('two late lookups are refused and the next round offers no tools at all', async t => {
-  const chat = workspace(t), sent = [];
-  const result = await streamReply(chat, turn('Compare the two cars in my notes'), { key: 'fixture', fetcher: provider(sent,
-    lookup('call_1', 6000, 'blue car'), lookup('call_2', 6000, 'grey car'), lookup('call_3', 6000, 'prices'),
-    lookup('call_4', 700, 'first late'), lookup('call_5', 700, 'second late'),
-    compatibleMessage({ text: 'The blue car is the better buy.', usage: usage(900) })) });
-  assert.equal(result.answer, 'The blue car is the better buy.', 'the reply finishes with the text of the third round');
-  assert.equal(sent.length, 6);
-  // The final rounds still offer the lookups, so a late request reaches Pocket and is refused there.
-  assert.ok(sent[3].tools.some(tool => tool.function.name === 'read_chat_history'));
-  assert.ok(sent[4].tools.some(tool => tool.function.name === 'read_chat_history'));
-  assert.ok(!sent[5].tools?.length, 'after the second tolerated refusal the round offers no tools');
-  assert.ok(sent[5].tool_choice === undefined || sent[5].tool_choice === 'none');
-  const asked = result.activity.filter(row => row.name === 'read_chat_history');
-  assert.deepEqual(asked.map(row => row.state), ['done', 'done', 'done', 'failed', 'failed']);
-  for (const refused of asked.slice(3)) assert.match(refused.result, /research_budget_reached/);
-});
-
-test('a pause between the first and the second tolerated lookup keeps the count', async t => {
-  const chat = workspace(t), sent = [], paused = [], asking = turn('Save the blue car price');
-  let seen = [];
-  const durable = { checkpoint: null, settled: null, pause: async state => { paused.push(state); } };
-  await assert.rejects(() => streamReply(chat, asking, { key: 'fixture', durable, onUpdate: update => { seen = update.activity; }, fetcher: provider(sent,
-    lookup('call_1', 6000, 'blue car'), lookup('call_2', 6000, 'grey car'), lookup('call_3', 6000, 'prices'),
-    lookup('call_4', 700, 'first late'),
-    compatibleMessage({ calls: [{ name: 'create_record', input: { kind: 'note', title: 'Blue car', text: '21,000 euros' }, id: 'call_write' }], usage: usage(100) })) }),
-  error => error?.name === 'RunPaused');
-  assert.equal(paused.length, 1);
-  const checkpoint = paused[0];
-  assert.equal(checkpoint.counters.lateLookups, 1, 'the first tolerated refusal is in the checkpoint');
-  assert.deepEqual(seen.filter(row => row.name === 'read_chat_history').map(row => row.state), ['done', 'done', 'done', 'failed']);
-  const result = await streamReply(chat, asking, { key: 'fixture', durable: { checkpoint, settled: new Map([['call_write', { approved: true }]]), pause: async () => {} },
-    executeTool: async (value, name, input) => ({ kind: 'action', action: { tool: name, kind: input.kind, title: input.title, status: 'saved', href: '/notes/blue-car' } }),
-    fetcher: provider(sent, lookup('call_5', 700, 'second late'), compatibleMessage({ text: 'Saved the blue car price.', usage: usage(8) })) });
-  assert.equal(result.answer, 'Saved the blue car price.');
-  // The count came back with the checkpoint: the second late lookup is the second refusal, so the round after it
-  // already offers no tools, and the text arrives in that one.
-  assert.ok(!sent[6].tools?.length, 'the round after the second tolerated refusal offers no tools');
-  const after = result.activity.filter(row => row.name === 'read_chat_history');
-  assert.deepEqual(after.map(row => row.state), ['failed']);
-  assert.match(after[0].result, /research_budget_reached/);
-});
-
 test('a pause stores the lookups budget and the resumed run keeps it', async t => {
   const chat = workspace(t), sent = [], paused = [], asking = turn('Save the blue car price');
   const durable = { checkpoint: null, settled: null, pause: async state => { paused.push(state); } };

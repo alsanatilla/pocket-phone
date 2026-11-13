@@ -19,7 +19,7 @@ export function effortState(
 export function effortFromAnswers(answers: unknown): EffortLevel | null;
 /** The lookup and web-call limits a level allows, or null when it leaves today's limits alone. */
 export function effortLimits(level: string | null | undefined): { lookups: number; webCalls: number } | null;
-/** The sentence the model reads for a level, or nothing for a level Pocket does not know. */
+/** The sentence the model reads for a level; nothing for thorough. */
 export function effortNote(level: string | null | undefined): string;
 /** The JEV questions object for one "is this enough?" judgment: one choice named `enough`. */
 export function enoughQuestions(): {
