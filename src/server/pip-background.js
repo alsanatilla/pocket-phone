@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { execute as sql } from './database.js';
+import { execute as sql, writeTransaction } from './database.js';
 import { seal, open } from './secrets.js';
 import { keyStatus, readKey } from './pip-keys.js';
 import { readDocuments } from './workspace.js';
@@ -274,8 +274,26 @@ export async function forgetBackgroundKey(userId) {
   await reschedule(userId);
   return backgroundState(userId);
 }
-export async function saveRoutine(userId, value) {
+/**
+ * Saves a routine. With `once`, it is a creation that happens once: the key and the routine are written in one
+ * transaction, nothing that exists is overwritten, and a key taken already answers `repeated: true` without saving.
+ */
+export async function saveRoutine(userId, value, { once = '' } = {}) {
   const routine = backgroundRoutine(value), saved = await stored(userId);
+  if (once) {
+    const created = await writeTransaction(async tx => {
+      const taken = await tx.execute({ sql: `INSERT INTO pocket_pip_job_once (user_id, key, routine_id, created) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, key) DO NOTHING RETURNING key`,
+        args: [userId, once, routine.id, Date.now()] });
+      if (!taken.rows.length) return false;
+      // Counted in the same transaction, so two creations at once cannot both be the twelfth.
+      const count = Number((await tx.execute({ sql: 'SELECT COUNT(*) AS n FROM pocket_pip_routines WHERE user_id = ?', args: [userId] })).rows[0].n);
+      if (count >= 12) throw invalid('Keep up to 12 routines.');
+      await tx.execute({ sql: 'INSERT INTO pocket_pip_routines (user_id, id, payload, next_run) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, id) DO NOTHING',
+        args: [userId, routine.id, JSON.stringify(routine), schedule(routine, saved?.settings, hasKey(saved))] });
+      return true;
+    });
+    return { ...await backgroundState(userId), ...(created ? {} : { repeated: true }) };
+  }
   if (routine.kind === 'training') {
     if (routine.enabled && !TRAINING_GRANTS.every(grant => saved?.settings?.grants.includes(grant))) throw invalid('Enable Gym, COROS and Tasks access in settings first.');
     if ((await routines(userId)).some(item => item.kind === 'training' && item.id !== routine.id)) throw invalid('Keep one training planner so your routines do not compete.');
@@ -304,6 +322,8 @@ export async function openTrainingChat(userId, now = Date.now()) {
 export async function removeRoutine(userId, id) {
   await sql({ sql: 'DELETE FROM pocket_pip_routines WHERE user_id = ? AND id = ?', args: [userId, String(id)] });
   await sql({ sql: 'DELETE FROM pocket_pip_routine_memory WHERE user_id = ? AND routine_id = ?', args: [userId, String(id)] });
+  // Its delivered-report keys go with it; a `create:` key stays, so a replayed tool call does not bring the job back.
+  await sql({ sql: "DELETE FROM pocket_pip_job_once WHERE user_id = ? AND routine_id = ? AND key LIKE 'report:%'", args: [userId, String(id)] });
   return backgroundState(userId);
 }
 
@@ -367,12 +387,15 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   // A job that reports into the big chat answers in its current segment, or in a new one when that is full; a new
   // segment is only written with the job's turn, so a job with nothing to say never leaves an empty one.
   const home = !conversation && reportsHome(routine);
+  // A scheduled report is delivered once per job and scheduled time, wherever it goes. A run repeated for the same
+  // time (the process stopped after the report was written and before the next time was saved, so the lock ran out)
+  // finds the key and sends no request; the key itself is taken in the transaction that writes the report.
+  const once = !conversation && !force && slot && routine.kind !== 'training' ? 'report:' + routine.id + ':' + slot : '';
+  const reported = once ? await onceResult(userId, once) : null;
+  if (reported) return { status: 'done', chat: reported.chat, turn: reported.turn };
+  const delivery = once ? 'job-' + createHash('sha256').update(routine.id + '\n' + slot).digest('hex').slice(0, 24) : '';
+  // The segment read here is what the job sees; the one it writes in is chosen again when it writes.
   const segments = home ? await homeSegmentsOf(userId) : [];
-  // A scheduled report has one turn id per scheduled time. A run repeated after a restart (its lock ran out before the
-  // next time was saved) finds that report in the big chat already and writes no second one.
-  const delivery = home && !force && slot ? 'job-' + createHash('sha256').update(routine.id + '\n' + slot).digest('hex').slice(0, 24) : '';
-  const delivered = delivery ? segments.find(segment => (segment.turns || []).some(item => item.uid === delivery && item.status === 'done')) : null;
-  if (delivered) return { status: 'done', chat: delivered.uid, turn: delivery };
   const chat = home ? homeSegment(segments, settings, now) : await routineChat(userId, routine, settings, now);
   if (!chat) return { status: 'skipped', error: routine.chat ? 'The chat this card was in was deleted.' : 'This month\'s chat for the routine was deleted.' };  if (conversation && (routine.kind !== 'training' || message.chat !== chat.uid || trainingChatRoutine(message.chat) !== routine.id)) throw invalid('Open your current training chat to continue.');
   const earlier = conversation ? chat.turns.find(turn => turn.uid === message.uid) : null;
@@ -497,26 +520,65 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
     chat.turns = chat.turns.filter(item => item !== turn);
     // Nothing new to say, but a card it keeps current changed: that is saved, quietly.
     if (revised) { chat.updated = Math.max(Date.now(), chat.updated + 1); await writeObject(userId, 'chats', chat); }
-    const spent = (turn.usage?.input_tokens || 0) + (turn.usage?.output_tokens || 0);
-    await sql({ sql: 'UPDATE pocket_pip_background SET used_day = ?, used_tokens = ? WHERE user_id = ?', args: [today, used + spent, userId] });
+    // Added to the day's total in one statement: a chat reply charging meanwhile keeps its tokens.
+    await chargeTokens(userId, settings.timezone, (turn.usage?.input_tokens || 0) + (turn.usage?.output_tokens || 0), now);
     return { status: 'unchanged' };
   }
+  // Tokens spent are charged whether or not this run delivers: a run that lost the race for its report still paid.
+  await chargeTokens(userId, settings.timezone, (turn.usage?.input_tokens || 0) + (turn.usage?.output_tokens || 0), now);
+  let target = { chat: chat.uid, turn: turn.uid };
   if (home) {
     // Only a finished report reaches the big chat, appended to whatever the person wrote there meanwhile; a failure
     // is shown on the Jobs page instead of offering "continue" for a message the person never sent.
     if (turn.status === 'done') {
       turn.text = routine.title + ' (job)';
-      turn.updated = chat.updated = Math.max(Date.now(), chat.updated + 1);
-      await writeObject(userId, 'chats', { ...chat, turns: [turn] }, { appendTurns: true });
+      target = await deliver(userId, routine.id, once, turn.uid, true, async tx => {
+        // Chosen in the writing transaction: two jobs finishing together see each other's report and the segment
+        // the first one started, and neither writes into a segment that filled up while it ran.
+        const current = currentHome(await homeSegmentsOf(userId, tx));
+        const stamp = Math.max(Date.now(), (current?.updated || 0) + 1);
+        turn.updated = stamp;
+        if (current && !homeFull(current)) return { ...current, updated: stamp, turns: [turn] };
+        const { grants, dailyTokens, timezone, enabled, useAccountKey, ...config } = settings;
+        return { uid: 'home-' + randomUUID().replaceAll('-', '').slice(0, 20), title: HOME_TITLE, titled: true, home: true,
+          created: Math.max(Date.now(), (current?.created || 0) + 1), updated: stamp, draft: '', context: [], turns: [turn], config: current?.config || config };
+      });
     }
   } else {
     turn.updated = chat.updated = Math.max(Date.now(), chat.updated + 1);
-    await writeObject(userId, 'chats', chat);
+    // A failed run is written without the key, so a run repeated for the same time may still deliver the report.
+    target = await deliver(userId, routine.id, turn.status === 'done' ? once : '', turn.uid, false, async () => chat);
   }
   if (!conversation && training?.complete && turn.status === 'done') await rememberTraining(userId, routine.id, observation, dailyReview ? today : checkpoint?.reviewDay || '');
-  const spent = (turn.usage?.input_tokens || 0) + (turn.usage?.output_tokens || 0);
-  await sql({ sql: 'UPDATE pocket_pip_background SET used_day = ?, used_tokens = ? WHERE user_id = ?', args: [today, used + spent, userId] });
-  return { status: turn.status, chat: chat.uid, turn: turn.uid, ...(conversation ? { reply: turn } : {}), ...(turn.error ? { error: turn.error } : {}) };
+  return { status: turn.status, ...(target ? target : {}), ...(conversation ? { reply: turn } : {}), ...(turn.error ? { error: turn.error } : {}) };
+}
+/** What a once-only key recorded (the chat and turn of a delivered report), or null when it was not taken. */
+export async function onceResult(userId, key, tx = null) {
+  const statement = { sql: 'SELECT result FROM pocket_pip_job_once WHERE user_id = ? AND key = ?', args: [userId, key] };
+  const row = (tx ? await tx.execute(statement) : await sql(statement)).rows[0];
+  return row ? parse(row.result) || {} : null;
+}
+const ONCE_KEEP = 7 * DAY;
+/**
+ * Writes a job's chat, chosen by `choose(tx)` inside the write transaction, and takes the report's once-only key
+ * (when there is one) in that same transaction. A key taken already means another run delivered this report: nothing
+ * is written and that run's chat and turn are the answer.
+ */
+async function deliver(userId, routineId, once, turnUid, appendTurns, choose) {
+  let earlier = null;
+  const written = await writeObject(userId, 'chats', null, { appendTurns, prepare: async tx => {
+    earlier = null;
+    const target = await choose(tx);
+    if (!once) return target;
+    const result = JSON.stringify({ chat: target.uid, turn: turnUid }), now = Date.now();
+    const taken = await tx.execute({ sql: `INSERT INTO pocket_pip_job_once (user_id, key, routine_id, result, created) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, key) DO NOTHING RETURNING key`, args: [userId, once, routineId, result, now] });
+    if (!taken.rows.length) { earlier = await onceResult(userId, once, tx); return null; }
+    // A report can only be repeated while its lock runs out; keys older than a week guard nothing.
+    await tx.execute({ sql: "DELETE FROM pocket_pip_job_once WHERE user_id = ? AND routine_id = ? AND key LIKE 'report:%' AND created < ?", args: [userId, routineId, now - ONCE_KEEP] });
+    return target;
+  } });
+  return written ? { chat: written.value.uid, turn: turnUid } : earlier;
 }
 /** Whether a job's report is a turn in the big chat. A watch that keeps a card current answers in the card's chat. */
 const reportsHome = routine => routine.to === 'home' && !routine.chat && routine.kind !== 'training';
@@ -538,8 +600,9 @@ async function writeHomeTurn(userId, segments, changed) {
 }
 /** Claims a routine so two jobs never run it at once, runs it and schedules its next time. */
 export async function runClaimed(userId, id, { force = false, fetcher, now = Date.now(), trainingServices, message, signal } = {}) {
+  const lock = now + 10 * 60000;
   const claimed = (await sql({ sql: `UPDATE pocket_pip_routines SET lock_until = ? WHERE user_id = ? AND id = ? AND lock_until <= ? ${force ? '' : 'AND next_run <= ?'} RETURNING payload, next_run`,
-    args: [now + 10 * 60000, userId, id, now, ...(force ? [] : [now])] })).rows[0];
+    args: [lock, userId, id, now, ...(force ? [] : [now])] })).rows[0];
   if (!claimed) throw Object.assign(new Error('This routine is already running.'), { status: 409 });
   const routine = parse(claimed.payload);
   let result;
@@ -547,8 +610,9 @@ export async function runClaimed(userId, id, { force = false, fetcher, now = Dat
   catch (error) { result = { status: 'failed', error: String(error?.message || 'The routine could not run.').slice(0, 500) }; }
   const saved = await stored(userId);
   const current = (await routines(userId)).find(item => item.id === id);
-  await sql({ sql: 'UPDATE pocket_pip_routines SET lock_until = 0, last_run = ?, last_error = ?, last_chat = ?, next_run = ? WHERE user_id = ? AND id = ?',
-    args: [now, result.error || '', result.chat || current?.lastChat || '', current ? schedule(current, saved?.settings, hasKey(saved)) : NEVER, userId, id] });
+  // The lock is released only if it is still this run's: a run that outlived its lock leaves a later claim's in place.
+  await sql({ sql: 'UPDATE pocket_pip_routines SET lock_until = CASE WHEN lock_until = ? THEN 0 ELSE lock_until END, last_run = ?, last_error = ?, last_chat = ?, next_run = ? WHERE user_id = ? AND id = ?',
+    args: [lock, now, result.error || '', result.chat || current?.lastChat || '', current ? schedule(current, saved?.settings, hasKey(saved)) : NEVER, userId, id] });
   await recordRun(userId, id, result, now);
   // A scheduled run that wrote in its chat is worth a notification, unless the job is quiet; one the user started
   // is not. Failures notify once per streak, on the second in a row: a single blip is not worth a buzz, and a

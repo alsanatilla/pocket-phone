@@ -28,16 +28,29 @@ export async function readObjects(userId, collection, after = 0) {
   } catch (error) { await tx.rollback().catch(() => {}); throw error; }
   finally { tx.close(); }
 }
-export async function writeObject(userId, collection, incoming, { appendTurns = false } = {}) {
+/**
+ * Writes one chat or zine. `prepare(tx)`, when given, runs first inside the write transaction and returns the record
+ * to write (or null to write nothing): what it reads and claims there commits or rolls back with the write, so a
+ * caller can choose its destination and take a once-only key without a check-then-write gap.
+ */
+export async function writeObject(userId, collection, incoming, { appendTurns = false, prepare = null } = {}) {
   if (appendTurns && collection !== 'chats') throw new Error('Only chats can append turns.');
-  if (!validObject(collection, incoming)) throw Object.assign(new Error('Invalid ' + collection + ' record.'), { status: 400 });
-  incoming = sanitizeObject(collection, incoming);
-  const uid = collection === 'chats' ? incoming.uid : incoming.id;
+  const checked = value => {
+    if (!validObject(collection, value)) throw Object.assign(new Error('Invalid ' + collection + ' record.'), { status: 400 });
+    return sanitizeObject(collection, value);
+  };
+  if (!prepare) incoming = checked(incoming);
   if (collection === 'chats') await ensureSearch();
   for (let attempt = 0; attempt < 4; attempt++) {
   let tx, head, logged = [];
   try {
     tx = await database().transaction('write');
+    if (prepare) {
+      const prepared = await prepare(tx);
+      if (!prepared) { await tx.commit(); return null; }
+      incoming = checked(prepared);
+    }
+    const uid = collection === 'chats' ? incoming.uid : incoming.id;
     const rows = await tx.execute({ sql: 'SELECT payload, revision FROM pocket_objects WHERE user_id = ? AND collection = ? AND uid = ?', args: [userId, collection, uid] });
     const previous = rows.rows[0], stored = previous ? JSON.parse(String(previous.payload)) : null;
     // A background reply adds turns without replacing a concurrently edited title, model, draft or pin. It may pin a

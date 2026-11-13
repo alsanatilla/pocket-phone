@@ -163,9 +163,13 @@ const chatObject = async (userId, uid) => {
   const row = (await sql({ sql: "SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND uid = ?", args: [userId, uid] })).rows[0];
   return row ? parse(row.payload) : null;
 };
-/** The account's home segments, oldest first, for a reply that runs in one. The LIKE keeps ordinary chats unread. */
-export async function homeSegmentsOf(userId) {
-  const rows = (await sql({ sql: `SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND payload LIKE '%"home":true%'`, args: [userId] })).rows;
+/**
+ * The account's home segments, oldest first, for a reply that runs in one. The LIKE keeps ordinary chats unread.
+ * Given a transaction, they are read in it, so a writer can choose its segment in the transaction that writes it.
+ */
+export async function homeSegmentsOf(userId, tx = null) {
+  const statement = { sql: `SELECT payload FROM pocket_objects WHERE user_id = ? AND collection = 'chats' AND payload LIKE '%"home":true%'`, args: [userId] };
+  const rows = (tx ? await tx.execute(statement) : await sql(statement)).rows;
   const chats = [];
   for (const row of rows) {
     const chat = parse(row.payload);

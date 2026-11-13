@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { backgroundAccount, backgroundRoutine, backgroundState, removeRoutine, saveRoutine, validTimezone, zonedTime, BACKGROUND_GRANTS } from './pip-background.js';
+import { backgroundAccount, backgroundRoutine, backgroundState, onceResult, removeRoutine, saveRoutine, validTimezone, zonedTime, BACKGROUND_GRANTS } from './pip-background.js';
 
 // Pip sets up the account's jobs when the person asks in words ("remind me every Monday at 8 …"). The tools take
 // what saveRoutine validates, in words a model gets right (day names, a local moment), and answer a refusal with
@@ -10,6 +10,9 @@ import { backgroundAccount, backgroundRoutine, backgroundState, removeRoutine, s
 export const JOB_TOOLS = ['list_jobs', 'create_job', 'change_job', 'remove_job'];
 const KINDS = ['prompt', 'watch', 'checkin', 'brief'], FIXED = ['checkin', 'brief'];
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const FULL_DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+/** A day name as the model writes it ("mon" or "monday", any case) as its number, or -1 when it is not one. */
+const dayNumber = day => { const name = String(day).trim().toLowerCase(); return Math.max(DAY_NAMES.indexOf(name), FULL_DAYS.indexOf(name)); };
 const SHOWN_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const refused = message => ({ error: 'invalid_job', message });
 
@@ -54,11 +57,26 @@ function routineFields(input, timeZone) {
   const fields = {};
   for (const name of ['title', 'prompt', 'time', 'every', 'enabled']) if (input[name] !== undefined) fields[name] = input[name];
   if (input.kind !== undefined) fields.kind = input.kind;
-  if (input.days !== undefined) fields.days = Array.isArray(input.days) ? input.days.map(day => DAY_NAMES.indexOf(String(day).toLowerCase().slice(0, 3))).filter(day => day >= 0) : [];
+  // A day that is not one is refused, not dropped: a job on fewer days than asked for runs at the wrong times.
+  if (input.days !== undefined) {
+    const days = Array.isArray(input.days) ? input.days.map(dayNumber) : [-1];
+    if (days.includes(-1)) return { problem: 'Write the days as mon, tue, wed, thu, fri, sat or sun.' };
+    fields.days = days;
+  }
   if (input.at !== undefined) {
-    const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/.exec(String(input.at).trim());
+    const written = String(input.at).trim(), match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/.exec(written);
     if (!match) return { problem: 'Write the moment as YYYY-MM-DD HH:MM in the account\'s timezone (' + timeZone + ').' };
-    fields.at = zonedTime(+match[1], +match[2], +match[3], +match[4], +match[5], timeZone);
+    const [year, month, day, hour, minute] = match.slice(1).map(Number);
+    // A date that is not on the calendar (the 30th of February) is refused instead of rolling over into March.
+    const calendar = new Date(Date.UTC(year, month - 1, day, hour, minute));
+    if (hour > 23 || minute > 59 || calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 || calendar.getUTCDate() !== day)
+      return { problem: written + ' is not a date and time on the calendar. Write the moment as YYYY-MM-DD HH:MM.' };
+    const at = zonedTime(year, month, day, hour, minute, timeZone);
+    // A clock time the timezone skips (the hour the clocks go forward) is refused rather than moved; one it repeats
+    // (the hour they go back) is the later of the two, the one zonedTime gives, which reads back as written.
+    if (wall(at, timeZone) !== match.slice(1, 4).join('-') + ' ' + match.slice(4).join(':'))
+      return { problem: written + ' does not exist in ' + timeZone + ': the clocks skip that hour. Choose another time.' };
+    fields.at = at;
   }
   if (input.active_from !== undefined || input.active_until !== undefined) fields.activeHours = { start: input.active_from, end: input.active_until };
   if (input.quiet !== undefined) fields.delivery = input.quiet ? 'quiet' : 'notify';
@@ -72,9 +90,10 @@ const jobId = (chat, turn, eventId) => 'j' + createHash('sha256').update([chat, 
 /** The record grants and web access of the chat that creates or changes a job: a job never has more. */
 const chatAccess = value => ({ grants: (Array.isArray(value?.grants) ? value.grants : []).filter(grant => BACKGROUND_GRANTS.includes(grant)), web: Boolean(value?.webSearch) });
 
-async function save(userId, routine, timeZone) {
+async function save(userId, routine, once = '') {
   try {
-    const state = await saveRoutine(userId, routine);
+    const state = await saveRoutine(userId, routine, { once });
+    if (state.repeated) return { repeated: true };
     return state.routines.find(item => item.id === routine.id) || null;
   } catch (error) {
     if (error.status === 400) return { problem: error.message };
@@ -107,14 +126,24 @@ export async function jobTool(userId, name, input = {}, { chat = '', turn = '', 
     if (FIXED.includes(input.kind) && String(input.prompt || '').trim()) return refused('A check-in and a brief have fixed instructions and take no prompt; for your own instruction use kind prompt.');
     const { fields, problem } = routineFields(input, timezone);
     if (problem) return refused(problem);
-    const id = jobId(chat, turn, eventId);
+    const id = jobId(chat, turn, eventId), once = 'create:' + id;
     const off = on ? {} : { off: true, note: 'Pip on its own is off, so this job will not run until the person turns it on in jobs.' };
+    // This tool call made again (a reply continued after a restart) creates nothing: it answers with the job as it
+    // stands now, paused or changed since, or says it was removed. The key is taken with the job, in one transaction.
+    const replayed = async () => {
+      const made = await current(userId, id);
+      return made ? { kind: 'job', done: 'scheduled', ...shown(made, timezone), timezone, existing: true, ...off }
+        : { error: 'job_removed', message: 'The job this call created was removed since; it is not created again.' };
+    };
+    if (await onceResult(userId, once)) return replayed();
     // The same job asked for twice (a model that repeats its call, a message sent again) is one job: the one that
-    // exists is the answer. Its own call made again after a restart has the same id and is saved over itself.
+    // exists is the answer.
     const twin = (await backgroundState(userId)).routines.find(item => item.id !== id && sameJob(item, fields, timezone));
     if (twin) return { kind: 'job', done: 'scheduled', ...shown(twin, timezone), timezone, existing: true, ...off };
+    // Only a job created in conversation reports into the big chat unless told otherwise; the Jobs page keeps its own.
     const routine = { to: 'home', ...fields, id, ...chatAccess(value) };
-    const saved = await save(userId, routine, timezone);
+    const saved = await save(userId, routine, once);
+    if (saved?.repeated) return replayed();
     if (!saved || saved.problem) return refused(saved?.problem || 'The job could not be saved.');
     return { kind: 'job', done: 'scheduled', ...shown(saved, timezone), timezone, ...off };
   }
@@ -133,7 +162,7 @@ export async function jobTool(userId, name, input = {}, { chat = '', turn = '', 
     if (SCHEDULE.some(key => fields[key] !== undefined)) for (const key of SCHEDULE) if (fields[key] === undefined) delete base[key];
     // Changed from a chat, a job keeps at most what that chat may read.
     const access = chatAccess(value), grants = Array.isArray(old.grants) ? old.grants.filter(grant => access.grants.includes(grant)) : access.grants;
-    const saved = await save(userId, { ...base, ...fields, grants, web: old.web !== false && access.web }, timezone);
+    const saved = await save(userId, { ...base, ...fields, grants, web: old.web !== false && access.web });
     if (!saved || saved.problem) return refused(saved?.problem || 'The job could not be saved.');
     const only = Object.keys(fields).every(key => key === 'enabled');
     const done = only && old.enabled && !saved.enabled ? 'paused' : only && !old.enabled && saved.enabled ? 'resumed' : 'changed';

@@ -46,8 +46,8 @@ function Form({ draft, onSave, busy }: { draft: JobDraft; onSave: (draft: JobDra
   const [end, setEnd] = useState(draft.activeHours?.end === "00:00" ? "24:00" : draft.activeHours?.end ?? "22:00");
   const [at, setAt] = useState(() => localInput(draft.at || Date.now() + 3600000));
   const [notify, setNotify] = useState(draft.delivery !== "quiet");
-  // A job made here reports into the big chat; one that exists keeps where it reported until this is changed.
-  const [home, setHome] = useState(draft.id ? draft.to === "home" : true);
+  // A job made here reports in its own chat, as before; only one set up in conversation starts in the big chat.
+  const [home, setHome] = useState(draft.to === "home");
 
   const submit = (event: FormEvent) => {
     event.preventDefault();

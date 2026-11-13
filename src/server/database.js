@@ -46,6 +46,10 @@ export const TABLES = [
   // Sign-in links handed to a person by an operator (scripts/sign-in-link.mjs): each one works once.
   `CREATE TABLE IF NOT EXISTS pocket_handoffs (nonce TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, used_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS pocket_pip_routine_memory (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, routine_id TEXT NOT NULL, scratch TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, PRIMARY KEY(user_id, routine_id))`,
+  // Things a job does once and only once, taken in the same transaction as the write they guard: a scheduled
+  // report per job and scheduled time (`report:`), a job created by one tool call (`create:`).
+  `CREATE TABLE IF NOT EXISTS pocket_pip_job_once (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, key TEXT NOT NULL, routine_id TEXT NOT NULL, result TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, PRIMARY KEY(user_id, key))`,
+  `CREATE INDEX IF NOT EXISTS pocket_pip_job_once_routine ON pocket_pip_job_once(user_id, routine_id, created)`,
   `CREATE TABLE IF NOT EXISTS pocket_pip_memory (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, id TEXT NOT NULL, text TEXT NOT NULL, chat_uid TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (user_id, id))`,
   `CREATE TABLE IF NOT EXISTS pocket_pip_training_state (user_id TEXT NOT NULL, routine_id TEXT NOT NULL, workouts TEXT NOT NULL DEFAULT '{}', review_day TEXT NOT NULL DEFAULT '', PRIMARY KEY(user_id, routine_id), FOREIGN KEY(user_id, routine_id) REFERENCES pocket_pip_routines(user_id, id) ON DELETE CASCADE)`,
   `CREATE TABLE IF NOT EXISTS pocket_pip_training_slots (user_id TEXT NOT NULL REFERENCES pocket_user(id) ON DELETE CASCADE, routine_id TEXT NOT NULL, slot TEXT NOT NULL, day TEXT NOT NULL, PRIMARY KEY(user_id, routine_id, slot))`,
