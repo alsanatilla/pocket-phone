@@ -73,6 +73,14 @@ Each state is photographed at 390×844 (phone, device scale 2) and 1280×800, as
 | `approval` | a reply waiting for the person to approve a note (read the `awaiting` tests in `tools/pip-runs.test.mjs` for the shape of such a turn and its requests) |
 | `card-menu` | the menu of a finished card, open |
 | `today-pinned` | Today with one pinned card |
+| `today-morning`, `today-morning-end` | Today at 08:30 with a brief, a working and a reported assignment, a job's report, three appointments, sixteen tasks and a pinned card (top, then the end) |
+| `today-evening` | Today at 19:30: tomorrow's appointments, open and finished tasks, the day's note |
+| `today-empty` | Today of an account with nothing in it |
+| `today-decision` | Today with two replies waiting for a decision and a failed assignment |
+| `assignment-working`, `assignment-done`, `assignment-failed` | the big chat with an assignment handed off, a message meanwhile, and (done) its report |
+
+The Today and assignment states each use an account of their own, seeded once, and move the page's clock to the
+state's moment (`at`), so the morning and the evening look the same whatever time the lab runs.
 | `chat-list` | the list of chats, open, with five chats |
 
 Use German and English text in the seeds, one long word (30 characters) and one long URL, so wrapping is exercised.

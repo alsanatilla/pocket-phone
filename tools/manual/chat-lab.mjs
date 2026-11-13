@@ -574,7 +574,7 @@ const TODAY_STATES = [
       const line = state === 'working' ? 'assignment · working · 3 lookups' : state === 'done' ? 'assignment · reported' : 'Bike prices failed:';
       await untilFor(page, 'assignment-' + state, 'the assignment line', 15000, line => document.body.innerText.includes(line), line);
       // The report is long: the picture starts at the reply that handed the work off, so its line and the report show.
-      if (state === 'done') { await page.evaluate(() => document.querySelector('[data-turn="a-origin"]')?.scrollIntoView({ block: 'start' })); await sleep(300); }
+      if (state === 'done') { await page.evaluate(() => { document.querySelector('[data-turn="a-origin"]')?.scrollIntoView({ block: 'start' }); window.scrollBy(0, -110); }); await sleep(300); }
     },
     text: ['Find out what the three bikes', 'Meanwhile', ...(state === 'done' ? ['Canyon Grail 7', '· assignment'] : state === 'working' ? ['stop'] : ['try again'])],
     scroll: state === 'done' ? 'keep' : 'bottom',

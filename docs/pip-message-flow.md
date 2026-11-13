@@ -528,6 +528,21 @@ Today can show what is working, what came back and what waits for the person. Ev
 (`waiting`, `started`, `done`, `failed`, `stopped`, `withdrawn`) on the live socket, without a `chat`, so no open
 chat attaches to it.
 
+**On screen** (the approved mock is `docs/mockups/today-assignments.html`). One copy of the list per tab
+(`src/app/data/assignments.ts`), read while a view shows it: Today and every reply that started an assignment. The
+socket's run events say when to read it again; without the socket it is read every 15 s, only while the tab is
+visible and something still works or waits. It belongs to the signed-in account: another account starts from an
+empty list and an answer for the account before is dropped.
+
+- *In the chat*, under the reply that started it (matched by the tool call's id, so a retry is followed through
+  `retried`): `assignment · working · 3 lookups` with `stop`, `assignment · reported 08:06, below` linking to the
+  report, or the failure in one sentence with `try again`. A failed one stays retryable after a reload (the list keeps
+  it). The tool call is not listed as a step as well. The report is shown by its owner: the title without
+  ` (assignment)`, a quiet marker and `· assignment` under it; a person's own message keeps whatever it says.
+- *On Today*, under "from pip": assignments working or waiting, and those that ended since the last visit, with stop
+  or try again in the row's menu; replies waiting for a decision under "waiting for you", each opening its chat, where
+  the change is approved as always.
+
 **Not in this release.** Writes (an assignment that wants a change describes it in its report; the person asks for
-it in the chat, where approval works as always), the screens (the mock is `docs/mockups/today-assignments.html`),
-a list tool for the model, and starting an assignment from a key instead of from the chat.
+it in the chat, where approval works as always), a list tool for the model, and starting an assignment from a key
+instead of from the chat.

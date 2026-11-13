@@ -365,7 +365,7 @@ and this guide. An agent that is unsure does less, not more, and says so. A scre
 | `Switch` | `src/app/components/ui/switch.tsx` | on/off |
 | `Tick` | `src/app/ui/kit.tsx` | done/not done |
 | `Segmented` | `kit.tsx` | a choice of view |
-| `Row` | `kit.tsx` | a line of a list: `lead`, the main line, `sub`, `end`; `onOpen`/`href` only for a single "go to" line |
+| `Row` | `kit.tsx` | a line of a list: `lead`, the main line, `sub`, `end`; `onOpen`/`href` with its › only for a single "go to" line; `arrow={false}` for a list whose rows all open their thing; `subTone="error"` for a failure as the second line |
 | `RowMenu` | `kit.tsx` | what can be done with one row (with `DropdownMenuItem`s) |
 | `Section`, `SectionLabel` | `kit.tsx` | a section and its name |
 | `Keys` | `kit.tsx` | up to three keys on one line |
