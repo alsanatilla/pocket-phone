@@ -37,6 +37,7 @@ async function account({ openrouter = true } = {}) {
 const header = (uid, title = 'Pip run') => ({ uid, title, created: Date.now(), config: VAULT_CONFIG });
 const failure = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const answers = (name, choice) => new Response(JSON.stringify({ answers: { [name]: { type: 'choice', choice } } }), { status: 200, headers: { 'content-type': 'application/json' } });
+const noLevel = () => new Response(JSON.stringify({ answers: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
 
 // What a chat-completions endpoint refuses: a tool call without its result before the next message, a result for
 // a call it never made, or an empty tool message. The double answers those with 400, as the provider would.
@@ -113,12 +114,12 @@ test('the levels, their limits and their note are the ones the brief names', () 
   assert.equal(effortFromAnswers(null), null);
   assert.deepEqual(effortLimits('none'), { lookups: 1, webCalls: 0 });
   assert.deepEqual(effortLimits('quick'), { lookups: 3, webCalls: 2 });
-  assert.equal(effortLimits('thorough'), null, 'thorough keeps today’s limits');
+  assert.deepEqual(effortLimits('thorough'), { lookups: 10, webCalls: 5 });
   assert.equal(effortLimits('unknown'), null);
   assert.equal(effortLimits(null), null);
   assert.equal(effortNote('none'), 'Pocket judged that this message needs no looking-up: answer directly; look something up only if you cannot answer without it.');
   assert.equal(effortNote('quick'), 'Pocket judged that this message needs one or two lookups: make them and answer.');
-  assert.equal(effortNote('thorough'), '');
+  assert.equal(effortNote('thorough'), 'Pocket judged that this message deserves thorough looking-up: up to ten lookups. Search with other words only when the first words found nothing, read what you found once, then answer.');
 });
 
 test('the JEV state cuts long text and sends finished prose, never a card source or a streaming turn', () => {
@@ -171,7 +172,7 @@ test('quick: three lookups run, the fourth is refused, and a card after that sti
   assert.match(String(sent[0].messages[0].content), /needs one or two lookups: make them and answer/);
 });
 
-test('thorough: five lookups all run, the instructions get no note, and the level is kept in the usage', async () => {
+test('thorough: five lookups all run, the instructions get the thorough note, and the level is kept in the usage', async () => {
   const userId = await account(), sent = [], jev = [];
   const view = await runs.submitRun(userId, { requestId: 'req-effort-thorough', chat: header('chat-effort-thorough'), text: 'Recherchiere den Gebrauchtwagenmarkt gründlich.', device: 'browser-1' },
     { fetcher: judged(sent, jev, 'thorough', lookups(5, 'thorough'), compatibleMessage({ text: 'Der Markt ist angespannt.' })) });
@@ -180,7 +181,7 @@ test('thorough: five lookups all run, the instructions get no note, and the leve
   const made = rows(view, 'search_notes');
   assert.equal(made.length, 5);
   assert.ok(made.every(item => item.state === 'done'), 'today’s limits still allow five lookups');
-  assert.doesNotMatch(String(sent[0].messages[0].content), /Pocket judged/);
+  assert.match(String(sent[0].messages[0].content), /deserves thorough looking-up: up to ten lookups/);
 });
 
 test('the judge gets the OpenRouter key, the model, the message and the chat’s earlier turn', async () => {
@@ -359,9 +360,12 @@ test('the enough question is asked at most six times in a reply', async () => {
   const view = await runs.submitRun(userId, { requestId: 'req-enough-six', chat: header('chat-enough-six'), text: 'Recherchiere neun Runden lang.', device: 'browser-1' },
     { fetcher: judging(sent, jev, { effort: 'thorough', enough: 'no' }, ...script(9, 1), compatibleMessage({ text: 'Genug.' })) });
   assert.equal(enoughRequests(jev).length, 6, 'never a seventh question');
-  // The existing continuation limit ends a script this long after its ninth lookup round.
-  assert.equal(view.run.status, 'failed');
-  assert.match(view.run.turn.error, /more tools after the research limit/);
+  // The continuation limit makes the ninth round final: its lookup is refused, and the model writes the answer.
+  assert.equal(view.run.status, 'done', view.run.turn.error);
+  assert.equal(view.run.turn.answer, 'Genug.');
+  const made = rows(view, 'search_notes');
+  assert.deepEqual(made.map(item => item.state), [...Array(8).fill('done'), 'failed']);
+  assert.match(made[8].result, /research_budget_reached/);
 });
 
 test('the enough count and the lookups last asked about survive a pause', async () => {
@@ -378,4 +382,91 @@ test('the enough count and the lookups last asked about survive a pause', async 
   assert.equal(enoughRequests(jev).length, 1, 'no new lookup was made, so the question is not repeated after the pause');
   assert.equal(decided.run.turn.usage.enoughAsked, 1);
   assert.equal('enoughAt' in decided.run.turn.usage, false);
+});
+
+test('a final round reached by the lookups’ ceiling refuses one more lookup instead of failing', async () => {
+  const userId = await account(), sent = [], jev = [];
+  const view = await runs.submitRun(userId, { requestId: 'req-late-ceiling', chat: header('chat-late-ceiling'), text: 'Vergleiche die zwei Angebote.', device: 'browser-1' },
+    { fetcher: judging(sent, jev, { effort: 'quick' }, lookups(4, 'ceiling'), lookups(1, 'after'), compatibleMessage({ text: 'Der blaue Wagen ist günstiger.' })) });
+  assert.equal(view.run.status, 'done', view.run.turn.error);
+  assert.equal(view.run.turn.answer, 'Der blaue Wagen ist günstiger.', 'the reply finishes with the model’s text');
+  const made = rows(view, 'search_notes');
+  assert.deepEqual(made.map(item => item.state), ['done', 'done', 'done', 'failed', 'failed']);
+  for (const refused of made.slice(3)) assert.match(refused.result, /research_budget_reached/);
+  assert.ok(sent[1].tools.some(tool => tool.function.name === 'search_notes'), 'the final round still offers the lookups, so the request reaches Pocket');
+});
+
+test('a final round reached by the continuation limit also refuses a late lookup instead of failing', async () => {
+  const userId = await account(), sent = [], jev = [];
+  const view = await runs.submitRun(userId, { requestId: 'req-late-continuation', chat: header('chat-late-continuation'), text: 'Recherchiere lange.', device: 'browser-1' },
+    { fetcher: judging(sent, jev, { effort: noLevel() },
+      ...Array.from({ length: 8 }, (_, index) => lookups(1, 'round' + index)), lookups(1, 'after'), compatibleMessage({ text: 'Genug recherchiert.' })) });
+  assert.equal(view.run.status, 'done', view.run.turn.error);
+  assert.equal(view.run.turn.answer, 'Genug recherchiert.');
+  const made = rows(view, 'search_notes');
+  assert.deepEqual(made.map(item => item.state), [...Array(8).fill('done'), 'failed']);
+  assert.match(made[8].result, /research_budget_reached/);
+  assert.ok(sent[8].tools.some(tool => tool.function.name === 'search_notes'), 'the ninth, final round still offers the lookups');
+});
+
+test('thorough: ten lookups run, the eleventh is refused, and the note says how many', async () => {
+  const userId = await account(), sent = [], jev = [];
+  const view = await runs.submitRun(userId, { requestId: 'req-thorough-ten', chat: header('chat-thorough-ten'), text: 'Recherchiere den Markt gründlich.', device: 'browser-1' },
+    { fetcher: judging(sent, jev, { effort: 'thorough', enough: 'no' },
+      ...Array.from({ length: 5 }, (_, index) => lookups(2, 'ten' + index)), lookups(1, 'over'), compatibleMessage({ text: 'Zehn Quellen reichen.' })) });
+  assert.equal(view.run.status, 'done', view.run.turn.error);
+  assert.equal(view.run.turn.answer, 'Zehn Quellen reichen.');
+  assert.equal(view.run.turn.usage.effort, 'thorough');
+  const made = rows(view, 'search_notes');
+  assert.deepEqual(made.map(item => item.state), [...Array(10).fill('done'), 'failed']);
+  assert.match(made[10].result, /research_budget_reached/);
+  assert.match(String(sent[0].messages[0].content), /deserves thorough looking-up: up to ten lookups/);
+});
+
+test('thorough: five web lookups run and the sixth is refused', async () => {
+  const userId = await account(), sent = [], jev = [];
+  const saved = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ success: true, data: { web: [{ title: 'Car', url: 'https://example.com/car', description: 'A car.' }] } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const view = await runs.submitRun(userId, { requestId: 'req-web-five', chat: { ...header('chat-web-five'), config: { ...VAULT_CONFIG, webSearch: true } }, text: 'Suche im Netz nach dem Auto.', device: 'browser-1' },
+      { fetcher: judging(sent, jev, { effort: 'thorough', enough: 'no' },
+        ...Array.from({ length: 5 }, (_, index) => compatibleMessage({ calls: [{ name: 'search_web', input: { query: 'car ' + index }, id: 'call_web' + index }] })), compatibleMessage({ calls: [{ name: 'search_web', input: { query: 'car over' }, id: 'call_web_over' }] }), compatibleMessage({ text: 'Fünf Suchen reichen.' })) });
+    assert.equal(view.run.status, 'done', view.run.turn.error);
+    assert.equal(view.run.turn.answer, 'Fünf Suchen reichen.');
+    const made = rows(view, 'search_web');
+    assert.deepEqual(made.map(item => item.state), ['done', 'done', 'done', 'done', 'done', 'failed']);
+    assert.match(made[5].result, /research_budget_reached/);
+  } finally {
+    globalThis.fetch = saved;
+  }
+});
+
+test('a pause in the first final round keeps the tolerance, and the answer still gets its round after it', async () => {
+  const userId = await account(), sent = [], jev = [];
+  const submitted = await runs.submitRun(userId, { requestId: 'req-late-pause', chat: header('chat-late-pause'), text: 'Recherchiere acht Runden und merke dir den Preis.', device: 'phone-1' },
+    { fetcher: judging(sent, jev, { effort: noLevel() },
+      ...Array.from({ length: 8 }, (_, index) => lookups(1, 'pause' + index)),
+      compatibleMessage({ calls: [{ name: 'create_record', input: { kind: 'note', title: 'Blue car', text: '21,000 euros' }, id: 'call_write' }] })) });
+  assert.equal(submitted.run.status, 'awaiting', 'waiting failed: ' + submitted.run.turn.error);
+  assert.equal(submitted.requests[0].tool, 'create_record');
+  // The eighth lookup round is the first final one; the write there pauses. After it, two late lookups and the answer
+  // need a round past the usual continuation limit, which must not end the reply before it writes.
+  const decided = await runs.decideRun(userId, { runId: submitted.run.runId, requestId: submitted.requests[0].id, approved: true, device: 'browser-1' },
+    { fetcher: judging(sent, jev, { effort: noLevel() }, lookups(1, 'late-a'), lookups(1, 'late-b'), compatibleMessage({ text: 'Nach acht Runden und zwei Absagen: die Antwort.' })) });
+  assert.equal(decided.run.status, 'done', 'continue failed: ' + decided.run.turn.error);
+  assert.equal(decided.run.turn.answer, 'Nach acht Runden und zwei Absagen: die Antwort.');
+  const made = decided.run.turn.activity.filter(item => item.name === 'search_notes');
+  assert.deepEqual(made.map(item => item.state), [...Array(8).fill('done'), 'failed', 'failed']);
+  for (const refused of made.slice(8)) assert.match(refused.result, /research_budget_reached/);
+});
+
+test('no level: eleven lookups all run, as today', async () => {
+  const userId = await account(), sent = [], jev = [];
+  const view = await runs.submitRun(userId, { requestId: 'req-no-level-eleven', chat: header('chat-no-level-eleven'), text: 'Recherchiere ohne JEV.', device: 'browser-1' },
+    { fetcher: judging(sent, jev, { effort: noLevel() }, lookups(5, 'plain-a'), lookups(5, 'plain-b'), lookups(1, 'plain-c'), compatibleMessage({ text: 'Elf Quellen reichen.' })) });
+  assert.equal(view.run.status, 'done', view.run.turn.error);
+  assert.equal(view.run.turn.answer, 'Elf Quellen reichen.');
+  assert.equal('effort' in view.run.turn.usage, false);
+  assert.deepEqual(rows(view, 'search_notes').map(item => item.state), Array(11).fill('done'));
+  assert.doesNotMatch(String(sent[0].messages[0].content), /Pocket judged/);
 });

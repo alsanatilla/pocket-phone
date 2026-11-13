@@ -113,24 +113,34 @@ test('a save in the last research round reserves an answer even when output usag
   turn.text = 'Research and save a note';
   const result = await streamReply(chat, turn, { key: 'fixture', approve: approveAll, executeTool: async (value, name, input, signal, context) => name === 'create_record' ? { kind: 'action', action: { tool: name, kind: input.kind, title: input.title, status: 'saved', href: '/notes/research' } } : execute(value, name, input, signal, context), fetcher: async (_, options) => {
     sent.push(JSON.parse(options.body)); const index = sent.length - 1;
-    if (index < 8) return response(call('read_chat_history', { query: 'q' + index }, 'read-' + index, 1));
+    // Eight lookup rounds of 1,875 tokens leave 1,000 of the lookups' 16,000.
+    if (index < 8) return response(call('read_chat_history', { query: 'q' + index }, 'read-' + index, 1875));
     if (index === 8) return response(call('create_record', { kind: 'note', title: 'Research note', text: 'Verified findings' }, 'last-proposal', null));
     return response(answer('The note is saved.'));
   } });
-  assert.equal(sent.length, 10); assert.ok(sent[9].tool_choice?.type === 'none' || !sent[9].tools?.length);
-  // The eight lookup rounds are paid from the lookups' own budget; the save and the answer share the reply's.
-  assert.ok(sent[8].max_tokens + sent[9].max_tokens <= chat.config.maxTokens);
+  assert.equal(sent.length, 10);
+  // The save round leaves the reserve for the answer. Without usage it is charged its whole allowance: in a final
+  // round the lookups' budget pays the 1,000 it has left and the answer's the rest, so the round after it may prepare
+  // once more only with what the answer kept, less the reserve. Charged nothing, it would offer the whole allowance
+  // again; charged to the answer alone, only the reserve.
+  const allowance = chat.config.maxTokens - 1024;
+  assert.equal(sent[8].max_tokens, allowance);
+  assert.match(systemText(sent[9]), /the app has stopped research for this reply/);
+  assert.equal(sent[9].max_tokens, chat.config.maxTokens - (allowance - 1000) - 1024);
   assert.ok(result.activity.some(event => event.name === 'create_record' && event.state === 'done' && event.applied_href === '/notes/research'));
   assert.equal(result.answer, 'The note is saved.');
 });
 
 test('a provider that ignores the final research limit stays failed and resumable', async t => {
-  const { store, chat } = workspace(t); let requests = 0;
-  const runner = new ReplyRunner(store, { key: () => 'fixture', stream: (chat, turn, options) => streamReply(chat, turn, { ...options, fetcher: async () => response(++requests === 1 ? limited() : call('read_chat_history', {})) }) });
+  const { store, chat } = workspace(t); let requests = 0; const sent = [];
+  const runner = new ReplyRunner(store, { key: () => 'fixture', stream: (chat, turn, options) => streamReply(chat, turn, { ...options, fetcher: async (_, request) => { sent.push(JSON.parse(request.body)); return response(++requests === 1 ? limited() : call('read_chat_history', {}, 'late-' + requests)); } }) });
   await runner.send(chat.uid, { text: 'Research cars' });
   const saved = store.get(chat.uid).turns[0]; assert.equal(saved.status, 'failed'); assert.match(saved.error, /more tools after the research limit/);
   const replayed = requestBody(store.get(chat.uid), current()).messages;
-  assert.equal(requests, 2); assert.equal(replayed[0].content, 'Research cars'); assert.match(replayed[1].content, /^\[No answer: this reply failed before it finished; its partial text is not repeated\.\]/);
+  // The two lookups asked for in final rounds are refused; the third round offers no tools, and the provider that
+  // calls one anyway ends the reply.
+  assert.equal(requests, 4); assert.ok(!sent[3].tools?.length, 'the last request offered no tools');
+  assert.equal(replayed[0].content, 'Research cars'); assert.match(replayed[1].content, /^\[No answer: this reply failed before it finished; its partial text is not repeated\.\]/);
   assert.ok(!replayed.some(item => item.role === 'assistant' && !item.content.startsWith('[No answer:')));
 });
 

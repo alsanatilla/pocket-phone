@@ -101,12 +101,24 @@ what can be drawn.
   fence (`draftLines`), replaced by the checked card when the call completes.
 - **Never replayed as a format.** History shows `[card drawn here with show_card: …]` (`cardsAsRecords`).
 - **Budget.** A round may use the reply's remaining tokens less the reserve for the closing text; a fixed 2,048 per
-  round cut thinking models off before their call. Lookups have their own budget (`RESEARCH_LIMITS.researchTokens`):
-  a round whose tool calls are all lookups is charged there, so research does not spend the answer's tokens; every
-  other round (text, cards, writes) is charged to the answer. When the lookups' budget runs out, research ends and
-  the reply writes its answer with the full answer budget that is left. Each card costs one more model round (the
-  tools and prompt are sent again, about 3,400 input tokens with every tool offered; providers that cache the prefix
-  bill most of it as cached).
+  round cut thinking models off before their call. Lookups have their own budget (`RESEARCH_LIMITS.researchTokens`,
+  16,000): a round that ends in tool calls without drawing a card (lookups, the plan, a save) is working, not
+  answering, and is charged there; a round that writes text or draws a card is charged to the answer. A round that
+  is not final may use at most what the lookups' budget has left plus the reserve. When that budget runs out,
+  research ends and the reply writes its answer with the answer budget that is left; in a final round the lookups'
+  budget pays only what it still has and the answer the rest.
+- **Thinking after lookups.** A model whose provider reports reasoning tokens (GLM 5.3 thinks before every call and
+  before the answer) gets, once it has looked something up, what is left of the lookups' budget on top of each
+  round's allowance, and the thinking of a round that writes is paid from there while it lasts; its text is paid
+  from the answer's. Before, GLM thought through the whole 3,072-token allowance before a thorough answer, was cut
+  off, got the 1,024 left, was cut off again and failed with "The configured reply token limit was reached". A
+  reply without lookups, or from a model that reports no reasoning, is charged as before.
+- **The ceiling.** Every round lowers what the reply may still spend by what it cost (a round without reported usage
+  costs its whole allowance), so one reply's output stays within `maxTokens` + 16,000 + the reserve: 21,120 tokens
+  at `maxTokens` 4,096, as before the thinking rule. With lookups, an answer's text may now be longer than
+  `maxTokens` when the lookups left tokens over.
+- **Thinking kept.** The thinking a reply shows is kept to at most 24,000 characters: past that it drops to its last
+  16,000 (a thorough GLM reply thinks more than that, and the reply used to fail with "This reply is too large").
 
 Measured on 2026-11-09 with the real pipeline, four requests each (chart, table, choices, tiles): DeepSeek V4.1
 Flash 4/4, GLM 5.3 4/4 (two after one correction), Kimi K3.1 Pro 4/4.
@@ -212,10 +224,15 @@ and the sentence the model reads are in `src/shared/pip-effort.js`.
 - The question is one choice named `effort`: `none`, `quick` or `thorough`. The state is the message (up to 2,000
   characters), how many sources are attached, and the last two finished turns (requests and prose answers, never a
   card's source).
-- `none` allows one lookup and no web call, `quick` three lookups and two web calls. `thorough` leaves today's
-  `RESEARCH_LIMITS` alone. `streamChat` counts a lookup as any tool call that is neither a write nor a state tool,
-  and the lookup beyond the level is answered with `research_budget_reached`, so the model answers from what it
-  has. Cards are never refused by this limit.
+- `none` allows one lookup and no web call, `quick` three lookups and two web calls, `thorough` ten lookups and five
+  web calls. `streamChat` counts a lookup as any tool call that is neither a write nor a state tool, and the lookup
+  beyond the level is answered with `research_budget_reached`, so the model answers from what it has. Cards are
+  never refused by this limit.
+- A lookup asked for after the reply has turned final (a limit was reached, or the lookups' own budget ran out) is
+  answered the same way instead of failing the reply: the model gets `research_budget_reached` and writes with what
+  it has. That is tolerated in two rounds of the reply, kept in the run's checkpoint like the other counters; the
+  round after the second is sent with no tools and `tool_choice: none`, and a provider that calls a tool anyway
+  fails the reply as before. Writes and state tools in a final round behave as they did.
 - The level is judged once per run and kept in `usage.effort`. A run continued after a pause or a restart keeps it
   without asking again, and the lookups it made before the pause count after it.
 - No OpenRouter key, no answer within 1.2 seconds, a refused request or an answer that is not one of the levels:
@@ -232,6 +249,13 @@ and the sentence the model reads are in `src/shared/pip-effort.js`.
   `usage.enoughAsked` beside it. `ENOUGH_STOPS` in `src/server/pip-runs.js` is off; when the lead switches it on
   (or sets `PIP_ENOUGH_STOPS=1`), a yes ends research through `finalReason`, later lookups are answered with
   `research_budget_reached`, and cards may still draw.
+- A thorough reply ends with the model's own answer, also from a model that thinks before every call: the
+  thinking after the lookups is paid from what the lookups' budget has left (see "Budget" and "Thinking after
+  lookups" under "Cards are a tool call"). Measured on 2026-11-13 with `tools/manual/thorough-real.mjs` (two
+  thorough questions over six short notes, the real server path): before, GLM 5.3 failed three of four with "The
+  configured reply token limit was reached"; after, DeepSeek V4.1 Flash answered 6 of 6 (41 to 83 s) and GLM 5.3
+  9 of 10 (33 to 127 s), the tenth having written its answer and then asked to save a note, which waits for the
+  person's approval. GLM's answer rounds thought 5,000 to 11,000 tokens, so its thorough replies stay slow.
 
 ## Pip remembers the person
 
