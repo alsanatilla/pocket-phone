@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 vi.mock("../../ui/toast/toast.ts", () => ({ toast: vi.fn(), toastError: vi.fn(), clearToast: vi.fn() }));
 vi.mock("../../ui/Markdown.tsx", () => ({ Markdown: ({ text }: { text: string }) => <div className="prose">{text}</div> }));
+vi.mock("../../data/assignments.ts", async original => ({ ...await original<typeof import("../../data/assignments.ts")>(), useAssignments: vi.fn(), stop: vi.fn(() => Promise.resolve()), retry: vi.fn(() => Promise.resolve()) }));
 import { chats, type ChatTurn } from "../../data/chats.ts";
 import { listTasks } from "../../data/tasks.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 import { QueuedTurn, Turn } from "./Turn.tsx";
+import { retry, stop, useAssignments, type Assignment, type AssignmentsState } from "../../data/assignments.ts";
 
 function seed(activity: unknown[], extra: Partial<ChatTurn> = {}) {
   const chat = chats.create();
@@ -51,5 +53,47 @@ describe("a reply in Pip", () => {
     expect(takeBack).toHaveBeenCalledTimes(1);
     view.rerender(<QueuedTurn text="And the red one?" state="held" onTakeBack={takeBack} />);
     expect(screen.getByText("paused")).toBeTruthy();
+  });
+
+  it("shows an assignment's report as Pip's own turn: its title without the mark, a quiet marker, and what it is", () => {
+    const { chatId, turn } = seed([], { text: "Bike prices (assignment)", owner: "pip-assignment", answer: "The Canyon is cheapest." });
+    const view = render(<Turn turn={turn} chatId={chatId} latest={false} live={null} locked={false} />);
+    expect(screen.getByText("Bike prices")).toBeTruthy();
+    expect(screen.queryByText(/\(assignment\)/)).toBeNull();
+    expect(screen.getByText(/· assignment/)).toBeTruthy();
+    view.unmount();
+    // The person's own words keep whatever they wrote.
+    const own = seed([], { uid: "turn-2", text: "Explain this (assignment)", owner: "phone" });
+    render(<Turn turn={own.turn} chatId={own.chatId} latest={false} live={null} locked={false} />);
+    expect(screen.getByText("Explain this (assignment)")).toBeTruthy();
+    expect(screen.queryByText(/· assignment/)).toBeNull();
+  });
+
+  it("follows the assignment a reply started: working with stop, failed with try again, and its retry once tried", async () => {
+    const started = { id: "row-a", name: "start_assignment", title: "start an assignment · Bike prices", state: "done", started: 1, ended: 2, result: JSON.stringify({ kind: "assignment", done: "started", id: "a1", title: "Bike prices" }) };
+    const { chatId, turn } = seed([started], { answer: "I am looking into it." });
+    const base: Assignment = { id: "a1", title: "Bike prices", state: "working", created: 1, started: 1, ended: 0, origin: { chat: chatId, turn: turn.uid }, report: null, error: "", lookups: 3, retryOf: "", retried: "" };
+    const state = (assignments: Assignment[]): AssignmentsState => ({ account: "user-a", status: "ready", assignments, decisions: [] });
+    vi.mocked(useAssignments).mockReturnValue(state([base]));
+    const view = render(<Turn turn={turn} chatId={chatId} latest live={null} locked={false} />);
+    expect(screen.getByText("assignment · working · 3 lookups")).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Stop the assignment Bike prices" })); });
+    expect(stop).toHaveBeenCalledWith("a1");
+
+    vi.mocked(useAssignments).mockReturnValue(state([{ ...base, state: "failed", ended: 3, error: "the provider could not be reached." }]));
+    view.rerender(<Turn turn={{ ...turn, updated: 99 }} chatId={chatId} latest live={null} locked={false} />);
+    expect(screen.getByText("Bike prices failed: the provider could not be reached.")).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Try the assignment Bike prices again" })); });
+    expect(retry).toHaveBeenCalledWith("a1");
+
+    const reportAt = new Date(2026, 10, 9, 8, 6).getTime();
+    vi.mocked(useAssignments).mockReturnValue(state([
+      { ...base, id: "a2", retryOf: "a1", state: "done", ended: reportAt, report: { chat: chatId, turn: "report-1" } },
+      { ...base, state: "failed", retried: "a2" },
+    ]));
+    view.rerender(<Turn turn={{ ...turn, updated: 100 }} chatId={chatId} latest live={null} locked={false} />);
+    expect(screen.getByText(/assignment · reported 08:06/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "below" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Try the assignment/ })).toBeNull();
   });
 });
