@@ -135,7 +135,8 @@ export function dayTasks(list: readonly Task[], part: DayPart, now = Date.now())
     .sort((a, b) => a.due.localeCompare(b.due) || Number(b.important) - Number(a.important) || a.created - b.created)
     .map(task => {
       const late = task.due < day ? daysBetween(task.due, day) : 0;
-      return { task, late: late > 0, note: late ? late + (late === 1 ? " day late" : " days late") : task.due === day ? "today" : "tomorrow" };
+      // Due today needs no word on a page called today; only late and tomorrow tell rows apart.
+      return { task, late: late > 0, note: late ? late + (late === 1 ? " day late" : " days late") : task.due === day ? "" : "tomorrow" };
     });
   const finished = list.filter(task => task.done && today(task.updated) === day && (part === "evening" || (task.due && task.due <= day)))
     .sort((a, b) => a.updated - b.updated).map(task => ({ task, note: "", late: false }));

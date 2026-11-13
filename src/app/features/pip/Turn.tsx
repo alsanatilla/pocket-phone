@@ -13,7 +13,7 @@ import { AssignmentStatus } from "./AssignmentStatus.tsx";
 import { ASSIGNMENT_OWNER, reportTitle } from "../../data/today.ts";
 import { Answer, Thinking } from "./stream/Answer.tsx";
 import { Prose } from "./stream/Prose.tsx";
-import { jobsOf, ledger, memoryOf, offersOf, planOf, sourcesOf } from "./reply.ts";
+import { assignmentsOf, jobsOf, ledger, memoryOf, offersOf, planOf, sourcesOf } from "./reply.ts";
 import { resume, retry, send } from "./runner.ts";
 import { hrefFor } from "../../lib/classic.ts";
 import type { Segment } from "../../../shared/pip-reply.js";
@@ -132,7 +132,7 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
   // own turn: its title stands where the question would, with a quiet marker, and the line under it says what it is.
   const report = shown.owner === ASSIGNMENT_OWNER;
   const asked = report ? { text: reportTitle(shown), id: "" } : aboutCard(shown.text);
-  const handedOff = shown.activity?.some(row => row.name === "start_assignment" && row.state === "done");
+  const handedOff = assignmentsOf(shown);
   const unfinished = !streaming && latest && ["stopped", "failed", "streaming"].includes(shown.status);
   const took = rows.reduce((sum, row) => sum + secondsOf(row), 0);
   const steps = rows.length > 1 ? rows.length + " steps" : "1 step";
@@ -191,7 +191,7 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
         ) : null}
 
         {/* Work this reply handed to an assignment: its state, live, with stop or try again. */}
-        {handedOff ? <AssignmentStatus chatId={chatId} turnId={shown.uid} /> : null}
+        {handedOff.length ? <AssignmentStatus started={handedOff} /> : null}
 
         {sources.length && !streaming ? (
           <p className="text-[11px] text-dim">

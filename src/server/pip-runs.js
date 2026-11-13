@@ -1246,7 +1246,9 @@ export async function assignmentsView(userId, { fetcher } = {}) {
     let decision = decisions.find(entry => entry.runId === runId);
     if (!decision) decisions.push(decision = { runId, chat: String(item.chat_uid), asked: Number(item.created) || 0, requests: [] });
     const payload = parse(item.payload) || {};
-    decision.requests.push({ id: String(item.request_id), tool: String(item.tool), title: String(payload.action?.title || payload.title || label(String(item.tool), {})) });
+    // Said as the waiting notice says it: what the change does, then what it is about ("save task “Call the bank”").
+    const what = String(payload.action?.title || payload.title || '');
+    decision.requests.push({ id: String(item.request_id), tool: String(item.tool), title: label(String(item.tool), payload.action || {}) + (what ? ' “' + what + '”' : '') });
   }
   return { assignments, decisions };
 }

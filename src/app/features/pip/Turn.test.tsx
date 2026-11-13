@@ -74,8 +74,16 @@ describe("a reply in Pip", () => {
     const { chatId, turn } = seed([started], { answer: "I am looking into it." });
     const base: Assignment = { id: "a1", title: "Bike prices", state: "working", created: 1, started: 1, ended: 0, origin: { chat: chatId, turn: turn.uid }, report: null, error: "", lookups: 3, retryOf: "", retried: "" };
     const state = (assignments: Assignment[]): AssignmentsState => ({ account: "user-a", status: "ready", assignments, decisions: [], error: "" });
-    vi.mocked(useAssignments).mockReturnValue(state([base]));
+    // Before the list is read (or signed out) the reply still says what it handed off, without a key.
+    vi.mocked(useAssignments).mockReturnValue({ account: "", status: "signed-out", assignments: [], decisions: [], error: "" });
     const view = render(<Turn turn={turn} chatId={chatId} latest live={null} locked={false} />);
+    expect(screen.getByText("assignment · Bike prices")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /assignment/ })).toBeNull();
+    // The status line says it; the tool call is not listed as a step as well.
+    expect(screen.queryByText(/start an assignment/)).toBeNull();
+
+    vi.mocked(useAssignments).mockReturnValue(state([base]));
+    view.rerender(<Turn turn={{ ...turn, updated: 98 }} chatId={chatId} latest live={null} locked={false} />);
     expect(screen.getByText("assignment · working · 3 lookups")).toBeTruthy();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Stop the assignment Bike prices" })); });
     expect(stop).toHaveBeenCalledWith("a1");

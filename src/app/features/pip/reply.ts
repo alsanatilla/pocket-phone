@@ -27,13 +27,13 @@ export function ledger(turn: ChatTurn, streaming: boolean): ActivityRow[] {
   const rows = !streaming && turn.status === "streaming" ? settle(turn.activity ?? [], "stopped", "Interrupted") : activity(turn.activity ?? []);
   // A drawn card stands in the answer itself; its tool call is not a lookup to list.
   // What Pip remembered or forgot is said under the answer, in words (memoryOf), not listed as a step.
-  // So is a job Pip set up, changed or removed (jobsOf).
+  // So is a job Pip set up, changed or removed (jobsOf), and work handed to an assignment (its own status line).
   return rows.filter(row => row.name !== "show_card" && !(SAID_TOOLS.includes(row.name) && row.state === "done"));
 }
 
 const MEMORY_TOOLS = ["remember", "forget"];
 const JOB_CHANGES = ["create_job", "change_job", "remove_job"];
-const SAID_TOOLS = [...MEMORY_TOOLS, ...JOB_CHANGES];
+const SAID_TOOLS = [...MEMORY_TOOLS, ...JOB_CHANGES, "start_assignment"];
 export interface MemoryChange { kind: "remembered" | "corrected" | "forgot"; text: string }
 /** What this reply changed in Pip's memory of the person, in the order it happened. */
 export function memoryOf(turn: ChatTurn): MemoryChange[] {
@@ -103,4 +103,15 @@ export function changeLabel(change: Change): string {
 export function sourcesOf(turn: ChatTurn, rows: ActivityRow[]): { href: string; title: string }[] {
   const seen = new Set<string>();
   return [...(turn.sources ?? []), ...rows.flatMap(row => row.sources)].filter(item => !seen.has(item.href) && Boolean(seen.add(item.href))).slice(0, 12);
+}
+
+/** The assignments this reply handed off, by id and title, as its start_assignment calls answered. */
+export function assignmentsOf(turn: ChatTurn): { id: string; title: string }[] {
+  const started: { id: string; title: string }[] = [];
+  for (const row of activity(turn.activity ?? [])) {
+    if (row.name !== "start_assignment" || row.state !== "done") continue;
+    const value = json(row.result);
+    if (value?.kind === "assignment" && typeof value.id === "string" && value.id) started.push({ id: value.id, title: typeof value.title === "string" ? value.title : "" });
+  }
+  return started;
 }

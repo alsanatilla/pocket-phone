@@ -145,7 +145,7 @@ describe("the day's tasks", () => {
   ];
   it("in the morning: open ones due today or earlier, the late one first and saying how late, then what was finished of them", () => {
     const shown = dayTasks(list, "morning", at(9));
-    expect(shown.map(item => [item.task.uid, item.note, item.late])).toEqual([["late", "2 days late", true], ["today", "today", false], ["done", "", false]]);
+    expect(shown.map(item => [item.task.uid, item.note, item.late])).toEqual([["late", "2 days late", true], ["today", "", false], ["done", "", false]]);
   });
   it("in the evening: tomorrow's too, and everything finished today", () => {
     expect(dayTasks(list, "evening", at(19)).map(item => item.task.uid)).toEqual(["late", "today", "tomorrow", "done", "done-undated"]);

@@ -9,7 +9,7 @@
 //   PUPPETEER_MODULE=/path/to/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js \
 //     node tools/manual/chat-lab.mjs [--out <dir>] [--only <state>]
 //
-// `--only` takes one state name from STATES below or `stream`. Pictures are <state>-phone.png and
+// `--only` takes state names from STATES below or `stream`, separated by commas. Pictures are <state>-phone.png and
 // <state>-desktop.png; the measurement is stream.json. Both go to app/build/reports/chat-lab/ by default (ignored
 // by git through **/build/). The stream is measured three times at phone size and the median is reported.
 
@@ -411,6 +411,177 @@ async function seedJobs(ctx) {
   });
 }
 
+// --- Today and assignments ------------------------------------------------------------------------------------
+// Each of these states has an account of its own, seeded once at its own moment of the day (`at`): the page's clock
+// is moved there, so the morning and the evening look as they would, whatever time the lab runs. Lengths are real
+// ones: a 120-character task, German words, sixteen tasks in the morning.
+
+const HOUR = 60 * MINUTE;
+/** The latest past moment at hh:mm, so nothing seeded lies in the server's future. */
+const momentAt = (hour, minute) => { const date = new Date(NOW); date.setHours(hour, minute, 0, 0); if (date.getTime() > NOW) date.setDate(date.getDate() - 1); return date.getTime(); };
+const dayOf = (at, offset = 0) => { const date = new Date(at); date.setDate(date.getDate() + offset); return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-'); };
+const atDay = (at, offset, hour, minute = 0) => { const date = new Date(at); date.setDate(date.getDate() + offset); date.setHours(hour, minute, 0, 0); return date.getTime(); };
+const TASK_120 = 'Write to the Hausverwaltung about the broken intercom in the stairwell and the missing name plate on the third floor door';
+const MORNING_TASKS = [
+  ['Submit the tax return', -2], ['Call the landlord', 0], [TASK_120, 0], ['Renew bike insurance', 0], ['Kündigung des Fitnessstudios abschicken', -1],
+  ['Book the train to Leipzig for Monday', 0], ['Pick up the parcel at the Packstation', 0], ['Pay the electricity bill', -3], ['Reply to Marta about dinner', 0],
+  ['Order contact lenses', 0], ['Sign the ' + LONG_WORD + ' form', 0], ['Water the plants on the balcony', 0], ['Back up the phone', -1],
+  ['Return the library books', 0], ['Send Jonas the photos from Saturday', 0], ['Check the tyre pressure', 0],
+];
+const BIKE_BRIEF = 'Compare the current prices of the Canyon Grail 7, the Rose Backroad GRX and the Cube Nuroad Race in my size, with stock and delivery time, and say which is the best buy.';
+const BIKE_REPORT = 'The **Canyon Grail 7** is the cheapest of the three at 1,899 euros, 180 under the next, and it is in stock in your size. The Rose Backroad dropped 100 euros this week.\n\n| bike | price | stock |\n|---|---:|---|\n| Canyon Grail 7 | 1,899 € | in stock |\n| Rose Backroad GRX | 2,079 € | 3 weeks |\n| Cube Nuroad Race | 2,149 € | in stock |\n\nIf you want one, tell me and I will add a task to order it.';
+const lookupRows = (prefix, count, at) => Array.from({ length: count }, (_, index) => ({ id: prefix + '-l' + index, kind: 'web', name: index % 2 ? 'read_web_page' : 'search_web', title: (index % 2 ? 'read web page “' : 'search web “') + ['Canyon Grail 7', 'canyon.com', 'Rose Backroad GRX', 'rosebikes.de', 'Cube Nuroad Race', 'cube.eu'][index % 6] + '”',
+  state: 'done', summary: index % 2 ? '1,100 words' : '5 pages', input: '{}', result: '{}', started: at + index * 7000, ended: at + index * 7000 + 6000, sources: [] }));
+const doneTurn = (uid, text, answer, created, fields = {}) => ({ uid, text, context: [], created, updated: created + 30_000, owner: 'phone', attempt: 'attempt-' + uid,
+  answer, reasoning: '', error: '', status: 'done', usage: {}, activity: [], sources: [], phase: 'done', ...fields });
+const homeOf = (user, turns, at) => ({ uid: 'home-' + user.replace(/[^a-z0-9]/g, ''), title: 'pip', titled: true, home: true, created: at - 30 * HOUR, updated: at, config: CONFIG, draft: '', context: [], turns });
+
+/** A fresh account, with its tasks, appointments and notes as synced documents. */
+async function seedAccount(ctx, user, { tasks = [], events = [], notes = [] } = {}) {
+  await ctx.execute({ sql: 'INSERT OR IGNORE INTO pocket_user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 0, ?, ?)', args: [user, 'Ada', user + '@example.com', NOW, NOW] });
+  await ctx.workspace.syncDocuments(user, {
+    'tasks.json': { v: 1, tasks: tasks.map((row, index) => ({ uid: 'task-' + index, text: row.text, done: Boolean(row.done), due: row.due || '', important: false, steps: [], list: '',
+      created: row.created || NOW - 3 * 24 * HOUR, updated: row.updated || NOW - 2 * 24 * HOUR + index, deleted: false })), lists: [], next: { uid: '', updated: 0 } },
+    'agenda.json': { v: 1, events: events.map((row, index) => ({ uid: 'event-' + index, title: row.title, when: row.when, minutes: row.minutes, remindAt: 0, task_uid: '', created: NOW - 3 * 24 * HOUR, updated: NOW - 2 * 24 * HOUR, deleted: false })) },
+    'notes.json': { v: 1, notes },
+  });
+}
+/** Pip on its own for the account, a morning check-in, and its run that reported `turn` in `chat`. */
+async function seedBrief(ctx, user, chat, turn, at) {
+  await ctx.background.saveBackground(user, { ...CONFIG, grants: ['notes', 'tasks', 'calendar'], dailyTokens: 200_000, timezone: 'Europe/Berlin', enabled: true, useAccountKey: false }, 'lab-background-key-12345678');
+  const state = await ctx.background.saveRoutine(user, { kind: 'checkin', title: 'Morning check-in', time: '07:30', days: [0, 1, 2, 3, 4, 5, 6], delivery: 'notify' });
+  await ctx.background.recordRun(user, state.routines.find(routine => routine.kind === 'checkin').id, { status: 'done', chat, turn }, at);
+}
+/** An assignment's run row as the server keeps it, with the events that date its start and end. */
+async function seedAssignment(ctx, user, { id, title, brief = BIKE_BRIEF, state, created, started = created, ended = 0, origin, report = null, error = '', lookups = 0, retryOf = '' }) {
+  const status = state === 'working' ? 'running' : state;
+  const config = { ...CONFIG, grants: ['notes', 'tasks'], timezone: 'Europe/Berlin', lane: '@assign', assignment: { title, brief, origin, ...(retryOf ? { retryOf } : {}) }, ...(report ? { delivered: report.chat } : {}) };
+  const turn = { uid: report?.turn || 'turn-' + id, text: brief, context: [], created, updated: ended || created, owner: 'pip-assignment', attempt: 'attempt-' + id, answer: '', reasoning: '', error,
+    status: state === 'working' ? 'streaming' : state, usage: {}, activity: lookupRows(id, lookups, started), sources: [], phase: state === 'working' ? 'searching' : state };
+  await ctx.execute({ sql: `INSERT OR REPLACE INTO pocket_pip_runs (user_id, run_id, chat_uid, request_id, turn_uid, device, status, turn, checkpoint, config, device_tools, lease_id, lease_until, expires_at, created, updated)
+    VALUES (?, ?, ?, ?, ?, '', ?, ?, NULL, ?, '[]', ?, ?, 0, ?, ?)`, args: [user, id, '@assign-' + id, 'as-' + id, turn.uid, status, JSON.stringify(turn), JSON.stringify(config),
+    state === 'working' ? 'lab-lease' : '', state === 'working' ? NOW + 12 * HOUR : 0, created, ended || started] });
+  for (const [kind, at] of [['started', started], ...(ended ? [[state, ended]] : [])]) {
+    await ctx.execute({ sql: 'INSERT INTO pocket_pip_run_events (user_id, run_id, kind, data, created) VALUES (?, ?, ?, ?, ?)', args: [user, id, kind, '{}', at] });
+  }
+}
+/** A reply in `chat` waiting for the person to approve saving `title`. */
+async function seedDecision(ctx, user, { runId, chat, kind, title, at }) {
+  const row = { id: 'row-' + runId, kind: 'tool', name: 'create_record', title: 'create record “' + title + '”', input: JSON.stringify({ kind, title }), state: 'awaiting', summary: 'waiting for your approval',
+    result: JSON.stringify({ kind: 'approval', action: { kind, title }, requires_confirmation: true }), started: at, ended: 0, sources: [] };
+  const turn = streamingTurn('turn-' + runId, 'Save “' + title + '” as a ' + kind + '.', { created: at, updated: at, phase: 'waiting for your approval', activity: [row] });
+  await ctx.objects.writeObject(user, 'chats', { uid: chat, title: chat === 'labflat' ? 'Wohnung' : 'Fahrrad', created: at - HOUR, updated: at, config: CONFIG, draft: '', context: [], turns: [turn] });
+  await ctx.execute({ sql: `INSERT INTO pocket_pip_runs (user_id, run_id, chat_uid, request_id, turn_uid, device, status, turn, checkpoint, config, device_tools, lease_id, lease_until, expires_at, created, updated)
+    VALUES (?, ?, ?, ?, ?, 'phone', 'awaiting', ?, NULL, ?, '[]', '', 0, ?, ?, ?)`, args: [user, runId, chat, 'req-' + runId, turn.uid, JSON.stringify(turn), JSON.stringify(CONFIG), NOW + 12 * HOUR, at, at] });
+  await ctx.execute({ sql: `INSERT INTO pocket_pip_run_requests (user_id, run_id, request_id, kind, tool, call_id, row_id, payload, state, created) VALUES (?, ?, ?, 'write', 'create_record', ?, ?, ?, 'pending', ?)`,
+    args: [user, runId, 'approval-' + runId, 'call-' + runId, row.id, JSON.stringify({ action: { kind, title } }), at] });
+}
+const pinnedChat = (user, at) => ({ uid: 'pinned-' + user.replace(/[^a-z0-9]/g, ''), title: 'Schlafkarte', created: at - 26 * HOUR, updated: at - 25 * HOUR, config: CONFIG, draft: '', context: [],
+  turns: [doneTurn('pinned-' + user, 'Zeig mir meine Schlafwerte als Karte.', 'Deine Schlafwerte als Karte:\n\n' + pinnedCard + '\n\nDie Karte bleibt auf Today sichtbar.', at - 25 * HOUR)] });
+
+const SEEDS = {
+  async 'lab-today-morning'(ctx, user, at) {
+    await seedAccount(ctx, user, {
+      tasks: MORNING_TASKS.map(([text, offset]) => ({ text, due: dayOf(at, offset) })),
+      events: [{ title: 'Dentist, Dr. Weber', when: atDay(at, 0, 10, 30), minutes: 45 }, { title: 'Lunch with Jonas', when: atDay(at, 0, 13), minutes: 60 }, { title: 'Climbing at the Boulderhalle with Sam and Lea', when: atDay(at, 0, 18, 30), minutes: 120 }],
+    });
+    const home = homeOf(user, [
+      doneTurn('m-watch', 'Train strike watch (job)', 'GDL strike called for Monday; your 07:12 to Leipzig is affected. The S-Bahn runs as usual.', at - 2 * HOUR - 20 * MINUTE, { owner: 'pip-routine' }),
+      doneTurn('m-brief', 'Morning check-in (job)', 'Dentist at 10:30, so leave by 10:05. The tax return is two days late: it is the one thing worth doing before noon.\n\nThe bike prices are still being compared; the report follows in a few minutes.', at - 60 * MINUTE, { owner: 'pip-routine' }),
+      doneTurn('m-report', 'Flat insurance (assignment)', 'Your current tariff is fine; switching to the cheapest comparable one saves 14 euros a year, not worth the paperwork.', at - 50 * MINUTE, { owner: 'pip-assignment' }),
+    ], at - 50 * MINUTE);
+    await ctx.objects.writeObject(user, 'chats', home);
+    await ctx.objects.writeObject(user, 'chats', pinnedChat(user, at));
+    await seedBrief(ctx, user, home.uid, 'm-brief', at - 59 * MINUTE);
+    await seedAssignment(ctx, user, { id: 'lab-m-bike', title: 'Bike prices', state: 'working', created: at - 47 * MINUTE, started: at - 46 * MINUTE, origin: { chat: home.uid, turn: 'origin' }, lookups: 3 });
+    await seedAssignment(ctx, user, { id: 'lab-m-flat', title: 'Flat insurance', state: 'done', created: at - 9 * HOUR, started: at - 9 * HOUR, ended: at - 50 * MINUTE, origin: { chat: home.uid, turn: 'origin2' }, report: { chat: home.uid, turn: 'm-report' }, lookups: 6 });
+    return at - 10 * HOUR - 50 * MINUTE;
+  },
+  async 'lab-today-evening'(ctx, user, at) {
+    const day = dayOf(at);
+    await seedAccount(ctx, user, {
+      tasks: [{ text: 'Submit the tax return', due: dayOf(at, -2) }, { text: 'Pack the climbing bag', due: dayOf(at, 1) }, { text: 'Reply to Marta about dinner', due: day },
+        { text: 'Call the landlord', due: day, done: true, updated: at - 6 * HOUR }, { text: 'Renew bike insurance', due: day, done: true, updated: at - 4 * HOUR },
+        { text: TASK_120, due: day, done: true, updated: at - 3 * HOUR }, { text: 'Water the plants on the balcony', done: true, updated: at - HOUR }],
+      events: [{ title: 'Flat viewing, Lindenstraße 12', when: atDay(at, 1, 9), minutes: 45 }, { title: 'Dinner at Marta’s', when: atDay(at, 1, 19), minutes: 150 }],
+      notes: [{ uid: 'day-' + day + '-lab', text: '# ' + day + '\n\nLong day; the viewing tomorrow matters more than the tax return.', pinned: false, created: at - 2 * HOUR, updated: at - 2 * HOUR, deleted: false }],
+    });
+    const home = homeOf(user, [
+      doneTurn('e-brief', 'Morning check-in (job)', 'Dentist at 10:30, so leave by 10:05. The tax return is two days late.', at - 12 * HOUR, { owner: 'pip-routine' }),
+      doneTurn('e-report', 'Bike prices (assignment)', BIKE_REPORT, at - 4 * HOUR - 10 * MINUTE, { owner: 'pip-assignment' }),
+      doneTurn('e-watch', 'Train strike watch (job)', 'The strike was called off; your Monday train runs.', at - 2 * HOUR, { owner: 'pip-routine' }),
+    ], at - 2 * HOUR);
+    await ctx.objects.writeObject(user, 'chats', home);
+    await ctx.objects.writeObject(user, 'chats', pinnedChat(user, at));
+    await seedBrief(ctx, user, home.uid, 'e-brief', at - 12 * HOUR + MINUTE);
+    await seedAssignment(ctx, user, { id: 'lab-e-bike', title: 'Bike prices', state: 'done', created: at - 5 * HOUR, ended: at - 4 * HOUR - 10 * MINUTE, origin: { chat: home.uid, turn: 'origin' }, report: { chat: home.uid, turn: 'e-report' }, lookups: 6 });
+    return at - 6 * HOUR - 25 * MINUTE;
+  },
+  async 'lab-today-empty'(ctx, user) { await seedAccount(ctx, user); return 0; },
+  async 'lab-today-decision'(ctx, user, at) {
+    await seedAccount(ctx, user, {
+      tasks: [{ text: 'Submit the tax return', due: dayOf(at, -2) }, { text: 'Call the landlord', due: dayOf(at) }],
+      events: [{ title: 'Dentist, Dr. Weber', when: atDay(at, 0, 10, 30), minutes: 45 }],
+    });
+    await seedDecision(ctx, user, { runId: 'lab-d1', chat: 'labflat', kind: 'task', title: 'Call Ms. Brandt about the deposit', at: at - 18 * MINUTE });
+    await seedDecision(ctx, user, { runId: 'lab-d2', chat: 'labbike', kind: 'note', title: 'Canyon Grail 7: 1,899 euros, in stock in size M', at: at - 35 * MINUTE });
+    await seedAssignment(ctx, user, { id: 'lab-d-train', title: 'Train times to Leipzig', state: 'failed', created: at - 2 * HOUR, ended: at - 92 * MINUTE, origin: { chat: 'labflat', turn: 'x' }, lookups: 1, error: 'The provider did not answer (502). Try again in a few minutes.' });
+    return at - 10 * HOUR - 50 * MINUTE;
+  },
+};
+/** The big chat with an assignment handed off, a message meanwhile, and (when done) the report under them. */
+async function seedAssignmentChat(ctx, user, state) {
+  await seedAccount(ctx, user);
+  const at = NOW - 6 * MINUTE, home = homeOf(user, [], NOW);
+  const started = { id: 'row-assign', kind: 'tool', name: 'start_assignment', title: 'start an assignment · Bike prices', state: 'done', summary: 'started · Bike prices', input: JSON.stringify({ title: 'Bike prices', brief: BIKE_BRIEF }),
+    result: JSON.stringify({ kind: 'assignment', done: 'started', id: 'lab-a-bike', title: 'Bike prices' }), started: at + 2000, ended: at + 2500, sources: [] };
+  home.turns = [
+    doneTurn('a-origin', 'Find out what the three bikes on my list cost now and tell me later.', 'I am looking into it in the background. Keep writing; the report will arrive here when it is done, usually within a few minutes.', at, { activity: [started] }),
+    doneTurn('a-meanwhile', 'Meanwhile: is the dentist at 10:30 or 11?', '10:30, at Dr. Weber’s. Leave by 10:05 to be on time.', at + MINUTE),
+    ...(state === 'done' ? [doneTurn('a-report', 'Bike prices (assignment)', BIKE_REPORT, NOW - 2 * MINUTE, { owner: 'pip-assignment', activity: lookupRows('a-report', 6, at + 10_000),
+      sources: [{ href: 'https://www.canyon.com/de-de/gravel-bikes/grail-7', title: 'canyon.com' }, { href: 'https://www.rosebikes.de/backroad-grx', title: 'rosebikes.de' }, { href: 'https://www.cube.eu/nuroad-race', title: 'cube.eu' }] })] : []),
+  ];
+  await ctx.objects.writeObject(user, 'chats', home);
+  await seedAssignment(ctx, user, { id: 'lab-a-bike', title: 'Bike prices', state, created: at + 2500, started: at + 3000, ended: state === 'working' ? 0 : NOW - 2 * MINUTE,
+    origin: { chat: home.uid, turn: 'a-origin' }, report: state === 'done' ? { chat: home.uid, turn: 'a-report' } : null, lookups: state === 'failed' ? 2 : 3,
+    error: state === 'failed' ? 'The provider could not be reached (502). Try again in a few minutes.' : '' });
+}
+
+const openToday = async (page, ctx, state, wanted) => {
+  await page.goto(ctx.origin + '/#/today', { waitUntil: 'domcontentloaded' });
+  await untilFor(page, state, 'Today with its data', 15000, words => words.every(word => document.body.innerText.includes(word)), wanted);
+};
+const TODAY_STATES = [
+  { name: 'today-morning', account: 'lab-today-morning', at: () => momentAt(8, 30),
+    async run(page, ctx) { await openToday(page, ctx, 'today-morning', ['leave by 10:05', 'Bike prices', 'Dentist, Dr. Weber', 'Check the tyre pressure']); },
+    text: ['today', /from pip/i, 'since', 'Bike prices', 'working', 'Flat insurance', 'Train strike watch', /appointments/i, /tasks/i, '2 days late'], scroll: 'top' },
+  { name: 'today-morning-end', account: 'lab-today-morning', at: () => momentAt(8, 30),
+    async run(page, ctx) { await openToday(page, ctx, 'today-morning-end', ['Check the tyre pressure', 'Schlafkarte']); },
+    text: [/pinned/i, 'Schlafkarte', 'Check the tyre pressure'], scroll: 'bottom' },
+  { name: 'today-evening', account: 'lab-today-evening', at: () => momentAt(19, 30),
+    async run(page, ctx) { await openToday(page, ctx, 'today-evening', ['evening', 'Flat viewing', 'Pack the climbing bag', 'Bike prices']); },
+    text: ['evening', /tomorrow/i, 'Flat viewing, Lindenstraße 12', /tasks/i, 'Renew bike insurance', /the day/i, 'Bike prices', 'Train strike watch'], scroll: 'top' },
+  { name: 'today-empty', account: 'lab-today-empty', at: () => momentAt(8, 30),
+    async run(page, ctx) { await openToday(page, ctx, 'today-empty', ['Nothing due and nothing planned today.']); },
+    text: ['Nothing due and nothing planned today. Ask pip anything below.'], selectors: ['textarea[aria-label="Message Pip"]'], scroll: 'top' },
+  { name: 'today-decision', account: 'lab-today-decision', at: () => momentAt(8, 30),
+    async run(page, ctx) { await openToday(page, ctx, 'today-decision', ['Call Ms. Brandt', 'Train times to Leipzig']); },
+    text: [/waiting for you/i, 'save task “Call Ms. Brandt about the deposit”', 'Wohnung', 'Failed: The provider did not answer (502).'], scroll: 'top' },
+  ...['working', 'done', 'failed'].map(state => ({
+    name: 'assignment-' + state, account: 'lab-assign-' + state,
+    async run(page, ctx) {
+      await page.goto(ctx.origin + '/#/pip', { waitUntil: 'domcontentloaded' });
+      const line = state === 'working' ? 'assignment · working · 3 lookups' : state === 'done' ? 'assignment · reported' : 'Bike prices failed:';
+      await untilFor(page, 'assignment-' + state, 'the assignment line', 15000, line => document.body.innerText.includes(line), line);
+      // The report is long: the picture starts at the reply that handed the work off, so its line and the report show.
+      if (state === 'done') { await page.evaluate(() => document.querySelector('[data-turn="a-origin"]')?.scrollIntoView({ block: 'start' })); await sleep(300); }
+    },
+    text: ['Find out what the three bikes', 'Meanwhile', ...(state === 'done' ? ['Canyon Grail 7', '· assignment'] : state === 'working' ? ['stop'] : ['try again'])],
+    scroll: state === 'done' ? 'keep' : 'bottom',
+    seed: (ctx, user) => seedAssignmentChat(ctx, user, state),
+  })),
+];
+
 const STATES = [
   {
     name: 'empty',
@@ -538,10 +709,10 @@ const STATES = [
     async run(page, ctx) {
       await until(page, 'today-pinned', 'the pinned chat in this tab', key => localStorage.getItem(key) !== null, chatKey('labpinned'));
       await page.goto(ctx.origin + '/#/today', { waitUntil: 'domcontentloaded' });
-      await until(page, 'today-pinned', 'the pinned card', () => Boolean(document.querySelector('[aria-label="Pinned cards"]')) && document.body.innerText.includes('Schlafkarte'));
+      await until(page, 'today-pinned', 'the pinned card', () => Boolean(document.querySelector('[data-card="kpinned1"]')) && document.body.innerText.includes('Schlafkarte'));
     },
-    text: ['Schlafkarte', 'Schlaf', '7 h 12'],
-    selectors: ['[aria-label="Pinned cards"]', '[data-card="kpinned1"]'],
+    text: ['Schlafkarte', 'Schlaf', '7 h 12', /pinned/i],
+    selectors: ['[data-card="kpinned1"]'],
     scroll: 'top',
   },
   {
@@ -748,7 +919,7 @@ const STATES = [
       const body = await page.evaluate(() => document.body.innerText);
       if (body.includes('Ruhepuls')) throw new Error('the last card elements are already on screen');
     },
-  },
+  },  ...TODAY_STATES,
 ];
 
 // --- browser and page helpers ----------------------------------------------------------------------------------
@@ -793,8 +964,16 @@ async function launchBrowser() {
  * A fresh page on the app, ready to use: the account is signed in, the first sync is done and the live socket has
  * said hello. Attaching to a running reply needs that socket, so it is a condition here rather than a wait later.
  */
-async function openPage(ctx, viewport, state) {
+async function openPage(ctx, viewport, state, shift = 0, visit = null) {
   const page = await ctx.browser.newPage();
+  // The page's clock, moved to the state's moment; everything else (timers, the server) keeps real time.
+  if (shift) await page.evaluateOnNewDocument(shift => {
+    const Real = Date;
+    globalThis.Date = class extends Real { constructor(...args) { super(...(args.length ? args : [Real.now() + shift])); } static now() { return Real.now() + shift; } };
+  }, shift);
+  if (visit) await page.evaluateOnNewDocument(({ user, at }) => {
+    try { if (!localStorage.getItem('pocket:today-seen:' + user)) localStorage.setItem('pocket:today-seen:' + user, String(at)); } catch { /* about:blank has no storage */ }
+  }, visit);
   page.__errors = [];
   page.on('pageerror', error => page.__errors.push(error.message));
   await page.setViewport(viewport);
@@ -816,14 +995,15 @@ async function openPage(ctx, viewport, state) {
   return page;
 }
 
-async function signIn(ctx) {
+async function signIn(ctx, user = USER) {
   const page = await ctx.browser.newPage();
   await page.setViewport(VIEWPORTS.phone);
   const { signInLink } = ctx;
-  await page.goto(ctx.origin + signInLink(USER, ctx.origin).replace(ctx.origin, ''), { waitUntil: 'domcontentloaded' });
+  await page.goto(ctx.origin + signInLink(user, ctx.origin).replace(ctx.origin, ''), { waitUntil: 'domcontentloaded' });
   await page.goto(ctx.origin + '/', { waitUntil: 'domcontentloaded' });
-  await waitNode('sign-in', 'the account to be active', () => page.evaluate(id => localStorage.getItem('pocket:active-account') === id, USER), 20000);
+  await waitNode('sign-in', 'the account to be active', () => page.evaluate(id => localStorage.getItem('pocket:active-account') === id, user), 20000);
   await page.close();
+  ctx.current = user;
 }
 
 /** Open one of the chats written to the scratch database and wait for the text a person would look for. */
@@ -871,7 +1051,15 @@ async function checkState(page, state) {
 }
 
 async function capture(ctx, state, viewportName) {
-  const page = await openPage(ctx, VIEWPORTS[viewportName], state.name);
+  const user = state.account || USER, at = state.at?.() ?? 0;
+  if (state.account && !ctx.seeded.has(user)) {
+    ctx.seeded.add(user);
+    // A Today seed answers when the person last left Today (0: never, a first visit on this device).
+    const visit = state.seed ? (await state.seed(ctx, user), 0) : await SEEDS[user](ctx, user, at);
+    if (visit) ctx.visits.set(user, visit);
+  }
+  if (ctx.current !== user) await signIn(ctx, user);
+  const page = await openPage(ctx, VIEWPORTS[viewportName], state.name, at ? at - Date.now() : 0, ctx.visits.get(user) ? { user, at: ctx.visits.get(user) } : null);
   try {
     await state.run(page, ctx);
     if (state.scroll !== 'keep') await scrollPage(page, state.scroll ?? 'bottom');
@@ -1136,9 +1324,9 @@ async function main() {
     return value;
   };
   const out = resolve(process.cwd(), option('--out') || join(ROOT, 'app/build/reports/chat-lab'));
-  const only = option('--only');
+  const only = option('--only'), wanted = only ? only.split(',') : [];
   const valid = [...STATES.map(state => state.name), 'stream'];
-  if (only && !valid.includes(only)) throw new Error('Unknown state "' + only + '". Use one of: ' + valid.join(', '));
+  for (const name of wanted) if (!valid.includes(name)) throw new Error('Unknown state "' + name + '". Use one of: ' + valid.join(', '));
   mkdirSync(out, { recursive: true });
 
   const dir = mkdtempSync(join(existsSync('/tmp/opencode') ? '/tmp/opencode' : tmpdir(), 'pocket-chat-lab-'));
@@ -1189,12 +1377,13 @@ async function main() {
     for (const chat of [EMPTY_CHAT, LONG_CHAT, FAILED_CHAT, APPROVAL_CHAT, PINNED_CHAT, SCHEDULED_CHAT, HOME_EARLIER_CHAT, HOME_CURRENT_CHAT]) await objects.writeObject(USER, 'chats', chat);
     await workspace.syncDocuments(USER, labDocuments());
 
-    const ctx = { browser: null, origin, out, eventsSecret, insertRun, finishRun, signInLink: auth.signInLink, memory, execute, secrets, keys, background };
+    const ctx = { browser: null, origin, out, eventsSecret, insertRun, finishRun, signInLink: auth.signInLink, memory, execute, secrets, keys, background, objects, workspace,
+      current: '', seeded: new Set(), visits: new Map() };
     browser = ctx.browser = await launchBrowser();
     await signIn(ctx);
     console.log('chat lab → ' + out);
 
-    const selected = only ? STATES.filter(state => state.name === only) : STATES;
+    const selected = only ? STATES.filter(state => wanted.includes(state.name)) : STATES;
     for (const state of selected) {
       for (const viewport of ['phone', 'desktop']) {
         // Capturing many states opens more pages than Better Auth's one-minute limit counts; clearing the scratch
@@ -1208,7 +1397,7 @@ async function main() {
         }
       }
     }
-    if (!only || only === 'stream') {
+    if (!only || wanted.includes('stream')) {
       await execute({ sql: 'DELETE FROM pocket_rate_limit' });
       try {
         await measureStream(ctx);
@@ -1220,7 +1409,7 @@ async function main() {
     const pictures = selected.flatMap(state => ['phone', 'desktop'].map(viewport => join(out, `${state.name}-${viewport}.png`)));
     const missing = pictures.filter(file => !existsSync(file));
     if (missing.length) failures.push('missing pictures: ' + missing.join(', '));
-    if (!failures.length) console.log('chat lab: done' + (!only || only === 'stream' ? ', measured stream written to ' + join(out, 'stream.json') : ''));
+    if (!failures.length) console.log('chat lab: done' + (!only || wanted.includes('stream') ? ', measured stream written to ' + join(out, 'stream.json') : ''));
   } finally {
     await browser?.close().catch(() => {});
     if (server) {

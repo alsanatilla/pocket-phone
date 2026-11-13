@@ -9,12 +9,16 @@ import { toastError } from "../../ui/toast/toast.ts";
 // at the right (stop while it works, try again once it failed or was stopped). A retry is followed, so the line says
 // what the newest attempt does. The report itself is a turn of its own further down the big chat; the line links to it.
 
-/** The assignments the reply `turnId` in `chatId` started, live. Renders nothing while the list is unknown. */
-export function AssignmentStatus({ chatId, turnId }: { chatId: string; turnId: string }) {
+/**
+ * The assignments a reply started (`started`, from its tool calls), live. One the list does not hold (signed out, not
+ * read yet, or older than the list) is still named, without a state or a key.
+ */
+export function AssignmentStatus({ started }: { started: { id: string; title: string }[] }) {
   const work = useAssignments();
-  const started = work.assignments.filter(item => !item.retryOf && item.origin?.chat === chatId && item.origin.turn === turnId);
-  if (!started.length) return null;
-  return <div className="space-y-1">{started.map(item => <Line key={item.id} item={latestOf(item, work.assignments)} />)}</div>;
+  return <div className="space-y-1">{started.map(({ id, title }) => {
+    const item = work.assignments.find(entry => entry.id === id);
+    return item ? <Line key={id} item={latestOf(item, work.assignments)} /> : <p key={id} className="text-xs text-dim">assignment{title ? " · " + title : ""}</p>;
+  })}</div>;
 }
 
 /** Scrolls to the report when it is on screen; otherwise the link opens the chat it is in. */
