@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Today and assignments</title>
+<!--
+  A mock for approval (docs/DESIGN.md section 19): Today, and an assignment's status in the Pip chat, at 390 x 844.
+  Nothing here is built yet. Colours, sizes and shapes copy src/app/styles/global.css, src/app/ui/kit.tsx,
+  src/app/components/ui/button.tsx, src/app/ui/SendButton.tsx and src/app/features/pip/Turn.tsx at phone size
+  (text-sm 14px, text-xs 12px on touch). The strip above the phones chooses a state; it is not part of the design.
+-->
+<style>
+  @font-face { font-family: "IBM Plex Mono"; src: url("../../public/fonts/IBMPlexMono-Regular.ttf") format("truetype"); font-weight: 400; }
+  @font-face { font-family: "IBM Plex Mono"; src: url("../../public/fonts/IBMPlexMono-Medium.ttf") format("truetype"); font-weight: 500; }
+  @font-face { font-family: "VT323"; src: url("../../public/fonts/VT323-Regular.ttf") format("truetype"); }
+  :root {
+    --background: #0d0d0b; --foreground: #d9d3c7; --hi: #f4eee3; --muted-foreground: #9c9484; --dim: #7d776b;
+    --secondary: #1a1915; --accent: #1d1b16; --popover: #151411; --border: #24221d; --primary: #ecc981; --destructive: #efa58e; --tick: #6b655a;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; --pixel: "VT323", "IBM Plex Mono", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--background); color: var(--foreground); font-family: var(--mono); font-size: 14px; line-height: 1.6; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+  /* The harness: the state strip and the two phones. Not part of the design. */
+  .harness { max-width: 860px; margin: 0 auto; padding: 16px; }
+  .harness h1 { font-size: 12px; font-weight: 400; color: var(--dim); margin-bottom: 8px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-bottom: 16px; }
+  .controls p { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin-bottom: 4px; }
+  .phones { display: flex; flex-wrap: wrap; gap: 24px; }
+  .phone-label { font-size: 12px; color: var(--dim); margin-bottom: 4px; }
+  .phone { width: 390px; max-width: 100%; height: 844px; border: 1px solid var(--border); overflow-y: auto; overflow-x: hidden; position: relative; background: var(--background); }
+
+  /* Segmented: one strip, the chosen one lifted (kit.tsx). */
+  .seg { display: inline-flex; gap: 2px; border-radius: 6px; background: var(--secondary); padding: 3px; }
+  .seg button { border-radius: 4px; padding: 3px 10px; font-size: 12px; color: var(--dim); }
+  .seg button[aria-selected="true"] { background: #2c2922; color: var(--hi); font-weight: 500; }
+
+  /* The page column. */
+  .page { min-height: 100%; display: flex; flex-direction: column; padding: 0 16px; }
+  .header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--border); background: var(--background); }
+  .brand { font-family: var(--pixel); font-size: 22px; line-height: 1; color: var(--primary); }
+  .nav { display: flex; gap: 12px; font-size: 12px; color: var(--dim); }
+  .nav span { display: flex; min-height: 44px; align-items: center; }
+  .nav .on { color: var(--hi); font-weight: 500; }
+  .sync { margin-left: auto; width: 44px; height: 44px; display: grid; place-items: center end; }
+  .sync i { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); display: block; }
+  .cog { width: 44px; height: 44px; margin-right: -12px; display: grid; place-items: center; color: var(--dim); }
+
+  .title { padding-top: 16px; margin-bottom: 12px; }
+  .title h2 { font-family: var(--pixel); font-size: 30px; line-height: 1; color: var(--hi); font-weight: 400; }
+  .title p { margin-top: 4px; font-size: 12px; color: var(--dim); }
+  .brief { color: var(--foreground); margin-bottom: 24px; }
+  .brief p + p { margin-top: 12px; }
+  .empty { color: var(--muted-foreground); margin-bottom: 24px; }
+
+  section { margin-bottom: 24px; }
+  .label { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; font-size: 10.5px; line-height: 20px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+  .label span:first-child { flex: 1; min-width: 0; }
+  .label .note { text-transform: none; letter-spacing: normal; }
+  .label.late { color: var(--destructive); }
+
+  /* Row (kit.tsx): a name and at most one quiet note; 44px to the touch; no rule between rows. */
+  .row { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; padding: 8px 0; width: 100%; text-align: left; }
+  a.row, button.row { border-radius: 5px; text-decoration: none; color: inherit; }
+  .row .lead { display: flex; height: 1.6em; align-items: center; flex-shrink: 0; color: var(--dim); }
+  .row .lead.time { font-size: 12px; width: 5ch; }
+  .row .body { flex: 1; min-width: 0; }
+  .row .main { display: block; color: var(--hi); overflow-wrap: anywhere; }
+  .row .main.done { color: var(--dim); text-decoration: line-through; }
+  .row .sub { display: block; font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .sub.error { color: var(--destructive); white-space: normal; }
+  .row .end { display: flex; min-height: 1.6em; align-items: center; gap: 8px; flex-shrink: 0; font-size: 12px; color: var(--dim); }
+  .row .end.late { color: var(--destructive); }
+  .dots { width: 44px; height: 44px; margin: -6px -10px -6px -2px; display: grid; place-items: center; color: var(--dim); border-radius: 5px; flex-shrink: 0; }
+
+  /* Tick (kit.tsx). */
+  .tick { position: relative; width: 15px; height: 15px; border-radius: 3px; border: 1.5px solid var(--tick); display: grid; place-items: center; }
+  .tick::before { content: ""; position: absolute; inset: -14px; }
+  .tick[aria-checked="true"] { background: var(--tick); }
+  .tick svg { width: 10px; height: 10px; color: var(--background); }
+
+  /* Key (button.tsx): 28px, 5px radius, quiet by default. */
+  .key { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 5px; font-size: 12px; background: var(--secondary); color: var(--hi); white-space: nowrap; flex-shrink: 0; }
+  .key::before { content: ""; position: absolute; inset: -8px 0; }
+  .key.dim { color: var(--dim); }
+  .key.danger { color: var(--destructive); }
+  .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+  /* Figures (kit.tsx). */
+  .figures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px 14px; margin-top: 4px; }
+  .figure .flabel { font-size: 10.5px; line-height: 20px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .figure .value { font-size: 22px; font-weight: 500; line-height: 1.3; color: var(--hi); }
+  .figure .value small { margin-left: 4px; font-size: 11px; font-weight: 400; color: var(--dim); }
+  .cardline { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+  .cardline p { flex: 1; min-width: 0; font-size: 12px; color: var(--dim); }
+  .cardtitle { color: var(--hi); }
+
+  /* The page's main field: a prompt line at the bottom, the one line above it (PipComposer, SendButton). */
+  .grow { flex: 1; }
+  .composer { position: sticky; bottom: 0; background: var(--background); padding: 8px 0 12px; }
+  .composer form { border-top: 1px solid var(--border); padding-top: 4px; }
+  .prompt { display: flex; align-items: flex-start; gap: 8px; }
+  .prompt .marker { padding-top: 10px; font-weight: 500; color: var(--primary); }
+  .prompt .field { flex: 1; min-height: 44px; padding: 10px 0; color: var(--dim); font-size: 16px; line-height: 1.5; }
+  .bar { display: flex; min-height: 44px; align-items: center; gap: 4px; }
+  .send { width: 32px; height: 32px; border-radius: 2px; display: flex; align-items: center; justify-content: center; background: var(--secondary); color: var(--dim); }
+  .send.inline { margin-top: 6px; }
+
+  /* The chat (Turn.tsx). */
+  .pipline { position: sticky; top: 45px; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 8px 0 4px; margin-bottom: 12px; background: var(--background); }
+  .thread { display: flex; flex-direction: column; gap: 32px; padding-bottom: 16px; }
+  .ask { display: flex; gap: 8px; font-weight: 500; color: var(--hi); }
+  .ask .m { color: var(--primary); }
+  .ask .m.quiet { color: var(--dim); }
+  .when { margin-left: 2ch; margin-top: 2px; font-size: 11px; color: var(--dim); }
+  .reply { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
+  .reply p { color: var(--foreground); }
+  .status { display: flex; align-items: center; gap: 12px; }
+  .status p { flex: 1; min-width: 0; font-size: 12px; color: var(--dim); }
+  .status p.error { color: var(--destructive); }
+  .sources { font-size: 11px; color: var(--dim); }
+  a.link { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-weight: 400; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); padding: 0 0 4px 12px; }
+  td { padding: 4px 0 4px 12px; color: var(--foreground); vertical-align: top; }
+  th:first-child, td:first-child { padding-left: 0; }
+  td.num, th.num { text-align: right; }
+  td.num { color: var(--hi); }
+
+  [hidden] { display: none !important; }
+  .alone { padding: 0; max-width: none; } .alone h1, .alone .controls, .alone .phone-label { display: none; } .alone .phone { border: 0; }
+  @media (max-width: 440px) { .harness { padding: 16px 0; } .harness h1, .controls, .phone-label { padding: 0 16px; } .phone { border-left: 0; border-right: 0; } }
+</style>
+</head>
+<body>
+<div class="harness">
+  <h1>Mock for approval · not built · Today and an assignment's status in the chat · 390 × 844</h1>
+  <div class="controls">
+    <div>
+      <p>today</p>
+      <div class="seg" role="tablist" aria-label="Today state" data-group="today">
+        <button role="tab" data-value="morning" aria-selected="true">morning</button>
+        <button role="tab" data-value="evening" aria-selected="false">evening</button>
+        <button role="tab" data-value="approval" aria-selected="false">approval</button>
+        <button role="tab" data-value="empty" aria-selected="false">empty</button>
+      </div>
+    </div>
+    <div>
+      <p>assignment</p>
+      <div class="seg" role="tablist" aria-label="Assignment state" data-group="assignment">
+        <button role="tab" data-value="working" aria-selected="false">working</button>
+        <button role="tab" data-value="done" aria-selected="true">completed</button>
+        <button role="tab" data-value="failed" aria-selected="false">failed</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="phones">
+    <div>
+      <p class="phone-label">today</p>
+      <div class="phone" id="today">
+        <div class="page">
+          <header class="header">
+            <span class="brand">pocket</span>
+            <nav class="nav"><span class="on">today</span><span>notes</span><span>tasks</span><span>pip</span></nav>
+            <span class="sync"><i></i></span>
+            <span class="cog" aria-label="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.2 2h-.4a2 2 0 0 0-2 2v.2a2 2 0 0 1-1 1.7l-.4.2a2 2 0 0 1-2 0l-.2-.1a2 2 0 0 0-2.7.7l-.2.4a2 2 0 0 0 .7 2.7l.2.1a2 2 0 0 1 1 1.7v.5a2 2 0 0 1-1 1.7l-.2.1a2 2 0 0 0-.7 2.7l.2.4a2 2 0 0 0 2.7.7l.2-.1a2 2 0 0 1 2 0l.4.2a2 2 0 0 1 1 1.7v.2a2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2v-.2a2 2 0 0 1 1-1.7l.4-.2a2 2 0 0 1 2 0l.2.1a2 2 0 0 0 2.7-.7l.2-.4a2 2 0 0 0-.7-2.7l-.2-.1a2 2 0 0 1-1-1.7v-.5a2 2 0 0 1 1-1.7l.2-.1a2 2 0 0 0 .7-2.7l-.2-.4a2 2 0 0 0-2.7-.7l-.2.1a2 2 0 0 1-2 0l-.4-.2a2 2 0 0 1-1-1.7V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></span>
+          </header>
+
+          <div class="title">
+            <h2>today</h2>
+            <p data-show="morning approval">Fri 14 Nov</p>
+            <p data-show="evening">Fri 14 Nov · evening</p>
+            <p data-show="empty">Fri 14 Nov</p>
+          </div>
+
+          <!-- Empty: one sentence, then the page's main action (the field at the bottom). -->
+          <p class="empty" data-show="empty">Nothing due and nothing planned today. Ask pip anything below.</p>
+
+          <!-- Pip's briefing: running text, two or three sentences, no label (the title says what it is). -->
+          <div class="brief" data-show="morning approval">
+            <p>Dentist at 10:30, so leave by 10:05. The tax return is two days late: it is the one thing worth doing before noon.
+              <span data-assignment="done">The bike prices came back overnight; the Canyon is 180 euros under the others.</span>
+              <span data-assignment="working">I am still comparing the bike prices; the report follows in a few minutes.</span>
+              <span data-assignment="failed">The bike price check failed overnight; it can be tried again below.</span></p>
+          </div>
+          <div class="brief" data-show="evening">
+            <p>Four tasks done today; the tax return is still open. Tomorrow starts with the flat viewing at 09:00, Lindenstraße 12.
+              <span data-assignment="done">The bike report is in pip.</span>
+              <span data-assignment="working">The bike prices are still being compared.</span>
+              <span data-assignment="failed">The bike price check failed; try it again below.</span></p>
+          </div>
+
+          <!-- Pending decisions: replies that wait for the person. The row opens the chat at the change. -->
+          <section data-show="approval">
+            <p class="label"><span>waiting for you</span></p>
+            <a class="row" href="#">
+              <span class="body"><span class="main">Save task “Call Ms. Brandt about the deposit”</span><span class="sub">flat · asked 08:12</span></span>
+            </a>
+            <a class="row" href="#">
+              <span class="body"><span class="main">Remove job “Train strike watch”</span><span class="sub">pip · asked 07:55</span></span>
+            </a>
+          </section>
+
+          <!-- What pip did while the person was away, and what it is working on. Since the last visit. -->
+          <section data-show="morning evening approval">
+            <p class="label"><span>from pip</span><span class="note" data-show="morning approval">since 21:40</span><span class="note" data-show="evening">since 13:05</span></p>
+            <div class="row" data-assignment="working">
+              <span class="body"><span class="main">Bike prices</span><span class="sub">3 lookups so far · started 07:44</span></span>
+              <span class="end">working<button class="dots" aria-label="Bike prices: more">⋯</button></span>
+            </div>
+            <a class="row" href="#" data-assignment="done">
+              <span class="body"><span class="main">Bike prices</span><span class="sub">Canyon Grail 7 is cheapest at 1,899 euros, in stock.</span></span>
+              <span class="end">07:40</span>
+            </a>
+            <div class="row" data-assignment="failed">
+              <span class="body"><span class="main">Bike prices</span><span class="sub error">Failed: the provider could not be reached.</span></span>
+              <span class="end">06:58<button class="dots" aria-label="Bike prices: more">⋯</button></span>
+            </div>
+            <a class="row" href="#" data-show="morning approval">
+              <span class="body"><span class="main">Nightly brief</span><span class="sub">The tax return was moved twice and is two days late.</span></span>
+              <span class="end">22:00</span>
+            </a>
+            <a class="row" href="#" data-show="morning approval">
+              <span class="body"><span class="main">Train strike watch</span><span class="sub">GDL strike called for Monday; your 07:12 to Leipzig is affected.</span></span>
+              <span class="end">06:10</span>
+            </a>
+            <a class="row" href="#" data-show="evening">
+              <span class="body"><span class="main">Flat insurance compared</span><span class="sub">The current tariff is fine; switching saves 14 euros a year.</span></span>
+              <span class="end">15:20</span>
+            </a>
+          </section>
+
+          <section data-show="morning approval">
+            <p class="label"><span>appointments</span></p>
+            <div class="row"><span class="lead time">10:30</span><span class="body"><span class="main">Dentist, Dr. Weber</span></span><span class="end">45 min</span></div>
+            <div class="row"><span class="lead time">13:00</span><span class="body"><span class="main">Lunch with Jonas</span></span></div>
+            <div class="row"><span class="lead time">18:30</span><span class="body"><span class="main">Climbing</span></span><span class="end">Boulderhalle</span></div>
+          </section>
+          <section data-show="evening">
+            <p class="label"><span>tomorrow</span></p>
+            <div class="row"><span class="lead time">09:00</span><span class="body"><span class="main">Flat viewing, Lindenstraße 12</span></span></div>
+            <div class="row"><span class="lead time">19:00</span><span class="body"><span class="main">Dinner at Marta’s</span></span></div>
+          </section>
+
+          <section data-show="morning approval">
+            <p class="label"><span>tasks</span></p>
+            <div class="row"><span class="lead"><button class="tick" role="checkbox" aria-checked="false" aria-label="Done: Submit the tax return"></button></span><span class="body"><span class="main">Submit the tax return</span></span><span class="end late">2 days late</span></div>
+            <div class="row"><span class="lead"><button class="tick" role="checkbox" aria-checked="false" aria-label="Done: Call the landlord"></button></span><span class="body"><span class="main">Call the landlord</span></span><span class="end">today</span></div>
+            <div class="row"><span class="lead"><button class="tick" role="checkbox" aria-checked="false" aria-label="Done: Write to the Hausverwaltung"></button></span><span class="body"><span class="main">Write to the Hausverwaltung about the broken intercom in the stairwell and the missing name plate</span></span><span class="end">today</span></div>
+            <div class="row"><span class="lead"><button class="tick" role="checkbox" aria-checked="false" aria-label="Done: Renew bike insurance"></button></span><span class="body"><span class="main">Renew bike insurance</span></span><span class="end">today</span></div>
+          </section>
+          <section data-show="evening">
+            <p class="label"><span>tasks</span></p>
+            <div class="row"><span class="lead"><button class="tick" role="checkbox" aria-checked="false" aria-label="Done: Submit the tax return"></button></span><span class="body"><span class="main">Submit the tax return</span></span><span class="end late">2 days late</span></div>
+            <div class="row"><span class="lead"><button class="tick" role="checkbox" aria-checked="false" aria-label="Done: Pack the climbing bag"></button></span><span class="body"><span class="main">Pack the climbing bag</span></span><span class="end">tomorrow</span></div>
+            <div class="row"><span class="lead"><button class="tick" role="checkbox" aria-checked="true" aria-label="Not done: Call the landlord"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></button></span><span class="body"><span class="main done">Call the landlord</span></span></div>
+            <div class="row"><span class="lead"><button class="tick" role="checkbox" aria-checked="true" aria-label="Not done: Renew bike insurance"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></button></span><span class="body"><span class="main done">Renew bike insurance</span></span></div>
+          </section>
+
+          <!-- A pinned card: drawn as in the chat, without a frame; its note line and one key under it. -->
+          <section data-show="morning evening approval">
+            <p class="label"><span>pinned</span></p>
+            <p class="cardtitle">Electricity, November</p>
+            <div class="figures">
+              <div class="figure"><p class="flabel">used</p><p class="value">214<small>kWh</small></p></div>
+              <div class="figure"><p class="flabel">cost</p><p class="value">61<small>€</small></p></div>
+              <div class="figure"><p class="flabel">vs oct</p><p class="value">−8<small>%</small></p></div>
+            </div>
+            <div class="cardline"><p data-show="morning approval">pinned · updated 06:00</p><p data-show="evening">pinned · updated 18:00</p><button class="key">more</button></div>
+          </section>
+
+          <div class="grow"></div>
+          <!-- The bottom field: what is sent here goes to pip's one big chat and opens it. -->
+          <div class="composer">
+            <form onsubmit="return false">
+              <div class="prompt"><span class="marker">›</span><div class="field">message pip</div><button class="send inline" aria-label="Send to pip" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg></button></div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p class="phone-label">pip · an assignment's status in the chat</p>
+      <div class="phone" id="chat">
+        <div class="page">
+          <header class="header">
+            <span class="brand">pocket</span>
+            <nav class="nav"><span>today</span><span>notes</span><span>tasks</span><span class="on">pip</span></nav>
+            <span class="sync"><i></i></span>
+            <span class="cog" aria-label="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.2 2h-.4a2 2 0 0 0-2 2v.2a2 2 0 0 1-1 1.7l-.4.2a2 2 0 0 1-2 0l-.2-.1a2 2 0 0 0-2.7.7l-.2.4a2 2 0 0 0 .7 2.7l.2.1a2 2 0 0 1 1 1.7v.5a2 2 0 0 1-1 1.7l-.2.1a2 2 0 0 0-.7 2.7l.2.4a2 2 0 0 0 2.7.7l.2-.1a2 2 0 0 1 2 0l.4.2a2 2 0 0 1 1 1.7v.2a2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2v-.2a2 2 0 0 1 1-1.7l.4-.2a2 2 0 0 1 2 0l.2.1a2 2 0 0 0 2.7-.7l.2-.4a2 2 0 0 0-.7-2.7l-.2-.1a2 2 0 0 1-1-1.7v-.5a2 2 0 0 1 1-1.7l.2-.1a2 2 0 0 0 .7-2.7l-.2-.4a2 2 0 0 0-2.7-.7l-.2.1a2 2 0 0 1-2 0l-.4-.2a2 2 0 0 1-1-1.7V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></span>
+          </header>
+          <div class="pipline">
+            <button class="key dim">pip <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button>
+            <span class="grow"></span>
+            <button class="key dim">jobs</button><button class="key dim">new</button>
+          </div>
+
+          <div class="thread">
+            <article>
+              <div class="ask"><span class="m">›</span><p>Find out what the three bikes on my list cost now and tell me later.</p></div>
+              <p class="when">08:02</p>
+              <div class="reply">
+                <p>I am looking into it in the background. Keep writing; the report will arrive here when it is done, usually within a few minutes.</p>
+                <!-- The assignment's one line under the reply that started it, like a card's line: its state left, one key right. -->
+                <div class="status" data-assignment="working"><p>assignment · working · 3 lookups</p><button class="key">stop</button></div>
+                <div class="status" data-assignment="done"><p>assignment · reported 08:06, below</p></div>
+                <div class="status" data-assignment="failed"><p class="error">The bike price check failed: the provider could not be reached.</p><button class="key">try again</button></div>
+              </div>
+            </article>
+
+            <article>
+              <div class="ask"><span class="m">›</span><p>Meanwhile: is the dentist at 10:30 or 11?</p></div>
+              <p class="when">08:03</p>
+              <div class="reply"><p>10:30, at Dr. Weber’s. Leave by 10:05 to be on time.</p></div>
+            </article>
+
+            <!-- The report: a turn of its own in the big chat, where it arrived, after what was said meanwhile. -->
+            <article data-assignment="done">
+              <div class="ask"><span class="m quiet">›</span><p>Bike prices</p></div>
+              <p class="when">08:06 · assignment</p>
+              <div class="reply">
+                <div><button class="key dim">6 steps · 48 s</button></div>
+                <p>The Canyon Grail 7 is the cheapest of the three at 1,899 euros, 180 under the next, and it is in stock in your size. The Rose Backroad dropped 100 euros this week.</p>
+                <table>
+                  <thead><tr><th>bike</th><th class="num">price</th><th>stock</th></tr></thead>
+                  <tbody>
+                    <tr><td>Canyon Grail 7</td><td class="num">1,899 €</td><td>in stock</td></tr>
+                    <tr><td>Rose Backroad GRX</td><td class="num">2,079 €</td><td>3 weeks</td></tr>
+                    <tr><td>Cube Nuroad Race</td><td class="num">2,149 €</td><td>in stock</td></tr>
+                  </tbody>
+                </table>
+                <p>If you want one, tell me and I will add a task to order it.</p>
+                <p class="sources"><a class="link" href="#">canyon.com</a> · <a class="link" href="#">rosebikes.de</a> · <a class="link" href="#">cube.eu</a></p>
+              </div>
+            </article>
+          </div>
+
+          <div class="grow"></div>
+          <div class="composer">
+            <form onsubmit="return false">
+              <div class="prompt"><span class="marker">›</span><div class="field">message pip</div></div>
+              <div class="bar"><button class="key dim">deepseek v4.1 flash</button><span class="grow"></span><button class="send" aria-label="Send" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg></button></div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  // Shows the chosen state: elements with data-show list the Today states they belong to; data-assignment the one
+  // assignment state. Nothing else is interactive.
+  // The address can choose too, for pictures: ?today=evening&assignment=working&only=today&full=1 shows one phone,
+  // without the strip, at its whole length.
+  const query = new URLSearchParams(location.search);
+  const state = { today: query.get('today') || 'morning', assignment: query.get('assignment') || 'done' };
+  if (query.get('only')) {
+    document.querySelector('.harness').classList.add('alone');
+    for (const id of ['today', 'chat']) if (id !== query.get('only')) document.getElementById(id).parentElement.hidden = true;
+  }
+  if (query.get('full')) document.querySelectorAll('.phone').forEach(phone => { phone.style.height = 'auto'; phone.style.minHeight = '844px'; });
+  function draw() {
+    document.querySelectorAll('[data-show]').forEach(element => {
+      const today = state.today === 'approval' ? ['approval'] : [state.today];
+      element.hidden = !element.dataset.show.split(' ').some(name => today.includes(name));
+    });
+    document.querySelectorAll('[data-assignment]').forEach(element => { element.hidden = element.dataset.assignment !== state.assignment; });
+    document.querySelectorAll('.seg').forEach(group => group.querySelectorAll('button').forEach(button => button.setAttribute('aria-selected', String(state[group.dataset.group] === button.dataset.value))));
+  }
+  document.querySelectorAll('.seg button').forEach(button => button.addEventListener('click', () => { state[button.closest('.seg').dataset.group] = button.dataset.value; draw(); }));
+  draw();
+</script>
+</body>
+</html>
