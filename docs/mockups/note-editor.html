@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Note editor</title>
+<!--
+  A mock for approval (docs/DESIGN.md section 19): one note, edited and read, at 390 x 844. Nothing here is built.
+  Colours, sizes and shapes copy src/app/styles/global.css, src/app/ui/kit.tsx, src/app/components/ui/button.tsx and
+  the editor's own CodeMirror styling (.cm-note) at phone size (text-sm 14px, text-xs 12px, the note's text 16px).
+  The strip above the phone chooses a state; it is not part of the design, and nothing in the phone saves anything.
+
+  What the editor does today, and keeps (src/app/features/notes/useNoteEditor.ts, NoteEditor.tsx, NoteText.tsx):
+  saves 600 ms after typing stops, 150 ms after Enter or an arrow, on leaving; keeps every keystroke as a draft on the
+  phone; Markdown drawn in place while writing (headings, bold, code, bullets, quotes, ">>" thoughts); a reading view
+  (Cmd+E); pin; delete on all devices; finished ">>" lines park as thoughts. In the classic editor only, and offered
+  here through the menu: earlier versions (history), "ask pip" about the note or the selection, and the paper page of a
+  note read from a handwritten journal page. Not existing anywhere today, and shown here as a proposal: noticing that
+  another device changed the note while it was being written (today the newer save simply wins).
+-->
+<style>
+  @font-face { font-family: "IBM Plex Mono"; src: url("../../public/fonts/IBMPlexMono-Regular.ttf") format("truetype"); font-weight: 400; }
+  @font-face { font-family: "IBM Plex Mono"; src: url("../../public/fonts/IBMPlexMono-Medium.ttf") format("truetype"); font-weight: 500; }
+  @font-face { font-family: "VT323"; src: url("../../public/fonts/VT323-Regular.ttf") format("truetype"); }
+  :root {
+    --background: #0d0d0b; --foreground: #d9d3c7; --hi: #f4eee3; --muted-foreground: #9c9484; --dim: #7d776b;
+    --secondary: #1a1915; --accent: #1d1b16; --popover: #151411; --border: #24221d; --primary: #ecc981; --destructive: #efa58e; --tick: #6b655a;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; --pixel: "VT323", "IBM Plex Mono", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--background); color: var(--foreground); font-family: var(--mono); font-size: 14px; line-height: 1.6; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+  /* The harness: not part of the design. */
+  .harness { max-width: 900px; margin: 0 auto; padding: 16px; }
+  .harness h1 { font-size: 12px; font-weight: 400; color: var(--dim); margin-bottom: 8px; }
+  .controls { margin-bottom: 16px; }
+  .controls p { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin-bottom: 4px; }
+  .states { display: flex; flex-wrap: wrap; gap: 6px; }
+  .states button { font-size: 12px; padding: 3px 10px; border-radius: 4px; background: var(--secondary); color: var(--dim); }
+  .states button[aria-pressed="true"] { background: #2c2922; color: var(--hi); font-weight: 500; }
+  .why { margin-top: 10px; font-size: 12px; color: var(--muted-foreground); max-width: 640px; min-height: 40px; }
+  .phone { width: 390px; max-width: 100%; height: 844px; border: 1px solid var(--border); overflow-y: auto; overflow-x: hidden; position: relative; background: var(--background); }
+
+  /* The app's header, as it is. */
+  .page { min-height: 100%; display: flex; flex-direction: column; padding: 0 16px; }
+  .header { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--border); background: var(--background); }
+  .brand { font-family: var(--pixel); font-size: 22px; line-height: 1; color: var(--primary); }
+  .nav { display: flex; gap: 12px; font-size: 12px; color: var(--dim); }
+  .nav span { display: flex; min-height: 44px; align-items: center; }
+  .nav .on { color: var(--hi); font-weight: 500; }
+  .sync { margin-left: auto; width: 44px; height: 44px; display: grid; place-items: center end; }
+  .sync i { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); display: block; }
+  .sync.off i { background: transparent; border: 1.5px solid var(--dim); }
+  .cog { width: 44px; height: 44px; margin-right: -12px; display: grid; place-items: center; color: var(--dim); }
+
+  /* The note's bar: back key, what happened to the words, the two views, the note's menu. No line under it. */
+  .bar { position: sticky; top: 45px; z-index: 2; display: flex; align-items: center; gap: 8px; min-height: 52px; background: var(--background); }
+  .status { min-width: 0; flex: 1; font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status.warn { color: var(--destructive); }
+  .key { position: relative; display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 5px; background: var(--secondary); color: var(--hi); font-size: 12px; white-space: nowrap; }
+  .key::before { content: ""; position: absolute; inset: -8px 0; }
+  .key.go { background: var(--primary); color: var(--background); font-weight: 500; }
+  .seg { display: inline-flex; gap: 2px; border-radius: 6px; background: var(--secondary); padding: 3px; flex-shrink: 0; }
+  .seg button { position: relative; border-radius: 4px; padding: 3px 10px; font-size: 12px; color: var(--dim); }
+  .seg button::before { content: ""; position: absolute; inset: -10px 0; }
+  .seg button[aria-selected="true"] { background: #2c2922; color: var(--hi); font-weight: 500; }
+  .dots { width: 44px; height: 44px; margin-right: -10px; display: grid; place-items: center; color: var(--dim); border-radius: 5px; flex-shrink: 0; }
+  .dots[aria-expanded="true"] { color: var(--hi); }
+
+  /* A sentence that belongs to the note as a whole (offline, a conflict, a failed save), and its keys. */
+  .notice { margin: 4px 0 8px; font-size: 14px; color: var(--muted-foreground); }
+  .notice.error { color: var(--destructive); }
+  .keys { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 16px; }
+
+  /* The note itself: 16px as the editor draws it, on the page's one left edge. */
+  .note { flex: 1; padding: 8px 0 64px; font-size: 16px; line-height: 1.75; color: var(--foreground); overflow-wrap: anywhere; }
+  .note p, .note .line { min-height: 1.75em; }
+  .note .h1 { font-family: var(--pixel); font-size: 30px; line-height: 1.05; color: var(--hi); margin: 4px 0 8px; }
+  .note .h2 { font-weight: 500; color: var(--hi); }
+  .note .mark { color: var(--dim); }
+  .note strong { font-weight: 500; color: var(--hi); }
+  .note code { background: var(--secondary); border-radius: 5px; padding: 0 4px; color: var(--hi); font-size: 14px; }
+  .note .bullet::before { content: "• "; color: var(--dim); }
+  .note .thought { color: var(--muted-foreground); }
+  .note .thought .mark, .note .thought::marker { color: var(--dim); }
+  .note .parked { font-size: 12px; color: var(--dim); }
+  .note a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+  .note .caret { display: inline-block; width: 2px; height: 1.1em; margin-left: 1px; vertical-align: -0.15em; background: var(--primary); }
+  .note .placeholder { color: var(--dim); white-space: pre-wrap; }
+  .note .first { color: var(--hi); }
+  .read p + p, .read ul + p, .read p + ul { margin-top: 12px; }
+  .read ul { list-style: none; }
+  .read li::before { content: "– "; color: var(--dim); }
+  .hint { font-size: 12px; color: var(--dim); }
+
+  /* Floating surfaces: one outline, no shadow. */
+  .menu { position: absolute; z-index: 4; right: 16px; width: 210px; background: var(--popover); border: 1px solid var(--border); border-radius: 2px; padding: 4px; }
+  .menu button { display: flex; width: 100%; min-height: 44px; align-items: center; padding: 0 10px; font-size: 14px; color: var(--foreground); border-radius: 2px; text-align: left; }
+  .menu button:hover { background: var(--secondary); }
+  .menu button.danger { color: var(--destructive); }
+  .scrim { position: absolute; inset: 0; z-index: 4; background: rgba(0, 0, 0, .5); }
+  .sheet { position: absolute; z-index: 5; left: 0; right: 0; bottom: 0; background: var(--popover); border-top: 1px solid var(--border); padding: 16px 16px 24px; }
+  .sheet h3 { font-family: var(--pixel); font-size: 26px; font-weight: 400; line-height: 1; color: var(--hi); margin-bottom: 12px; }
+  .label { font-size: 10.5px; line-height: 20px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 12px 0 4px; }
+  .row { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; padding: 8px 0; }
+  .row .main { flex: 1; min-width: 0; }
+  .row .main b { display: block; font-weight: 400; color: var(--hi); }
+  .row .main small { display: block; font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .end { font-size: 12px; color: var(--dim); }
+  .row.chosen { background: var(--secondary); border-radius: 5px; margin: 0 -10px; padding: 8px 10px; }
+</style>
+</head>
+<body>
+<div class="harness">
+  <h1>Note editor · mock for approval · 390 × 844</h1>
+  <div class="controls">
+    <p>state</p>
+    <div class="states" id="states"></div>
+    <p class="why" id="why"></p>
+  </div>
+  <div class="phone" id="phone"></div>
+</div>
+
+<script>
+const LONG_TITLE = "Notes from the harbour walks, the fish market and the ferry terminal, with a long stop on the pier before the rain came.";
+const WORD = "Donaudampfschifffahrtsgesellschaft";
+
+const lisbon = `<p class="h1">Lisbon in April</p>
+<p>Book the flat near the market before the prices climb for the holiday. The one on Rua da Rosa has a balcony and answers quickly.</p>
+<p class="line"></p>
+<p class="h2">To decide</p>
+<p class="bullet">which week: 7–14 or 14–21</p>
+<p class="bullet">train from Porto or fly direct</p>
+<p class="bullet">ask Marta about <strong>Sintra</strong> on the Saturday</p>
+<p class="line"></p>
+<p class="thought"><span class="mark">» </span>call the landlord about the deposit @tomorrow</p>`;
+
+const lisbonRead = `<p class="h1">Lisbon in April</p>
+<p>Book the flat near the market before the prices climb for the holiday. The one on Rua da Rosa has a balcony and answers quickly.</p>
+<p class="h2">To decide</p>
+<ul><li>which week: 7–14 or 14–21</li><li>train from Porto or fly direct</li><li>ask Marta about <strong>Sintra</strong> on the Saturday</li></ul>
+<p class="thought">» call the landlord about the deposit <span class="parked">· parked for tomorrow</span></p>`;
+
+const editing = (caretAfter) => lisbon.replace("answers quickly.", "answers quickly." + (caretAfter ? '<span class="caret"></span>' : ""));
+
+const longBody = `<p class="first">${LONG_TITLE}</p>
+<p class="line"></p>
+<p>Everything smelled of salt and diesel, and nobody was in a hurry. The ferry to Cacilhas left every twenty minutes; the man at the kiosk said the ${WORD} once ran the river boats too, which nobody believed.</p>
+<p class="line"></p>
+<p>Fish market: sardines at 6 €/kg, the woman at the third stall keeps the good ones under the counter. Ask for <code>carapau</code> if the sardines are gone.</p>
+<p class="line"></p>
+<p>Photos are at <a>https://photos.example.com/albums/harbour-walk-2026-11-08-lisbon-cacilhas-ferry-terminal</a>.</p>
+<p class="line"></p>
+${Array.from({ length: 8 }, (_, i) => `<p>Stop ${i + 2}: the pier, the bench by the crane, the café with the blue door; the light went orange at five and the rain came at a quarter past.</p><p class="line"></p>`).join("")}
+<p>Back by the 18:40 ferry.<span class="caret"></span></p>`;
+
+const header = (offline) => `<div class="header">
+  <span class="brand">pocket</span>
+  <nav class="nav"><span>today</span><span class="on">notes</span><span>tasks</span><span>pip</span></nav>
+  <span class="sync${offline ? " off" : ""}" title="${offline ? "offline" : "synced"}"><i></i></span>
+  <span class="cog"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></span>
+</div>`;
+
+const bar = ({ status, warn, view = "write", menu = false }) => `<div class="bar">
+  <button class="key">‹ notes</button>
+  <span class="status${warn ? " warn" : ""}" aria-live="polite">${status}</span>
+  <div class="seg" role="tablist" aria-label="View"><button role="tab" aria-selected="${view === "write"}">write</button><button role="tab" aria-selected="${view === "read"}">read</button></div>
+  <button class="dots" aria-label="Options for this note" aria-expanded="${menu}"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+</div>`;
+
+const menu = (paper) => `<div class="menu" style="top: 96px" role="menu">
+  <button role="menuitem">pin</button>
+  <button role="menuitem">ask pip about this</button>
+  <button role="menuitem">history</button>
+  ${paper ? '<button role="menuitem">paper page</button>' : ""}
+  <button role="menuitem" class="danger">delete</button>
+</div>`;
+
+const history = `<div class="scrim"></div><div class="sheet" role="dialog" aria-label="History">
+  <h3>history</h3>
+  <p class="label">today</p>
+  <div class="row chosen"><div class="main"><b>14:02</b><small>Book the flat near the market before the prices…</small></div><span class="end">now</span></div>
+  <div class="row"><div class="main"><b>11:47</b><small>Book the flat near the market before the prices…</small></div><span class="end">−2 lines</span></div>
+  <p class="label">earlier</p>
+  <div class="row"><div class="main"><b>12 Nov · 21:40</b><small>Lisbon in April · first draft</small></div><span class="end">−9 lines</span></div>
+  <div class="row"><div class="main"><b>9 Nov · 08:15</b><small>Lisbon in April</small></div><span class="end">−14 lines</span></div>
+  <p class="hint" style="margin-top:8px">Press a version to read it; restoring it saves it as the newest.</p>
+</div>`;
+
+const STATES = {
+  edit: { label: "writing", why: "The normal state: the note's words on the page's one left edge, its title in the pixel face because it is the page's title. The bar says what happened to the words in one dim word; write and read are two views of one note, so they are a segmented strip instead of an eye icon; everything else is in the note's menu.",
+    html: () => header() + bar({ status: "saved" }) + `<div class="note">${editing(true)}</div>` },
+  saving: { label: "saving", why: "While typing: the word changes, nothing moves, no pulsing dot (the green and amber dots were signal colours used as states).",
+    html: () => header() + bar({ status: "saving…" }) + `<div class="note">${editing(true)}</div>` },
+  draft: { label: "draft restored", why: "Reopened after the tab closed mid-sentence: the words come back from the phone's draft and the bar says “draft” until they are saved.",
+    html: () => header() + bar({ status: "draft" }) + `<div class="note">${editing(true)}</div>` },
+  parked: { label: "thought parked", why: "A finished » line parked as a thought: said once in the bar, and the line stays in the note.",
+    html: () => header() + bar({ status: "1 thought parked" }) + `<div class="note">${lisbon}<p class="line"><span class="caret"></span></p></div>` },
+  long: { label: "long title and body", why: "A 120-character first line with no # wraps as the note's first line, bright, not in the pixel face (the face is for a real # title). A 30-character word and a long link break instead of pushing the page sideways. The bar stays at the top while the note scrolls.",
+    html: () => header() + bar({ status: "saved" }) + `<div class="note">${longBody}</div>` },
+  read: { label: "reading", why: "The same column drawn as Markdown: headings at weight 500 (only the title in the pixel face), lists with a dim dash, the parked thought marked.",
+    html: () => header() + bar({ status: "saved", view: "read" }) + `<div class="note read">${lisbonRead}</div>` },
+  offline: { label: "offline", why: "No connection: the words are saved on the phone and sync later. The bar says “saved here”, one sentence says the rest, no key, since nothing here fixes it; the header's sync dot is hollow.",
+    html: () => header(true) + bar({ status: "saved here" }) + `<p class="notice">Offline. The note syncs when the phone is back online.</p><div class="note">${editing(true)}</div>` },
+  conflict: { label: "changed elsewhere", why: "Proposal, not existing today (the newer save simply wins): another device saved this note while it was being written here. One sentence where it happened and two keys. Keep this saves these words as the newest, the other stays in history; show other opens it from history.",
+    html: () => header() + bar({ status: "not saved", warn: true }) + `<p class="notice error">This note was changed on another device at 14:05 while you wrote.</p><div class="keys"><button class="key go">keep this</button><button class="key">show other</button></div><div class="note">${editing(true)}</div>` },
+  failed: { label: "save failed", why: "The phone could not keep the words (storage full, or the note is over its limit). The draft is still there; the sentence says what to do, with a key to try again.",
+    html: () => header() + bar({ status: "not saved", warn: true }) + `<p class="notice error">The note could not be saved: the phone's storage is full. Free some space, then try again.</p><div class="keys"><button class="key">try again</button></div><div class="note">${editing(true)}</div>` },
+  menu: { label: "menu", why: "The note's menu: pin, ask pip about the note (or the selected words), its history, the paper page for a note read from a handwritten journal page, and delete last, in its warning colour, asking first. The three icon keys (eye, pin, bin) of today's editor go: icons alone were not explained, and the bin sat next to pin.",
+    html: () => header() + bar({ status: "saved", menu: true }) + `<div class="note">${editing(false)}</div>` + menu(true) },
+  history: { label: "history", why: "History as a sheet over the note: versions by time, the one shown chosen, how much each differs. It closes by tapping beside it. Today this exists only in the classic editor.",
+    html: () => header() + bar({ status: "saved" }) + `<div class="note">${editing(false)}</div>` + history },
+  empty: { label: "new note", why: "A new note opens to type: the placeholder shows the shape of a title and one dim line says the three things worth knowing.",
+    html: () => header() + bar({ status: "new" }) + `<div class="note"><p><span class="caret"></span><span class="placeholder"># title</span></p><p class="placeholder">write in Markdown…</p><p class="hint" style="margin-top:24px"># makes a heading · » at the start of a line parks a thought · saved as you type</p></div>` },
+};
+
+const strip = document.getElementById("states"), phone = document.getElementById("phone"), why = document.getElementById("why");
+function show(name) {
+  for (const button of strip.children) button.setAttribute("aria-pressed", String(button.dataset.state === name));
+  phone.innerHTML = `<div class="page">${STATES[name].html()}</div>`;
+  phone.scrollTop = 0;
+  why.textContent = STATES[name].why;
+  try { localStorage.setItem("note-editor-mock", name); } catch { /* preview without storage */ }
+}
+for (const [name, state] of Object.entries(STATES)) {
+  const button = document.createElement("button");
+  button.textContent = state.label; button.dataset.state = name;
+  button.addEventListener("click", () => show(name));
+  strip.append(button);
+}
+let first = "edit";
+try { first = localStorage.getItem("note-editor-mock") || "edit"; } catch { /* default */ }
+show(STATES[first] ? first : "edit");
+</script>
+</body>
+</html>
