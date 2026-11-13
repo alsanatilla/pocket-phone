@@ -726,6 +726,15 @@ const STATES = [
     scroll: 'top',
   },
   {
+    name: 'task-focus',
+    async run(page, ctx) {
+      await page.goto(ctx.origin + '/#/tasks/labtask1', { waitUntil: 'domcontentloaded' });
+      await until(page, 'task-focus', 'focus controls', () => document.body.innerText.includes('start focus'));
+    },
+    text: ['focus', 'start focus', 'save task'],
+    scroll: 'bottom',
+  },
+  {
     name: 'tasks',
     async run(page, ctx) {
       await page.goto(ctx.origin + '/#/tasks', { waitUntil: 'domcontentloaded' });
