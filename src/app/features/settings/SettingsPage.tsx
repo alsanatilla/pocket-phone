@@ -52,6 +52,7 @@ export function SettingsPage() {
   return (
     <main className="pb-4">
       <PageTitle title="settings" />
+      <a href="/ios" className="text-primary underline underline-offset-2">Pocket on iPhone · widget & shortcuts</a>
 
       <div className="mt-6">
         <Section label="AI connections">

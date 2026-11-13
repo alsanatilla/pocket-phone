@@ -1,0 +1,29 @@
+---
+export const prerender = true;
+---
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Pocket auf dem iPhone</title></head>
+<body><main>
+<a href="/">← Pocket</a><h1>Pocket auf dem iPhone</h1>
+<h2>Zum Home-Bildschirm</h2><p>Öffne Pocket in Safari. Wähle Teilen → Zum Home-Bildschirm hinzufügen. Starte Pocket anschließend über das neue Icon und melde dich an.</p>
+<h2>Widget und Kurzbefehle verbinden</h2><p>Melde dich zuerst in Pocket an. Dieser Schlüssel erlaubt das Lesen deiner nächsten Aufgabe und das Senden an Pip. Er gilt 90 Tage. Ein neuer Schlüssel ersetzt den bisherigen. Bewahre ihn privat auf.</p>
+<button id="create">Schlüssel erstellen / ersetzen</button> <button id="revoke">Schlüssel widerrufen</button>
+<p id="status" role="status"></p><textarea id="key" readonly aria-label="Dein neuer Schlüssel" hidden></textarea>
+<h2>Widget</h2><ol><li>Installiere Scriptable auf deinem iPhone.</li><li>Kopiere <a href="/pocket-widget.js">dieses Skript</a> in ein neues Scriptable-Skript.</li><li>Führe es einmal aus und trage deine Pocket-Adresse und den Schlüssel ein.</li><li>Füge ein Scriptable-Widget zum Home-Bildschirm hinzu und wähle das Skript aus.</li></ol><p>Es zeigt deine synchronisierte nächste Aufgabe. iOS bestimmt, wann Widgets aktualisiert werden. Dieses Skript ist für den Home-Bildschirm gedacht.</p>
+<h2>„An Pip senden“ als Kurzbefehl</h2><ol><li>Erstelle in Kurzbefehle einen Kurzbefehl mit „Nach Eingabe fragen“ (Text). Für das Teilen-Menü aktiviere „Im Share-Sheet anzeigen“ und verwende stattdessen die Kurzbefehleingabe.</li><li>Füge „Inhalte von URL abrufen“ hinzu. URL: <code id="endpoint"></code>, Methode: POST.</li><li>Setze den Header <code>Authorization</code> auf <code>Bearer DEIN_SCHLÜSSEL</code>. Wähle JSON als Anfrageinhalt und füge das Textfeld <code>text</code> mit deiner Eingabe hinzu.</li><li>Benenne ihn „An Pip senden“. Du kannst ihn auch über Siri starten.</li></ol><p>Pip muss in Pocket für den Serverbetrieb eingerichtet sein. Eine erfolgreiche Anfrage wird angenommen; die Antwort erscheint im Chat in Pocket. Freigaben erledigst du dort. Teile den Kurzbefehl nicht mit eingebautem Schlüssel.</p>
+</main></body></html>
+<style>body{background:#12110f;color:#eee9df;font:17px/1.6 system-ui;margin:0}main{max-width:640px;margin:auto;padding:32px 24px 80px}h1{font-size:30px}h2{font-size:21px;margin-top:40px}a{color:#ecc981}button,textarea{font:inherit;padding:12px;border:1px solid #777;border-radius:6px;background:#25231e;color:inherit;max-width:100%}button{cursor:pointer;margin:4px 0;min-height:44px}textarea{width:100%;box-sizing:border-box}code{overflow-wrap:anywhere}li{margin:12px 0}</style>
+<script>
+const output = document.querySelector<HTMLTextAreaElement>('#key')!;
+const status = document.querySelector<HTMLElement>('#status')!;
+document.querySelector('#endpoint')!.textContent = location.origin + '/api/ios/message';
+async function change(method:string) {
+ const buttons = document.querySelectorAll<HTMLButtonElement>('button'); buttons.forEach(b=>b.disabled=true);
+ output.hidden=true; output.value='';
+ try { const r=await fetch('/api/ios/key',{method}); const data=await r.json(); if(!r.ok) throw new Error(data.error); if(data.key){output.value=data.key;output.hidden=false;} status.textContent=data.key?'Jetzt kopieren. Der Schlüssel wird nur einmal angezeigt.':'Schlüssel widerrufen.'; }
+ catch(e){status.textContent=e instanceof Error?e.message:'Verbindung fehlgeschlagen.';}
+ finally {buttons.forEach(b=>b.disabled=false);}
+}
+document.querySelector('#create')!.addEventListener('click',()=>change('POST'));
+document.querySelector('#revoke')!.addEventListener('click',()=>change('DELETE'));
+</script>
