@@ -611,8 +611,8 @@ export async function runClaimed(userId, id, { force = false, fetcher, now = Dat
   const saved = await stored(userId);
   const current = (await routines(userId)).find(item => item.id === id);
   // The lock is released only if it is still this run's: a run that outlived its lock leaves a later claim's in place.
-  await sql({ sql: 'UPDATE pocket_pip_routines SET lock_until = CASE WHEN lock_until = ? THEN 0 ELSE lock_until END, last_run = ?, last_error = ?, last_chat = ?, next_run = ? WHERE user_id = ? AND id = ?',
-    args: [lock, now, result.error || '', result.chat || current?.lastChat || '', current ? schedule(current, saved?.settings, hasKey(saved)) : NEVER, userId, id] });
+  await sql({ sql: 'UPDATE pocket_pip_routines SET lock_until = 0, last_run = ?, last_error = ?, last_chat = ?, next_run = ? WHERE user_id = ? AND id = ? AND lock_until = ?',
+    args: [now, result.error || '', result.chat || current?.lastChat || '', current ? schedule(current, saved?.settings, hasKey(saved)) : NEVER, userId, id, lock] });
   await recordRun(userId, id, result, now);
   // A scheduled run that wrote in its chat is worth a notification, unless the job is quiet; one the user started
   // is not. Failures notify once per streak, on the second in a row: a single blip is not worth a buzz, and a

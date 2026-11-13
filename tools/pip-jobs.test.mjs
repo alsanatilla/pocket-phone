@@ -381,6 +381,9 @@ test('the same scheduled time claimed twice (a lock that ran out mid-run): one r
   assert.equal(a.status, 'done', a.error);
   const lock = Number((await execute({ sql: 'SELECT lock_until FROM pocket_pip_routines WHERE user_id = ? AND id = ?', args: [userId, id] })).rows[0].lock_until);
   assert.ok(lock > Date.now(), 'the first run leaves the second run\'s lock in place');
+  const pending = (await execute({ sql: 'SELECT next_run, last_run FROM pocket_pip_routines WHERE user_id = ? AND id = ?', args: [userId, id] })).rows[0];
+  assert.equal(Number(pending.next_run), slot, 'an expired claimant cannot advance the new claimant schedule');
+  assert.equal(Number(pending.last_run), 0, 'an expired claimant cannot overwrite run metadata');
   two.open();
   const b = await second;
   assert.deepEqual([b.status, b.chat, b.turn], ['done', a.chat, a.turn], 'the second run answers with the report the first delivered');
