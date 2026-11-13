@@ -10,13 +10,13 @@ import type { Note } from "../../data/types.ts";
 import { PageTitle } from "../../ui/PageTitle.tsx";
 import { BARE_INPUT } from "../../ui/SendButton.tsx";
 import { classicHref } from "../../lib/classic.ts";
+import { dateAt } from "@/lib/utils";
 
 // Notes: the list is for finding a note, not for reading it. Title first, then a line of it and the date, with parked
 // thoughts kept to one quiet marker. Pinned notes get their own short group above the rest.
 
 let lastQuery = ""; // the filter is still there when you come back
 
-const shortDate = (at: number) => new Date(at).toLocaleDateString([], { day: "2-digit", month: "short" });
 
 function ThoughtMark({ note }: { note: Note }) {
   const found = noteThoughts(note);
@@ -27,8 +27,8 @@ function ThoughtMark({ note }: { note: Note }) {
 function NoteRow({ note }: { note: Note }) {
   const excerpt = noteExcerpt(note);
   return <li>
-    <Row href={"#/notes/" + note.uid} sub={excerpt || undefined}
-      end={<><ThoughtMark note={note} /><span>{shortDate(note.updated)}</span></>}>
+    <Row href={"#/notes/" + note.uid} arrow={false} sub={excerpt || undefined}
+      end={<><ThoughtMark note={note} /><span>{dateAt(note.updated)}</span></>}>
       {noteTitle(note)}
     </Row>
   </li>;
@@ -58,15 +58,15 @@ export function NotesPage() {
       <Button type="button" onClick={fresh} className="mb-1">+ new</Button>
     </PageTitle>
 
-    {/* A prompt line for the filter, separated from the page by a hairline. */}
-    <div className="mt-4 flex min-h-11 items-center gap-2 border-t sm:min-h-0">
+    {/* A prompt line for the filter: a field inside the page has no line of its own (docs/DESIGN.md 11). */}
+    <div className="mt-4 flex min-h-11 items-center gap-2 sm:min-h-0">
       <span aria-hidden="true" className="text-dim">/</span>
       <Input type="search" value={query} placeholder="find in notes…" aria-label="Find in notes" className={BARE_INPUT}
         onChange={event => { lastQuery = event.target.value; setQuery(event.target.value); }} />
       {query ? <Button type="button" onClick={() => { lastQuery = ""; setQuery(""); }}>clear</Button> : null}
     </div>
 
-    {groups.length ? groups.map(([title, notes], index) => <Section key={title} label={<span role="heading" aria-level={2}>{title}</span>} note={notes.length} className={index ? undefined : "mt-6"}>
+    {groups.length ? groups.map(([title, notes], index) => <Section key={title} label={<span role="heading" aria-level={2}>{title}</span>} count={notes.length} className={index ? undefined : "mt-6"}>
       <ul>{notes.map(note => <NoteRow key={note.uid} note={note} />)}</ul>
     </Section>) : <p className="pt-6 text-sm text-muted-foreground">
       {searching ? <>No note matches “{query.trim()}”. <Button type="button" variant="link" onClick={() => { lastQuery = ""; setQuery(""); }}>clear the search</Button></>

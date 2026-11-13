@@ -3,7 +3,7 @@ import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { RowMenu } from "../../ui/kit.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, dateAt } from "@/lib/utils";
 import { useCollection } from "../../data/bus.ts";
 import { listChats, pinChat, removeChat, renameChat, type Chat } from "../../data/chats.ts";
 import { isHome } from "../../data/home.ts";
@@ -18,7 +18,7 @@ const when = (at: number) => {
   const date = new Date(at), today = new Date();
   return date.toDateString() === today.toDateString()
     ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
-    : date.toLocaleDateString([], { day: "numeric", month: "short" });
+    : dateAt(at);
 };
 
 /** The headings a list of conversations falls into: pinned, then today, yesterday, this week, and older. */

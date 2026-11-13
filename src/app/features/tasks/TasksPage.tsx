@@ -4,8 +4,8 @@ import { BARE_INPUT, FIELD, SendButton } from "../../ui/SendButton.tsx";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
-import { Keys, Row, Section, Segmented, Tick } from "../../ui/kit.tsx";
+import { cn, dateAt } from "@/lib/utils";
+import { Keys, Row, RowMenu, Section, Segmented, Tick } from "../../ui/kit.tsx";
 import { useCollection } from "../../data/bus.ts";
 import { completeTask, createTask, listTasks, today } from "../../data/tasks.ts";
 import { addDays, createList, dayOffset, getList, lists, removeList, renameList, saveAsTemplate, templates, useTemplate } from "../../data/lists.ts";
@@ -29,12 +29,13 @@ function dueLabel(task: Task, current: string): { text: string; late: boolean; n
   if (distance === 1) return { text: "tomorrow", late: false, now: false };
   if (distance < 0) return { text: distance === -1 ? "yesterday" : `${-distance} days late`, late: true, now: false };
   if (distance <= 7) return { text: atNoon(task.due).toLocaleDateString([], { weekday: "short" }), late: false, now: false };
-  return { text: atNoon(task.due).toLocaleDateString([], { day: "numeric", month: "short" }), late: false, now: false };
+  return { text: dateAt(atNoon(task.due).getTime()), late: false, now: false };
 }
 
-interface RowProps { task: Task; list?: TaskList | null; showList: boolean; current: string; onOpen: () => void }
-function TaskRow({ task, list, showList, current, onOpen }: RowProps) {
-  const due = dueLabel(task, current);
+interface RowProps { task: Task; list?: TaskList | null; showList: boolean; showDue: boolean; current: string; onOpen: () => void }
+function TaskRow({ task, list, showList, showDue, current, onOpen }: RowProps) {
+  // Under a day's own heading (next 7 days) the date is said once, by the heading.
+  const due = showDue ? dueLabel(task, current) : null;
   const done = (task.steps ?? []).filter(step => step.done).length;
   const sub: React.ReactNode[] = [];
   if (due) sub.push(<span key="due" className={cn(due.late && "text-destructive")}>{due.text}</span>);
@@ -45,7 +46,7 @@ function TaskRow({ task, list, showList, current, onOpen }: RowProps) {
       <Tick checked={task.done} label={(task.done ? "Reopen " : "Complete ") + task.text}
         onChange={() => attempt(() => completeTask(task.uid))} />
     </span>
-    <Row onOpen={onOpen} className="min-w-0 flex-1"
+    <Row onOpen={onOpen} arrow={false} className="min-w-0 flex-1"
       sub={sub.length ? <>{sub.map((part, index) => <span key={index}>{index ? " · " : ""}{part}</span>)}</> : undefined}>
       <span className="flex items-start gap-1.5 leading-snug">
         {task.important ? <span role="img" aria-label="Important" className="shrink-0 text-dim">!</span> : null}
@@ -85,7 +86,7 @@ function groupsFor(view: string, all: Task[], hidden: Set<string>, listsByUid: M
     const byDay = new Map<string, Task[]>();
     for (const task of open.filter(item => item.due > current && item.due <= end)) byDay.set(task.due, [...(byDay.get(task.due) ?? []), task]);
     return [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, tasks]) => [
-      atNoon(date).toLocaleDateString([], { weekday: "long", day: "numeric", month: "short" }), tasks,
+      atNoon(date).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" }).replace(",", ""), tasks,
     ]);
   }
   const inbox = open.filter(task => !task.list).sort((a, b) => (a.due || "9999").localeCompare(b.due || "9999") || b.created - a.created);
@@ -154,7 +155,7 @@ export function TasksPage() {
     attempt(() => { const list = useTemplate(template.uid); go("list:" + list.uid); toast(list.name + " is ready."); });
   }
 
-  return <main className="pb-4">
+  return <main className="flex min-h-[calc(100dvh-45px)] flex-col pb-4">
     <PageTitle title={currentList?.name ?? "tasks"} meta={currentList ? `${countOf(currentList.uid)} open` : `${dueToday} due · ${open.length} open`}>
       {currentList ? <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -168,6 +169,7 @@ export function TasksPage() {
       </DropdownMenu> : null}
     </PageTitle>
 
+    <div className="flex-1">
     <div className="mt-4">
       <Segmented label="Task views" value={view} options={MODES} onChange={go} />
     </div>
@@ -183,8 +185,8 @@ export function TasksPage() {
       </Keys>
     </nav>
 
-    {groups.length ? groups.map(([title, tasks], index) => <Section key={title} label={<span role="heading" aria-level={2}>{title}</span>} note={tasks.length} tone={title === "overdue" ? "late" : undefined} className={index ? undefined : "mt-6"}>
-      <ul className="space-y-1">{tasks.map(task => <TaskRow key={task.uid} task={task} list={listsByUid.get(task.list ?? "") ?? null} showList={showList} current={current}
+    {groups.length ? groups.map(([title, tasks], index) => <Section key={title} label={<span role="heading" aria-level={2}>{title}</span>} count={tasks.length} tone={title === "overdue" ? "late" : undefined} className={index ? undefined : "mt-6"}>
+      <ul className="space-y-1">{tasks.map(task => <TaskRow key={task.uid} task={task} list={listsByUid.get(task.list ?? "") ?? null} showList={showList} showDue={view !== "next"} current={current}
         onOpen={() => void navigate({ to: "/tasks/$taskId", params: { taskId: task.uid } })} />)}</ul>
     </Section>) : <p className="pt-6 text-sm text-muted-foreground">
       {view === "done" ? "Nothing done yet."
@@ -196,16 +198,19 @@ export function TasksPage() {
     {templatesNow.length && view !== "done" ? <Section label={<span role="heading" aria-level={2}>templates</span>} className={groups.length ? undefined : "mt-6"}>
       <ul className="space-y-1">
         {templatesNow.map(template => <li key={template.uid}>
-          <Row end={<Button type="button" onClick={() => startTemplate(template)}>use</Button>}
+          <Row end={<RowMenu label={"Options for template " + template.name}>
+            <DropdownMenuItem onSelect={() => startTemplate(template)}>use</DropdownMenuItem>
+          </RowMenu>}
             sub={<>{templateItemsOf(template.uid)} {templateItemsOf(template.uid) === 1 ? "item" : "items"} · dated from today</>}>
             {template.name}
           </Row>
         </li>)}
       </ul>
     </Section> : null}
+    </div>
 
     {/* The one place to add a task: a date or an ! in the text is read as you type. */}
-    <form onSubmit={add} className={cn("mt-[18px]", FIELD)}>
+    <form onSubmit={add} className={cn("mt-6", FIELD)}>
       <span aria-hidden="true" className="text-dim">+</span>
       <Input ref={addRef} value={text} onChange={event => setText(event.target.value)} aria-label="New task" maxLength={500}
         placeholder="add a task" className={BARE_INPUT} />

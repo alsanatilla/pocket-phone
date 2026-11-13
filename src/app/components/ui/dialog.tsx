@@ -45,10 +45,12 @@ function DialogOverlay({
   )
 }
 
+// Pocket's dialogs have no "close" key (docs/DESIGN.md 13): they close with Escape, by tapping beside them, and with
+// the quiet cancel key at their bottom right (DialogFooter's `cancel`).
 function DialogContent({
   className,
   children,
-  showCloseButton = true,
+  showCloseButton = false,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
@@ -79,7 +81,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-1 text-left", className, "pr-14")}
+      className={cn("flex flex-col gap-1 text-left", className)}
       {...props}
     />
   )
@@ -87,11 +89,12 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
 
 function DialogFooter({
   className,
-  showCloseButton = false,
+  cancel = false,
   children,
   ...props
 }: React.ComponentProps<"div"> & {
-  showCloseButton?: boolean
+  /** A quiet "cancel" key before the confirming one, which closes the dialog without doing anything. */
+  cancel?: boolean
 }) {
   return (
     <div
@@ -102,12 +105,12 @@ function DialogFooter({
       )}
       {...props}
     >
-      {children}
-      {showCloseButton && (
+      {cancel && (
         <DialogPrimitive.Close asChild>
-          <Button variant="outline">close</Button>
+          <Button type="button">cancel</Button>
         </DialogPrimitive.Close>
       )}
+      {children}
     </div>
   )
 }

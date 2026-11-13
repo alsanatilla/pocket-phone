@@ -4,10 +4,12 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 const params = { taskId: "" };
 vi.mock("@tanstack/react-router", () => ({ useParams: () => params, useNavigate: () => vi.fn() }));
 vi.mock("../../ui/toast/toast.ts", () => ({ toast: vi.fn(), toastError: vi.fn(), clearToast: vi.fn() }));
+vi.mock("../../ui/dialog/dialog.ts", () => ({ confirm: vi.fn(() => Promise.resolve(true)) }));
 
 import { clock } from "../../../client/planner.js";
 import { connect } from "../../data/bus.ts";
-import { completeTask, createTask } from "../../data/tasks.ts";
+import { completeTask, createTask, getTask } from "../../data/tasks.ts";
+import { confirm } from "../../ui/dialog/dialog.ts";
 import { TaskPage } from "./TaskPage.tsx";
 
 // Focus moved from Today to the task it is about: started, paused and ended here on the real room timer.
@@ -42,5 +44,33 @@ describe("a task's focus", () => {
     completeTask(mine.uid);
     render(<TaskPage />);
     expect(screen.queryByText("focus")).toBeNull();
+  });
+});
+
+describe("a task's keys", () => {
+  it("offers save and complete; delete is in the task's menu, asks first, and removes the task", async () => {
+    const task = createTask("Send the insurance form");
+    params.taskId = task.uid;
+    render(<TaskPage />);
+    expect(screen.getByRole("button", { name: "save task" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "complete" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "delete" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Options for this task" }), { key: "ArrowDown" });
+    await act(async () => { fireEvent.click(await screen.findByRole("menuitem", { name: "delete" })); });
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ danger: true }));
+    expect(getTask(task.uid)).toBeNull();
+  });
+
+  it("removes a step from that step's menu, with no remove key on every step", async () => {
+    const task = createTask("Pack for Lisbon", { steps: [{ text: "Passport", done: false }, { text: "Charger", done: false }] });
+    params.taskId = task.uid;
+    render(<TaskPage />);
+    expect(screen.queryByRole("button", { name: /remove/i })).toBeNull();
+    expect(screen.getByText("0/2")).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Options for step Passport" }), { key: "ArrowDown" });
+    await act(async () => { fireEvent.click(await screen.findByRole("menuitem", { name: "remove" })); });
+    expect(screen.queryByText("Passport")).toBeNull();
+    expect(screen.getByText("Charger")).toBeTruthy();
+    expect(screen.getByText("0/1")).toBeTruthy();
   });
 });

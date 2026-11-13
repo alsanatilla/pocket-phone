@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { Figure, Keys, Row, Section, SectionLabel, Segmented, Tick } from "../../ui/kit.tsx";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { Figure, Keys, Row, RowMenu, Section, SectionLabel, Segmented, Tick } from "../../ui/kit.tsx";
 import { clock, clockText } from "../../../client/planner.js";
 import { endFocus, focusRemaining, focusSession, startFocus } from "../../data/today.ts";
 import { useCollection } from "../../data/bus.ts";
@@ -96,10 +97,10 @@ export function TaskPage() {
       </p> : null}
 
       <div className="mt-2">
-        <Row end={<Input id="task-due" type="date" value={draft.due} onChange={event => set("due", event.target.value)} className={cn(BARE_INPUT, "w-40 text-right")} />}>
+        <Row className="items-center" end={<Input id="task-due" type="date" value={draft.due} onChange={event => set("due", event.target.value)} className={cn(BARE_INPUT, "w-40 text-right")} />}>
           <label htmlFor="task-due" className="text-dim">date</label>
         </Row>
-        <Row end={<div className="relative w-40 min-w-0">
+        <Row className="items-center" end={<div className="relative w-40 min-w-0">
           <select id="task-list" value={draft.list} onChange={event => set("list", event.target.value)}
             className="min-h-11 w-full appearance-none rounded-none border-0 bg-transparent pr-6 pl-0 text-right text-sm text-foreground outline-none focus-visible:ring-0 sm:min-h-0">
             <option value="">inbox</option>
@@ -109,19 +110,20 @@ export function TaskPage() {
         </div>}>
           <label htmlFor="task-list" className="text-dim">list</label>
         </Row>
-        <Row end={<Switch checked={draft.important} aria-label="important" onCheckedChange={next => set("important", next)} />}>
+        <Row className="items-center" end={<Switch checked={draft.important} aria-label="important" onCheckedChange={next => set("important", next)} />}>
           <span className="text-dim">important</span>
         </Row>
       </div>
 
-      <Section label={<span role="heading" aria-level={2}>steps</span>} note={`${draft.steps.filter(item => item.done).length}/${draft.steps.length}`} className="mt-6">
+      <Section label={<span role="heading" aria-level={2}>steps</span>} note={draft.steps.length ? `${draft.steps.filter(item => item.done).length}/${draft.steps.length}` : undefined} className="mt-6">
         {draft.steps.length ? <ul className="space-y-1">
           {draft.steps.map((item, index) => <li key={index}>
             <Row lead={<Tick checked={item.done} label={(item.done ? "Reopen step " : "Complete step ") + item.text}
               onChange={() => setDraft(current => ({ ...current, steps: current.steps.map((old, at) => at === index ? { ...old, done: !old.done } : old) }))} />}
               dim={item.done}
-              end={<Button type="button" variant="destructive" size="sm" aria-label={"Remove step " + item.text}
-                onClick={() => setDraft(current => ({ ...current, steps: current.steps.filter((_, at) => at !== index) }))}>remove</Button>}>
+              end={<RowMenu label={"Options for step " + item.text}>
+                <DropdownMenuItem variant="destructive" onSelect={() => setDraft(current => ({ ...current, steps: current.steps.filter((_, at) => at !== index) }))}>remove</DropdownMenuItem>
+              </RowMenu>}>
               {item.text}
             </Row>
           </li>)}
@@ -136,11 +138,14 @@ export function TaskPage() {
 
     {task && !task.done ? <TaskFocus uid={task.uid} /> : null}
 
+    {/* Two keys and the task's menu: leaving without saving is the "‹ tasks" key above, and delete sits last, in the
+        menu at the far end, away from save. */}
     <Keys className="mt-6">
       <Button onClick={save} variant="go">save task</Button>
       {task ? <Button onClick={() => attempt(() => { completeTask(task.uid); void navigate({ to: "/tasks" }); })}>{task.done ? "reopen" : "complete"}</Button> : null}
-      <Button onClick={() => void navigate({ to: "/tasks" })}>cancel</Button>
-      {task ? <Button variant="destructive" onClick={() => void remove()}>delete</Button> : null}
+      {task ? <span className="ml-auto"><RowMenu label="Options for this task">
+        <DropdownMenuItem variant="destructive" onSelect={() => void remove()}>delete</DropdownMenuItem>
+      </RowMenu></span> : null}
     </Keys>
   </main>;
 }

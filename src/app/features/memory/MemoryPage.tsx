@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { readChat } from "../../data/chats.ts";
 import { addMemory, editMemory, forgetMemory, useMemory, type MemoryEntry } from "../../data/memory.ts";
 import { classicHref } from "../../lib/classic.ts";
+import { dateAt } from "@/lib/utils";
 import { prompt } from "../../ui/dialog/dialog.ts";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Section, Row, RowMenu } from "../../ui/kit.tsx";
@@ -16,7 +17,6 @@ import { toast, toastError } from "../../ui/toast/toast.ts";
 // two ways to change it. The rows read like the jobs and tasks lists; nothing is saved without an action here.
 
 const MEMORY_MAX = 100;
-const shortDate = (at: number) => new Date(at).toLocaleDateString([], { day: "2-digit", month: "short" });
 
 function Entry({ entry, busy, onEdit, onForget }: { entry: MemoryEntry; busy: boolean; onEdit: () => void; onForget: () => void }) {
   const chat = entry.chat ? readChat(entry.chat) : null;
@@ -26,7 +26,7 @@ function Entry({ entry, busy, onEdit, onForget }: { entry: MemoryEntry; busy: bo
           <DropdownMenuItem disabled={busy} onSelect={onEdit}>edit</DropdownMenuItem>
           <DropdownMenuItem disabled={busy} variant="destructive" onSelect={onForget}>forget</DropdownMenuItem>
         </RowMenu>}
-        sub={<>since {shortDate(entry.created)}{chat ? <> · from <Link to="/pip" search={{ chat: chat.uid }} className="text-primary underline underline-offset-2">{chat.title || "chat"}</Link></> : null}</>}>
+        sub={<>since {dateAt(entry.created)}{chat ? <> · from <Link to="/pip" search={{ chat: chat.uid }} className="text-primary underline underline-offset-2">{chat.title || "chat"}</Link></> : null}</>}>
         {entry.text}
       </Row>
     </li>
@@ -77,7 +77,7 @@ export function MemoryPage() {
     </div>;
   } else {
     body = <>
-      <Section className="mt-6" label="remembered" note={newestFirst.length}>
+      <Section className="mt-6 flex-1" label="remembered" count={newestFirst.length}>
         {newestFirst.length
           ? <ul>{newestFirst.map(entry => <Entry key={entry.id} entry={entry} busy={busy === "edit:" + entry.id || busy === "forget:" + entry.id}
             onEdit={() => void edit(entry)} onForget={() => void act("forget:" + entry.id, () => forgetMemory(entry.id), () => toast("Forgotten."))} />)}</ul>
@@ -95,7 +95,7 @@ export function MemoryPage() {
   }
 
   return (
-    <main className="pb-4">
+    <main className="flex min-h-[calc(100dvh-45px)] flex-col pb-4">
       <PageTitle title="memory" meta="What pip remembers about you. It reads this in every reply." />
       {body}
     </main>

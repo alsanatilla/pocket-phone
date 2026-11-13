@@ -120,7 +120,7 @@ function ProposalForm({ proposal, onSubmit, submitLabel }: { proposal: CreatePro
           <Textarea rows={4} maxLength={6000} value={text} onChange={event => setText(event.target.value)} className={BARE_AREA} />
         </span>
       </label>
-      <DialogFooter className="flex-row items-center justify-end">
+      <DialogFooter cancel className="flex-row items-center justify-end">
         <Button type="submit" variant="go" disabled={!title.trim()}>{submitLabel}</Button>
       </DialogFooter>
     </form>

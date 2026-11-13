@@ -52,7 +52,6 @@ export function SettingsPage() {
   return (
     <main className="pb-4">
       <PageTitle title="settings" />
-      <a href="/ios" className="text-primary underline underline-offset-2">Pocket on iPhone · widget & shortcuts</a>
 
       <div className="mt-6">
         <Section label="AI connections">
@@ -73,12 +72,14 @@ export function SettingsPage() {
           </Row>
         </Section>
 
-        <Section label="jobs">
-          <Row onOpen={() => void navigate({ to: "/jobs" })}>open jobs</Row>
+        {/* Places of their own, one "go to" line each: their › says the line leads away from settings. */}
+        <Section label="pip">
+          <Row onOpen={() => void navigate({ to: "/jobs" })} sub="what pip does on its own">jobs</Row>
+          <Row onOpen={() => void navigate({ to: "/memory" })} sub="what pip remembers about you">memory</Row>
         </Section>
 
-        <Section label="memory">
-          <Row onOpen={() => void navigate({ to: "/memory" })}>memory: what pip remembers about you</Row>
+        <Section label="iphone">
+          <Row href="/ios" sub="home screen, widget and the send to pip shortcut">pocket on iPhone</Row>
         </Section>
 
         <Section label="this month">
@@ -101,7 +102,7 @@ function Advanced({ current, onUse, active }: { current?: { baseUrl: string; mod
   const [model, setModel] = useState(current?.model ?? "");
   return (
     <Collapsible defaultOpen={active}>
-      <CollapsibleTrigger asChild><Button type="button" className="text-dim">advanced</Button></CollapsibleTrigger>
+      <CollapsibleTrigger asChild><Button type="button">advanced</Button></CollapsibleTrigger>
       <CollapsibleContent>
         <form className="grid gap-2 pt-1" onSubmit={event => { event.preventDefault(); onUse({ baseUrl: baseUrl.trim(), model: model.trim() }); }}>
           <label className={PROMPT}>

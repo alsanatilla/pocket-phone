@@ -137,7 +137,7 @@ function Form({ draft, onSave, busy }: { draft: JobDraft; onSave: (draft: JobDra
         <p className="text-xs text-dim">{home ? "Its reports land in your pip chat." : "Its reports go to a chat of its own."}</p>
       </div> : null}
 
-      <DialogFooter className="flex-row items-center justify-end pt-1">
+      <DialogFooter cancel className="flex-row items-center justify-end pt-1">
         <Button type="submit" variant="go" disabled={busy || (!fixed && (!title.trim() || !prompt.trim())) || (mode !== "once" && !days.length)}>
           {draft.id ? "save" : "create job"}
         </Button>

@@ -82,7 +82,7 @@ function JobCard({ job, jobs }: { job: Job; jobs: ReturnType<typeof useJobs> }) 
       </p>
       {job.scratch ? (
         <Collapsible className="group/notes pt-1">
-          <CollapsibleTrigger asChild><Button type="button" className="text-dim">pip's notes for this job</Button></CollapsibleTrigger>
+          <CollapsibleTrigger asChild><Button type="button">pip's notes for this job</Button></CollapsibleTrigger>
           <CollapsibleContent className="space-y-2 pt-2">
             <p className="whitespace-pre-wrap text-xs text-muted-foreground">{job.scratch}</p>
             <Keys><Button type="button" onClick={() => void jobs.clear(job.id)}>clear notes</Button></Keys>
@@ -119,7 +119,7 @@ export function JobsPage() {
   const limit = state.settings?.dailyTokens ?? 0;
   return (
     <main className="pb-4">
-      <PageTitle title="jobs" meta={on ? `pip on its own · today ${tokens(state.usedToday)} of ${tokens(limit)} tokens` : "pip on its own · off"}>
+      <PageTitle title="jobs" meta={on ? `today ${tokens(state.usedToday)} of ${tokens(limit)} tokens` : "pip on its own · off"}>
         <Button type="button" onClick={() => setPicking(true)}>+ new job</Button>
       </PageTitle>
 
@@ -140,7 +140,8 @@ export function JobsPage() {
           </Section>
         ) : null}
 
-        <Section label="jobs" note={state.routines.length}>
+        {/* No "jobs" label: the page's title says it already. */}
+        <Section>
           {state.routines.length
             ? <ul>{state.routines.map(job => <JobCard key={job.id} job={job} jobs={jobs} />)}</ul>
             : <p className="text-sm text-muted-foreground">No jobs yet. A morning check-in is a good first one.</p>}
@@ -152,7 +153,7 @@ export function JobsPage() {
               {state.runs.slice(0, 12).map((run, index) => (
                 <li key={index}>
                   <Row
-                    lead={<time className="w-24 shrink-0 text-xs">{new Date(run.at).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}</time>}
+                    lead={<time className="w-24 shrink-0 text-xs">{new Date(run.at).toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}</time>}
                     end={<span className={run.status === "failed" ? "text-destructive" : undefined}>{STATUS_LABEL[run.status] ?? run.status}</span>}
                     onOpen={run.chat ? () => void navigate({ to: "/pip", search: { chat: run.chat } }) : undefined}>
                     {run.title}

@@ -61,7 +61,7 @@ const interval = (minutes: number) => minutes % 60 === 0 ? (minutes === 60 ? "ev
 
 /** "07:30 · weekdays", "every 2 h · 08:00–22:00", "once · Thu 12 Nov 18:00". */
 export function scheduleLabel(job: Pick<Job, "time" | "days" | "every" | "at" | "activeHours">): string {
-  if (job.at) return "once · " + new Date(job.at).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+  if (job.at) return "once · " + new Date(job.at).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }).replace(",", "");
   if (job.every) {
     const window = job.activeHours ? ` · ${job.activeHours.start}–${job.activeHours.end === "00:00" ? "24:00" : job.activeHours.end}` : "";
     const days = job.days.length === 7 ? "" : " · " + daysLabel(job.days);
@@ -80,7 +80,7 @@ export function nextLabel(job: Pick<Job, "enabled" | "nextRun">, now = Date.now(
   if (minutes < 12 * 60) return `in ${Math.round(minutes / 60)} h`;
   const date = new Date(job.nextRun), tomorrow = new Date(now + 86_400_000);
   const clock = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-  return date.toDateString() === tomorrow.toDateString() ? "tomorrow " + clock : date.toLocaleDateString([], { weekday: "short", day: "numeric" }) + " " + clock;
+  return date.toDateString() === tomorrow.toDateString() ? "tomorrow " + clock : date.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" }).replace(",", "") + " " + clock;
 }
 
 export const STATUS_LABEL: Record<string, string> = {

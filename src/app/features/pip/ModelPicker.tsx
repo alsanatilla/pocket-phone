@@ -97,7 +97,7 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
                   const chosen = providerName === PROVIDER_NAMES[model.provider] && chat.config.model === model.id;
                   const size = model.context ? `${Math.round(model.context / 1000)}k` : "";
                   return (
-                    <Row key={model.provider + model.id} onOpen={busy || model.tools === false ? undefined : () => choose(model)}
+                    <Row key={model.provider + model.id} onOpen={busy || model.tools === false ? undefined : () => choose(model)} arrow={false}
                       className={cn(chosen && "bg-secondary")}
                       lead={chosen ? <Check aria-hidden="true" className="size-3.5 text-hi" /> : <span aria-hidden="true" className="w-3.5" />}
                       end={<>
@@ -106,7 +106,7 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
                         {model.tools === false ? <span>no tools</span> : size ? <span className="w-9 text-right tabular-nums">{size}</span> : null}
                       </>}>
                       <span title={model.note ? model.name + " · " + model.note : model.name}
-                        className={cn("truncate", chosen ? "text-hi" : "text-foreground")}>
+                        className={cn("block truncate", chosen ? "text-hi" : "text-foreground")}>
                         {model.name.replace(/^[^:·]{1,30}:\s+/, "")}
                       </span>
                       {chosen ? <span className="sr-only"> chosen</span> : null}

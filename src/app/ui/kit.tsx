@@ -8,11 +8,18 @@ import { cn } from "@/lib/utils";
 // (Switch), a tick box (Tick), a segmented choice (Segmented), or a row that ends in ›. Nothing else is pressable,
 // and nothing that is not pressable has those shapes.
 
-/** A section: its small name, with a count or note at the right, then its content. Sections sit 24px apart. */
-export function Section({ label, note, tone, children, className }: { label?: ReactNode; note?: ReactNode; tone?: "late"; children: ReactNode; className?: string }) {
+/** From how many rows a section says its count: fewer are counted at a glance (docs/DESIGN.md 9). */
+const COUNTED_FROM = 7;
+
+/**
+ * A section: its small name, with a note at the right, then its content. Sections sit 24px apart. `count` is how many
+ * rows it holds, shown as the note only from seven rows on.
+ */
+export function Section({ label, note, count, tone, children, className }: { label?: ReactNode; note?: ReactNode; count?: number; tone?: "late"; children: ReactNode; className?: string }) {
+  const shown = note ?? (count !== undefined && count >= COUNTED_FROM ? count : undefined);
   return (
     <section className={cn("mb-6", className)}>
-      {label ? <SectionLabel note={note} tone={tone}>{label}</SectionLabel> : null}
+      {label ? <SectionLabel note={shown} tone={tone}>{label}</SectionLabel> : null}
       {children}
     </section>
   );
@@ -119,7 +126,7 @@ export function Figure({ label, value, unit, note }: { label: ReactNode; value: 
 export function RowMenu({ label, children }: { label: string; children: ReactNode }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger aria-label={label} className="-my-1.5 -mr-2.5 grid size-11 shrink-0 place-items-center rounded-[5px] text-dim outline-none transition-colors hover:text-hi focus-visible:ring-2 focus-visible:ring-ring/60 data-[state=open]:text-hi sm:size-8">
+      <DropdownMenuTrigger aria-label={label} className="-my-3 -mr-2.5 grid size-11 shrink-0 place-items-center rounded-[5px] text-dim outline-none transition-colors hover:text-hi focus-visible:ring-2 focus-visible:ring-ring/60 data-[state=open]:text-hi sm:size-8">
         <MoreHorizontal aria-hidden="true" className="size-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">{children}</DropdownMenuContent>

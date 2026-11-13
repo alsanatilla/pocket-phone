@@ -735,6 +735,67 @@ const STATES = [
     scroll: 'bottom',
   },
   {
+    // One task with four steps, the whole page: its fields, steps (each with its menu), focus and the keys.
+    name: 'task-detail',
+    async run(page, ctx) {
+      await page.goto(ctx.origin + '/#/tasks/labtask4', { waitUntil: 'domcontentloaded' });
+      await until(page, 'task-detail', 'the task and its steps', () => document.body.innerText.includes('Send the route to Sam'));
+    },
+    text: ['Pick a route', '2/4', 'save task', 'complete'],
+    selectors: ['button[aria-label="Options for this task"]', 'button[aria-label="Options for step Pick a route"]'],
+    scroll: 'top',
+    fullPage: true,
+    async check(page) {
+      const keys = await page.evaluate(() => [...document.querySelectorAll('main button')].map(button => button.textContent.trim()));
+      if (keys.includes('delete') || keys.includes('remove')) throw new Error('a delete or remove key is on the page: ' + keys.join(', '));
+    },
+  },
+  {
+    name: 'task-menu',
+    async run(page, ctx) {
+      await page.goto(ctx.origin + '/#/tasks/labtask4', { waitUntil: 'domcontentloaded' });
+      await until(page, 'task-menu', 'the task', () => Boolean(document.querySelector('button[aria-label="Options for this task"]')));
+      await page.evaluate(() => document.querySelector('button[aria-label="Options for this task"]').scrollIntoView({ block: 'center' }));
+      await page.click('button[aria-label="Options for this task"]');
+      await until(page, 'task-menu', 'the task menu', () => Boolean(document.querySelector('[role="menu"]')));
+    },
+    text: ['delete'],
+    selectors: ['[role="menu"]'],
+    scroll: 'keep',
+  },
+  {
+    name: 'tasks-next',
+    async run(page, ctx) {
+      await page.goto(ctx.origin + '/#/tasks?view=next', { waitUntil: 'domcontentloaded' });
+      await until(page, 'tasks-next', 'the week\'s task', () => document.body.innerText.includes('Plan the long run for Saturday'));
+    },
+    text: ['Plan the long run for Saturday', '2/4 steps'],
+    selectors: ['main input[aria-label="New task"]'],
+    scroll: 'top',
+  },
+  {
+    // The existing note editor, for the audit and the mock of its redesign: the 120-character title.
+    name: 'note-editor',
+    async run(page, ctx) {
+      await page.goto(ctx.origin + '/#/notes/labnote3', { waitUntil: 'domcontentloaded' });
+      await until(page, 'note-editor', 'the note', () => document.body.innerText.includes('salt and diesel'));
+    },
+    text: ['harbour walks', 'salt and diesel'],
+    scroll: 'top',
+    fullPage: true,
+  },
+  {
+    // The iPhone setup page: an Astro page drawn with the app's blocks, outside the React app.
+    name: 'ios',
+    async run(page, ctx) {
+      await page.goto(ctx.origin + '/ios', { waitUntil: 'domcontentloaded' });
+      await until(page, 'ios', 'the setup page', () => document.body.innerText.includes('create key'));
+    },
+    text: ['pocket on iPhone', 'home screen', 'create key', 'revoke key', 'Send to Pip', '/api/ios/message'],
+    scroll: 'top',
+    fullPage: true,
+  },
+  {
     name: 'tasks',
     async run(page, ctx) {
       await page.goto(ctx.origin + '/#/tasks', { waitUntil: 'domcontentloaded' });
@@ -794,8 +855,9 @@ const STATES = [
       await page.goto(ctx.origin + '/#/settings', { waitUntil: 'domcontentloaded' });
       await until(page, 'settings', 'the connected accounts', () => document.body.innerText.includes('OpenCode Go') && document.body.innerText.includes('connected') && document.body.innerText.includes('OpenRouter'));
     },
-    text: ['settings', 'AI connections', 'OpenCode Go', 'OpenRouter', 'Anthropic', 'connected', 'what pip may read', 'this month'],
+    text: ['settings', 'AI connections', 'OpenCode Go', 'OpenRouter', 'Anthropic', 'connected', 'what pip may read', 'this month', 'pocket on iPhone'],
     scroll: 'top',
+    fullPage: true,
     async check(page) {
       const notes = await page.evaluate(() => [...document.querySelectorAll('[role="switch"]')]
         .find(node => node.getAttribute('aria-label') === 'Notes')?.getAttribute('aria-checked'));
@@ -1073,7 +1135,7 @@ async function capture(ctx, state, viewportName) {
     await state.run(page, ctx);
     if (state.scroll !== 'keep') await scrollPage(page, state.scroll ?? 'bottom');
     await sleep(300);
-    await page.screenshot({ path: join(ctx.out, `${state.name}-${viewportName}.png`) });
+    await page.screenshot({ path: join(ctx.out, `${state.name}-${viewportName}.png`), fullPage: Boolean(state.fullPage) });
     await checkState(page, state);
     if (state.check) await state.check(page);
     console.log(`  ✓ ${state.name}-${viewportName}.png`);
