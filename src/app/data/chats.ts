@@ -7,6 +7,9 @@ import { homeChat } from "./home.ts";
 
 export interface ChatTurn {
   uid: string; text: string; answer: string; created: number; updated?: number;
+  /** Who asked: a device id for the person's own message, or Pip's own work (`pip-routine` for a job's report,
+   * `pip-assignment` for an assignment's). */
+  owner?: string;
   status: "streaming" | "done" | "stopped" | "failed" | string;
   error?: string; phase?: string; reasoning?: string;
   activity?: ActivityRow[]; sources?: { href: string; title: string }[];

@@ -372,6 +372,7 @@ test('an assignment reads only what the chat could, and what it reads cannot mak
     assert.equal(decisions[0].chat, 'chat-write');
     assert.equal(decisions[0].requests[0].tool, 'create_record');
     assert.match(decisions[0].requests[0].title, /Blue bike/);
+    assert.ok(decisions[0].asked > 0, 'the decision says when it was asked');
   });
 });
 

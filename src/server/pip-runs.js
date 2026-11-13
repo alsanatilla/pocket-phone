@@ -1238,13 +1238,13 @@ export async function assignmentsView(userId, { fetcher } = {}) {
       lookups: (turn.activity || []).filter(item => item?.state === 'done' && !STATE_TOOLS.includes(item.name)).length,
       retryOf: typeof config.assignment?.retryOf === 'string' ? config.assignment.retryOf : '', retried: retries.get(id) || '' };
   });
-  const waiting = (await sql({ sql: `SELECT r.run_id, r.chat_uid, q.request_id, q.tool, q.payload FROM pocket_pip_runs r JOIN pocket_pip_run_requests q ON q.user_id = r.user_id AND q.run_id = r.run_id
+  const waiting = (await sql({ sql: `SELECT r.run_id, r.chat_uid, q.request_id, q.tool, q.payload, q.created FROM pocket_pip_runs r JOIN pocket_pip_run_requests q ON q.user_id = r.user_id AND q.run_id = r.run_id
     WHERE r.user_id = ? AND r.status = 'awaiting' AND q.state = 'pending' AND q.kind = 'write' ORDER BY q.created`, args: [userId] })).rows;
   const decisions = [];
   for (const item of waiting) {
     const runId = String(item.run_id);
     let decision = decisions.find(entry => entry.runId === runId);
-    if (!decision) decisions.push(decision = { runId, chat: String(item.chat_uid), requests: [] });
+    if (!decision) decisions.push(decision = { runId, chat: String(item.chat_uid), asked: Number(item.created) || 0, requests: [] });
     const payload = parse(item.payload) || {};
     decision.requests.push({ id: String(item.request_id), tool: String(item.tool), title: String(payload.action?.title || payload.title || label(String(item.tool), {})) });
   }

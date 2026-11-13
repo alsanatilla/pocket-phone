@@ -523,7 +523,7 @@ worker's routine timer), because starting it inside the chat's request would mak
 **What a screen reads.** `POST /api/pip/runs { action: 'assignments' }` (also over the socket) answers
 `{ assignments, decisions }`: the newest 20 assignments, each `{ id, title, state: waiting | working | done |
 failed | stopped, created, started, ended, origin: { chat, turn }, report: { chat, turn } | null, error, lookups, retryOf, retried }`,
-and every reply waiting for the person's decision, each `{ runId, chat, requests: [{ id, tool, title }] }`, so
+and every reply waiting for the person's decision, each `{ runId, chat, asked, requests: [{ id, tool, title }] }`, so
 Today can show what is working, what came back and what waits for the person. Every change is a run event
 (`waiting`, `started`, `done`, `failed`, `stopped`, `withdrawn`) on the live socket, without a `chat`, so no open
 chat attaches to it.

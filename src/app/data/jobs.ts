@@ -18,7 +18,8 @@ export interface Job {
   grants?: string[]; web?: boolean;
   nextRun: number; lastRun: number; lastStatus: RunStatus; lastError: string; lastChat: string; scratch: string;
 }
-export interface JobRun { routine: string; title: string; kind: string; at: number; status: RunStatus; error: string; chat: string }
+/** One run of a job: `chat` and `turn` say where its report stands, when it wrote one. */
+export interface JobRun { routine: string; title: string; kind: string; at: number; status: RunStatus; error: string; chat: string; turn: string }
 export interface BackgroundSettings extends PipConfig { grants: string[]; dailyTokens: number; timezone: string; enabled: boolean; useAccountKey?: boolean }
 export interface JobsState {
   settings: BackgroundSettings | null; hasKey: boolean; keySource: "dedicated" | "account" | null;

@@ -6,7 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { Keys, Row, Section, SectionLabel, Tick } from "../../ui/kit.tsx";
+import { Figure, Keys, Row, Section, SectionLabel, Segmented, Tick } from "../../ui/kit.tsx";
+import { clock, clockText } from "../../../client/planner.js";
+import { endFocus, focusRemaining, focusSession, startFocus } from "../../data/today.ts";
 import { useCollection } from "../../data/bus.ts";
 import { lists } from "../../data/lists.ts";
 import { parseTask } from "../../data/parse.ts";
@@ -132,6 +134,8 @@ export function TaskPage() {
       </Section>
     </div>
 
+    {task && !task.done ? <TaskFocus uid={task.uid} /> : null}
+
     <Keys className="mt-6">
       <Button onClick={save} variant="go">save task</Button>
       {task ? <Button onClick={() => attempt(() => { completeTask(task.uid); void navigate({ to: "/tasks" }); })}>{task.done ? "reopen" : "complete"}</Button> : null}
@@ -139,4 +143,29 @@ export function TaskPage() {
       {task ? <Button variant="destructive" onClick={() => void remove()}>delete</Button> : null}
     </Keys>
   </main>;
+}
+
+/**
+ * A focus session on this task: 15, 25 or 45 minutes on the room timer (the clock), which keeps running when the page
+ * closes and rings when it ends. One session at a time: while another task has one, this says so.
+ */
+function TaskFocus({ uid }: { uid: string }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => { const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, []);
+  const session = useCollection(["clock.json"], () => focusSession(now), [Math.floor(now / 1000)]);
+  const [minutes, setMinutes] = useState("25");
+  const mine = session && session.task_uid === uid ? session : null;
+  const remaining = mine ? focusRemaining(mine, now) : 0;
+  return <Section label="focus" className="mt-6">
+    {mine ? <>
+      <div role="timer" aria-label="Focus time remaining"><Figure label="remaining" value={remaining > 0 ? clockText(remaining) : "done"} /></div>
+      <Keys className="mt-3">
+        {remaining > 0 ? <Button type="button" onClick={() => attempt(() => mine.enabled ? clock.pause(mine.uid) : clock.resume(mine.uid))}>{mine.enabled ? "pause" : "resume"}</Button> : null}
+        <Button type="button" onClick={() => attempt(() => endFocus(mine.uid))}>{remaining > 0 ? "end session" : "finish session"}</Button>
+      </Keys>
+    </> : session && focusRemaining(session, now) > 0 ? <p className="text-sm text-muted-foreground">A focus session runs on “{session.title}”. End it there to focus on this one.</p> : <>
+      <Segmented label="Focus duration" value={minutes} onChange={setMinutes} options={["15", "25", "45"].map(value => ({ value, label: value + " min" }))} />
+      <Keys className="mt-3"><Button type="button" onClick={() => attempt(() => startFocus(uid, Number(minutes)))}>start focus</Button></Keys>
+    </>}
+  </Section>;
 }

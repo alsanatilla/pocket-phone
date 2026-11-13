@@ -315,3 +315,27 @@ export async function changeQueue(action, { chat = '', runId = '' } = {}) {
   if (!owner) throw new Error('Sign in to Pocket to change what waits for Pip.');
   return command({ action, accountId: owner.id, chat, runId });
 }
+
+/**
+ * Pip's background work and the replies waiting for the person (docs/pip-message-flow.md, "An assignment"): the newest
+ * assignments with their state and every reply waiting for a decision, as `{ accountId, assignments, decisions }`.
+ */
+export async function assignmentList() {
+  const owner = account();
+  if (!owner) throw new Error('Sign in to Pocket to see what Pip works on.');
+  return command({ action: 'assignments', accountId: owner.id });
+}
+
+/** Stops an assignment (a waiting one is taken back); answers the list as it is afterwards. Safe to repeat. */
+export async function stopAssignment(id, storage = globalThis.localStorage) {
+  const owner = account();
+  if (!owner) throw new Error('Sign in to Pocket to stop what Pip works on.');
+  return command({ action: 'cancel_assignment', accountId: owner.id, id, device: deviceId(storage) });
+}
+
+/** Tries a failed or stopped assignment again; a retry already started for it, from any device, answers instead. */
+export async function retryAssignment(id) {
+  const owner = account();
+  if (!owner) throw new Error('Sign in to Pocket to try this again.');
+  return command({ action: 'retry_assignment', accountId: owner.id, id, requestId: crypto.randomUUID() });
+}

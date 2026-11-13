@@ -40,22 +40,26 @@ interface RowProps {
   /** Pressing the row goes somewhere: it ends in › and the whole row is the target. */
   onOpen?: () => void;
   href?: string;
+  /** False leaves out the › of a pressable row: in a list where every row opens its thing, it says nothing. */
+  arrow?: boolean;
+  /** "error": the second line is a failure, in the error colour, and wraps instead of being cut. */
+  subTone?: "error";
   dim?: boolean;
   className?: string;
 }
 
 /** One line of a list. No rule between rows: space separates them. 44px to the touch. */
-export function Row({ lead, children, sub, end, onOpen, href, dim, className }: RowProps) {
+export function Row({ lead, children, sub, end, onOpen, href, arrow = true, subTone, dim, className }: RowProps) {
   const goes = Boolean(onOpen || href);
   const body = (
     <>
       {lead != null ? <span className="flex h-[1.6em] shrink-0 items-center text-dim">{lead}</span> : null}
       <span className="min-w-0 flex-1">
         <span className={cn("block break-words", dim ? "text-dim line-through" : "text-hi")}>{children}</span>
-        {sub != null ? <span className="block truncate text-xs text-dim">{sub}</span> : null}
+        {sub != null ? <span className={cn("block text-xs", subTone === "error" ? "break-words text-destructive" : "truncate text-dim")}>{sub}</span> : null}
       </span>
       {end != null ? <span className="flex min-h-[1.6em] shrink-0 items-center gap-2 text-xs text-dim">{end}</span> : null}
-      {goes ? <ChevronRight aria-hidden="true" className="mt-[3px] size-3.5 shrink-0 text-dim" /> : null}
+      {goes && arrow ? <ChevronRight aria-hidden="true" className="mt-[3px] size-3.5 shrink-0 text-dim" /> : null}
     </>
   );
   const shape = cn("flex min-h-11 w-full items-start gap-2.5 py-2 text-left sm:min-h-0 sm:py-1.5", goes && "rounded-[5px] no-underline transition-colors hover:bg-secondary/60", className);

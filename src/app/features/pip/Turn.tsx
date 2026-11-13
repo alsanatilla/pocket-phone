@@ -9,6 +9,8 @@ import { phaseLabel } from "../../../client/pip-activity.js";
 import type { ChatTurn } from "../../data/chats.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 import { OfferCard } from "./Offers.tsx";
+import { AssignmentStatus } from "./AssignmentStatus.tsx";
+import { ASSIGNMENT_OWNER, reportTitle } from "../../data/today.ts";
 import { Answer, Thinking } from "./stream/Answer.tsx";
 import { Prose } from "./stream/Prose.tsx";
 import { jobsOf, ledger, memoryOf, offersOf, planOf, sourcesOf } from "./reply.ts";
@@ -126,21 +128,24 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
   const cards = useCardButtons(chatId, locked);
   const ask = useCallback((prompt: string) => { if (!locked) send(chatId, prompt).catch(toastError); }, [chatId, locked]);
   const place = useMemo(() => ({ chatId, place: "chat" as const, locked }), [chatId, locked]);
-  // A message about one card says so in a line of its own, not with the card's id.
-  const asked = aboutCard(shown.text);
+  // A message about one card says so in a line of its own, not with the card's id. An assignment's report is Pip's
+  // own turn: its title stands where the question would, with a quiet marker, and the line under it says what it is.
+  const report = shown.owner === ASSIGNMENT_OWNER;
+  const asked = report ? { text: reportTitle(shown), id: "" } : aboutCard(shown.text);
+  const handedOff = shown.activity?.some(row => row.name === "start_assignment" && row.state === "done");
   const unfinished = !streaming && latest && ["stopped", "failed", "streaming"].includes(shown.status);
   const took = rows.reduce((sum, row) => sum + secondsOf(row), 0);
   const steps = rows.length > 1 ? rows.length + " steps" : "1 step";
 
   return (
-    <article className={cn("space-y-3", Date.now() - shown.created < 4000 && "arrive")}>
+    <article data-turn={shown.uid} className={cn("space-y-3", Date.now() - shown.created < 4000 && "arrive")}>
       {/* What the person wrote is a prompt line; the reply under it is plain text. No bubble, no rule beside it. */}
       <div>
         <div className="flex gap-2 font-medium text-hi">
-          <span aria-hidden="true" className="text-primary">›</span>
+          <span aria-hidden="true" className={report ? "text-dim" : "text-primary"}>›</span>
           <p className="min-w-0 whitespace-pre-wrap break-words">{asked.text}</p>
         </div>
-        <p className="ml-[2ch] mt-0.5 text-[11px] text-dim">{clock(shown.created)}{asked.id ? " · about a card" : ""}</p>
+        <p className="ml-[2ch] mt-0.5 text-[11px] text-dim">{clock(shown.created)}{asked.id ? " · about a card" : report ? " · assignment" : ""}</p>
       </div>
 
       <div data-reply className="space-y-3">
@@ -184,6 +189,9 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
             <li><Link to="/jobs" className="text-primary underline underline-offset-2">jobs</Link></li>
           </ul>
         ) : null}
+
+        {/* Work this reply handed to an assignment: its state, live, with stop or try again. */}
+        {handedOff ? <AssignmentStatus chatId={chatId} turnId={shown.uid} /> : null}
 
         {sources.length && !streaming ? (
           <p className="text-[11px] text-dim">
