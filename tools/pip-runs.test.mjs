@@ -598,7 +598,7 @@ test('update_card in a later run changes the card in the earlier turn of the sto
     { fetcher: provider(sent, compatibleMessage({ calls: [{ name: 'update_card', input: { id, ...card(19500) }, id: 'call_update' }] }), compatibleMessage({ text: 'Updated.' })) });
   assert.equal(second.run.status, 'done', second.run.turn.error);
   // The model saw the earlier card as a record with its id, not as a format to copy.
-  assert.match(JSON.stringify(sent[2].messages), new RegExp('\\[card ' + id + ' drawn here with show_card'));
+  assert.ok(sent[2].messages.some(message => message.role === 'tool' && JSON.parse(message.content).id === id));
   const stored = await chatOf(userId, 'chat-card');
   assert.equal(stored.turns.length, 2);
   assert.deepEqual(cardIds(stored.turns[0].answer), [id], 'the card kept its id');

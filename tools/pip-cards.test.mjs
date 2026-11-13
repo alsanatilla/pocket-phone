@@ -147,11 +147,12 @@ test('update_card changes a card in an earlier reply, tells the path that keeps 
       compatibleMessage({ calls: [{ name: 'update_card', input: { id: 'kwrong9', ...withValue(899) }, id: 'call_wrong' }] }),
       compatibleMessage({ calls: [{ name: 'update_card', input: { id: 'kprice1', ...withValue(899) }, id: 'call_right' }] }),
       compatibleMessage({ text: 'It dropped to 899 €; the card above is current.' })) });
-  // The model saw the earlier card as a record with its id, never as a format.
+  // The model sees the original drawing call and its returned card id.
   const replayed = sent[0].messages.find(message => message.role === 'assistant');
-  assert.match(String(replayed.content), /\[card kprice1 drawn here with show_card: Metric “Canyon Endurace”; change it with update_card\]/);
+  assert.equal(replayed.tool_calls[0].function.name, 'show_card');
+  assert.equal(JSON.parse(toolResults(sent[0])[0]).id, 'kprice1');
   assert.doesNotMatch(String(replayed.content), /```|"elements"/);
-  assert.match(toolResults(sent[1])[0], /card_not_found.*Cards here: kprice1/);
+  assert.match(toolResults(sent[1]).at(-1), /card_not_found.*Cards here: kprice1/);
   assert.match(toolResults(sent[2]).at(-1), /"updated":true.*an earlier reply/);
   assert.equal(kept.length, 1); assert.equal(kept[0].uid, 'earlier'); assert.ok(kept[0].updated > 5);
   const [card] = cardsOf(kept[0].answer);
@@ -364,4 +365,19 @@ test('tool-call markup a model wrote as text never reaches the reader', () => {
   const debris = '<｜DSML｜ calls>\n<｜DSML｜ invoke name="search_notes">\n<｜DSML｜ parameter name="query" string="true">Jahr</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>';
   assert.deepEqual(normalizeAnswer('Ich schaue nach.\n\n' + debris + '\n\nDer Golf kostet 21.000 Euro.').split('\n').filter(line => line.trim()), ['Ich schaue nach.', 'Der Golf kostet 21.000 Euro.']);
   assert.equal(normalizeAnswer(debris), '');
+});
+
+test('card replay retains ids, prose and bounded arguments without changing the stored card', async () => {
+  const { cardsAsCalls } = await import('../src/shared/pocket-card-tool.js');
+  const spec = { ...cardFromTool(withValue('x'.repeat(500))), id: 'kprice1' };
+  const stored = 'Before\n\n' + cardFence(spec, { id: spec.id }) + '\n\nAfter';
+  const full = cardsAsCalls(stored);
+  assert.equal(full.messages[1].content[0].output.value.id, 'kprice1');
+  assert.equal(full.messages[0].content[1].input.elements[0].props.value.length, 500);
+  const short = cardsAsCalls(stored, { room: 0, tail: 'Prepared action' });
+  assert.equal(short.messages[0].content[1].input.elements[0].props.value.length, 201);
+  assert.match(short.messages[1].content[0].output.value.replay, /shortened/);
+  assert.match(short.messages[2].content[0].text, /After.*Prepared action/s);
+  assert.equal(spec.elements.main.props.value.length, 500);
+  assert.equal(normalizeAnswer('[card: Table “Prices”]'), '');
 });

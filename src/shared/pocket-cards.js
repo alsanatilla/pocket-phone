@@ -49,7 +49,7 @@ export const CARD_TOOL_DESCRIPTION = 'Draw a picture at this point of your reply
 
 /** update_card's description. */
 export const CARD_UPDATE_DESCRIPTION = 'Change a card that is already in this chat, in this reply or an earlier one, where it stands: a figure that moved, a row to add, a mistake to correct. '
-  + 'id is the card\'s id, from show_card\'s result or from a "[card <id> …]" record in an earlier reply. root and elements are the whole new card, in the same form as show_card: the old card is replaced, not merged. '
+  + 'id is the card\'s id, from the result of the show_card call that drew it (your earlier calls are in this conversation) or from a "[card <id> …]" record in chat history you read. root and elements are the whole new card, in the same form as show_card: the old card is replaced, not merged. '
   + 'The person sees the card change in place, marked with the time. Use this instead of drawing the same card again.';
 
 /** When and how Pip draws, appended to its system prompt. What can be drawn is in show_card's own description. */
@@ -65,4 +65,5 @@ export const CARDS_PROMPT = 'Pocket can draw parts of a reply as a picture: read
   + 'A card stays alive: when figures in a card that is already in this chat change, or it needs a correction, change that card with update_card and its id instead of drawing a second one. '
   + 'When the person asks to change, correct or add to something a card in this chat shows, call update_card; describing the change in words does not change the card. '
   + 'A message that ends with "[about card <id>]" is about that card: change it with update_card and that id. '
-  + 'Earlier replies show "[card <id> drawn here with show_card: …]" where a card was; that line is a record of what the person saw, never something to write yourself.';
+  + 'The cards of earlier replies are in this conversation as the show_card calls that drew them, each with its id in the result. '
+  + 'Chat history you read shows "[card <id> drawn here with show_card: …]" where a card was; that line is a record, never something to write. A line such as "[card: Table …]" in your answer draws nothing and is removed: to show a card, call show_card.';

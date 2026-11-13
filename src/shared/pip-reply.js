@@ -17,9 +17,9 @@ const TOOL_DEBRIS = /^\s*<\/?(?:parameter|function|tool_call)\b[^>]*>\s*$/;
 const DSML = /<\/?｜DSML｜/;
 /**
  * A card record a model copied into its answer: a whole line, in either form cardsAsRecords writes, or one a model
- * made up after it ("[card k… updated with show_card: …]").
+ * made up after it ("[card k… updated with show_card: …]", "[card: Table “Prices”]"). These standalone records and colon-prefixed placeholders draw nothing.
  */
-export const CARD_RECORD = /^\[card(?: [a-z0-9]{4,24})? [a-z ]{1,24}with (?:show|update)_card\b.*\]$/;
+export const CARD_RECORD = /^\s*\[card(?::[^\]]*|(?: [a-z0-9]{4,24})? [a-z ]{1,24}with (?:show|update)_card\b[^\]]*)\]\s*$/;
 /** A code fence a model may wrap a card in instead of ```pocket: no language, or JSON. */
 const CARD_LIKE = /^(?:json|jsonl|jsonc|json-render)?$/i;
 

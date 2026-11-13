@@ -8,7 +8,8 @@
 // - a drawn card has an id and stays alive: update_card replaces it where it stands (replaceCard), in this reply or
 //   an earlier one, so a figure that changed is corrected in place instead of drawn a second time;
 // - cardsAsRecords replaces cards in replayed history by one line each, so the model sees that a card was drawn
-//   there without seeing a text format it could copy.
+//   there without seeing a text format it could copy (in text the model only reads: chat history it looked up);
+// - cardsAsCalls replays an earlier reply to the model with each card as the show_card call that drew it.
 
 import { CARD_ACTIONS, CARD_COMPONENTS, TONES } from './pocket-cards.js';
 import { segmentAnswer } from './pip-reply.js';
@@ -164,6 +165,45 @@ export function draftLines(partial) {
     }
   }
   return out.join('\n');
+}
+
+/** show_card's arguments for a stored card: the reverse of cardFromTool. */
+export function toolFromCard(spec) {
+  return { root: spec.root, elements: Object.entries(spec.elements).filter(([, element]) => element && typeof element === 'object').map(([id, element]) => ({ id, type: element.type, props: element.props && typeof element.props === 'object' ? element.props : {}, children: Array.isArray(element.children) ? element.children : [], ...(element.on ? { on: element.on } : {}) })) };
+}
+
+/** A card's arguments with its long lists cut to three entries and its long texts cut, for a replay that has no room for all of it. */
+const shorter = value => Array.isArray(value) ? value.slice(0, 3).map(shorter) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, shorter(item)])) : typeof value === 'string' && value.length > 200 ? value.slice(0, 200) + '…' : value;
+const shortCard = input => ({ root: input.root, elements: input.elements.map(element => ({ ...element, props: shorter(element.props) })) });
+
+/**
+ * An earlier reply as the messages the model reads again. A card was drawn by a show_card call, so that is how it
+ * comes back: the prose before it, the call with the card's own arguments, and the result that named its id. A
+ * model repeats what its earlier replies look like; a card replayed as a line of text was copied as a line of text
+ * ("[card: Table …]") instead of being drawn. `room` is how many characters of card arguments may still be replayed
+ * whole; a card past it comes back shortened and says so. `tail` is text that follows the reply.
+ */
+export function cardsAsCalls(text, { prefix = 'replay', room = Infinity, tail = '' } = {}) {
+  const source = String(text ?? ''), segments = source.includes('```') || source.includes('"op"') ? segmentAnswer(source) : [];
+  if (!segments.some(segment => segment.kind === 'card')) return { messages: [{ role: 'assistant', content: source + (tail ? '\n\n' + tail : '') }], room };
+  const messages = [];
+  let parts = [], count = 0;
+  const say = value => { const last = parts.at(-1); if (last?.type === 'text') last.text += '\n\n' + value; else parts.push({ type: 'text', text: value }); };
+  for (const segment of segments) {
+    if (segment.kind === 'prose') { const prose = segment.text.replace(/\s+$/, ''); if (prose.trim()) say(prose); continue; }
+    const spec = normalizeSpec(pocketSpec(segment.source));
+    if (!spec?.elements || typeof spec.root !== 'string') continue;
+    const id = typeof spec.id === 'string' && CARD_ID.test(spec.id) ? spec.id : '', toolCallId = prefix + '_' + count++;
+    let input = toolFromCard(spec), whole = true;
+    const weight = JSON.stringify(input).length;
+    if (weight > room) { input = shortCard(input); whole = false; } else room -= weight;
+    parts.push({ type: 'tool-call', toolCallId, toolName: 'show_card', input });
+    messages.push({ role: 'assistant', content: parts }); parts = [];
+    messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId, toolName: 'show_card', output: { type: 'json', value: { kind: 'card', drawn: true, ...(id ? { id } : {}), shows: cardSummary(spec), ...(whole ? {} : { replay: 'These arguments are shortened here; the card the person sees is complete.' }) } } }] });
+  }
+  if (tail) say(tail);
+  if (parts.length) messages.push({ role: 'assistant', content: parts });
+  return { messages, room };
 }
 
 /** The shape of the record cardsAsRecords writes, defined with the cleaning in pip-reply.js so the two stay in step. */

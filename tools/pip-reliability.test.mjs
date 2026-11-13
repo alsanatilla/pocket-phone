@@ -39,15 +39,19 @@ test('current research requests receive the local date and timezone', t => {
   assert.match(body.instructions, /verify publication dates/);
 });
 
-test('a replayed reply shows each card as a record, never as a format to copy', t => {
+test('a replayed reply preserves cards as paired tool calls', t => {
   const { chat } = workspace(t), turn = current();
   const legacy = 'Before.\n\n```pocket\n{"root":"card","elements":{"card":{"type":"Card","props":{"title":"Alt","subtitle":"3 fällig"},"children":["f"]},"f":{"type":"Field","props":{"label":"next","value":"x"},"children":[]}}}\n```\n\nAfter.';
   chat.turns = [prior('old', [], { answer: legacy }), turn];
-  const body = requestBody(chat, turn), replayed = String(body.messages[1].content);
-  assert.match(replayed, /Before\./);
-  assert.match(replayed, /After\./);
-  assert.match(replayed, /\[card drawn here with show_card: /);
-  assert.doesNotMatch(replayed, /"subtitle"|"Field"|```|"elements"/);
+  const body = requestBody(chat, turn);
+  const parts = body.messages[1].content;
+  assert.match(parts[0].text, /Before\./);
+  assert.equal(parts[1].type, 'tool-call');
+  assert.equal(parts[1].toolName, 'show_card');
+  assert.equal(parts[1].input.root, 'card');
+  assert.equal(body.messages[2].role, 'tool');
+  assert.equal(body.messages[2].content[0].toolCallId, parts[1].toolCallId);
+  assert.match(body.messages[3].content[0].text, /After\./);
   // Drawing is a tool: the instructions say when to call it and that card text is never written; what can be drawn
   // is the tool's own description, so the system prompt carries no format.
   assert.match(body.instructions, /only way to draw is the show_card tool/);

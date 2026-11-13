@@ -260,7 +260,9 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     const activeTools = lateLookups >= LATE_LOOKUPS ? [] : [...offered].filter(name => allowed(name) && (!final || STATE_TOOLS.includes(name) || isLookup(name)));
     result.phase = final ? 'synthesizing' : 'requesting'; publish();
     const instruction = final ? '\n\nPocket runtime status: the app has stopped research for this reply. This is an app limit, not a user instruction, and does not mean the research is complete. Answer the current user request using the observations already collected. Do not start more research or read more sources. '
-      + (canPrepare ? 'Only if the current user request asks to save or change something, request it now if it has not already been requested in this reply. An unfinished action from an earlier message must not replace the current answer. ' : 'Make no more tool calls; write the answer now. ')
+      + (canPrepare ? 'Only if the current user request asks to save or change something, request it now if it has not already been requested in this reply. An unfinished action from an earlier message must not replace the current answer. '
+        + (offered.has('show_card') ? 'A card that belongs in this answer is still drawn by calling show_card; never write a stand-in for one. ' : '')
+        : 'Make no more tool calls; write the answer now. ' + (offered.has('show_card') ? 'No card can be drawn any more: write what it would have shown as a plain list in your text, never a stand-in such as "[card: …]". ' : ''))
       + 'Explain material gaps briefly without attributing this limit to the user.' + (finalReason ? ' App limit: ' + finalReason : '') : '';
     return { maxOutputTokens: allowance, instructions: instructions + instruction, activeTools, toolChoice: final && !canPrepare ? 'none' : 'auto' };
   };
