@@ -9,7 +9,7 @@ import { phaseLabel } from "../../../client/pip-activity.js";
 import { readChat, type ChatTurn } from "../../data/chats.ts";
 import { explain } from "./account.ts";
 import { toastError } from "../../ui/toast/toast.ts";
-import { OfferCard } from "./Offers.tsx";
+import { ApprovalGroup, OfferCard } from "./Offers.tsx";
 import { AssignmentStatus } from "./AssignmentStatus.tsx";
 import { ASSIGNMENT_OWNER, reportTitle } from "../../data/today.ts";
 import { Answer, Thinking } from "./stream/Answer.tsx";
@@ -182,12 +182,15 @@ function answerParts(answer: string, blocks: Segment[] | undefined, steers: Stee
 function TurnView({ turn, live, blocks, chatId, latest, locked, pending = [], held = false, onTakeBack }: TurnProps) {
   const shown: ChatTurn = live ? { ...turn, ...live } as ChatTurn : turn;
   const streaming = Boolean(live);
-  const rows = ledger(shown, streaming);
-  const plan = planOf(rows), offers = offersOf(rows), sources = sourcesOf(shown, rows);
+  const all = ledger(shown, streaming);
+  const plan = planOf(all), offers = offersOf(all), sources = sourcesOf(shown, all);
+  const approvals = offers.filter((offer): offer is Extract<typeof offer, { type: "approval" }> => offer.type === "approval");
+  // Writes waiting together are listed once, in their review, not a second time as steps above it.
+  const rows = approvals.length > 1 ? all.filter(row => row.state !== "awaiting") : all;
   const remembered = memoryOf(shown), jobs = jobsOf(shown);
   const cards = useCardButtons(chatId, locked);
   const ask = useCallback((prompt: string) => { if (!locked) send(chatId, prompt).catch(toastError); }, [chatId, locked]);
-  const place = useMemo(() => ({ chatId, place: "chat" as const, locked }), [chatId, locked]);
+  const place = useMemo(() => ({ chatId, place: "chat" as const, locked, drawn: turn.created }), [chatId, locked, turn.created]);
   // A message about one card says so in a line of its own, not with the card's id. An assignment's report is Pip's
   // own turn: its title stands where the question would, with a quiet marker, and the line under it says what it is.
   const report = shown.owner === ASSIGNMENT_OWNER;
@@ -279,7 +282,14 @@ function TurnView({ turn, live, blocks, chatId, latest, locked, pending = [], he
           </p>
         ) : null}
 
-        {offers.length ? <div className="space-y-2">{offers.map(offer => <OfferCard key={offer.row.id} offer={offer} chatId={chatId} turnId={shown.uid} locked={locked && !streaming} />)}</div> : null}
+        {/* Two or more writes waiting at once are one list with one "save all"; a single one keeps its own keys. */}
+        {offers.length ? (
+          <div className="space-y-2">
+            {offers.map(offer => offer.type === "approval" && approvals.length > 1
+              ? (offer === approvals[0] ? <ApprovalGroup key="approvals" offers={approvals} turnId={shown.uid} /> : null)
+              : <OfferCard key={offer.row.id} offer={offer} chatId={chatId} turnId={shown.uid} locked={locked && !streaming} />)}
+          </div>
+        ) : null}
 
         {/* Sent into the reply and not taken yet: after what Pip has written so far, and after a change it waits on. */}
         {waiting.map(item => (

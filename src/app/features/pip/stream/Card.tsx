@@ -78,7 +78,9 @@ function Placeholder() {
 }
 
 /** Where a card stands, so the person can pin, change or remove it: its chat, and whether this is the chat or Today. */
-export interface CardPlace { chatId: string; place: "chat" | "today"; chatTitle?: string; locked?: boolean }
+export interface CardPlace { chatId: string; place: "chat" | "today"; chatTitle?: string; locked?: boolean;
+  /** When the reply holding the card was written: a plan's "tomorrow" is counted from then. */
+  drawn?: number }
 
 export const Card = memo(function Card({ source, closed, streaming, onAsk, at }: { source: string; closed: boolean; streaming: boolean; onAsk: (prompt: string) => void; at?: CardPlace }) {
   // Once the reply is finished, its last line is complete even without a newline after it.
@@ -112,7 +114,7 @@ export const Card = memo(function Card({ source, closed, streaming, onAsk, at }:
           <p className="min-w-0 flex-1 text-xs text-dim">
             {notes.map((note, index) => <Fragment key={index}>{index ? " · " : ""}<span>{note}</span></Fragment>)}
           </p>
-          {at && marks.id && hasMenu ? <CardMenu chatId={at.chatId} id={marks.id} pinned={pinned} place={at.place} locked={at.locked} source={source} alert={alert} onAsk={onAsk} /> : null}
+          {at && marks.id && hasMenu ? <CardMenu chatId={at.chatId} id={marks.id} pinned={pinned} place={at.place} locked={at.locked} source={source} alert={alert} drawn={at.drawn} onAsk={onAsk} /> : null}
         </div>
       ) : null}
     </div>

@@ -7,7 +7,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { applyChange, applyProposal, type CreateProposal } from "../../../client/pip-actions.js";
 import { chats } from "../../data/chats.ts";
-import { Keys, Row, Section } from "../../ui/kit.tsx";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { dateAt } from "@/lib/utils";
+import { Keys, Row, RowMenu, Section } from "../../ui/kit.tsx";
 import { BARE_INPUT } from "../../ui/SendButton.tsx";
 import { toast, toastError } from "../../ui/toast/toast.ts";
 import { approvalOf, decide } from "./runner.ts";
@@ -198,5 +200,82 @@ export function OfferCard({ offer, chatId, turnId, locked }: { offer: Offer; cha
         </>
       ) : null}
     </Frame>
+  );
+}
+
+/** The day a proposed record is for (an appointment's, a task's due date), and its time; empty when it has none. */
+function approvalWhen(offer: Extract<Offer, { type: "approval" }>): { day: string; time: string } {
+  const input = offer.input as { kind?: unknown; when?: unknown; due?: unknown };
+  if (offer.name !== "create_record") return { day: "", time: "" };
+  if (input.kind === "appointment") {
+    const at = Date.parse(String(input.when ?? ""));
+    return Number.isFinite(at) ? { day: dateAt(at), time: new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) } : { day: "", time: "" };
+  }
+  return input.kind === "task" && /^\d{4}-\d{2}-\d{2}$/.test(String(input.due ?? "")) ? { day: dateAt(Date.parse(input.due + "T12:00:00")), time: "" } : { day: "", time: "" };
+}
+
+/**
+ * What tells the rows apart: an appointment's time, or "task"; with the day when the rows are not all on one day
+ * (a day's plan says its day once, in the section's label, instead of on every row).
+ */
+function approvalNote(offer: Extract<Offer, { type: "approval" }>, sharedDay: string): string {
+  const { day, time } = approvalWhen(offer), kind = (offer.input as { kind?: unknown }).kind;
+  const what = time || (offer.name === "create_record" && typeof kind === "string" ? kind : "");
+  return [what, day && day !== sharedDay ? day : ""].filter(Boolean).join(" · ");
+}
+
+/**
+ * Several writes asked for in one message (a plan turned into appointments and tasks): one section, a row per write
+ * with what tells it apart, and its own review or decline in the row's menu; `save all` approves every one still
+ * open as proposed. Five sections of their own, each with two keys, were a wall of buttons on a phone.
+ */
+export function ApprovalGroup({ offers, turnId }: { offers: Extract<Offer, { type: "approval" }>[]; turnId: string }) {
+  const [reviewing, setReviewing] = useState<string | null>(null);
+  const rows = offers.map(offer => ({ offer, waiting: approvalOf(turnId, offer.row.id) }));
+  const open = rows.filter(row => row.waiting && !row.waiting.decision);
+  const settle = (rowId: string, decision: Parameters<typeof decide>[2]) => { try { decide(turnId, rowId, decision); } catch (error) { toastError(error); } };
+  const all = (approved: boolean) => { for (const { offer } of open) settle(offer.row.id, { approved }); };
+  const shown = offers.find(offer => offer.row.id === reviewing);
+  const days = new Set(offers.map(offer => approvalWhen(offer).day));
+  const sharedDay = days.size === 1 ? [...days][0] ?? "" : "";
+  const editable = (offer: Extract<Offer, { type: "approval" }>) => offer.name === "create_record" && typeof offer.input.title === "string";
+  return (
+    <Section label={"needs your approval" + (sharedDay ? " · " + sharedDay : "")}>
+      <ul>
+        {rows.map(({ offer, waiting }) => {
+          const decided = waiting?.decision, note = decided ? (decided.approved ? "approved" : "declined") : approvalNote(offer, sharedDay);
+          return (
+            <li key={offer.row.id}>
+              {/* A decision stays open to change until the last one is taken: a mis-tap on a phone is undone here. */}
+              <Row dim={decided ? !decided.approved : false} end={<>{note ? <span>{note}</span> : null}{waiting ? (
+                <RowMenu label={"Options for: " + offer.title.slice(0, 60)}>
+                  {editable(offer)
+                    ? <DropdownMenuItem onSelect={() => setReviewing(offer.row.id)}>review…</DropdownMenuItem>
+                    : decided?.approved ? null : <DropdownMenuItem onSelect={() => settle(offer.row.id, { approved: true })}>approve</DropdownMenuItem>}
+                  {decided && !decided.approved ? null : <DropdownMenuItem onSelect={() => settle(offer.row.id, { approved: false })}>decline</DropdownMenuItem>}
+                </RowMenu>
+              ) : null}</>}>
+                {offer.title}
+              </Row>
+            </li>
+          );
+        })}
+      </ul>
+      {open.length ? (
+        <Keys className="pt-1">
+          <Button type="button" onClick={() => all(false)}>decline all</Button>
+          <Button type="button" variant="go" onClick={() => all(true)}>{open.length === offers.length ? "save all" : "save the rest"}</Button>
+        </Keys>
+      ) : null}
+      <Dialog open={Boolean(shown)} onOpenChange={value => { if (!value) setReviewing(null); }}>
+        {shown ? (
+          <DialogContent>
+            <DialogHeader><DialogTitle>{shown.title}</DialogTitle><DialogDescription>Pip wants to save this. Change anything, then approve.</DialogDescription></DialogHeader>
+            <ProposalForm proposal={shown.input as unknown as CreateProposal} submitLabel="approve"
+              onSubmit={value => { settle(shown.row.id, { approved: true, input: value }); setReviewing(null); }} />
+          </DialogContent>
+        ) : null}
+      </Dialog>
+    </Section>
   );
 }

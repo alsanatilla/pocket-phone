@@ -52,6 +52,14 @@ export const CARD_UPDATE_DESCRIPTION = 'Change a card that is already in this ch
   + 'id is the card\'s id, from the result of the show_card call that drew it (your earlier calls are in this conversation) or from a "[card <id> …]" record in chat history you read. root and elements are the whole new card, in the same form as show_card: the old card is replaced, not merged. '
   + 'The person sees the card change in place, marked with the time. Use this instead of drawing the same card again.';
 
+/**
+ * How Pip saves a plan card the person asked to add (planRequest in pocket-card-edit.js): every item in one message,
+ * so the person reviews them together, and a question instead of a guessed date.
+ */
+export const PLAN_PROMPT = 'A message with a "[plan …]" block asks you to save that plan, whose items it lists in full: in one message, call create_record once for each item not saved yet (an earlier "[Pip actions: …]" line shows what was). '
+  + 'An item with a clock time is an appointment with when on the plan\'s date and minutes only from the plan, else the default; an item without a time is a task, due on the plan\'s date if it has one. '
+  + 'If a timed item\'s date is not stated in the plan or this chat, save nothing yet and ask for the date in one short question. Leave the card as it is; once saved, say in one or two lines what was saved. ';
+
 /** When and how Pip draws, appended to its system prompt. What can be drawn is in show_card's own description. */
 export const CARDS_PROMPT = 'Pocket can draw parts of a reply as a picture: readings, charts, tables, a schedule, choices, the person\'s tasks. '
   + 'The only way to draw is the show_card tool: write the sentence a picture illustrates, call show_card right there, then go on writing after it. A reply may have up to four cards, each where it belongs, not collected at the end. '
@@ -64,6 +72,7 @@ export const CARDS_PROMPT = 'Pocket can draw parts of a reply as a picture: read
   + 'Every fact appears once: what the prose says needs no tile, and a Hero is not repeated by a Metric. Short labels, no emoji. Skip pictures when plain prose is enough. '
   + 'A card stays alive: when figures in a card that is already in this chat change, or it needs a correction, change that card with update_card and its id instead of drawing a second one. '
   + 'When the person asks to change, correct or add to something a card in this chat shows, call update_card; describing the change in words does not change the card. '
-  + 'A message that ends with "[about card <id>]" is about that card: change it with update_card and that id. '
+  + 'A message that ends with "[about card <id>]" is about that card: when it asks for a change, change it with update_card and that id. '
+  + PLAN_PROMPT
   + 'The cards of earlier replies are in this conversation as the show_card calls that drew them, each with its id in the result. '
   + 'Chat history you read shows "[card <id> drawn here with show_card: …]" where a card was; that line is a record, never something to write. A line such as "[card: Table …]" in your answer draws nothing and is removed: to show a card, call show_card.';

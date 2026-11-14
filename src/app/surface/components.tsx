@@ -178,7 +178,7 @@ export function Timeline({ title, items }: { title?: string | null; items: Timel
   return (
     <Section className="arrive mb-0" label={title ?? "today"}>
       {list.map((item, index) => (
-        <Row key={index} lead={item.time} end={item.now ? "now" : undefined}>
+        <Row key={index} lead={item.time || undefined} end={item.now ? "now" : undefined}>
           <span className={item.past ? "text-dim" : undefined}>{item.title}</span>
           {item.detail ? <span className="block truncate text-xs text-dim">{item.detail}</span> : null}
         </Row>

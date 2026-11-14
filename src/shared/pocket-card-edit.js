@@ -80,11 +80,61 @@ export function cardName(source) {
   return '';
 }
 
-/** The text and the card id its last line names, or an empty id when it names none. */
+/**
+ * The text and the card id its last line names, or an empty id when it names none. A plan block (planRequest) before
+ * the trailer is for the model, not for the person: it is cut from `text` and returned as `plan`.
+ */
 export function aboutCard(text) {
   const value = String(text ?? '');
   const match = ABOUT_CARD.exec(value);
-  return match ? { text: value.slice(0, match.index).trim(), id: match[1] } : { text: value, id: '' };
+  if (!match) return { text: value, id: '' };
+  const body = value.slice(0, match.index), plan = PLAN_BLOCK.exec(body);
+  return plan ? { text: body.slice(0, plan.index).trim(), id: match[1], plan: plan[0].trim() } : { text: body.trim(), id: match[1] };
+}
+
+/** The block a plan request carries: a header line, then one line per item, right before the card trailer. */
+const PLAN_BLOCK = /(?:^|\n)\[plan [^\n]*\](?:\n- [^\n]*)*\s*$/;
+/** What the person asks when they turn a plan into appointments and tasks; the shown line of the message. */
+export const PLAN_ASK = 'Add this plan to my calendar and tasks.';
+const PLAN_ITEMS = 50, PLAN_LINE = 240;
+const oneLine = value => typeof value === 'string' || typeof value === 'number' ? String(value).replace(/\s+/g, ' ').trim() : '';
+
+/**
+ * The plan a card draws: its Timeline items in order, with the plan's title. Null when the card draws no Timeline
+ * with items, so only a plan offers to be saved as appointments and tasks.
+ */
+export function cardPlan(source) {
+  const spec = pocketSpec(String(source ?? ''));
+  if (!spec || !spec.elements || typeof spec.elements !== 'object') return null;
+  const timelines = Object.values(spec.elements).filter(element => element?.type === 'Timeline' && Array.isArray(element.props?.items));
+  const items = timelines.flatMap(element => element.props.items).filter(item => item && typeof item === 'object' && oneLine(item.title))
+    .map(item => ({ time: oneLine(item.time), title: oneLine(item.title), detail: oneLine(item.detail) }));
+  if (!items.length) return null;
+  const title = timelines.map(element => oneLine(element.props.title)).find(Boolean) || cardName(source);
+  return { title, items };
+}
+
+/** "Fri 2026-11-13": the local day a card was drawn, so the model can place "tomorrow" or "Saturday" in a plan. */
+const drawnDay = at => {
+  const date = new Date(at);
+  if (!Number.isFinite(+date) || at <= 0) return '';
+  const pad = number => String(number).padStart(2, '0');
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()] + ' ' + date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate());
+};
+
+/**
+ * The message that asks Pip to save a plan card as appointments and tasks. The plan's items travel in the message,
+ * built from the stored card: a replayed card past the history budget is shortened to three entries, and the person
+ * should not have to retype what the card shows. Null when the card draws no plan.
+ */
+export function planRequest(source, id, drawn = 0) {
+  const plan = cardPlan(source);
+  if (!plan || !CARD_ID.test(String(id))) return null;
+  const day = drawnDay(drawn);
+  const lines = plan.items.slice(0, PLAN_ITEMS).map(item => ('- ' + (item.time || 'no time') + ' · ' + item.title + (item.detail ? ' · ' + item.detail : '')).slice(0, PLAN_LINE));
+  if (plan.items.length > PLAN_ITEMS) lines.push('- … ' + (plan.items.length - PLAN_ITEMS) + ' more items in the card');
+  const header = '[plan' + (plan.title ? ' “' + plan.title.slice(0, 80) + '”' : '') + (day ? ' · drawn ' + day : '') + ' · items as time · title · detail]';
+  return withCard(PLAN_ASK + '\n\n' + header + '\n' + lines.join('\n'), id);
 }
 
 /** The text with a trailer on its last line naming card `id`, replacing one that is already there. */

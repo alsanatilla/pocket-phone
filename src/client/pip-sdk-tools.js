@@ -83,7 +83,7 @@ const DEFINITIONS = {
   show_card: [CARD_TOOL_DESCRIPTION, z.object({ root: cardRoot, elements: cardElements })],
   update_card: [CARD_UPDATE_DESCRIPTION, z.object({ id: z.string().min(1).max(24).meta({ description: 'The id of the card to change.' }), root: cardRoot, elements: cardElements })],
   update_plan: ['Show or update a short plan for this reply. Changes only the displayed plan; never saves Pocket records.', object({ steps: z.array(object({ text: z.string().min(1).max(160), status: z.enum(['pending', 'in_progress', 'done']) })).min(1).max(6) })],
-  create_record: ['Save a new note, task or appointment in Pocket. The user reviews it first and may edit, approve or decline it; the result says whether it was saved. Appointments need when; task due is YYYY-MM-DD.', object({
+  create_record: ['Save a new note, task or appointment in Pocket. The user reviews it first and may edit, approve or decline it; the result says whether it was saved. Appointments need when; task due is YYYY-MM-DD. Never guess a date: ask for it. Several records: one call each, all in the same message, so the user reviews them together.', object({
     kind: z.enum(['note', 'task', 'appointment']), title: z.string().min(1).max(200), text: z.string().max(6000), due: optional(z.string().max(10)),
     steps: optional(z.array(line).max(12)), when: optional(z.string().max(40)), minutes: integer('Appointment duration in minutes.', 15, 480, 60)
   }).superRefine(checked(recordProblem))],

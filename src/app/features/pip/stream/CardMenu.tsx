@@ -1,6 +1,6 @@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { cardName, sourceUrl, withCard } from "../../../../shared/pocket-card-edit.js";
+import { cardName, planRequest, sourceUrl, withCard } from "../../../../shared/pocket-card-edit.js";
 import { removeCard, setCardAlert, setCardPinned } from "../../../data/cards.ts";
 import { keepCardCurrent, stopCardWatch } from "../../../data/card-watch.ts";
 import { confirm, prompt } from "../../../ui/dialog/dialog.ts";
@@ -9,14 +9,15 @@ import { openPath } from "../../../lib/classic.ts";
 
 // What the person can do with a drawn card: pin it to Today, have Pip change or refresh it, or take it out of the
 // reply. A request to Pip names the card (withCard), so "make it 58" needs no explanation of which one. A card that
-// names a source is kept current by a watch of its own while it is pinned.
+// names a source is kept current by a watch of its own while it is pinned. A plan (a Timeline) can be turned into
+// appointments and tasks: Pip is sent the plan's items with the card's id and proposes them for one review.
 
-export function CardMenu({ chatId, id, pinned, place, locked, source, alert, onAsk }: {
+export function CardMenu({ chatId, id, pinned, place, locked, source, alert, drawn, onAsk }: {
   chatId: string; id: string; pinned: boolean; place: "chat" | "today"; locked?: boolean; source: string;
-  alert?: { below?: number; above?: number }; onAsk: (prompt: string) => void;
+  alert?: { below?: number; above?: number }; drawn?: number; onAsk: (prompt: string) => void;
 }) {
   const guard = (run: () => unknown) => () => { Promise.resolve().then(run).catch(toastError); };
-  const url = sourceUrl(source), name = cardName(source);
+  const url = sourceUrl(source), name = cardName(source), plan = planRequest(source, id, drawn);
   const kept = (said: string) => (state: Awaited<ReturnType<typeof keepCardCurrent>>) =>
     toast(state === "scheduled" ? said
       : state === "signed-out" ? "Pinned. Sign in to let Pip keep it current."
@@ -52,8 +53,9 @@ export function CardMenu({ chatId, id, pinned, place, locked, source, alert, onA
       <DropdownMenuTrigger asChild>
         <Button type="button" size="xs" aria-label="Card options">more</Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)] [&_[role=menuitem]]:min-h-11 [&_[role=menuitem]]:px-3 sm:[&_[role=menuitem]]:min-h-9">
+      <DropdownMenuContent align="end" className="w-64 max-w-[calc(100vw-2rem)] [&_[role=menuitem]]:min-h-11 [&_[role=menuitem]]:px-3 sm:[&_[role=menuitem]]:min-h-9">
         <DropdownMenuItem onSelect={guard(pin)}>{pinned ? "unpin" : "pin to today"}</DropdownMenuItem>
+        {plan ? <DropdownMenuItem disabled={locked} onSelect={guard(() => onAsk(plan))}>add to calendar and tasks</DropdownMenuItem> : null}
         {place === "today" ? <DropdownMenuItem onSelect={guard(() => openPath("/pip?chat=" + encodeURIComponent(chatId)))}>open chat</DropdownMenuItem> : null}
         <DropdownMenuItem disabled={locked} onSelect={guard(async () => {
           const text = await prompt({ title: "Change this card", placeholder: "what should change?", maxLength: 2000 });

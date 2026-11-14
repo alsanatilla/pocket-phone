@@ -13,6 +13,12 @@ export function sourceUrl(source: string): string;
 /** A short name for a card, from the first label it shows; '' when it shows none. */
 export function cardName(source: string): string;
 /** The text without its "[about card <id>]" trailer, and the id; an empty id when there is none. */
-export function aboutCard(text: string): { text: string; id: string };
+export function aboutCard(text: string): { text: string; id: string; plan?: string };
+/** What the person asks when they turn a plan card into appointments and tasks. */
+export const PLAN_ASK: string;
+/** The Timeline items a card draws, with the plan's title; null when it draws no plan. */
+export function cardPlan(source: string): { title: string; items: { time: string; title: string; detail: string }[] } | null;
+/** The message asking Pip to save the plan card `id` as appointments and tasks, with every item; null for a card that is not a plan. */
+export function planRequest(source: string, id: string, drawn?: number): string | null;
 /** The text with its trailer naming the card, replacing one that is already there. */
 export function withCard(text: string, id: string): string;

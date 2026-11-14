@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cardFence } from '../../src/shared/pocket-card-tool.js';
+import { planRequest } from '../../src/shared/pocket-card-edit.js';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const CHROME = process.env.CHROME_PATH || '/usr/bin/chromium';
@@ -232,6 +233,56 @@ const APPROVAL_TURN = streamingTurn('approval-turn-1', 'Speichere den Preis für
   phase: 'waiting for your approval', activity: [APPROVAL_ROW],
 });
 const APPROVAL_CHAT = chatRecord('labapproval', 'Notiz speichern', [APPROVAL_TURN]);
+
+// A plan turned into appointments and tasks: a Saturday drawn as a Timeline (six timed items, two without a time),
+// the message its card's menu sends, and Pip's eight proposals waiting in one review.
+const PLAN_ITEMS = [
+  ['08:00', 'Long run', '18 km easy, along the canal'], ['10:30', 'Brunch with Mia', 'Café Fleury'], ['12:30', 'Pick up the bike from the shop', ''],
+  ['14:00', 'Haircut', ''], ['16:00', 'Call Grandma', ''], ['19:30', 'Dinner at Jonas and Lea’s, bring dessert and the photos from the summer', ''],
+  ['', 'Buy groceries for the week', 'oat milk, rice, apples'], ['', 'Stretching', '15 minutes'],
+];
+const planCard = cardFence({
+  root: 't',
+  elements: { t: { type: 'Timeline', props: { title: 'Saturday 15 Nov', items: PLAN_ITEMS.map(([time, title, detail]) => ({ time, title, ...(detail ? { detail } : {}) })) }, children: [] } },
+}, { id: 'kplan01' });
+const PLAN_ANSWER = 'Here is Saturday, with the run early so the afternoon stays free:\n\n' + planCard + '\n\nThe groceries and the stretching fit wherever there is room.';
+const PLAN_ASKED = planRequest(planCard.replace(/^```pocket\n|\n```$/g, ''), 'kplan01', NOW - 30 * MINUTE);
+const planRows = (prefix, state) => PLAN_ITEMS.map(([time, title, detail], index) => {
+  const input = time
+    ? { kind: 'appointment', title, text: detail, when: '2026-11-15T' + time + ':00Z', minutes: 60 }
+    : { kind: 'task', title, text: detail, due: '2026-11-15' };
+  return {
+    id: prefix + '-row-' + index, kind: 'tool', name: 'create_record', title: 'save ' + input.kind, input: JSON.stringify(input),
+    ...(state === 'awaiting'
+      ? { state, summary: 'waiting for your approval', result: JSON.stringify({ kind: 'approval', action: { tool: 'create_record', kind: input.kind, title }, requires_confirmation: true }), ended: 0 }
+      : { state: 'done', summary: index === 7 ? 'declined' : 'saved', result: JSON.stringify({ kind: 'action', action: { tool: 'create_record', kind: input.kind, title, status: index === 7 ? 'declined' : 'saved' } }), ended: NOW - 50_000,
+        ...(index === 7 ? {} : { applied_href: (time ? '/calendar/' : '/tasks/') + prefix + index, applied: NOW - 50_000 }) }),
+    started: NOW - 60_000, sources: [],
+  };
+});
+const planDone = (uid, text, answer, created, fields = {}) => streamingTurn(uid, text, { created, updated: created + 30_000, answer, status: 'done', phase: 'done', ...fields });
+const planTurn = uid => planDone(uid + '-drawn', 'Plan my Saturday: long run, brunch with Mia, the bike, a haircut, Grandma, dinner at Jonas and Lea’s.', PLAN_ANSWER, NOW - 30 * MINUTE);
+const planWaiting = uid => streamingTurn(uid + '-turn', PLAN_ASKED, { phase: 'waiting for your approval', activity: planRows(uid, 'awaiting') });
+const planChat = uid => chatRecord(uid, 'Saturday', [planTurn(uid), planWaiting(uid)]);
+const planRequests = uid => planRows(uid, 'awaiting').map((row, index) => ({ requestId: uid + '-req-' + index, kind: 'write', tool: 'create_record', callId: uid + '-call-' + index, rowId: row.id,
+  payload: { action: { tool: 'create_record', kind: JSON.parse(row.input).kind, title: JSON.parse(row.input).title } } }));
+const PLAN_CHAT = chatRecord('labplan', 'Saturday', [planTurn('labplan')]);
+const PLAN_SAVED_CHAT = chatRecord('labplansaved', 'Saturday', [planTurn('labplansaved'), planDone('labplansaved-turn', PLAN_ASKED,
+  'Saved six appointments for Saturday 15 Nov and the groceries as a task due that day. The stretching was declined, so it is not saved.', NOW - 60_000, { activity: planRows('labplansaved', 'done') })]);
+/** Opens a chat whose last reply waits for the plan's eight decisions. */
+async function openPlanApproval(page, ctx, state, uid) {
+  await until(page, state, 'the chat in this tab', key => localStorage.getItem(key) !== null, chatKey(uid));
+  await ctx.insertRun({ runId: uid + '-run', chat: uid, requestId: uid + '-request', turn: planWaiting(uid), status: 'awaiting', expiresAt: NOW + 12 * 3600_000, requests: planRequests(uid) });
+  await page.goto(ctx.origin + '/#/pip?chat=' + uid, { waitUntil: 'domcontentloaded' });
+  await until(page, state, 'the reply to attach', () => Boolean(document.querySelector('[aria-label="Stop the reply"]')));
+  await until(page, state, 'the grouped review', () => document.body.innerText.includes('save all'));
+}
+/** Opens the menu of the plan item `title` in the grouped review. */
+async function openItemMenu(page, state, title) {
+  await page.click('[aria-label="Options for: ' + title + '"]');
+  await until(page, state, 'the item menu', () => Boolean(document.querySelector('[role="menu"]')));
+}
+const menuItem = (page, label) => page.evaluate(label => [...document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent.trim() === label)?.click(), label);
 
 // A reply that set up a job (the line under it says so) after a job's own report, as it lands in the big chat.
 const SCHEDULED_ROW = {
@@ -694,6 +745,65 @@ const STATES = [
       await until(page, 'approval', 'the approval buttons', () => document.body.innerText.includes('decline') && document.body.innerText.includes('review'));
     },
     text: [/needs your approval/i, 'Blue car', 'decline', 'review'],
+  },
+  {
+    // A plan card's menu offers to turn it into appointments and tasks.
+    name: 'plan-menu',
+    async run(page, ctx) {
+      await openStaticChat(page, ctx, 'plan-menu', 'labplan', 'Long run');
+      await page.click('[data-card="kplan01"] [aria-label="Card options"]');
+      await until(page, 'plan-menu', 'the card menu', () => Boolean(document.querySelector('[role="menu"]')));
+    },
+    text: ['add to calendar and tasks', 'pin to today', 'Saturday 15 Nov'],
+    selectors: ['[role="menu"]'],
+    scroll: 'keep',
+  },
+  {
+    // What that sends, and Pip's eight proposals in one review: one list, one "save all".
+    name: 'plan-approval',
+    async run(page, ctx) { await openPlanApproval(page, ctx, 'plan-approval', 'labplanwait'); },
+    text: ['Add this plan to my calendar and tasks.', 'about a card', /needs your approval/i, 'Long run', '08:00', /needs your approval · 15 Nov/i, 'save all', 'decline all'],
+    async check(page) {
+      const body = await page.evaluate(() => document.body.innerText);
+      if (body.includes('[plan') || body.includes('[about card')) throw new Error('the plan block meant for Pip is on screen');
+      const keys = await page.evaluate(() => [...document.querySelectorAll('main button')].filter(item => ['review', 'decline'].includes(item.textContent.trim())).length);
+      if (keys) throw new Error(keys + ' review or decline keys are repeated down the list');
+    },
+  },
+  {
+    // One item declined from its menu: the row says so, the rest can still be saved together.
+    name: 'plan-approval-decided',
+    async run(page, ctx) {
+      await openPlanApproval(page, ctx, 'plan-approval-decided', 'labplanpart');
+      await openItemMenu(page, 'plan-approval-decided', 'Stretching');
+      await menuItem(page, 'decline');
+      await until(page, 'plan-approval-decided', 'the declined row', () => document.body.innerText.includes('declined') && document.body.innerText.includes('save the rest'));
+    },
+    text: ['declined', 'save the rest', 'Stretching'],
+  },
+  {
+    // One item opened for review: its fields, editable, and approve.
+    name: 'plan-review',
+    async run(page, ctx) {
+      await openPlanApproval(page, ctx, 'plan-review', 'labplanreview');
+      await openItemMenu(page, 'plan-review', 'Brunch with Mia');
+      await menuItem(page, 'review…');
+      await until(page, 'plan-review', 'the review dialog', () => Boolean(document.querySelector('[role="dialog"]')));
+    },
+    text: ['Brunch with Mia', 'approve', 'minutes'],
+    selectors: ['[role="dialog"]'],
+    scroll: 'keep',
+  },
+  {
+    // After the decisions: Pip says what was saved in a line, the card above is as it was.
+    name: 'plan-saved',
+    async run(page, ctx) { await openStaticChat(page, ctx, 'plan-saved', 'labplansaved', 'Saved six appointments'); },
+    text: ['Saved six appointments', 'Long run', 'Add this plan to my calendar and tasks.'],
+    selectors: ['[data-card="kplan01"]'],
+    async check(page) {
+      const body = await page.evaluate(() => document.body.innerText);
+      if (/needs your approval/i.test(body)) throw new Error('the review is still on screen after the decisions');
+    },
   },
   {
     name: 'scheduled',
@@ -1597,7 +1707,7 @@ async function main() {
       });
     };
 
-    for (const chat of [EMPTY_CHAT, LONG_CHAT, FAILED_CHAT, APPROVAL_CHAT, PINNED_CHAT, SCHEDULED_CHAT, HOME_EARLIER_CHAT, HOME_CURRENT_CHAT]) await objects.writeObject(USER, 'chats', chat);
+    for (const chat of [EMPTY_CHAT, LONG_CHAT, FAILED_CHAT, APPROVAL_CHAT, PLAN_CHAT, PLAN_SAVED_CHAT, planChat('labplanwait'), planChat('labplanpart'), planChat('labplanreview'), PINNED_CHAT, SCHEDULED_CHAT, HOME_EARLIER_CHAT, HOME_CURRENT_CHAT]) await objects.writeObject(USER, 'chats', chat);
     await workspace.syncDocuments(USER, labDocuments());
 
     const ctx = { browser: null, origin, out, eventsSecret, insertRun, finishRun, signInLink: auth.signInLink, memory, execute, secrets, keys, background, objects, workspace,

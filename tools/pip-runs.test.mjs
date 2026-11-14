@@ -606,3 +606,46 @@ test('update_card in a later run changes the card in the earlier turn of the sto
   assert.match(stored.turns[0].answer, /\/updated/);
   assert.equal(stored.turns[1].answer, 'Updated.', 'the new reply has no second card');
 });
+
+test('a plan turned into records: every item in one message, one pause for all of them, and exactly the approved ones saved', async () => {
+  const { cardsIn, planRequest } = await import('../src/shared/pocket-card-edit.js');
+  const items = Array.from({ length: 10 }, (_, index) => index < 7 ? { time: String(8 + index).padStart(2, '0') + ':00', title: 'Slot ' + index } : { time: '', title: 'Errand ' + index });
+  const userId = await account(), sent = [];
+  const drawn = await runs.submitRun(userId, { requestId: 'req-plan-1', chat: header('chat-plan'), text: 'Plan my Saturday.', device: 'browser-1' },
+    { fetcher: provider(sent, compatibleMessage({ text: 'Your Saturday:', calls: [{ name: 'show_card', input: { root: 't', elements: [{ id: 't', type: 'Timeline', props: { title: 'Saturday 15 Nov', items } }] }, id: 'call_plan' }] }), compatibleMessage({ text: 'Have a good day.' })) });
+  assert.equal(drawn.run.status, 'done', drawn.run.turn.error);
+  const [card] = cardsIn((await chatOf(userId, 'chat-plan')).turns[0].answer);
+
+  // The card's menu sends this; the model answers with one create_record per item, all in one message.
+  const text = planRequest(card.source, card.id);
+  const calls = items.map((item, index) => ({ id: 'call_item_' + index, name: 'create_record', input: item.time
+    ? { kind: 'appointment', title: item.title, text: '', when: '2026-11-15T' + item.time + ':00+01:00' }
+    : { kind: 'task', title: item.title, text: '', due: '2026-11-15' } }));
+  const asked = await runs.submitRun(userId, { requestId: 'req-plan-2', chat: header('chat-plan'), text, device: 'browser-1' }, { fetcher: provider(sent, compatibleMessage({ calls })) });
+  assert.equal(asked.run.status, 'awaiting', asked.run.turn.error);
+  const question = String(sent[2].messages.filter(message => message.role === 'user').at(-1).content);
+  for (const item of items) assert.ok(question.includes(item.title), item.title + ' reached the model');
+  assert.ok(question.trimEnd().endsWith('[about card ' + card.id + ']'), 'the card id reached the model');
+  assert.equal(asked.requests.length, 10, 'one pause asks for every item');
+  assert.ok(asked.requests.every(request => request.state === 'pending' && request.tool === 'create_record'));
+
+  // Approve some, decline the others: only the last decision continues the reply.
+  const approved = new Set(['Slot 0', 'Slot 2', 'Slot 4', 'Slot 6', 'Errand 8']);
+  let final;
+  for (const [index, request] of asked.requests.entries()) {
+    const last = index === asked.requests.length - 1;
+    final = await runs.decideRun(userId, { runId: asked.run.runId, requestId: request.id, approved: approved.has(request.payload.action.title), device: 'browser-1' },
+      { fetcher: last ? provider(sent, compatibleMessage({ text: 'Saved four appointments and one task for Saturday 15 Nov.' })) : noProvider });
+  }
+  assert.equal(final.run.status, 'done', final.run.turn.error);
+  assert.equal(sent.length, 4, 'two model requests for the whole plan');
+  const documents = await readDocuments(userId);
+  const events = documents['agenda.json'].value.events.filter(item => item.uid.startsWith('pip-')).map(item => item.title).sort();
+  const tasks = (documents['tasks.json']?.value.tasks || []).filter(item => item.uid.startsWith('pip-'));
+  assert.deepEqual(events, ['Slot 0', 'Slot 2', 'Slot 4', 'Slot 6']);
+  assert.deepEqual(tasks.map(item => [item.text, item.due]), [['Errand 8', '2026-11-15']]);
+  assert.equal(documents['agenda.json'].value.events.find(item => item.title === 'Slot 0').when, Date.parse('2026-11-15T08:00:00+01:00'));
+  assert.match(toolMessages(sent[3]), /declined this change/);
+  // The card stands as it was drawn.
+  assert.equal(cardsIn((await chatOf(userId, 'chat-plan')).turns[0].answer)[0].source, card.source);
+});

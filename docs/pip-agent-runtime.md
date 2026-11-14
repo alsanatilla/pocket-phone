@@ -117,6 +117,13 @@ next step and carries on in the same reply, instead of the message waiting until
 
 ## Approvals
 
+A plan card (a Timeline) has "add to calendar and tasks" in its menu: it sends the plan's items, built from the
+stored card, with `[about card <id>]` (`planRequest` in `src/shared/pocket-card-edit.js`; rules in `PLAN_PROMPT`).
+The model answers with one `create_record` per item in one message, so the person gets one pause; two or more
+waiting writes are shown as one list with per-item review/decline and `save all` (`ApprovalGroup` in
+`src/app/features/pip/Offers.tsx`). Writes are not counted against the lookup caps and there is no per-reply write
+cap, so a ten-item plan takes two model requests of the twelve.
+
 Approval checkpoints contain OpenClaw messages (thinking blocks untouched), pending
 calls, previews, rows, counters and displayed output. A durable run pauses at the
 assistant message boundary, before executing its tool batch, with every write and

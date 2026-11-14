@@ -329,6 +329,49 @@ test('the cards prompt says what a message that names a card means', () => {
   assert.match(CARDS_PROMPT, /change it with update_card and that id/);
 });
 
+test('a plan card turns into a message that carries every item and the card id, though a replay shortens the card', async () => {
+  const { cardsAsCalls } = await import('../src/shared/pocket-card-tool.js');
+  const { cardPlan, planRequest, PLAN_ASK } = await import('../src/shared/pocket-card-edit.js');
+  const items = Array.from({ length: 10 }, (_, index) => index < 7 ? { time: String(8 + index).padStart(2, '0') + ':00', title: 'Item ' + index, detail: 'line one\nline two' } : { time: '', title: 'Task ' + index });
+  const fence = cardFence({ root: 's', elements: { s: { type: 'Stack', props: {}, children: ['h', 't'] }, h: { type: 'Heading', props: { text: 'Saturday' }, children: [] },
+    t: { type: 'Timeline', props: { title: 'Saturday 15 Nov', items }, children: [] } } }, { id: 'kplan01' });
+  const source = fence.slice('```pocket\n'.length, -'\n```'.length);
+  // A card past the replay budget reaches the model with three entries: the request must not depend on it.
+  const replayed = cardsAsCalls('Plan:\n\n' + fence, { room: 0 }).messages[0].content.at(-1).input.elements.find(element => element.type === 'Timeline');
+  assert.equal(replayed.props.items.length, 3);
+  const message = planRequest(source, 'kplan01', new Date(2026, 10, 14, 9).getTime());
+  for (const item of items) assert.ok(message.includes('· ' + item.title), item.title + ' is in the message');
+  assert.match(message, /- 08:00 · Item 0 · line one line two\n/, 'an item stays on one line');
+  assert.match(message, /- no time · Task 9\n\[about card kplan01\]$/);
+  assert.match(message, /\[plan “Saturday 15 Nov” · drawn Sat 2026-11-14 · items as time · title · detail\]/);
+  assert.deepEqual({ ...aboutCard(message), plan: undefined }, { text: PLAN_ASK, id: 'kplan01', plan: undefined });
+  assert.equal(aboutCard(message).plan.split('\n').length, 11);
+  // Only a card that draws a plan offers it; a long plan stays within one message.
+  assert.equal(planRequest(cardFence({ root: 'm', elements: { m: { type: 'Metric', props: { label: 'HRV', value: 62 }, children: [] } } }, { id: 'kmetric1' }), 'kmetric1'), null);
+  assert.equal(cardPlan(source).items.length, 10);
+  const long = cardFence({ root: 't', elements: { t: { type: 'Timeline', props: { items: Array.from({ length: 80 }, (_, index) => ({ time: '09:00', title: 'x'.repeat(400) + index })) }, children: [] } } }, { id: 'klong001' });
+  const big = planRequest(long.slice('```pocket\n'.length, -'\n```'.length), 'klong001');
+  assert.ok(big.length < 16000, 'a long plan fits the 16,000-character message limit: ' + big.length);
+  assert.match(big, /- … 30 more items in the card/);
+});
+
+test('the rules for saving a plan are where the model reads tool guidance', async () => {
+  const { PLAN_PROMPT } = await import('../src/shared/pocket-cards.js');
+  const { SCHEMAS } = await import('../src/client/pip-sdk-tools.js');
+  const { sdkTools } = await import('../src/client/pip-sdk-tools.js');
+  assert.ok(CARDS_PROMPT.includes(PLAN_PROMPT));
+  assert.match(PLAN_PROMPT, /in one message, call create_record once for each item not saved yet/);
+  assert.match(PLAN_PROMPT, /An item with a clock time is an appointment with when on the plan's date/);
+  assert.match(PLAN_PROMPT, /an item without a time is a task/);
+  assert.match(PLAN_PROMPT, /minutes only from the plan, else the default/, 'no invented durations');
+  assert.match(PLAN_PROMPT, /save nothing yet and ask for the date in one short question/, 'a missing date is asked for, not guessed');
+  assert.match(PLAN_PROMPT, /Leave the card as it is; once saved, say in one or two lines what was saved/);
+  assert.ok(SCHEMAS.create_record);
+  const description = sdkTools(['create_record'], () => {}).create_record.description;
+  assert.match(description, /Never guess a date: ask for it\./);
+  assert.match(description, /one call each, all in the same message/);
+});
+
 test('a card tells the web address its figures come from, and a short name', () => {
   const chart = { root: 'main', elements: {
     main: { type: 'Chart', props: { kind: 'line', title: 'Distance', data: [{ label: 'W1', value: 22 }], source: { title: 'Club log', url: 'https://example.org/log?week=45' } }, children: [] } } };
