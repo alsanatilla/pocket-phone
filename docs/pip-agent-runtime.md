@@ -83,6 +83,48 @@ so reusing a provider tool-call ID cannot reuse an earlier approval. Completed
 conversation history continues to use Pocket's existing storage format and is
 translated at the runtime boundary.
 
+## Compaction
+
+A chat longer than the replay (pinned first request, 20 exchanges, 60,000
+characters) loses its middle. `src/server/pip-compaction.js` summarises those
+omitted turns once, before a server reply's request is built, and `requestBody`
+replays the summary where they were: a `<pocket_conversation_summary>` block,
+marked as historical reference data, before the first replayed turn after the
+pinned one. The coverage block still lists every omitted turn (plus
+`summarized_turns`, `summary_through_turn_id`), `read_chat_history` still
+recovers exact text, and the conversation memory block is unchanged.
+
+- **Stored** on the chat as `summary = { upto, text, made, model }` (the last turn
+  covered), written with `writeObject` in a transaction that checks the run still
+  holds its lease and that the stored summary is still the one it extended. It
+  syncs like any header field; `mergeObject` keeps the newest summary by `made`,
+  so a device whose copy predates it cannot drop it.
+- **When**: the replay omits turns today and the summary does not cover them. A
+  stored summary is extended once 3 more turns fall out (`EXTEND_AFTER`), with
+  OpenClaw's incremental `previousSummary`; it never reads covered turns again.
+  While a chat has a summary the replay keeps 8,600 characters free for it, so
+  the planned window and the replayed window are the same.
+- **Input**: stored turns only, prose via `answerText` (no card sources, card
+  records, tool-call markup or tags), each request clipped to 2,000 characters
+  and each answer to 4,000, at most 40,000 serialised characters per compaction
+  (the oldest pending turns first; the rest wait). Unfinished turns are sent as
+  "[No answer …]". The prompt treats the turns as untrusted data.
+- **Output**: at most 1,500 tokens; stored and replayed text is capped at 8,000
+  characters.
+- **Cost**: the summary request's usage is added to the turn's usage and charged
+  with the reply (`chargeTokens`). It is skipped when OpenClaw's estimate of it
+  would leave less than 20,000 tokens of the day's budget.
+- **Failure**: a failed, cut-off (`length`), slow (30 s) or stopped summary,
+  or one over budget, changes nothing: the reply goes out with the clipped
+  replay. A continued run (approval checkpoint) and assignments never compact.
+
+OpenClaw's `generateSummary` writes the summary through Pocket's transport with
+the chat's own model and key; `serializeConversation` and `estimateTokens`
+bound and price its input. `prepareCompaction`, `findCutPoint`, `compact` and
+`shouldCompact` are not used: they cut OpenClaw session entries by a token
+window, whereas Pocket's replay window decides what is omitted and the summary
+must cover exactly that for the coverage block to stay true.
+
 ## Deployment
 
 Deployment requires Node >=24.16.0 <25 or >=26.1.0. The Fly Dockerfile pins Node
@@ -95,7 +137,7 @@ the server backend; it does not load the OpenClaw Node package into browsers.
 ## Verification
 
 Verification uses the real OpenClaw Agent and simulated provider HTTP streams:
-`node --test tools/pip-agent.test.mjs tools/pip-agent-transport.test.mjs tools/pip-runs.test.mjs tools/pip-effort.test.mjs tools/pip-background.test.mjs tools/pip-assignments.test.mjs`
+`node --test tools/pip-agent.test.mjs tools/pip-agent-transport.test.mjs tools/pip-runs.test.mjs tools/pip-effort.test.mjs tools/pip-background.test.mjs tools/pip-assignments.test.mjs tools/pip-compaction.test.mjs`
 plus the full tools suite (`NODE_OPTIONS=--experimental-vm-modules npm run test:tools`).
 These cover:
 - approvals, edited and invalid inputs, partly settled batches, device tools and restart recovery

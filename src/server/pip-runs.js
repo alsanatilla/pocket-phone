@@ -22,6 +22,7 @@ import { enqueue, claimJob, finishJob, releaseJob } from './pip-queue.js';
 import * as live from './pip-live.js';
 import { publish } from './pocket-events.js';
 import { compactFrame } from './pip-frames.js';
+import { compactChat } from './pip-compaction.js';
 export { compactFrame };
 
 // Pip's shared conversations: the account's server runs each turn once for every device. A run holds its own
@@ -440,7 +441,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
   const assignment = snapshot?.lane === ASSIGN_LANE ? snapshot.assignment || {} : null;
   const owned = 'user_id = ? AND run_id = ? AND lease_id = ?', ownedArgs = [userId, runId, leaseId];
   const controller = new AbortController();
-  let stopRequested = false, leaseLost = false, paused = false, lastWrite = 0, trailing = null, writing = Promise.resolve(), beating = Promise.resolve(), saved = null, segment = {};
+  let stopRequested = false, leaseLost = false, paused = false, lastWrite = 0, trailing = null, writing = Promise.resolve(), beating = Promise.resolve(), saved = null, segment = {}, summarySpent = 0;
   // The heartbeat keeps the lease while this request works, and notices a stop from another device.
   const beat = async () => {
     const row = (await sql({ sql: `UPDATE pocket_pip_runs SET lease_until = ? WHERE ${owned} RETURNING status`, args: [Date.now() + LEASE, ...ownedArgs] })).rows[0];
@@ -547,7 +548,14 @@ async function drive(userId, run, leaseId, { fetcher }) {
     const judging = effort ? null : judgeEffort(userId, turn, (chat.turns || []).filter(item => item.uid !== turn.uid), { fetcher });
     const key = saved.key, timezone = value.timezone || saved.settings.timezone || 'UTC';
     const tail = chat.home === true ? homeTail(await homeSegmentsOf(userId), chat) : [];
-    const conversationView = { ...chat, config: value, ...(tail.length ? { turns: [...tail, ...(chat.turns || [])] } : {}) }, body = requestBody(conversationView, turn), source = await serverRecordSource(userId);
+    // Turns the replay leaves out are summarised once and replayed as that summary (pip-compaction.js), before the
+    // request is built and only when none is built yet (a continued run replays its checkpoint). Its tokens count
+    // like the reply's; a summary that fails, is cut off, slow or over budget leaves today's clipped replay.
+    const whole = { ...chat, config: value, ...(tail.length ? { turns: [...tail, ...(chat.turns || [])] } : {}) };
+    const compacted = assignment || run.checkpoint ? null : await compactChat(userId, whole, turn, { value, key: saved.key, fetcher, signal: controller.signal, lease: { runId, leaseId }, tokensLeft: saved.source === 'routines' ? tokensLeft(saved) : VAULT_TOKENS });
+    for (const name of USAGE) prior[name] += compacted?.usage[name] || 0;
+    summarySpent = (compacted?.usage.input_tokens || 0) + (compacted?.usage.output_tokens || 0);
+    const conversationView = compacted?.chat || whole, body = requestBody(conversationView, turn), source = await serverRecordSource(userId);
     body.instructions += '\n\nToday is ' + localDay(Date.now(), timezone) + ' (' + timezone + ').' + (assignment ? ASSIGNMENT_NOTE : NOTE);
     // The memory is read once at the start of the reply; a fact saved during it lands in the next request. An
     // assignment reads it but keeps nothing.
@@ -600,7 +608,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
     await quiet();
     // Its record is final now; followers read it from there.
     live.close(runId);
-    const spent = (Number(segment.input_tokens) || 0) + (Number(segment.output_tokens) || 0);
+    const spent = (Number(segment.input_tokens) || 0) + (Number(segment.output_tokens) || 0) + summarySpent;
     if (saved && spent) await chargeTokens(userId, saved.settings.timezone, spent).catch(() => { /* The run's own usage still shows it. */ });
   }
 }

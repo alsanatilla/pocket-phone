@@ -7,7 +7,7 @@ export function sanitizeObject(collection, value) {
   if (value.deleted) return { [uid]: value[uid], updated: value.updated, deleted: true };
   if (collection === 'zines') return { id: value.id, title: value.title, byline: value.byline || '', tone: value.tone, photos: value.photos.map(photo => pick(photo, ['id', 'caption', 'layout'])), created: value.created, updated: value.updated };
   const context = values => (values || []).map(item => pick(item, ['kind', 'uid', 'id', 'title', 'text', 'originalLength', 'href']));
-  return { ...pick(value, ['uid', 'title', 'titled', 'created', 'updated', 'draft', 'draftUpdated', 'returnedModel', 'usage', 'pinned', 'home']),
+  return { ...pick(value, ['uid', 'title', 'titled', 'created', 'updated', 'draft', 'draftUpdated', 'returnedModel', 'usage', 'pinned', 'home']), ...(value.summary ? { summary: pick(value.summary, ['upto', 'text', 'made', 'model']) } : {}),
     config: pick(value.config, ['provider', 'model', 'baseUrl', 'maxTokens', 'thinking', 'webSearch']), context: context(value.context),
     turns: value.turns.map(turn => ({ ...pick(turn, ['uid', 'assistantUid', 'owner', 'text', 'answer', 'reasoning', 'error', 'status', 'created', 'updated', 'attempt', 'usage', 'activity', 'sources', 'phase', 'model']), context: context(turn.context) })) };
 }
@@ -17,6 +17,8 @@ function safeConfig(value) {
     return ['anthropic', 'compatible'].includes(value.provider) && typeof value.model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,119}$/.test(value.model) && url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash && Number.isInteger(value.maxTokens) && value.maxTokens >= 64 && value.maxTokens <= 8192;
   } catch { return false; }
 }
+/** A server-written summary of earlier turns (src/server/pip-compaction.js); optional, so every older chat stays valid. */
+const summary = value => value === undefined || (object(value) && objectId(value.upto) && typeof value.text === 'string' && value.text.length <= 16000 && stamp(value.made) && (value.model === undefined || (typeof value.model === 'string' && value.model.length <= 120)));
 const contexts = value => Array.isArray(value) && value.length <= 3 && value.every(item => object(item) && typeof item.text === 'string' && item.text.length <= 8000 && typeof item.title === 'string' && item.title.length <= 500);
 export function canonical(value) { if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']'; if (object(value)) return '{' + Object.keys(value).sort().filter(key => value[key] !== undefined).map(key => JSON.stringify(key) + ':' + canonical(value[key])).join(',') + '}'; return JSON.stringify(value); }
 const newer = (a, b, left, right) => left !== right ? left > right : canonical(a) > canonical(b);
@@ -24,7 +26,7 @@ export function validObject(collection, value) {
   if (!object(value) || !stamp(value.updated)) return false;
   if (collection === 'zines') return objectId(value.id) && (value.deleted === true || (typeof value.title === 'string' && value.title.length <= 1000 && Array.isArray(value.photos) && value.photos.length <= 40 && value.photos.every(photo => object(photo) && objectId(photo.id))));
   if (collection === 'chats') return objectId(value.uid) && (value.deleted === true || (
-    typeof value.title === 'string' && value.title.length <= 1000 && typeof value.draft === 'string' && value.draft.length <= 16000 && (value.pinned === undefined || typeof value.pinned === 'boolean') && (value.titled === undefined || typeof value.titled === 'boolean') && (value.home === undefined || value.home === true) && contexts(value.context) && Array.isArray(value.turns) && value.turns.length <= 2000 && object(value.config) && safeConfig(value.config) &&
+    typeof value.title === 'string' && value.title.length <= 1000 && typeof value.draft === 'string' && value.draft.length <= 16000 && (value.pinned === undefined || typeof value.pinned === 'boolean') && (value.titled === undefined || typeof value.titled === 'boolean') && (value.home === undefined || value.home === true) && summary(value.summary) && contexts(value.context) && Array.isArray(value.turns) && value.turns.length <= 2000 && object(value.config) && safeConfig(value.config) &&
     value.turns.every(turn => object(turn) && objectId(turn.uid) && typeof turn.text === 'string' && turn.text.length <= 16000 && typeof turn.answer === 'string' && ['streaming', 'done', 'failed', 'stopped'].includes(turn.status) && contexts(turn.context || []) && (turn.updated === undefined || stamp(turn.updated)))));
   return false;
 }
@@ -39,6 +41,8 @@ export function mergeObject(collection, stored, incoming) {
     const previous = turns.get(turn.uid);
     if (!previous || newer(turn, previous, turn.updated ?? incoming.updated, previous.updated ?? stored.updated)) turns.set(turn.uid, turn);
   }
-  return { ...latest, draft: draft.draft, context: draft.context, draftUpdated: draft.draftUpdated ?? draft.updated,
+  // The newest summary wins on its own stamp: a device whose copy predates it must not drop it with a later edit.
+  const kept = [stored.summary, incoming.summary].filter(Boolean).sort((a, b) => b.made - a.made)[0];
+  return { ...latest, ...(kept ? { summary: kept } : {}), draft: draft.draft, context: draft.context, draftUpdated: draft.draftUpdated ?? draft.updated,
     turns: [...turns.values()].sort((a, b) => a.created - b.created || a.uid.localeCompare(b.uid)), updated: Math.max(stored.updated, incoming.updated) };
 }
