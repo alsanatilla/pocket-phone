@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Keys, Row } from "../../ui/kit.tsx";
 import { phaseLabel } from "../../../client/pip-activity.js";
-import type { ChatTurn } from "../../data/chats.ts";
+import { readChat, type ChatTurn } from "../../data/chats.ts";
+import { explain } from "./account.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 import { OfferCard } from "./Offers.tsx";
 import { AssignmentStatus } from "./AssignmentStatus.tsx";
@@ -41,6 +42,21 @@ function Fold({ title, open, children }: { title: string; open?: boolean; childr
       </CollapsibleTrigger>
       <CollapsibleContent className="pt-1">{children}</CollapsibleContent>
     </Collapsible>
+  );
+}
+
+/**
+ * Why a reply ended, in this app's words: a refusal the server wrote into the turn (a message that waited its turn,
+ * another device's reply) reads the same as one this tab was told. "settings" in the sentence is where it is fixed.
+ */
+function Problem({ error, chatId, className }: { error: string; chatId: string; className: string }) {
+  const text = explain(error, readChat(chatId)?.config);
+  const at = text.lastIndexOf(" in settings");
+  if (at < 0) return <p className={className}>{text}</p>;
+  return (
+    <p className={className}>
+      {text.slice(0, at)} in <Link to="/settings" className="text-primary underline underline-offset-2">settings</Link>{text.slice(at + " in settings".length)}
+    </p>
   );
 }
 
@@ -208,13 +224,13 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
 
         {unfinished ? (
           <div className="space-y-1">
-            <p className="text-sm text-destructive">{shown.error || "This reply did not finish."}</p>
+            <Problem error={shown.error || "This reply did not finish."} chatId={chatId} className="text-sm text-destructive" />
             <Keys>
               <Button type="button" disabled={locked} onClick={() => resume(chatId, shown.uid).catch(toastError)}>continue</Button>
               <Button type="button" disabled={locked} onClick={() => retry(chatId, shown.uid).catch(toastError)}>start over</Button>
             </Keys>
           </div>
-        ) : !streaming && shown.error ? <p className="text-xs text-destructive">{shown.error}</p> : null}
+        ) : !streaming && shown.error ? <Problem error={shown.error} chatId={chatId} className="text-xs text-destructive" /> : null}
       </div>
     </article>
   );

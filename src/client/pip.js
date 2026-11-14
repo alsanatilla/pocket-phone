@@ -1,7 +1,8 @@
 import { storage as localStorage, activeAccount } from './workspace-storage.js';
 // Component structure informed by beautifului.dev: conversation navigation,
 // reply + expandable details, context cards, composer. Pocket owns the visuals.
-import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings, apiKey, identity, contextCoverage, streamReply } from "./pip-core.js";
+import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, settings, saveSettings, apiKey, identity, contextCoverage } from "./pip-core.js";
+import { streamReply } from "./pip-local.js";
 import { notes, tasks, parking, taskDay, noteTitle, receipt, KIND } from "./store.js";
 import { modelName, starters } from './pip-presentation.js';
 import { enter, pressMotion } from './ui-motion.js';

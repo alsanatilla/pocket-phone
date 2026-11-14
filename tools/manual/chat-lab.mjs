@@ -990,8 +990,76 @@ const STATES = [
       const body = await page.evaluate(() => document.body.innerText);
       if (body.includes('Ruhepuls')) throw new Error('the last card elements are already on screen');
     },
-  },  ...TODAY_STATES,
+  },
+  // Every reply runs on the server: a guest gets the sign-in sentence instead of the field.
+  {
+    name: 'signed-out',
+    guest: true,
+    async run(page, ctx) {
+      await page.goto(ctx.origin + '/#/pip', { waitUntil: 'domcontentloaded' });
+      await until(page, 'signed-out', 'the sign-in sentence', () => document.body.innerText.includes("Pip answers on Pocket's server"));
+    },
+    text: ["Pip answers on Pocket's server, so it needs your Pocket account.", 'sign in'],
+    async check(page) {
+      if (await page.$('textarea[aria-label="Message Pip"]')) throw new Error('the message field is still there');
+    },
+  },
+  // A guest with a chat kept in this browser from before: the chat stays readable, the sentence takes the field's place.
+  {
+    name: 'signed-out-chat',
+    guest: true,
+    async run(page, ctx) {
+      await page.goto(ctx.origin + '/#/pip', { waitUntil: 'domcontentloaded' });
+      await page.evaluate(chat => localStorage.setItem('pocket:pip-chat:' + chat.uid, JSON.stringify(chat)), { uid: 'labguest', title: 'Schlaf', created: NOW - 2 * HOUR, updated: NOW - HOUR, config: CONFIG, draft: '', context: [],
+        turns: [doneTurn('guest-1', 'Wie habe ich diese Woche geschlafen?', 'Im Schnitt 7 h 12, zwei Nächte unter sechs Stunden. ' + LONG_WORD + ' kam am Dienstag dazwischen.', NOW - HOUR)] });
+      await page.goto(ctx.origin + '/#/pip?chat=labguest', { waitUntil: 'domcontentloaded' });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await until(page, 'signed-out-chat', 'the kept chat and the sentence', () => document.body.innerText.includes('7 h 12') && document.body.innerText.includes("Pip answers on Pocket's server"));
+    },
+    text: ['Wie habe ich diese Woche geschlafen?', "Pip answers on Pocket's server, so it needs your Pocket account.", 'sign in'],
+    async check(page) {
+      if (await page.$('textarea[aria-label="Message Pip"]')) throw new Error('the message field is still there');
+    },
+  },
+  // An account with no key for the chat's provider: the server refuses, and the turn says what to do.
+  {
+    name: 'refused',
+    account: 'lab-nokey',
+    seed: (ctx, user) => seedAccount(ctx, user),
+    async run(page, ctx) {
+      await sendFromHome(page, ctx, 'refused', 'Was steht heute an?');
+      await until(page, 'refused', 'the refusal', () => document.body.innerText.includes('key is on your Pocket account'));
+    },
+    text: ['Was steht heute an?', 'No Anthropic key is on your Pocket account, so Pip cannot answer. Connect Anthropic in settings, then start over.', 'start over'],
+    async check(page) {
+      const link = await page.evaluate(() => [...document.querySelectorAll('main a')].find(item => item.textContent === 'settings')?.getAttribute('href') || '');
+      if (!link.includes('settings')) throw new Error('the sentence does not link to settings');
+    },
+  },
+  // A key from before keys lived on the account, still in this tab: asked once, before anything is sent.
+  {
+    name: 'key-move',
+    account: 'lab-keymove',
+    seed: (ctx, user) => seedAccount(ctx, user),
+    async run(page, ctx) {
+      await page.evaluate(user => sessionStorage.setItem('pocket:account:' + user + ':pocket:claude-key', 'sk-ant-lab-tab-key-0123456789abcdef'), 'lab-keymove');
+      await sendFromHome(page, ctx, 'key-move', 'Was steht heute an?');
+      await until(page, 'key-move', 'the question', () => Boolean(document.querySelector('[role="alertdialog"]')));
+    },
+    text: ['Store your Anthropic key on your account?', 'It is only in this tab now.', 'cancel', 'store key'],
+    selectors: ['[role="alertdialog"]'],
+    scroll: 'keep',
+  },
+  ...TODAY_STATES,
 ];
+
+/** Open home, write `text` in the field and send it with Enter, as a person would. */
+async function sendFromHome(page, ctx, state, text) {
+  await page.goto(ctx.origin + '/#/pip', { waitUntil: 'domcontentloaded' });
+  await until(page, state, 'the message field', () => Boolean(document.querySelector('textarea[aria-label="Message Pip"]')));
+  await page.type('textarea[aria-label="Message Pip"]', text);
+  await page.keyboard.press('Enter');
+}
 
 // --- browser and page helpers ----------------------------------------------------------------------------------
 
@@ -1128,6 +1196,26 @@ async function capture(ctx, state, viewportName) {
     // A Today seed answers when the person last left Today (0: never, a first visit on this device).
     const visit = state.seed ? (await state.seed(ctx, user), 0) : await SEEDS[user](ctx, user, at);
     if (visit) ctx.visits.set(user, visit);
+  }
+  // A guest's picture is taken in a browser context of its own, with no session and no account in its storage.
+  const guestContext = state.guest ? await ctx.browser.createBrowserContext() : null;
+  if (guestContext) {
+    const page = await guestContext.newPage();
+    page.__errors = [];
+    page.on('pageerror', error => page.__errors.push(error.message));
+    await page.setViewport(VIEWPORTS[viewportName]);
+    try {
+      await state.run(page, ctx);
+      await sleep(300);
+      await page.screenshot({ path: join(ctx.out, `${state.name}-${viewportName}.png`) });
+      await checkState(page, state);
+      if (state.check) await state.check(page);
+      console.log(`  ✓ ${state.name}-${viewportName}.png`);
+    } catch (error) {
+      await page.screenshot({ path: join(ctx.out, `${state.name}-${viewportName}-failed.png`) }).catch(() => {});
+      throw new Error(`${state.name}: ${error.message || error}`);
+    } finally { await guestContext.close(); }
+    return;
   }
   if (ctx.current !== user) await signIn(ctx, user);
   const page = await openPage(ctx, VIEWPORTS[viewportName], state.name, at ? at - Date.now() : 0, ctx.visits.get(user) ? { user, at: ctx.visits.get(user) } : null);

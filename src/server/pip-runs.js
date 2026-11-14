@@ -17,6 +17,7 @@ import { objectId, validObject } from '../shared/objects.js';
 import { HOME_TITLE, homeFull, homeSegments, homeTail } from '../shared/pip-home.js';
 import { effortLimits, effortNote } from '../shared/pip-effort.js';
 import { replyNotice, waitingNotice } from '../shared/pip-notice.js';
+import { NOT_SET_UP, NO_TOKENS } from '../shared/pip-refusals.js';
 import { notify, watched, watching, unwatch, forgetWatches } from './pip-notify.js';
 import { enqueue, claimJob, finishJob, releaseJob } from './pip-queue.js';
 import * as live from './pip-live.js';
@@ -110,9 +111,9 @@ const NOTE = '\n\nThis reply runs on your Pocket account\'s server and is shared
 const no = (message, status = 400, code = '') => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 /** A reply is already running in this chat (from this or another device): the client follows that one instead. */
 const RUN_ACTIVE = 'Pip is still answering in this chat. Wait for it, or stop it first.';
-/** What a submit is refused with, and what a queued message ends with when the same is true as it starts. */
-const NOT_SET_UP = 'Pip on the server is not set up for the selected provider. Connect that provider in Pip settings.',
-  NO_TOKENS = 'Today’s token limit for Pip on the server is used up.', CHAT_FULL = 'This chat is full. Start a new one.';
+/** What a submit is refused with, and what a queued message ends with when the same is true as it starts (NOT_SET_UP and
+ * NO_TOKENS are shared with the clients, which say them in their own words). */
+const CHAT_FULL = 'This chat is full. Start a new one.';
 /** How many messages may wait their turn in one chat (waiting and held). */
 const QUEUE_LIMIT = 5;
 const QUEUE_FULL = 'Five messages already wait in this chat. Send this one when Pip has answered one of them.';

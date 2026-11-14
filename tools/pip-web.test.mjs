@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, apiKey, setKey, saveSettings, settings, requestBody, streamReply } from '../src/client/pip-core.js';
+import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, apiKey, setKey, saveSettings, settings, requestBody } from '../src/client/pip-core.js';
+import { streamReply } from '../src/client/pip-local.js';
 import { streamChat } from '../src/client/pip-stream.js';
 import { execute } from '../src/client/pip-tools.js';
 import { SCHEMAS } from '../src/client/pip-sdk-tools.js';
