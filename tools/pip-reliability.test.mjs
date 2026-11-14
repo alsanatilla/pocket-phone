@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, identity, requestBody, streamReply, contextCoverage } from '../src/client/pip-core.js';
+import { ChatStore, ReplyRunner, DEFAULT_CONFIG, config, identity, requestBody, contextCoverage } from '../src/client/pip-core.js';
+import { streamReply } from '../src/client/pip-local.js';
 import { execute, accessFingerprint, historyPolicy, saveAccess } from '../src/client/pip-tools.js';
 import { conversationMemory, MEMORY_LIMIT } from '../src/client/pip-memory.js';
 import { activity } from '../src/client/pip-activity.js';

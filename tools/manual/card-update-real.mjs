@@ -4,7 +4,8 @@ import fs from 'node:fs';
 const ROOT = new URL('../..', import.meta.url).pathname.replace(/\/$/, '');
 for (const line of fs.readFileSync(ROOT + '/.env', 'utf8').split('\n')) { const m = line.match(/^([A-Z0-9_]+)=(.*)$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, ''); }
 const { readKey } = await import(ROOT + '/src/server/pip-keys.js');
-const { ChatStore, DEFAULT_CONFIG, config, streamReply } = await import(ROOT + '/src/client/pip-core.js');
+const { ChatStore, DEFAULT_CONFIG, config } = await import(ROOT + '/src/client/pip-core.js');
+const { streamReply } = await import(ROOT + '/src/client/pip-local.js');
 const { cardIds } = await import(ROOT + '/src/shared/pocket-card-tool.js');
 const { OPENCODE_GO } = await import(ROOT + '/src/shared/pip-opencode.js');
 class Memory { values = new Map(); get length() { return this.values.size; } key(i) { return [...this.values.keys()][i] ?? null; } getItem(k) { return this.values.get(k) ?? null; } setItem(k, v) { this.values.set(k, String(v)); } removeItem(k) { this.values.delete(k); } }

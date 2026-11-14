@@ -1,17 +1,21 @@
 import { useSyncExternalStore } from "react";
-import { ReplyRunner, streamReply, type Decision, type RunnerEvent } from "../../../client/pip-core.js";
+import { ReplyRunner, type Decision, type RunnerEvent } from "../../../client/pip-core.js";
 import { resolve } from "../../../client/pip-credentials.js";
 import { changeQueue, chatQueue, queueReply, streamReplyRemote, type ChatQueue } from "../../../client/pip-remote.js";
 import { connected } from "../../../client/cloud.js";
+import { activeAccount } from "../../../client/workspace-storage.js";
 import * as liveSocket from "../../../client/live.js";
 import { suggestTitle } from "../../../client/pip-title.js";
 import { trainingChatRoutine, trainingReply } from "../../../client/pip-training-chat.js";
 import { chats, type ChatTurn } from "../../data/chats.ts";
 import type { Segment } from "../../../shared/pip-reply.js";
+import { explainError, moveTabKey, reachAccount, SIGNED_OUT } from "./account.ts";
 
-// One reply runner for the whole app, wired like the classic chat's:
-// - a signed-in chat always runs on Pocket's server (it survives a closed tab); a guest's runs in this tab;
-// - a COROS training routine's chat answers through its own path with the account's key;
+// One reply runner for the whole app:
+// - every reply runs on Pocket's server (it survives a closed tab); this app has no reply loop of its own in the tab
+//   (pip-local.js is the classic app's). A guest is asked to sign in, a key kept only in this tab is offered to the
+//   account first, and what the server refuses is said as the turn's error (account.ts);
+// - a COROS training routine's chat answers through its own server path with the account's key;
 // - a fresh chat names itself after its first answer;
 // - writes Pip asks for wait for the person's decision (approvals);
 // - a message sent while a reply runs waits its turn on the server (queueSend), shown to every device (useQueue).
@@ -34,15 +38,22 @@ const schedule = () => {
 };
 function flush() { frame = 0; emit(); }
 
+/** A reply on the server: the session checked first, and a refusal or a lost connection said in plain words. */
+async function serverReply(chat: Parameters<typeof streamReplyRemote>[0], turn: Parameters<typeof streamReplyRemote>[1], options: Record<string, unknown>): Promise<unknown> {
+  if (trainingChatRoutine(chat.uid) && turn) return trainingReply(chat, turn, options);
+  try { await reachAccount(); return await streamReplyRemote(chat, turn, options); }
+  catch (error) { throw explainError(error, chat.config); }
+}
+
 const runner = new ReplyRunner(chats, {
+  // Only the chat's name uses a key in this tab (pip-title.js, through the relay); replies never do.
   key: (value, chat) => trainingChatRoutine(chat.uid) ? "account-key" : resolve(value),
+  // One rule, no lookup first: every chat runs on Pocket's server. A missing key is the server's clear answer.
   remote: {
-    // One rule, no lookup first: a signed-in chat runs on Pocket's server. A missing key is the server's clear answer.
-    available: chat => Promise.resolve(!trainingChatRoutine(chat.uid) && connected()),
-    stream: streamReplyRemote,
-    attach: (chat, _turn, options) => streamReplyRemote(chat, null, options),
+    available: () => Promise.resolve(true),
+    stream: serverReply,
+    attach: (chat, _turn, options) => streamReplyRemote(chat, null, options).catch(error => { throw explainError(error, chat.config); }),
   },
-  stream: (chat, turn, options) => trainingChatRoutine(chat.uid) ? trainingReply(chat, turn, options) : streamReply(chat, turn, options),
   title: suggestTitle,
   onChange: (event: RunnerEvent) => {
     const active = runner.active;
@@ -59,16 +70,27 @@ const runner = new ReplyRunner(chats, {
 /** The engine's messages still name the classic screens; say where things are in this client. */
 const plain = (error: unknown): Error => {
   const message = error instanceof Error ? error.message : String(error);
-  return new Error(message.replace(/Add an API key for this chat in API settings\./, "Connect a model in settings first.").replace(/\bAPI settings\b/g, "settings"));
+  return new Error(message.replace(/\b(API|Pip) settings\b/g, "settings"));
 };
 const run = (work: Promise<unknown>): Promise<void> => work.then(() => undefined, error => { throw plain(error); });
 
+/**
+ * Before a message goes out: a guest has no server to answer (the page says so where the field would be; this is
+ * for a card's key or a starter), and a key kept only in this tab is offered to the account once.
+ */
+async function ready(chatId: string): Promise<void> {
+  if (trainingChatRoutine(chatId)) return;
+  if (!activeAccount()) throw new Error(SIGNED_OUT);
+  const chat = chats.get(chatId);
+  if (chat && !runner.active) await moveTabKey(chat);
+}
+
 /** Sends `text` in `chatId` with the chat's sources. Rejects with a readable message (no model, busy, …). */
-export const send = (chatId: string, text: string): Promise<void> => run(runner.send(chatId, { text, context: chats.get(chatId)?.context ?? [] }));
+export const send = (chatId: string, text: string): Promise<void> => run(ready(chatId).then(() => runner.send(chatId, { text, context: chats.get(chatId)?.context ?? [] })));
 /** Restarts the latest unfinished reply from scratch. */
-export const retry = (chatId: string, turnId: string): Promise<void> => run(runner.send(chatId, { retry: turnId }));
+export const retry = (chatId: string, turnId: string): Promise<void> => run(ready(chatId).then(() => runner.send(chatId, { retry: turnId })));
 /** Continues the latest unfinished reply, keeping the lookups it completed. */
-export const resume = (chatId: string, turnId: string): Promise<void> => run(runner.send(chatId, { resume: turnId }));
+export const resume = (chatId: string, turnId: string): Promise<void> => run(ready(chatId).then(() => runner.send(chatId, { resume: turnId })));
 
 /** Aborts the request itself; the runner marks the turn stopped and saves what arrived. */
 export function stop(): void { runner.stop(); live = null; emit(); }

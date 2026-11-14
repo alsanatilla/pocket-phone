@@ -23,7 +23,7 @@ const view = (status, turn) => ({ run: { runId: 'run-1', chat: 'chat-1', turnUid
 const log = []; let state = emptyReply(), record = view('running', { answer: '', reasoning: '', activity: [], sources: [], usage: {}, phase: 'requesting' });
 const change = answer => { const next = structuredClone(replyOf({ answer, phase: 'writing', model: 'm' })); log.push({ seq: log.length + 1, ops: diffReply(state, next) }); state = next; return log.at(-1); };
 const resumes = [];
-let socket;
+let socket, refusal = null;
 globalThis.WebSocket = class {
   constructor() { socket = this; queueMicrotask(() => this.onmessage({ data: JSON.stringify({ type: 'hello', accountId: 'u1', at: 1 }) })); }
   emit(message) { this.onmessage({ data: JSON.stringify(message) }); }
@@ -31,7 +31,8 @@ globalThis.WebSocket = class {
   send(raw) {
     const message = JSON.parse(raw);
     queueMicrotask(() => {
-      if (message.method === 'pip.runs') this.emit({ type: 'res', id: message.id, ok: true, payload: record });
+      if (message.method === 'pip.runs' && refusal && message.params.action === 'submit') this.emit({ type: 'res', id: message.id, ok: false, error: refusal });
+      else if (message.method === 'pip.runs') this.emit({ type: 'res', id: message.id, ok: true, payload: record });
       if (message.method === 'run.resume') { resumes.push(message.params.after); this.emit({ type: 'res', id: message.id, ok: true, payload: { seq: log.length, events: log.filter(event => event.seq > message.params.after) } }); }
     });
   }
@@ -80,4 +81,18 @@ test('a streamed reply is drawn from numbered changes; a skipped number is asked
   const done = await reply;
   assert.equal(done.answer, 'Die Lage ist ruhig.\n\nMehr nicht.'); assert.equal(done.blocks, undefined, 'the finished turn carries text, not live blocks');
   live.stop();
+});
+
+test('a submit the server refuses over the socket ends the reply with its reason, instead of waiting for a run', async () => {
+  live.start('u1'); await sleep(5);
+  assert.equal(live.connected(), true);
+  const { NOT_SET_UP } = await import('../src/shared/pip-refusals.js');
+  refusal = { message: NOT_SET_UP, status: 409 };
+  record = { run: null, requests: [], events: [], cursor: 0 };
+  const chat = { uid: 'chat-2', title: 'Fixture', created: 1, config: { provider: 'compatible', model: 'm', baseUrl: 'https://model.example/v1', maxTokens: 4096, thinking: false, webSearch: false } };
+  const started = Date.now();
+  await assert.rejects(streamReplyRemote(chat, { uid: 'turn-2', text: 'Hallo', attempt: 'attempt-2', context: [] }, { storage: localStorage }),
+    error => error.message === NOT_SET_UP && error.status === 409);
+  assert.ok(Date.now() - started < 2000, 'at once, not after a watchdog');
+  refusal = null; live.stop();
 });

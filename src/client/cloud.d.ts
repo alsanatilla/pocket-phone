@@ -6,6 +6,10 @@ export function configured(): boolean;
 /** Signed in, as the account this workspace belongs to. */
 export function connected(): boolean;
 export function account(): { id: string; email: string; name?: string } | null;
+/** Reads the session again; rejects with Expired when it ended, or with the network's error when Pocket cannot be reached. */
+export function refreshAccount(): Promise<{ id: string } | null>;
+/** The session ended: sign in again. */
+export class Expired extends Error {}
 /** Reads JSON; a failed answer rejects with the server's message. */
 export function request<T = unknown>(path: string, options?: RequestInit): Promise<T>;
 /** Sends a JSON body with the active account id; resolves to the server's JSON. */

@@ -16,9 +16,24 @@ import { threadOf } from "./thread.ts";
 import { QueuedTurn, Turn } from "./Turn.tsx";
 import { busy as runnerBusy, canQueue, clearQueue, queueSend, resumeQueue, send, stop, useLiveReply, useQueue, watchChat, withdraw } from "./runner.ts";
 import { toastError } from "../../ui/toast/toast.ts";
+import { activeAccount } from "../../../client/workspace-storage.js";
+import { classicHref } from "../../lib/classic.ts";
+import { SIGNED_OUT } from "./account.ts";
 
 // Pip: one ongoing conversation, plus the separate chats in a side sheet. The header says which model answers and
 // what Pip may read, both linking to settings. An empty chat offers questions that fit what Pip may read.
+// Every reply runs on Pocket's server: without an account there is no field, only one sentence and the sign-in key
+// (as the empty page, or under the chats a guest kept in this browser), and no "new" key.
+
+/** What a person who is not signed in reads instead of the field. */
+export function SignedOut({ className = "py-1" }: { className?: string }) {
+  return (
+    <div className={className}>
+      <p className="text-sm text-muted-foreground">{SIGNED_OUT}</p>
+      <Keys className="mt-2"><Button asChild><a href={classicHref("/account")}>sign in</a></Button></Keys>
+    </div>
+  );
+}
 
 function Empty({ onAsk }: { onAsk: (prompt: string) => void }) {
   const enabled = readAccess();
@@ -60,6 +75,8 @@ export function PipPage() {
   const open = (uid: string) => { setListOpen(false); void navigate({ search: { chat: uid } }); };
   const goHome = () => { setListOpen(false); void navigate({ search: {} }); };
   const start = () => open(createChat().uid);
+  // The page reloads when the account changes, so reading it in each render is enough.
+  const guest = !activeAccount();
 
   // A notification may name a home segment; home has no chat in its address.
   useEffect(() => {
@@ -134,11 +151,11 @@ export function PipPage() {
         </Button>
         <span className="flex-1" />
         <Button asChild variant="ghost" className="text-dim" aria-label="Jobs: Pip on its own"><Link to="/jobs">jobs</Link></Button>
-        <Button variant="ghost" className="text-dim" aria-label="New chat" onClick={start}>new</Button>
+        {guest ? null : <Button variant="ghost" className="text-dim" aria-label="New chat" onClick={start}>new</Button>}
       </div>
       <div ref={thread} className="flex-1 space-y-8 pb-4">
         {!joined.items.length
-          ? <Empty onAsk={askPip} />
+          ? guest ? <SignedOut className="py-6" /> : <Empty onAsk={askPip} />
           : <>
             {joined.earlier ? (
               <Keys>
@@ -168,7 +185,7 @@ export function PipPage() {
       </div>
 
       <div className="sticky bottom-0 bg-background pt-2 pb-3">
-        {chat
+        {guest ? (joined.items.length ? <SignedOut /> : null) : chat
           ? <PipComposer key={chat.uid + (ask ?? "")} chat={chat} busy={locked} queueing={queueing} note={note} initial={ask} onSend={sendFromComposer} onStop={stop} />
           : null}
       </div>

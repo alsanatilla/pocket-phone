@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ChatStore, DEFAULT_CONFIG, config, streamReply } from '../src/client/pip-core.js';
+import { ChatStore, DEFAULT_CONFIG, config } from '../src/client/pip-core.js';
+import { streamReply } from '../src/client/pip-local.js';
 import { segmentAnswer, answerText } from '../src/shared/pip-reply.js';
 import { pocketSpec } from '../src/shared/pocket-spec.js';
 import { cardProblems, cardFromTool, draftLines, drawCard } from '../src/shared/pocket-card-tool.js';

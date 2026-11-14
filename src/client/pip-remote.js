@@ -206,9 +206,12 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
     let settled = false, chain = Promise.resolve(), quiet = Date.now();
     const finish = result => {
       if (settled) return; settled = true;
-      off(); clearInterval(watchdog); signal?.removeEventListener('abort', aborted);
+      off(); clearInterval(watchdog); signal?.removeEventListener('abort', aborted); unwatch = () => {};
       resolve(result);
     };
+    // A POST that failed (a refused submit: no key, no tokens left) ends the watch at once, so the loop reads why;
+    // without this a run that never starts left the reply "linking up" for good.
+    unwatch = () => finish({ live: true });
     // One frame at a time, in order: a step must not overtake the progress before it.
     const handle = work => {
       chain = chain.then(work).then(done => { if (done) finish({ live: true, done }); })

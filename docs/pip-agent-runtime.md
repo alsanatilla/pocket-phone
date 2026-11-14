@@ -22,9 +22,9 @@ one model request and do not run an agent loop.
   pauses through the checkpoint. The last request's instructions say it is the last:
   write the answer now; cards may still be drawn; lookups are refused. Past the
   ceiling the reply ends with what it has plus a notice.
-- There is **no per-reply token budget** and thinking is never counted. Browser-only
-  chats still use the older budget (`tokens` / `researchTokens`) in
-  `src/client/pip-stream.js`.
+- There is **no per-reply token budget** and thinking is never counted. Only the
+  classic app's browser loop still uses the older budget (`tokens` / `researchTokens`)
+  in `src/client/pip-stream.js` (see "One loop in the app" below).
 - **Time**: one five-minute research deadline shared by all requests of a reply, and
   a 90-second idle limit (no bytes from the provider; the transport's `clock` and
   every agent event reset it). Neither runs while the person decides on an approval;
@@ -89,8 +89,37 @@ Deployment requires Node >=24.16.0 <25 or >=26.1.0. The Fly Dockerfile pins Node
 24.16.0. Install with `npm ci` and build with `POCKET_TARGET=node npm run build`.
 Pending checkpoints made by the previous runtime must be stopped and resubmitted;
 they are rejected explicitly rather than interpreted as OpenClaw transcripts.
-Browser-only chats still use the existing client runtime. This change migrates
-the server backend; it does not load the OpenClaw Node package into browsers.
+The OpenClaw Node package is never loaded into browsers.
+
+## One loop in the app
+
+In the app people use (`src/app`) every Pip reply runs on this server loop; there is
+no browser-only chat. `src/app/features/pip/runner.ts` gives `ReplyRunner` the server
+as its only transport, and `src/app/features/pip/account.ts` handles what used to send
+a reply into the tab:
+
+- **Not signed in:** no message field; one sentence ("Pip answers on Pocket's server,
+  so it needs your Pocket account.") and the `sign in` key. Nothing is sent.
+- **Signed in, but the tab has no session yet or lost it:** the session is read once;
+  an ended session says "sign in again", an unreachable server says so, both as the
+  turn's error with `start over`.
+- **A key kept only in this tab** (from before keys lived on the account, or typed
+  in as a guest in the same tab): when the server has no key for the chat's endpoint,
+  one dialog asks to store it on the account; yes stores it sealed in
+  `pocket_pip_keys` (`/api/pip/keys`) before the message is sent. No asks once per
+  page; the server then refuses. A per-request key would not do: a paused run resumes
+  in a later request and a restarted worker continues it, both from the vault.
+  Saving a key in settings while signed in already stores it on the account.
+- **The server refuses** (`src/shared/pip-refusals.js`: no key for the endpoint; the
+  daily limit of "Pip on its own"'s key used up) or cannot be reached: the turn ends
+  failed with one sentence that names the provider and links to settings. A refused
+  submit over the live socket now ends the follow at once (`pip-remote.js`).
+- **Device tools** are unchanged: they arrive as approvals of the server run.
+
+The browser loop (`src/client/pip-local.js` → `pip-stream.js`) stays only for the
+classic app (`/classic`), whose guests and signed-out tabs still answer in the tab.
+`pip-core.js` no longer refers to it, so the app's bundle does not contain it
+(checked by `src/app/features/pip/one-loop.test.tsx`).
 
 ## Verification
 

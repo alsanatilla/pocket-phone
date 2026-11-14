@@ -223,16 +223,9 @@ export function requestBody(chat, turn, resume = null) {
   return { instructions: system, messages, tools: reads };
 }
 
-export async function streamReply(chat, turn, options = {}) {
-  const value = config(chat.config);
-  let streamChat;
-  try { ({ streamChat } = await import('./pip-stream.js')); }
-  catch { throw new Error('Pip could not load. Reload Pocket and try again.'); }
-  return streamChat(chat, turn, { ...options, value, body: requestBody({ ...chat, config: value }, turn, options.resume), coverage: contextCoverage({ ...chat, config: value }, turn) });
-}
-
+// The browser loop (streamReply) is in pip-local.js, for the classic app; a runner without `stream` has none.
 export class ReplyRunner {
-  constructor(store, { key = value => resolveCredential(value), stream = streamReply, remote = null, onChange = () => {}, title = null } = {}) { this.store = store; this.key = key; this.stream = stream; this.remote = remote; this.onChange = onChange; this.title = title; this.active = null; }
+  constructor(store, { key = value => resolveCredential(value), stream = null, remote = null, onChange = () => {}, title = null } = {}) { this.store = store; this.key = key; this.stream = stream; this.remote = remote; this.onChange = onChange; this.title = title; this.active = null; }
   /**
    * Shows a reply that runs on the server without this tab having sent it: another device or tab asked, or this tab
    * was reloaded mid-reply. It is followed like one this tab sent (live text, approvals, stop), and the finished turn
@@ -282,6 +275,7 @@ export class ReplyRunner {
     // A signed-in account with its own server key runs the reply on Pocket's server; otherwise this tab does.
     // Training chats opt out synchronously; ordinary chats check their account's key asynchronously.
     const remote = this.remote && await Promise.resolve(this.remote.available(chat)).catch(() => false) ? this.remote : null;
+    if (!remote && !this.stream) throw new Error("Pip answers on Pocket's server, which this chat cannot reach right now.");
     // The account vault resolves asynchronously; a supplied or tab key stays synchronous.
     const pending = remote ? null : this.key(chat.config, chat);
     const key = pending && typeof pending.then === "function" ? await pending : pending;

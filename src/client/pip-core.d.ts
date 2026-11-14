@@ -48,4 +48,3 @@ export class ReplyRunner {
   approvalOf(turnId: string, eventId: string): { decision?: Decision } | null;
   decide(turnId: string, eventId: string, decision: Decision): void;
 }
-export function streamReply(chat: Chat, turn: ChatTurn, options?: Record<string, unknown>): Promise<unknown>;

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ChatStore, DEFAULT_CONFIG, config, streamReply } from '../src/client/pip-core.js';
+import { ChatStore, DEFAULT_CONFIG, config } from '../src/client/pip-core.js';
+import { streamReply } from '../src/client/pip-local.js';
 import { RESEARCH_LIMITS } from '../src/client/pip-limits.js';
 import { compatibleMessage, event, response, systemText } from './pip-provider-fixtures.mjs';
 
