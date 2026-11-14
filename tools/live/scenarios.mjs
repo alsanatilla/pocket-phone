@@ -23,7 +23,7 @@ export const SCENARIOS = [
   { name: 'plan-card', cost: 2, guards: 'a plan is drawn with show_card as a Timeline, never written as "[card: …]" text or raw JSON',
     text: PLAN, checks: run => [['done', check.done(run)], ['card', check.cardDrawn(run, 'Timeline')], ['no stand-in', check.noStandIn(run)], ['clean prose', check.cleanProse(run)]] },
   { name: 'card-after-history', cost: 4, guards: 'with a stored card in the replayed history, a new card is still drawn by tool call (the original bug)',
-    turns: [planTurn()], text: 'Now put the two Bosphorus tours from Eminönü side by side in a table: departure times, duration and fare.',
+    turns: [planTurn()], text: 'Leave that plan card as it is. Draw a second, separate card: a table with one row per stop of the plan and the columns stop, what to bring and what to wear, from your own judgement. No need to look anything up.', effort: 'none',
     checks: run => [['done', check.done(run)], ['new card', check.cardDrawn(run, 'Table')], ['no stand-in', check.noStandIn(run)], ['clean prose', check.cleanProse(run)]] },
   { name: 'research-then-card', cost: 4, guards: 'after lookups are refused at the cap, the reply still draws its card, cites its sources and ends',
     text: 'Which Bosphorus tour from Eminönü is cheaper and shorter, the city ferries\' short tour or Turyol? Look both up on the web and show me the comparison.',

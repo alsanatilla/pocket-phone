@@ -19,12 +19,14 @@ const at = (offset, hours, minutes = 0) => { const day = new Date(); day.setDate
 // What pip-runs.js adds to every chat reply's instructions (its NOTE constant is not exported; keep this in step).
 const SERVER_NOTE = '\n\nThis reply runs on your Pocket account\'s server and is shared by your devices: another device sees the same answer, tool activity and any change waiting for approval, and answers it once. Provider keys stay on the server for this chat. Notes, tasks, thoughts, calendar, gym and COROS come from your synced account copy.';
 
+// The two tour listings carry duration and fare: research-then-card stops lookups after the searches, and a model
+// that has no figures rightly refuses to draw a comparison.
 export const PAGES = [
   { url: 'https://ferries.example.org/bosphorus-short-tour', title: 'Short Bosphorus Tour from Eminönü – City Ferries',
-    description: 'The short Bosphorus tour of the city ferries, from Eminönü pier.',
+    description: 'The short Bosphorus tour of the city ferries, from Eminönü pier: about 2 hours round trip, 150 TL per person.',
     text: '# Short Bosphorus Tour\n\nThe short Bosphorus tour leaves from Eminönü pier (Boğaz İskelesi). Saturday departures: 10:30, 12:30, 15:00 and 17:00. The round trip takes about 2 hours and turns at the Fatih Sultan Mehmet bridge without stops. Fare: 150 TL per person, Istanbulkart accepted. Buy tickets at the pier 30 minutes before departure.' },
   { url: 'https://cruises.example.org/turyol-bosphorus', title: 'Turyol Bosphorus Cruise – Eminönü',
-    description: 'Hourly Bosphorus cruises by Turyol from the Eminönü pier.',
+    description: 'Hourly Bosphorus cruises by Turyol from the Eminönü pier: 90 minutes, 200 TL.',
     text: '# Turyol Bosphorus Cruise\n\nTuryol boats leave Eminönü every hour from 11:00 to 18:00, also on Saturdays. The cruise takes 90 minutes and goes up to the Rumeli Fortress and back. Fare: 200 TL, cash or card. No booking needed.' },
   { url: 'https://food.example.org/beyoglu-lokantas', title: 'Five lokantas in Beyoğlu for lunch',
     description: 'Where to eat a lokanta lunch in Beyoğlu.',
