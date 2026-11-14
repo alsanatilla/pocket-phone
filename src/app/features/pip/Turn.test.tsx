@@ -104,4 +104,37 @@ describe("a reply in Pip", () => {
     expect(screen.getByRole("link", { name: "below" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Try the assignment/ })).toBeNull();
   });
+
+  it("shows a message sent into the reply where Pip took it in, marked quietly, with the answer going on after it", () => {
+    const answer = "Saturday is free.\n\nSunday is free too.";
+    const { chatId, turn } = seed([], { answer, steers: [{ uid: "s1", text: "And Sunday?", at: 1, taken: 2, pos: 17 }] } as Partial<ChatTurn>);
+    const view = render(<Turn turn={turn} chatId={chatId} latest live={null} locked={false} />);
+    const reply = view.container.querySelector("[data-reply]")!.textContent!;
+    expect(reply.indexOf("Saturday is free.")).toBeLessThan(reply.indexOf("And Sunday?"));
+    expect(reply.indexOf("And Sunday?")).toBeLessThan(reply.indexOf("Sunday is free too."));
+    expect(screen.getByText(/taken in/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Take back/ })).toBeNull();
+  });
+
+  it("cuts streamed blocks at a taken message, and shows one not taken yet after the reply so far with a key to take it back", async () => {
+    const { chatId, turn } = seed([], { status: "streaming", answer: "" });
+    const blocks = [{ kind: "prose" as const, key: "p0", text: "Saturday is free." }, { kind: "prose" as const, key: "p1", text: "Sunday too." }];
+    const live = { status: "streaming", answer: "Saturday is free.\n\nSunday too.", phase: "writing", steers: [{ uid: "s1", text: "And Sunday?", at: 1, taken: 2, pos: 17, block: 1 }] } as Partial<ChatTurn>;
+    const takeBack = vi.fn(() => Promise.resolve());
+    const view = render(<Turn turn={turn} chatId={chatId} latest live={live} blocks={blocks} locked
+      pending={[{ runId: "r2", turnUid: "s2", text: "Only the morning, please.", created: 3 }]} onTakeBack={takeBack} />);
+    const reply = view.container.querySelector("[data-reply]")!.textContent!;
+    expect(reply.indexOf("Saturday is free.")).toBeLessThan(reply.indexOf("And Sunday?"));
+    expect(reply.indexOf("Sunday too.")).toBeLessThan(reply.indexOf("Only the morning"));
+    expect(screen.getByText(/for pip’s next step/)).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Take back: Only the morning, please." })); });
+    expect(takeBack).toHaveBeenCalledWith("r2");
+    view.rerender(<Turn turn={turn} chatId={chatId} latest live={live} blocks={blocks} locked held
+      pending={[{ runId: "r2", turnUid: "s2", text: "Only the morning, please.", created: 3 }]} onTakeBack={takeBack} />);
+    expect(screen.getByText(/after your decision/)).toBeTruthy();
+    // Once the reply has taken it, it is drawn once, in its place.
+    view.rerender(<Turn turn={turn} chatId={chatId} latest live={{ ...live, steers: [...live.steers!, { uid: "s2", text: "Only the morning, please.", at: 3, taken: 4, pos: 29, block: 2 }] } as Partial<ChatTurn>} blocks={blocks} locked
+      pending={[{ runId: "r2", turnUid: "s2", text: "Only the morning, please.", created: 3 }]} onTakeBack={takeBack} />);
+    expect(screen.getAllByText("Only the morning, please.")).toHaveLength(1);
+  });
 });

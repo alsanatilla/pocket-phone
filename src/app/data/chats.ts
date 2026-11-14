@@ -1,3 +1,4 @@
+import type { Steer } from "../../shared/pip-steer.js";
 import { ChatStore } from "../../client/pip-core.js";
 import type { ActivityRow } from "../../client/pip-activity.js";
 import type { PipConfig } from "../../client/pip-core.js";
@@ -13,6 +14,8 @@ export interface ChatTurn {
   status: "streaming" | "done" | "stopped" | "failed" | string;
   error?: string; phase?: string; reasoning?: string;
   activity?: ActivityRow[]; sources?: { href: string; title: string }[];
+  /** Messages the person sent into this reply while Pip worked (src/shared/pip-steer.js). */
+  steers?: Steer[];
 }
 export interface ChatSource { kind: string; uid: string; title: string; text: string; href: string }
 export interface Chat {

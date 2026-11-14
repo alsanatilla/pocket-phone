@@ -1,8 +1,9 @@
+import { storedSteers } from './pip-steer.js';
 export const objectId = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value);
 const stamp = value => Number.isSafeInteger(value) && value >= 0;
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const pick = (value, names) => Object.fromEntries(names.filter(name => value[name] !== undefined).map(name => [name, value[name]]));
-export function sanitizeObject(collection, value) {
+function sanitizeFields(collection, value) {
   const uid = collection === 'chats' ? 'uid' : 'id';
   if (value.deleted) return { [uid]: value[uid], updated: value.updated, deleted: true };
   if (collection === 'zines') return { id: value.id, title: value.title, byline: value.byline || '', tone: value.tone, photos: value.photos.map(photo => pick(photo, ['id', 'caption', 'layout'])), created: value.created, updated: value.updated };
@@ -10,6 +11,15 @@ export function sanitizeObject(collection, value) {
   return { ...pick(value, ['uid', 'title', 'titled', 'created', 'updated', 'draft', 'draftUpdated', 'returnedModel', 'usage', 'pinned', 'home']),
     config: pick(value.config, ['provider', 'model', 'baseUrl', 'maxTokens', 'thinking', 'webSearch']), context: context(value.context),
     turns: value.turns.map(turn => ({ ...pick(turn, ['uid', 'assistantUid', 'owner', 'text', 'answer', 'reasoning', 'error', 'status', 'created', 'updated', 'attempt', 'usage', 'activity', 'sources', 'phase', 'model']), context: context(turn.context) })) };
+}
+/** The stored form of an object. A chat turn's steering messages (pip-steer.js) travel with it, bounded; a malformed list is left out, not refused. */
+export function sanitizeObject(collection, value) {
+  const clean = sanitizeFields(collection, value);
+  if (collection === 'chats' && !value.deleted) clean.turns.forEach((turn, index) => {
+    const steers = value.turns[index]?.steers;
+    if (Array.isArray(steers) && steers.length) turn.steers = storedSteers(steers);
+  });
+  return clean;
 }
 function safeConfig(value) {
   try {

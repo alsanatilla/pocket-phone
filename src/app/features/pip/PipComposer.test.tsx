@@ -12,6 +12,8 @@ describe("the message field while Pip replies", () => {
     render(<PipComposer chat={chat} busy queueing onSend={onSend} onStop={() => {}} />);
     fireEvent.change(screen.getByLabelText("Message Pip"), { target: { value: "And then the next thing." } });
     expect(screen.getByRole("button", { name: "Stop the reply" })).toBeTruthy();
+    // One send key while Pip works: it sends into the reply now (the server queues it when the reply cannot take it).
+    expect(screen.getByRole("button", { name: "Send to Pip now (Enter)" })).toBeTruthy();
     await act(async () => { fireEvent.keyDown(screen.getByLabelText("Message Pip"), { key: "Enter" }); });
     expect(onSend).toHaveBeenCalledWith("And then the next thing.");
   });

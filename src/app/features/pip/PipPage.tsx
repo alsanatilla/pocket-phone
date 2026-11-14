@@ -111,8 +111,11 @@ export function PipPage() {
   const queue = useQueue(watched);
   const queueing = Boolean(watched && canQueue(watched));
   const asked = new Set(joined.items.map(item => item.turn.uid));
-  const queued = queue.queue.filter(item => !asked.has(item.turnUid));
+  // A message sent into the running reply shows in that reply until it is taken (Turn); the rest wait their turn here.
+  const steering = queue.queue.filter(item => item.steer && !asked.has(item.turnUid));
+  const queued = queue.queue.filter(item => !item.steer && !asked.has(item.turnUid));
   const held = queued.filter(item => item.state === "held").length;
+  const pendingFor = (turnUid: string) => steering.filter(item => item.steer === turnUid);
   // A reply waiting for the person's decision holds the queue: the composer says so in one dim line.
   const note = queued.length > held && queue.active === "awaiting"
     ? <p className="py-1 text-xs text-dim">Queued messages start once you decide the change above.</p>
@@ -120,7 +123,8 @@ export function PipPage() {
   const sendFromComposer = (text: string) => {
     const target = home ? homeForSend() : chat;
     if (!target) return Promise.resolve();
-    return locked && canQueue(target.uid) ? queueSend(target.uid, text) : send(target.uid, text);
+    // While a reply runs, the message goes into it (steer: the turn that runs); the server queues it when it cannot.
+    return locked && canQueue(target.uid) ? queueSend(target.uid, text, live?.turnId ?? "") : send(target.uid, text);
   };
 
   return (
@@ -148,7 +152,9 @@ export function PipPage() {
             {joined.items.map(item => (
               <Turn key={item.turn.uid} turn={item.turn} chatId={item.chatId} latest={item.chatId === chat?.uid && item.turn.uid === latest} locked={locked}
                 live={live && live.chatId === item.chatId && live.turnId === item.turn.uid ? live.turn : null}
-                blocks={live && live.chatId === item.chatId && live.turnId === item.turn.uid ? live.blocks : undefined} />
+                blocks={live && live.chatId === item.chatId && live.turnId === item.turn.uid ? live.blocks : undefined}
+                pending={watched ? pendingFor(item.turn.uid) : undefined} held={queue.active === "awaiting"}
+                onTakeBack={watched ? runId => withdraw(watched, runId) : undefined} />
             ))}
             {watched ? queued.map(item => (
               <QueuedTurn key={item.runId} text={item.text} state={item.state} onTakeBack={() => withdraw(watched, item.runId)} />

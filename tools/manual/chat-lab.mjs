@@ -294,6 +294,22 @@ const QUEUED_MESSAGES = [
   'Und danach: Plane mir den langen Lauf am Samstag, mit Strecke, Tempo und wann ich losgehen sollte, damit ich vor dem Regen zurück bin.',
   'Erinnere mich morgen an die Donaudampfschifffahrtsgesellschaft.',
 ];
+// Messages sent into a reply while Pip works on it (docs/pip-agent-runtime.md, "Steering"): one not taken yet (a
+// waiting row naming the run in `steer`), one as long as a person writes, and a reply that took one in and went on.
+const STEER_TEXT = 'Nur die kurze Runde bitte, höchstens 8 km, und sag mir, ob ich vor dem Regen zurück bin.';
+const STEER_LONG = 'Und prüf auch den Sonntag: Wenn es dort trockener ist, verschieben wir den langen Lauf, und die Donaudampfschifffahrtsgesellschaft-Tour fällt dann aus.';
+const STEER_SENT_TURN = streamingTurn('steer-sent-turn-1', QUESTION, { phase: 'writing', answer: WRITING_TEXT,
+  activity: [{ id: 'steer-a1', kind: 'records', name: 'search_notes', title: 'search notes “Schlaf”', state: 'done', summary: '3 notes', input: '{"query":"Schlaf"}', result: '{"notes":3}', started: NOW - 9000, ended: NOW - 8000, sources: [] }] });
+const STEER_BEFORE = 'Der Schlaf war mit 7 h 12 min etwas länger als dein Schnitt, und die HRV blieb stabil. Für heute passt ein langer, lockerer Lauf von 18 km am Nachmittag.';
+const STEER_AFTER = 'Dann die kurze Runde: 8 km locker am Kanal, Start um 15:30. Der Regen kommt laut Vorhersage gegen 17 Uhr, du bist also gut vorher zurück. Morgen';
+const STEER_TAKEN_TURN = streamingTurn('steer-taken-turn-1', QUESTION, { phase: 'writing', answer: STEER_BEFORE + '\n\n' + STEER_AFTER,
+  steers: [{ uid: 'steer-taken-msg', text: STEER_TEXT, at: NOW - 6000, taken: NOW - 5000, pos: STEER_BEFORE.length }],
+  activity: [{ id: 'steer-t1', kind: 'records', name: 'search_notes', title: 'search notes “Schlaf”', state: 'done', summary: '3 notes', input: '{"query":"Schlaf"}', result: '{"notes":3}', started: NOW - 9000, ended: NOW - 8000, sources: [] }] });
+const STEER_DONE_CHAT = chatRecord('labsteerdone', 'Lauf', [{ ...STEER_TAKEN_TURN, uid: 'steer-done-turn-1', status: 'done', phase: 'done',
+  answer: STEER_BEFORE + '\n\n' + STEER_AFTER.replace(/ Morgen$/, ''), steers: [{ ...STEER_TAKEN_TURN.steers[0], uid: 'steer-done-msg' }] }]);
+const steerRow = (ctx, chat, runId, index, text, target) => ctx.insertRun({ runId: 'steer-wait-' + chat + '-' + index, chat, requestId: 'steer-wait-req-' + chat + '-' + index,
+  turn: { ...streamingTurn('steer-wait-' + chat + '-' + index, text), phase: 'requesting', created: NOW - 3000 + index }, status: 'waiting', created: NOW + index + 1,
+  config: { lane: chat, header: { uid: chat, title: 'Lage', created: NOW, config: CONFIG }, grants: null, timezone: 'Europe/Berlin', steer: target } });
 const BUILDING_TURN = streamingTurn('building-turn-1', 'Zeig mir die Werte als Karte.', {
   phase: 'drawing',
   answer: 'Die Werte als Karte:\n\n' + openFence(BUILD_LINES.slice(0, 5)),
@@ -977,6 +993,54 @@ const STATES = [
       await until(page, 'queue-paused', 'the paused queue', () => document.body.innerText.includes('2 messages wait'));
     },
     text: ['Guten Abend', 'langen Lauf', 'paused', '2 messages wait', 'resume', 'clear'],
+  },
+  {
+    // Sent into the running reply, not taken yet: after the text so far, with the dim line and one key.
+    name: 'steer-sent',
+    async run(page, ctx) {
+      await steerRow(ctx, 'labsteersent', 'steer-sent-run', 0, STEER_TEXT, 'steer-sent-run');
+      await steerRow(ctx, 'labsteersent', 'steer-sent-run', 1, STEER_LONG, 'steer-sent-run');
+      await openStreamingState(page, ctx, 'steer-sent', chatRecord('labsteersent', 'Lauf', [STEER_SENT_TURN]), 'steer-sent-run', 'steer-sent-req', STEER_SENT_TURN);
+      await until(page, 'steer-sent', 'both messages in the reply', () => document.body.innerText.includes('kurze Runde') && document.body.innerText.includes('Sonntag'));
+    },
+    text: ['Guten Abend', 'kurze Runde', 'next step', 'take back'],
+    selectors: ['[data-steer="sent"]', '[aria-label="Stop the reply"]'],
+  },
+  {
+    // Sent while a change waits for the person's decision: held until they decide.
+    name: 'steer-held',
+    async run(page, ctx) {
+      const turn = { ...APPROVAL_TURN, uid: 'steer-held-turn-1' }, chat = 'labsteerheld';
+      await page.evaluate(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: chatKey(chat), value: chatRecord(chat, 'Notiz speichern', [turn]) });
+      await ctx.insertRun({ runId: 'steer-held-run', chat, requestId: 'steer-held-req', turn, status: 'awaiting', expiresAt: NOW + 12 * 3600_000,
+        requests: [{ requestId: 'steer-held-approval', kind: 'write', tool: 'create_record', callId: 'steer-held-call', rowId: 'row-approval', payload: { action: { kind: 'note', title: 'Blue car', text: '21,000 euros' } } }] });
+      await steerRow(ctx, chat, 'steer-held-run', 0, 'Nenn die Notiz „Blaues Auto, geprüft“.', 'steer-held-run');
+      await page.goto(ctx.origin + '/#/pip?chat=' + chat, { waitUntil: 'domcontentloaded' });
+      await until(page, 'steer-held', 'the held message', () => document.body.innerText.includes('Blaues Auto') && document.body.innerText.includes('decision'));
+    },
+    text: ['Blue car', 'Blaues Auto', 'after your decision', 'take back'],
+    selectors: ['[data-steer="held"]'],
+  },
+  {
+    // Taken in: the message stands where Pip took it, and the answer goes on below it.
+    name: 'steer-taken',
+    async run(page, ctx) {
+      await openStreamingState(page, ctx, 'steer-taken', chatRecord('labsteertaken', 'Lauf', [STEER_TAKEN_TURN]), 'steer-taken-run', 'steer-taken-req', STEER_TAKEN_TURN);
+      await until(page, 'steer-taken', 'the answer after the message', () => document.body.innerText.includes('taken in') && document.body.innerText.includes('Kanal'));
+    },
+    text: ['18 km', 'kurze Runde', 'taken in', 'Kanal'],
+    selectors: ['[data-steer="taken"]', '[aria-label="Stop the reply"]'],
+  },
+  {
+    // The finished reply as every device keeps it.
+    name: 'steer-done',
+    async run(page, ctx) {
+      await page.evaluate(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: chatKey('labsteerdone'), value: STEER_DONE_CHAT });
+      await page.goto(ctx.origin + '/#/pip?chat=labsteerdone', { waitUntil: 'domcontentloaded' });
+      await until(page, 'steer-done', 'the finished reply', () => document.body.innerText.includes('taken in') && document.body.innerText.includes('17 Uhr'));
+    },
+    text: ['18 km', 'kurze Runde', 'taken in', '17 Uhr'],
+    selectors: ['[data-steer="taken"]'],
   },
   {
     name: 'card-building',

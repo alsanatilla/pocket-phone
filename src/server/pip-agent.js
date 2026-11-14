@@ -9,6 +9,7 @@ import { RESEARCH_LIMITS } from '../client/pip-limits.js';
 import { CARD_ARGUMENT_LIMIT, cardFence, cardIds, draftLines, replaceCard } from '../shared/pocket-card-tool.js';
 import { cardsIn } from '../shared/pocket-card-edit.js';
 import { normalizeAnswer } from '../shared/pip-reply.js';
+import { answerPieces, joinPieces, steerText, takenSteers } from '../shared/pip-steer.js';
 import { createTransport, toCore } from './pip-agent-transport.js';
 
 /**
@@ -21,6 +22,8 @@ export const MAX_REQUESTS = 12;
 const LENGTH_RETRIES = 2;
 const CEILING = `The reply reached its limit of ${MAX_REQUESTS} model requests. Continue when you’re ready.`;
 const LENGTH = 'The reply limit per message was reached. Continue when you’re ready.';
+/** What the "enough looked up" judge stops research with; only that stop is lifted by a message sent into the reply. */
+const ENOUGH = 'Enough looked up for this message';
 const CARD_TOOLS = ['show_card', 'update_card'];
 export class RunPaused extends Error { constructor() { super('Waiting for a decision'); this.name = 'RunPaused'; } }
 const stopped = () => new DOMException('Stopped', 'AbortError');
@@ -37,10 +40,13 @@ const kept = (name, input) => CARD_TOOLS.includes(name) ? (name === 'update_card
  * A durable run passes `durable`: { checkpoint, settled, pause }; it stops at a decision point (RunPaused) and
  * continues in a later request with the clients' decisions in `settled` (Map toolCallId → { approved, input? } or
  * { answer } for a device). Without `durable`, `approve(requests, signal)` answers in place.
+ * A chat reply passes `steering`: { take({ pos }) } marks the messages the person sent into this reply as taken, and
+ * returns them ([{ uid, text, at, taken, pos }]); they reach the model before its next request ("Steering" in
+ * docs/pip-agent-runtime.md). Scheduled jobs and assignments pass none.
  */
 export async function streamChat(chat, turn, { value, body, key, signal, onUpdate = () => {}, fetcher = fetch,
   executeTool = execute, previewTool = preview, approve, deviceTools = [], durable, saveTurn, resume, coverage,
-  deadlineMs = RESEARCH_LIMITS.deadlineMs, timeoutMs = 90000, research, streamFn, transport = createTransport } = {}) {
+  deadlineMs = RESEARCH_LIMITS.deadlineMs, timeoutMs = 90000, research, streamFn, transport = createTransport, steering } = {}) {
   const saved = durable?.checkpoint;
   if (saved && saved.runtime !== 'openclaw') throw new Error('This pending reply uses the previous runtime. Stop it and send the request again.');
   const model = { id: value.model, name: value.model, api: 'pocket-transport', provider: value.provider, baseUrl: value.baseUrl, reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: value.maxTokens };
@@ -49,6 +55,10 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   result.usage = { runtime: 'openclaw', agent_runtime: 'openclaw', request_identity: checkpointIdentity(value), read_access: access(value).join('|'), web_access: value.webSearch, notes_restricted: resume?.notes_restricted || false, ...(coverage ? { history_replay: coverage } : {}) };
   const counters = { requests: 0, calls: 0, lookups: 0, searches: 0, toolData: 0, enoughAsked: 0, enoughLookups: 0, enoughStopped: false, finalReason: '', lengthRetries: 0, cardEnd: 0, researchLeft: RESEARCH_LIMITS.deadlineMs, ...saved?.counters };
   const previews = saved?.previews || {}, rows = saved?.rows || {}, decisions = durable?.settled || new Map();
+  // The turn is the record of what was taken (it is written in the same step that marks a message taken), so it wins
+  // over a checkpoint written before a later take. A message stands at most at the end of the answer it is resumed with.
+  const steered = takenSteers(turn.steers).map(item => ({ ...item, pos: Math.min(Number(item.pos) || 0, result.answer.length) }));
+  if (steered.length || steering) result.steers = steered;
   let agent, fatal, ending = '', finished = false;
 
   // Timers. The research deadline is shared by every request of a reply (the checkpoint carries what is left); the
@@ -97,7 +107,12 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   const reviseCard = async ({ id, spec, shows }) => {
     const change = text => { const old = cardsIn(text).find(card => card.id === id); return old ? replaceCard(text, id, cardFence(spec, { id, updated: Date.now(), pinned: old.pinned, alert: old.alert })) : null; };
     const here = change(result.answer);
-    if (here !== null) { counters.cardEnd += here.length - result.answer.length; result.answer = here; return { kind: 'card', updated: true, id, shows }; }
+    if (here !== null) {
+      // A message sent into the reply after the card keeps its place behind it.
+      let from = 0; while (from < here.length && here[from] === result.answer[from]) from++;
+      for (const item of result.steers || []) if (item.pos > from) item.pos += here.length - result.answer.length;
+      counters.cardEnd += here.length - result.answer.length; result.answer = here; return { kind: 'card', updated: true, id, shows };
+    }
     const earlier = (chat.turns || []).filter(item => item.uid !== turn.uid && typeof item.answer === 'string');
     for (const item of earlier.toReversed()) {
       const changed = change(item.answer);
@@ -153,6 +168,30 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       + 'Only if the current user request asks to save or change something, request it now if it has not already been requested in this reply. An unfinished action from an earlier message must not replace the current answer. '
       + (offered.includes('show_card') ? 'A card that belongs in this answer is still drawn by calling show_card; never write a stand-in for one. ' : '')
       + 'Explain material gaps briefly without attributing this limit to the user.' + (counters.finalReason ? ' App limit: ' + counters.finalReason : '') : '');
+  // Steering. Messages the person sent into this reply are taken only between model requests, never while a tool batch
+  // runs: OpenClaw would skip the batch's unstarted sequential calls (approved saves, cards) for a steering message.
+  // Each is a user message that keeps its uid (`pocketSteer`), so a message the turn records as taken but the
+  // transcript lacks (a restart rebuilt it, or a checkpoint predates the take) is added once, and never twice.
+  const inTranscript = uid => (agent?.state.messages || []).some(message => message.role === 'user' && message.pocketSteer === uid);
+  const steerMessage = item => ({ role: 'user', content: [{ type: 'text', text: steerText(item.text) }], timestamp: Date.now(), pocketSteer: item.uid });
+  /** The messages due before the next request: taken ones the transcript lacks, then new ones while a request is left. */
+  const steersNow = async () => {
+    if (!result.steers) return [];
+    const due = result.steers.filter(item => !inTranscript(item.uid));
+    if (steering && counters.requests < MAX_REQUESTS && !ending) {
+      // What was written so far stays as written; the message stands after it and the answer continues below.
+      let fresh = [];
+      try { fresh = await steering.take({ pos: result.answer.length }) || []; } catch { /* A message not taken now is taken later, or waits its turn. */ }
+      check();
+      if (fresh.length) {
+        result.steers.push(...fresh); due.push(...fresh); counters.cardEnd = result.answer.length;
+        // The person asked for more: research the judge ended may start again. Every other limit holds.
+        if (counters.enoughStopped && counters.finalReason === ENOUGH) { counters.enoughStopped = false; counters.finalReason = ''; counters.enoughLookups = counters.lookups; }
+        publish();
+      }
+    }
+    return due.map(steerMessage);
+  };
   /** Before each model request: the ceiling, the context size, the judge, and that request's instructions. False ends the reply. */
   const prepare = async messages => {
     check();
@@ -161,7 +200,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     // Between rounds, JEV says whether what was found is enough; a yes ends research the way a limit does.
     if (!researchStopped() && typeof research?.enough === 'function' && counters.lookups > counters.enoughLookups && counters.enoughAsked < 6) {
       counters.enoughAsked++; counters.enoughLookups = counters.lookups;
-      try { if (await research.enough({ lookups: counters.lookups, rounds: counters.requests })) { counters.enoughStopped = true; counters.finalReason ||= 'Enough looked up for this message'; } }
+      try { if (await research.enough({ lookups: counters.lookups, rounds: counters.requests })) { counters.enoughStopped = true; counters.finalReason ||= ENOUGH; } }
       catch { /* A judge that fails must never fail the reply. */ }
       check();
     }
@@ -340,6 +379,12 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     throw new RunPaused();
   };
 
+  /** The answer in its stored form, cleaned piece by piece around the person's messages so each keeps its place. */
+  const clean = (tail = '') => {
+    if (!result.steers?.length) { result.answer = normalizeAnswer(result.answer + tail); return; }
+    const pieces = answerPieces(result.answer, result.steers); pieces[pieces.length - 1] += tail;
+    Object.assign(result, joinPieces(pieces, result.steers, normalizeAnswer));
+  };
   /** The reply ends with what it has, a plain notice, and phase 'failed', so Continue resumes it. */
   const finishFromObservations = reason => {
     dropDraft();
@@ -348,7 +393,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       const excerpts = observations.flatMap(({ answer }) => answer.error ? [] : answer.kind === 'action' ? [(answer.action.status === 'saved' ? 'Saved: ' : 'Declined: ') + answer.action.title] : answer.kind === 'plan' || answer.kind === 'card' ? [] : answer.text ? [String(answer.title || 'Source') + ': ' + answer.text.slice(0, 600)] : (answer.results || answer.notes || answer.tasks || answer.appointments || []).slice(0, 3).map(item => (item.title || item.text || 'Source') + (item.description || item.excerpt || item.title && item.text ? ': ' + (item.description || item.excerpt || item.text).slice(0, 300) : '')));
       result.answer = excerpts.length ? 'Collected observations:\n\n' + excerpts.slice(0, 8).map(item => '- ' + item).join('\n') : 'Research stopped before a final answer was available.';
     }
-    result.answer = normalizeAnswer(result.answer + '\n\n' + reason + ' Completed lookups remain in the activity.');
+    clean('\n\n' + reason + ' Completed lookups remain in the activity.');
     result.activity = settle(result.activity, 'failed', reason); result.phase = 'failed'; onUpdate(structuredClone(result));
     finished = true; throw new Error(reason);
   };
@@ -368,11 +413,13 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
         if (index < 0 && result.sources.length < 24) { index = result.sources.length; result.sources.push(found); }
         if (index >= 0) result.answer += ` [${index + 1}](${found.href.replace(/[()]/g, char => encodeURIComponent(char))})`;
       } });
-    agent = new Agent({ initialState: { systemPrompt: base, messages: saved?.messages || toCore(body.messages, model), model, tools }, streamFn: stream, toolExecution: 'parallel',
+    agent = new Agent({ initialState: { systemPrompt: base, messages: saved?.messages || toCore(body.messages, model), model, tools }, streamFn: stream, toolExecution: 'parallel', steeringMode: 'all',
       runtime: { ...openClawAgentCoreRuntime, isLocalError: error => locals.has(error) || error?.name === 'RunPaused' || openClawAgentCoreRuntime.isLocalError(error) },
       // Runs after every turn; only a turn whose tools ran leads to another request.
       prepareNextTurnWithContext: guard(async ({ message, toolResults, context }) => {
         if (message.stopReason !== 'toolUse' || !toolResults.length) return undefined;
+        // The loop's steering checkpoint follows this hook: what is queued here goes before the next request.
+        for (const steer of await steersNow()) agent.steer(steer);
         const prompt = await prepare(context.messages);
         return prompt === false ? { stop: true } : { context: { ...context, systemPrompt: prompt } };
       }) });
@@ -401,6 +448,10 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       endStep(messages[at] || {});
     }
     for (;;) {
+      // Before every request this loop makes (the first, after an approval, after a finished message): messages sent
+      // into the reply go after the transcript, as the person's own.
+      const steers = await steersNow();
+      if (steers.length) agent.state.messages = [...agent.state.messages, ...steers];
       const prompt = await prepare(agent.state.messages);
       if (prompt === false) return finishFromObservations(ending);
       agent.state.systemPrompt = prompt;
@@ -410,7 +461,15 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       const last = agent.state.messages.at(-1);
       if (last?.role === 'assistant' && last.stopReason === 'error') throw new Error(last.errorMessage || 'The connection ended before the reply was complete. Retry when you’re ready.');
       if (last?.role !== 'assistant' || last.stopReason === 'aborted') throw new Error('The connection ended before the reply was complete. Retry when you’re ready.');
-      if (last.stopReason !== 'length') break;
+      // A finished message with a message sent meanwhile is not the end: the reply carries on after it, while a
+      // request is left. The check sees the message (and takes it) only once; the top of the loop delivers it.
+      if (last.stopReason !== 'length') {
+        if (!steering || counters.requests >= MAX_REQUESTS) break;
+        const more = await steersNow();
+        if (!more.length) break;
+        agent.state.messages = [...agent.state.messages, ...more];
+        continue;
+      }
       // A message cut off at the reply limit, text or a tool call, has nothing to continue from: it is dropped and
       // written again, twice in a row at most; after that the reply ends with what it has.
       if (++counters.lengthRetries > LENGTH_RETRIES || lastRequest()) return finishFromObservations(LENGTH);
@@ -418,7 +477,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       agent.state.messages = agent.state.messages.slice(0, -1);
     }
     // The one place a finished reply leaves the model: it is stored in its clean form.
-    dropDraft(); result.answer = normalizeAnswer(result.answer);
+    dropDraft(); clean();
     if (!result.answer.trim()) throw new Error('The provider returned no answer. Check its model and reply limit.');
     result.activity = settle(result.activity, 'failed'); result.phase = 'done'; publish(); return result;
   } catch (error) {
@@ -426,7 +485,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     if (!signal?.aborted && (timedOut || deadlineReached)) return finishFromObservations(deadlineReached ? 'The five-minute research deadline was reached. Continue when you’re ready.' : 'The provider stopped responding for 90 seconds. Continue when you’re ready.');
     if (signal?.aborted || controller.signal.aborted) throw stopped();
     // A failed reply is published settled, so the stored turn has no row left running.
-    dropDraft(); result.answer = normalizeAnswer(result.answer);
+    dropDraft(); clean();
     result.activity = settle(result.activity, 'failed', error?.message); result.phase = 'failed'; onUpdate(structuredClone(result)); throw error;
   } finally { clearTimeout(idle); clearTimeout(absolute); signal?.removeEventListener('abort', abort); controller.abort(); }
 }

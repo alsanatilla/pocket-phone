@@ -22,6 +22,7 @@ import { enqueue, claimJob, finishJob, releaseJob } from './pip-queue.js';
 import * as live from './pip-live.js';
 import { publish } from './pocket-events.js';
 import { compactFrame } from './pip-frames.js';
+import { MAX_STEERS, takenSteers } from '../shared/pip-steer.js';
 export { compactFrame };
 
 // Pip's shared conversations: the account's server runs each turn once for every device. A run holds its own
@@ -39,8 +40,11 @@ const RUN_DEADLINE = 150000, HEARTBEAT = 2000, LEASE = 20000, PROGRESS_REQUEST =
 /** A chat run on a vaulted key has no dedicated daily budget; this bounds a runaway day without a settings page. */
 const VAULT_TOKENS = 200000;
 const ACTIVE = ['queued', 'running', 'awaiting', 'stopping'];
-/** A run that was asked of the model, as opposed to a message still waiting its turn (or taken back before it began). */
-const STARTED = "status NOT IN ('waiting', 'held', 'withdrawn')";
+/**
+ * A run that was asked of the model, as opposed to a message still waiting its turn (or taken back before it began,
+ * or `steered`: taken into the reply it was sent to, see queueMessage).
+ */
+const STARTED = "status NOT IN ('waiting', 'held', 'withdrawn', 'steered')";
 /** Detached runs are queued in Turso and executed by a worker process (services/pip), not by the request. */
 const detached = () => process.env.PIP_RUNS_DETACHED === '1' && !inProcess();
 /**
@@ -254,6 +258,9 @@ async function endIdle(userId, run, { stop = false, device = '', fetcher } = {})
 async function restart(userId, run, { fetcher } = {}) {
   const now = Date.now(), runId = String(run.run_id), turn = parse(run.turn) || {};
   turn.answer = ''; turn.phase = 'requesting'; turn.activity = settle(turn.activity || [], 'failed');
+  // Messages the reply had taken stay taken: they stand before the answer written again, and reach the model again
+  // only because the rebuilt transcript lacks them (pip-agent.js), never as a second queued message.
+  if (Array.isArray(turn.steers)) turn.steers = turn.steers.map(item => ({ ...item, pos: 0 }));
   const leaseId = randomUUID();
   const claimed = (await sql({ sql: `UPDATE pocket_pip_runs SET lease_id = ?, lease_until = ?, turn = ?, updated = ?
     WHERE user_id = ? AND run_id = ? AND status = 'running' AND lease_until <= ? AND lease_id = ? AND created > ?
@@ -309,6 +316,9 @@ export async function submitRun(userId, body, { fetcher, now = Date.now() } = {}
   const turnUid = typeof body.turnUid === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(body.turnUid) ? body.turnUid : randomUUID();
   const turn = { uid: turnUid, text, context: Array.isArray(body.context) ? body.context : [], created: now, updated: now, owner: device || 'pocket-server', attempt,
     answer: '', reasoning: '', error: '', status: 'streaming', usage: { runtime: 'pocket-server' }, activity: [], sources: [], phase: 'requesting', model: value.model };
+  // Continue or retry of a turn keeps the messages the person sent into it: the new attempt starts with them.
+  const steered = takenSteers((chat.turns || []).find(item => item.uid === turnUid)?.steers).map(item => ({ ...item, pos: 0 }));
+  if (steered.length) turn.steers = steered;
   if (!validObject('chats', { ...chat, updated: now, turns: [turn] })) throw no('Check the message and its attached sources: up to three, each with a title and up to 8,000 characters.');
   const deviceTools = [...new Set((Array.isArray(body.deviceTools) ? body.deviceTools : []).filter(name => DEVICE_TOOLS.includes(name)))];
   const runId = randomUUID(), leaseId = randomUUID(), deferred = detached(), status = deferred ? 'queued' : 'running';
@@ -522,6 +532,36 @@ async function drive(userId, run, leaseId, { fetcher }) {
     });
     await tell(chat => waitingNotice(chat, changes));
   };
+  // Steering: the messages sent into this reply, rows `waiting` whose config names this run (`steer`, queueMessage).
+  // The agent takes them before a model request (pip-agent.js). Taking is one write transaction on this request's
+  // lease: the rows become `steered` and the turn records them, so a message is either still waiting (and, when the
+  // reply ends first, the next queued message) or taken and in the turn, never both and never neither. It waits for
+  // the progress writes before it, so none of them can write the turn back without the messages.
+  const take = ({ pos }) => {
+    const job = writing.then(async () => {
+      const now = Date.now();
+      let fresh = [], rows = [];
+      try {
+        await writeTransaction(async tx => {
+          rows = (await tx.execute({ sql: `UPDATE pocket_pip_runs SET status = 'steered', updated = ? WHERE user_id = ? AND status = 'waiting' AND json_extract(config, '$.steer') = ?
+            RETURNING run_id, turn_uid, turn, created`, args: [now, userId, runId] })).rows;
+          fresh = rows.map(row => ({ uid: String(row.turn_uid), text: String(parse(row.turn)?.text || ''), at: Number(row.created), taken: now, pos }))
+            .sort((a, b) => a.at - b.at);
+          if (!fresh.length) return;
+          const kept = await tx.execute({ sql: `UPDATE pocket_pip_runs SET turn = ?, updated = ? WHERE ${owned} AND status = 'running'`,
+            args: [JSON.stringify({ ...turn, steers: [...takenSteers(turn.steers), ...fresh] }), now, ...ownedArgs] });
+          // A stop or a lost lease since: nothing is taken, the messages wait as they were.
+          if (!kept.rowsAffected) throw Object.assign(new Error('The reply is no longer running here.'), { code: 'steer_refused' });
+        });
+      } catch (error) { if (error?.code === 'steer_refused') return []; throw error; }
+      if (!fresh.length) return [];
+      turn.steers = [...takenSteers(turn.steers), ...fresh];
+      for (const row of rows) await event(userId, String(row.run_id), 'steered', { chat: chatUid, into: runId }, now);
+      return fresh;
+    });
+    writing = job.then(() => {}, () => {});
+    return job;
+  };
   try {
     saved = await account(userId, snapshot, snapshot.grants, snapshot.timezone);
     if (!saved) return await end('failed', 'Pip on the server is no longer set up for this account.');
@@ -570,7 +610,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
     const limits = effortLimits(effort);
     const researchOption = effort === 'thorough' && !assignment ? { ...limits, enough } : limits;
     const reply = await streamChat(conversationView, turn, { value, body, key, fetcher, deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
-      ...(researchOption ? { research: researchOption } : {}),
+      ...(researchOption ? { research: researchOption } : {}), ...(assignment ? {} : { steering: { take } }),
       onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } }); live.publish(runId, turn, meta); progress(); },
       resume: { reasoning: turn.reasoning || '', activity: turn.activity || [], observations },
       durable: { checkpoint: resumed, settled: resumed ? settlementMap(requests) : null, pause },
@@ -795,6 +835,8 @@ export async function workerStep({ fetcher, now = Date.now() } = {}) {
 // docs/pip-message-flow.md has the states and the decisions. A queued message is a run row with status `waiting`
 // (or `held` after a stop, `withdrawn` once taken back); its `config` holds the request it starts with, and its lane
 // says which chat's queue it is in: the chat's uid, or `home` for every segment of the one big chat.
+// A message sent into the running reply has `config.steer` (that run) and ends `steered` once the reply takes it
+// (docs/pip-agent-runtime.md, "Steering"); one the reply never took is an ordinary queued message.
 
 /** The queue a chat's messages wait in: `home` for any segment of the one big chat, else the chat itself. */
 async function laneOf(userId, uid, header = null) {
@@ -839,12 +881,20 @@ async function queueMessage(userId, body, { uid, lane, header, clientConfig, tim
   if (!validObject('chats', { ...chat, updated: now, turns: [turn] })) throw no('Check the message and its attached sources: up to three, each with a title and up to 8,000 characters.');
   const deviceTools = [...new Set((Array.isArray(body.deviceTools) ? body.deviceTools : []).filter(name => DEVICE_TOOLS.includes(name)))];
   const request = { lane, header: { ...header, uid }, grants: Array.isArray(body.grants) ? body.grants : null, timezone };
+  // Sent into the reply that runs in this lane (`body.steer` names the turn the tab sees running): it is the same row,
+  // naming that run, and the reply takes it at its next step (drive's `take`). A reply waiting for a decision takes it
+  // when it continues; one stopping or ended leaves it an ordinary queued message. A message with attached sources,
+  // and any past MAX_STEERS for one reply, waits its turn as before.
+  const active = typeof body.steer === 'string' && body.steer && !(Array.isArray(body.context) && body.context.length) ? await activeIn(userId, lane) : null;
+  const target = active && String(active.turn_uid) === body.steer && ['queued', 'running', 'awaiting'].includes(String(active.status)) && parse(active.config)?.lane !== ASSIGN_LANE ? String(active.run_id) : '';
   const runId = randomUUID();
   let inserted;
   const tx = await database().transaction('write');
   try {
     const waiting = Number((await tx.execute({ sql: `SELECT COUNT(*) AS n FROM pocket_pip_runs WHERE user_id = ? AND status IN ('waiting', 'held') AND json_extract(config, '$.lane') = ?`, args: [userId, lane] })).rows[0].n);
     if (waiting >= QUEUE_LIMIT) throw no(QUEUE_FULL, 409, 'queue_full');
+    if (target && Number((await tx.execute({ sql: `SELECT COUNT(*) AS n FROM pocket_pip_runs WHERE user_id = ? AND status IN ('waiting', 'held', 'steered') AND json_extract(config, '$.steer') = ?`,
+      args: [userId, target] })).rows[0].n) < MAX_STEERS) request.steer = target;
     inserted = (await tx.execute({ sql: `INSERT INTO pocket_pip_runs (user_id, run_id, chat_uid, request_id, turn_uid, device, status, turn, checkpoint, config, device_tools, lease_id, lease_until, expires_at, created, updated)
       VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, NULL, ?, ?, '', 0, 0, ?, ?) ON CONFLICT(user_id, request_id) DO NOTHING RETURNING run_id`,
       args: [userId, runId, uid, requestId, turn.uid, device, JSON.stringify(turn), JSON.stringify(request), JSON.stringify(deviceTools), now, now] })).rows[0];
@@ -949,7 +999,7 @@ async function holdLane(userId, lane) {
  */
 async function settleLane(userId, runId, { fetcher } = {}) {
   const row = await runRow(userId, runId);
-  if (!row || ACTIVE.includes(String(row.status)) || ['waiting', 'held', 'withdrawn'].includes(String(row.status))) return;
+  if (!row || ACTIVE.includes(String(row.status)) || ['waiting', 'held', 'withdrawn', 'steered'].includes(String(row.status))) return;
   // An assignment that ended, however it ended, makes room for the next one; a stop does not hold the others.
   if (parse(row.config)?.lane === ASSIGN_LANE) { await startAssignments(userId, { fetcher }); return; }
   const lane = await laneOf(userId, String(row.chat_uid));
@@ -966,9 +1016,11 @@ export async function queueView(userId, { chat = '', fetcher } = {}) {
   const lane = await laneOf(userId, chat);
   if (inProcess() && !await activeIn(userId, lane)) await startNext(userId, lane, { fetcher });
   const active = await activeIn(userId, lane);
+  // `steer` is the running turn a message was sent into, while that reply may still take it; else it is queued.
   const queue = (await laneRows(userId, lane, ['waiting', 'held'])).map(row => {
-    const turn = parse(row.turn) || {};
-    return { runId: String(row.run_id), requestId: String(row.request_id), chat: String(row.chat_uid), turnUid: String(row.turn_uid), text: String(turn.text || ''), created: Number(row.created), state: String(row.status) };
+    const turn = parse(row.turn) || {}, into = parse(row.config)?.steer;
+    return { runId: String(row.run_id), requestId: String(row.request_id), chat: String(row.chat_uid), turnUid: String(row.turn_uid), text: String(turn.text || ''), created: Number(row.created), state: String(row.status),
+      steer: active && String(row.status) === 'waiting' && into === String(active.run_id) ? String(active.turn_uid) : '' };
   });
   return { queue, active: active ? String(active.status) : '' };
 }

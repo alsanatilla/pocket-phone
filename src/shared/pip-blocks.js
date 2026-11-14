@@ -6,9 +6,10 @@
 // never parses the answer while it streams. Both ends use this module, so they cannot disagree about a change.
 
 import { segmentAnswer } from './pip-reply.js';
+import { answerPieces, takenSteers } from './pip-steer.js';
 
 /** The empty reply both ends start from. */
-export const emptyReply = () => ({ blocks: [], reasoning: '', activity: [], sources: [], phase: '', model: '', usage: {} });
+export const emptyReply = () => ({ blocks: [], reasoning: '', activity: [], sources: [], phase: '', model: '', usage: {}, steers: [] });
 
 /**
  * The blocks of an answer: { kind: 'prose' | 'card', body, closed }. Prose is always closed; a card while it is
@@ -18,9 +19,19 @@ export const blocksOf = answer => segmentAnswer(String(answer || '')).map(segmen
   ? { kind: 'prose', body: segment.text.replace(/\s+$/, ''), closed: true }
   : { kind: 'card', body: segment.source, closed: segment.closed });
 
-/** A turn (as a run keeps it) as the reply state followers hold. */
-export const replyOf = turn => ({ blocks: blocksOf(turn?.answer), reasoning: String(turn?.reasoning || ''), activity: turn?.activity || [], sources: turn?.sources || [],
-  phase: String(turn?.phase || ''), model: String(turn?.model || ''), usage: turn?.usage || {} });
+/**
+ * A turn (as a run keeps it) as the reply state followers hold. A message the person sent into the reply cuts the
+ * answer: the blocks before it and after it are cut apart, and `steers[i].block` is how many blocks stand before it.
+ */
+export function replyOf(turn) {
+  const blocks = [], steers = [], taken = takenSteers(turn?.steers);
+  answerPieces(turn?.answer, taken).forEach((piece, index) => {
+    blocks.push(...blocksOf(piece));
+    if (index < taken.length) steers.push({ ...taken[index], block: blocks.length });
+  });
+  return { blocks, reasoning: String(turn?.reasoning || ''), activity: turn?.activity || [], sources: turn?.sources || [],
+    phase: String(turn?.phase || ''), model: String(turn?.model || ''), usage: turn?.usage || {}, steers };
+}
 
 const same = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
 
@@ -42,6 +53,7 @@ export function diffReply(before, after) {
   }
   const meta = {};
   for (const field of ['activity', 'sources', 'usage']) if (!same(before[field], after[field])) meta[field] = after[field];
+  if (!same(before.steers || [], after.steers || [])) meta.steers = after.steers || [];
   for (const field of ['phase', 'model']) if (before[field] !== after[field]) meta[field] = after[field];
   if (Object.keys(meta).length) ops.push({ o: 'meta', ...meta });
   return ops;

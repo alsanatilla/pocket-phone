@@ -9,7 +9,8 @@ import { toastError } from "../../ui/toast/toast.ts";
 
 // The message field: grows with its text, Enter sends (Shift+Enter is a new line), the chat's sources sit above it
 // as rows that can be removed, and the draft is kept on the chat, so it survives switching chats or a reload.
-// With `queueing` (a chat that runs on the server), a message can be sent while a reply runs: it waits its turn there.
+// With `queueing` (a chat that runs on the server), a message can be sent while a reply runs: it goes into that reply
+// at Pip's next step, or waits its turn when the reply can no longer take it.
 // `note` is one dim line above the field saying why queued messages wait (a change waiting for a decision).
 
 export function PipComposer({ chat, busy, queueing = false, note, initial, onSend, onStop }: { chat: Chat; busy: boolean; queueing?: boolean; note?: ReactNode; initial?: string; onSend: (text: string) => Promise<void>; onStop: () => void }) {
@@ -68,7 +69,7 @@ export function PipComposer({ chat, busy, queueing = false, note, initial, onSen
         <ModelPicker chat={chat} busy={busy} />
         <span className="flex-1" />
         {busy ? <StopButton label="Stop the reply" onClick={onStop} /> : null}
-        {!busy || (queueing && text.trim()) ? <SendButton label={busy ? "Send when Pip has answered (Enter)" : "Send (Enter)"} disabled={!text.trim()} /> : null}
+        {!busy || (queueing && text.trim()) ? <SendButton label={busy ? "Send to Pip now (Enter)" : "Send (Enter)"} disabled={!text.trim()} /> : null}
       </div>
     </form>
   );
