@@ -69,20 +69,6 @@ reasoning as working notes. Text up to the last drawn card stays. While
 card's complete elements stand in the answer as an open fence. The checked card
 replaces that fence, or the fence is dropped.
 
-## Approvals
-
-Approval checkpoints contain OpenClaw messages (thinking blocks untouched), pending
-calls, previews, rows, counters and displayed output. A durable run pauses at the
-assistant message boundary, before executing its tool batch, with every write and
-device call of that message pending at once. On resume, Pocket first checks that
-every pending request is settled; if one is not, it pauses again unchanged. Then
-it supplies approved, declined or device results using the same call IDs, and
-calls `Agent.continue()`. The database's existing run lease and idempotent write
-boundary still own concurrency. Approval request IDs include the request index,
-so reusing a provider tool-call ID cannot reuse an earlier approval. Completed
-conversation history continues to use Pocket's existing storage format and is
-translated at the runtime boundary.
-
 ## Steering
 
 While a chat reply runs on the server, a message the person sends goes into that reply: Pip takes it in at its
@@ -128,6 +114,20 @@ next step and carries on in the same reply, instead of the message waiting until
   of the running reply ("for pip's next step", or "after your decision" while a change waits) with `take back`; a
   taken one stands where it was taken in, marked "taken in". Lab states: `steer-sent`, `steer-held`,
   `steer-taken`, `steer-done`.
+
+## Approvals
+
+Approval checkpoints contain OpenClaw messages (thinking blocks untouched), pending
+calls, previews, rows, counters and displayed output. A durable run pauses at the
+assistant message boundary, before executing its tool batch, with every write and
+device call of that message pending at once. On resume, Pocket first checks that
+every pending request is settled; if one is not, it pauses again unchanged. Then
+it supplies approved, declined or device results using the same call IDs, and
+calls `Agent.continue()`. The database's existing run lease and idempotent write
+boundary still own concurrency. Approval request IDs include the request index,
+so reusing a provider tool-call ID cannot reuse an earlier approval. Completed
+conversation history continues to use Pocket's existing storage format and is
+translated at the runtime boundary.
 
 ## Deployment
 

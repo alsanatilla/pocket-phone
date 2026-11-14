@@ -1,5 +1,6 @@
 import { settledSurfaces } from './surfaces.js';
 import { createHash, randomUUID } from 'node:crypto';
+import { MAX_STEERS, takenSteers } from '../shared/pip-steer.js';
 import { database, execute as sql, writeTransaction } from './database.js';
 import { open } from './secrets.js';
 import { writeObject } from './objects.js';
@@ -22,7 +23,6 @@ import { enqueue, claimJob, finishJob, releaseJob } from './pip-queue.js';
 import * as live from './pip-live.js';
 import { publish } from './pocket-events.js';
 import { compactFrame } from './pip-frames.js';
-import { MAX_STEERS, takenSteers } from '../shared/pip-steer.js';
 export { compactFrame };
 
 // Pip's shared conversations: the account's server runs each turn once for every device. A run holds its own
