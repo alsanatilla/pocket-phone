@@ -223,3 +223,51 @@ These cover:
   approval, exactly once across a pause and a restart, the ceiling, `MAX_STEERS`, the judge, and history replay
 
 They do not establish live model quality or deployment health.
+
+## Checking against a real model
+
+`npm run check:live` (`tools/live/`) sends a fixed set of requests through the real reply loop (`streamChat`) with
+the real request building (`config`, `requestBody`, plus the date, server note, memory instructions and effort note
+pip-runs.js appends) and the production tool definitions for a server chat with notes, tasks, calendar and web
+search on, then judges each reply with deterministic checks (`tools/live/checks.mjs`). It is never run
+automatically: not by the tests, the build or a deploy. Without a key it prints one "skipped" line and exits 0.
+
+```
+POCKET_CHECK_KEY=… npm run check:live
+POCKET_CHECK_KEY=… POCKET_CHECK_ONLY=plan-card,steer POCKET_CHECK_REPEAT=3 npm run check:live
+```
+
+- `POCKET_CHECK_KEY` (required; never printed or written, and redacted from the report and output),
+  `POCKET_CHECK_BASE_URL` (default `https://opencode.ai/inference/go/openai/v1`; ignored for anthropic, whose URL is
+  fixed), `POCKET_CHECK_MODEL` (default `deepseek-v4.1-flash`), `POCKET_CHECK_PROVIDER` (`compatible` | `anthropic`),
+  `POCKET_CHECK_ONLY` (comma list of scenario names), `POCKET_CHECK_REPEAT` (default 1; a scenario passes when two
+  thirds of its runs, rounded up, pass: 1/1, 2/2, 2/3, 3/4, 4/5), `POCKET_CHECK_REPORT` (the JSON report's path;
+  default a file in the system temp directory).
+- **No database, no account, no web.** `tools/live/world.mjs` holds a few German and English notes, tasks and
+  appointments read through Pocket's real tools over an in-memory record source; `search_web` / `read_web_page`
+  answer from three canned pages; saves are recorded, not written; memory and jobs tools are no-ops. Effort is fixed
+  per scenario in place of the JEV judgment, so the effort note and lookup limits match production.
+- **Scenarios** and what they guard:
+  `plan-card` (a plan is drawn with show_card as a Timeline, never "[card: …]" text or raw JSON in the prose; the
+  stand-in is looked for in the streamed text, since the stored form drops it);
+  `card-after-history` (with a stored card replayed as a show_card call, a new table is still drawn by tool call);
+  `research-then-card` (lookup cap 2: a lookup is refused, a Table/Chart is drawn after it, canned URLs are cited,
+  at most `MAX_REQUESTS`); `update-card` (update_card with the earlier card's id, no second card, the stored card
+  shows 13:00); `save-with-approval` (one create_record task due tomorrow, saved once); `save-declined` (nothing
+  saved and the reply says so without claiming a save); `steer` (a message sent when the first tool call shows is
+  taken through the same `steering.take` option pip-runs.js passes, reaches the model, and the answer after it
+  mentions the tour and names none of the canned restaurants); `language` ("Was steht morgen an?": the prose has at
+  least three German function words and at least 70% of the counted function words are German; reasoning is not
+  read); `no-runaway` ("Hey": at most 2 requests, no tools, under 600 characters, under 4,000 output tokens);
+  `thinking-limit` (reply limit 1,024: done, or the "reply limit per message" notice with a non-empty partial
+  answer; never empty, never another error).
+- **Output.** A table per scenario (k/N, requests, tokens in/out, seconds, first failed check) and a JSON report
+  with every check's reason, requests, tokens and duration per run, and on failure the answer (1,500 characters),
+  the activity rows and the last 800 characters of reasoning. Exit 1 if any scenario fails.
+- **Cost.** One full run is about 27 model requests (requests are counted at HTTP, so a provider retry counts),
+  mostly a few thousand input tokens each: the system text and tool definitions are sent every time. The run
+  prints the tokens used and the requests made against that estimate.
+- **Differences from production.** Approvals are answered in place (`approve`), not through a durable checkpoint;
+  the server note is a copy of pip-runs.js's unexported `NOTE`; compaction, the effort and "enough" judges, and
+  device tools are not exercised. `node --test tools/live/selftest.test.mjs` (part of `test:tools`) proves each
+  check can fail, against a scripted fake provider.
