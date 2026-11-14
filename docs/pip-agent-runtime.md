@@ -69,6 +69,52 @@ reasoning as working notes. Text up to the last drawn card stays. While
 card's complete elements stand in the answer as an open fence. The checked card
 replaces that fence, or the fence is dropped.
 
+## Steering
+
+While a chat reply runs on the server, a message the person sends goes into that reply: Pip takes it in at its
+next step and carries on in the same reply, instead of the message waiting until the reply is over.
+
+- **Storage.** A steering message is a queued message (a `pocket_pip_runs` row, status `waiting`, see
+  docs/pip-message-flow.md) whose `config.steer` names the run it was sent into. No schema change. The client sends
+  `steer` = the turn uid it sees running; the server sets `config.steer` only when that turn is the lane's active
+  run and it is `queued`, `running` or `awaiting`, the message has no attached sources, and fewer than
+  `MAX_STEERS` (5, `src/shared/pip-steer.js`) were sent into that reply. Otherwise it is an ordinary queued
+  message. Size: the normal 16,000-character limit.
+- **Delivery.** The run's process takes waiting rows for its run immediately before a model request: in
+  `prepareNextTurnWithContext` (they are queued with `agent.steer()`, `steeringMode: 'all'`, and the loop's
+  after-turn steering checkpoint commits them as user messages), and in Pocket's own loop before its first request,
+  after an approval and after a finished message. That is a single indexed read per model request, at most twelve
+  per reply, never a poll loop. Steers are never admitted while a tool batch runs: OpenClaw would skip the batch's
+  unstarted sequential calls (approved saves, cards) with a "steering" result.
+- **Exactly once.** Taking is one write transaction on the run's lease (`take` in `drive`): the rows become
+  `steered` and the run's turn records them in `turn.steers`; if the lease is lost or the run is stopping, nothing
+  is taken. It is chained behind the progress writes, so none of them can write the turn back without the
+  messages. Each delivered user message carries `pocketSteer: uid`; a message the turn records as taken but the
+  transcript lacks (a restart rebuilds the transcript from the chat; a checkpoint written before a later take) is
+  added once before the next request, never twice. A restarted reply keeps its steers at `pos` 0.
+- **Ending first.** A message not taken before the reply ends stays `waiting` and is the next queued message,
+  exactly as before (`settleLane` / `startNext`). A finished message is not the end while a request is left: if a
+  message arrived, the reply continues after it. At the last request (`MAX_REQUESTS`) nothing is taken.
+- **Approvals.** While a run waits for a decision, a steering message decides nothing; it is held and delivered
+  when the run continues, after the batch's results. Stop still stops: a stopping run takes nothing, and messages
+  left waiting are held with the rest of the queue.
+- **Limits.** A steer resets no counter: the request ceiling, the deadline, the lookup caps and the idle limit
+  hold. One exception: research stopped only by the "enough looked up" judge (`counters.enoughStopped` with that
+  `finalReason`) starts again, and the judge is asked again only after new lookups. Per-message effort caps still
+  refuse. Scheduled jobs and assignments pass no steering source; nothing about them changes.
+- **Transcript.** The model receives `steerText(text)`: the message marked as sent while it worked. The turn keeps
+  `steers: [{ uid, text, at, taken, pos }]`, `pos` being the answer's length when taken. The rule for text before
+  a steer is the existing one: working notes before a lookup move to the reasoning (`moveNotes`); what stands in the
+  answer when the message is taken stays (`cardEnd` moves to it), and the answer continues after it. The stored form
+  is normalized piece by piece so every `pos` stays exact. Later replies replay a finished steered turn as
+  question, answer up to the message, the message (cut to 2,000 characters; not counted in the history budget),
+  the rest of the answer (`replayAnswer` in pip-core.js). Continue or retry of a steered turn keeps its steers.
+- **Live and UI.** `replyOf` cuts the streamed blocks at each steer (`steers[i].block`), so followers draw it in
+  place. In the new app the send key while Pip works is "Send to Pip now"; a message not taken yet shows at the end
+  of the running reply ("for pip's next step", or "after your decision" while a change waits) with `take back`; a
+  taken one stands where it was taken in, marked "taken in". Lab states: `steer-sent`, `steer-held`,
+  `steer-taken`, `steer-done`.
+
 ## Approvals
 
 Approval checkpoints contain OpenClaw messages (thinking blocks untouched), pending
@@ -173,5 +219,7 @@ These cover:
 - the request ceiling, `length` retries, the deadline and the idle limit, and stops
 - cards after the lookup limit, card drafts and card updates
 - reasoning, usage, failure states and scheduled jobs
+- steering (`tools/pip-steer.test.mjs`): delivery between steps and after a finished message, held during an
+  approval, exactly once across a pause and a restart, the ceiling, `MAX_STEERS`, the judge, and history replay
 
 They do not establish live model quality or deployment health.

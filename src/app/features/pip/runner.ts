@@ -18,7 +18,8 @@ import { explainError, moveTabKey, reachAccount, SIGNED_OUT } from "./account.ts
 // - a COROS training routine's chat answers through its own server path with the account's key;
 // - a fresh chat names itself after its first answer;
 // - writes Pip asks for wait for the person's decision (approvals);
-// - a message sent while a reply runs waits its turn on the server (queueSend), shown to every device (useQueue).
+// - a message sent while a reply runs goes into it at its next step, or waits its turn on the server when the reply
+//   cannot take it (queueSend), shown to every device (useQueue).
 // Views read the live turn and the approval state through useLiveReply().
 
 /** `blocks`: the reply already cut into prose and cards by the server, while it streams from there. */
@@ -140,11 +141,15 @@ async function refreshQueue(chatId: string): Promise<void> {
 
 /** Whether a message sent while a reply runs in this chat can wait its turn: a signed-in chat that runs on the server. */
 export const canQueue = (chatId: string): boolean => connected() && !trainingChatRoutine(chatId);
-/** Sends `text` to wait its turn behind the reply running in `chatId`, with the chat's sources. */
-export async function queueSend(chatId: string, text: string): Promise<void> {
+/**
+ * Sends `text` while a reply runs in `chatId`, with the chat's sources. With `steer`, the turn on screen that is
+ * running, it goes into that reply at its next step; the server makes it wait its turn instead when the reply cannot
+ * take it any more (it ended, it is stopping, five already went in, or sources are attached).
+ */
+export async function queueSend(chatId: string, text: string, steer = ""): Promise<void> {
   const chat = chats.get(chatId);
   if (!chat) throw new Error("This chat was removed.");
-  await queueReply(chat, { text, context: chat.context ?? [] }).catch(error => { throw plain(error); });
+  await queueReply(chat, { text, context: chat.context ?? [], steer }).catch(error => { throw plain(error); });
   if (chat.context?.length) chats.update(chatId, current => { current.context = []; });
   await refreshQueue(chatId);
 }

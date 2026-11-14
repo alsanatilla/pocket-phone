@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { Fragment, memo, useCallback, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Link } from "@tanstack/react-router";
 import { Check, Circle, LoaderCircle, Minus, TriangleAlert } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -19,6 +19,7 @@ import { resume, retry, send } from "./runner.ts";
 import { hrefFor } from "../../lib/classic.ts";
 import type { Segment } from "../../../shared/pip-reply.js";
 import { aboutCard } from "../../../shared/pocket-card-edit.js";
+import { answerPieces, takenSteers, type Steer } from "../../../shared/pip-steer.js";
 
 // One exchange: the question, then Pip's reply with its parts in reading order: what it looked up (listed open while
 // the reply runs, folded to one line once it is done and there are more than three), its plan, its reasoning, the
@@ -118,7 +119,35 @@ export function QueuedTurn({ text, state, onTakeBack }: { text: string; state: "
   );
 }
 
-interface TurnProps { turn: ChatTurn; live: Partial<ChatTurn> | null; blocks?: Segment[]; chatId: string; latest: boolean; locked: boolean }
+/**
+ * A message the person sent into this reply while Pip worked on it: their words as a prompt line, where the reply took
+ * them in, and the dim line a question has under it. Until Pip has it (`sent`, or `held` while a change waits for a
+ * decision) its marker is dim, as a queued message's, and one quiet key takes it back; once Pip has it the marker is
+ * the question's and the line says so, and the answer goes on below it.
+ */
+export function SteerLine({ text, at, state, onTakeBack }: { text: string; at: number; state: "sent" | "held" | "taken"; onTakeBack?: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const takeBack = () => { setBusy(true); onTakeBack?.().catch(error => { setBusy(false); toastError(error); }); };
+  return (
+    <div data-steer={state}>
+      <div className="flex gap-2 font-medium text-hi">
+        <span aria-hidden="true" className={state === "taken" ? "text-primary" : "text-dim"}>›</span>
+        <p className="min-w-0 whitespace-pre-wrap break-words">{text}</p>
+      </div>
+      <div className="ml-[2ch] mt-0.5 flex items-center gap-3">
+        <p className="min-w-0 flex-1 text-[11px] text-dim">{clock(at)} · {state === "taken" ? "taken in" : state === "held" ? "after your decision" : "for pip’s next step"}</p>
+        {state !== "taken" && onTakeBack ? <Button type="button" size="xs" disabled={busy} onClick={takeBack} aria-label={"Take back: " + text.slice(0, 60)}>take back</Button> : null}
+      </div>
+    </div>
+  );
+}
+
+/** A message sent into the running reply that it has not taken yet (from the chat's queue). */
+export interface PendingSteer { runId: string; turnUid: string; text: string; created: number }
+
+interface TurnProps { turn: ChatTurn; live: Partial<ChatTurn> | null; blocks?: Segment[]; chatId: string; latest: boolean; locked: boolean;
+  /** Messages sent into this reply that it has not taken yet; `held` while the reply waits for a decision. */
+  pending?: PendingSteer[]; held?: boolean; onTakeBack?: (runId: string) => Promise<void> }
 
 /**
  * Re-renders only when this exchange changed: its saved version (turns carry `updated`), its live copy while it
@@ -126,7 +155,7 @@ interface TurnProps { turn: ChatTurn; live: Partial<ChatTurn> | null; blocks?: S
  */
 export const Turn = memo(TurnView, (before, after) =>
   before.live === after.live && before.blocks === after.blocks && before.chatId === after.chatId && before.latest === after.latest && before.locked === after.locked
-  && sameTurn(before.turn, after.turn));
+  && sameTurn(before.turn, after.turn) && before.held === after.held && JSON.stringify(before.pending ?? []) === JSON.stringify(after.pending ?? []));
 
 /** The store re-parses chats on every read, so objects are always new; the store stamps a turn's content change. */
 function sameTurn(a: ChatTurn & { updated?: number }, b: ChatTurn & { updated?: number }): boolean {
@@ -135,7 +164,22 @@ function sameTurn(a: ChatTurn & { updated?: number }, b: ChatTurn & { updated?: 
   return a.status === b.status && a.answer === b.answer && JSON.stringify(a.activity) === JSON.stringify(b.activity);
 }
 
-function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
+/**
+ * The answer cut where the person's messages arrived: each part is text (a stored reply) or the streamed blocks the
+ * server cut (`block` says how many stand before a message). A reply nobody steered is one part, drawn as before.
+ */
+function answerParts(answer: string, blocks: Segment[] | undefined, steers: Steer[]): { text: string; blocks?: Segment[]; filled: boolean }[] {
+  if (!steers.length) return [{ text: answer, blocks, filled: Boolean(answer) }];
+  if (blocks && steers.every(item => typeof item.block === "number")) {
+    let from = 0;
+    const parts = steers.map(item => { const to = Math.max(from, Math.min(blocks.length, item.block!)), part = blocks.slice(from, to); from = to; return { text: "", blocks: part, filled: part.length > 0 }; });
+    const rest = blocks.slice(from);
+    return [...parts, { text: "", blocks: rest, filled: rest.length > 0 }];
+  }
+  return answerPieces(answer, steers).map(text => ({ text, filled: Boolean(text.trim()) }));
+}
+
+function TurnView({ turn, live, blocks, chatId, latest, locked, pending = [], held = false, onTakeBack }: TurnProps) {
   const shown: ChatTurn = live ? { ...turn, ...live } as ChatTurn : turn;
   const streaming = Boolean(live);
   const rows = ledger(shown, streaming);
@@ -152,6 +196,9 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
   const unfinished = !streaming && latest && ["stopped", "failed", "streaming"].includes(shown.status);
   const took = rows.reduce((sum, row) => sum + secondsOf(row), 0);
   const steps = rows.length > 1 ? rows.length + " steps" : "1 step";
+  const steers = takenSteers(shown.steers);
+  const parts = answerParts(shown.answer || "", blocks, steers);
+  const waiting = pending.filter(item => !steers.some(steer => steer.uid === item.turnUid));
 
   return (
     <article data-turn={shown.uid} className={cn("space-y-3", Date.now() - shown.created < 4000 && "arrive")}>
@@ -185,10 +232,22 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
 
         {shown.reasoning ? <Fold title="reasoning"><Prose text={shown.reasoning} streaming={streaming && !shown.answer} className="text-xs text-muted-foreground" /></Fold> : null}
 
-        {/* Classic cards' buttons answer through data attributes; the click is caught here. */}
-        {shown.answer ? <div {...cards}><Answer text={shown.answer} blocks={blocks} streaming={streaming} onAsk={ask} at={place} /></div> : null}
+        {/* Classic cards' buttons answer through data attributes; the click is caught here. A message the person sent
+            into the reply stands where Pip took it in, and the answer goes on after it. */}
+        {!steers.length
+          ? (shown.answer ? <div {...cards}><Answer text={shown.answer} blocks={blocks} streaming={streaming} onAsk={ask} at={place} /></div> : null)
+          : (
+            <div {...cards} className="space-y-3">
+              {parts.map((part, index) => (
+                <Fragment key={index}>
+                  {part.filled ? <Answer text={part.text} blocks={part.blocks} streaming={streaming && index === parts.length - 1} onAsk={ask} at={place} /> : null}
+                  {index < steers.length ? <SteerLine text={steers[index]!.text} at={steers[index]!.taken || steers[index]!.at} state="taken" /> : null}
+                </Fragment>
+              ))}
+            </div>
+          )}
 
-        {streaming && !shown.answer && !offers.length ? <Thinking label={phaseLabel(shown.phase || "thinking")} /> : null}
+        {streaming && !offers.length && (steers.length ? !parts.at(-1)?.filled : !shown.answer) ? <Thinking label={phaseLabel(shown.phase || "thinking")} /> : null}
 
         {/* What Pip took into its memory of the person with this reply: said, so nothing is remembered unseen. */}
         {!streaming && remembered.length ? (
@@ -221,6 +280,11 @@ function TurnView({ turn, live, blocks, chatId, latest, locked }: TurnProps) {
         ) : null}
 
         {offers.length ? <div className="space-y-2">{offers.map(offer => <OfferCard key={offer.row.id} offer={offer} chatId={chatId} turnId={shown.uid} locked={locked && !streaming} />)}</div> : null}
+
+        {/* Sent into the reply and not taken yet: after what Pip has written so far, and after a change it waits on. */}
+        {waiting.map(item => (
+          <SteerLine key={item.runId} text={item.text} at={item.created} state={held ? "held" : "sent"} onTakeBack={onTakeBack ? () => onTakeBack(item.runId) : undefined} />
+        ))}
 
         {unfinished ? (
           <div className="space-y-1">

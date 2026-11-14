@@ -109,7 +109,7 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
    */
   const stream = { seq: 0, state: emptyReply(), asking: false };
   const liveTurn = () => ({ answer: answerOf(stream.state.blocks), blocks: segmentsOf(stream.state.blocks), reasoning: stream.state.reasoning,
-    activity: stream.state.activity, sources: stream.state.sources, usage: { ...stream.state.usage, runtime: 'pocket-server' }, model: stream.state.model || turn?.model, phase: stream.state.phase || 'requesting' });
+    activity: stream.state.activity, sources: stream.state.sources, usage: { ...stream.state.usage, runtime: 'pocket-server' }, model: stream.state.model || turn?.model, phase: stream.state.phase || 'requesting', steers: stream.state.steers || [] });
   /** Asks for the changes after this tab's number (or the whole state) and applies them. One request at a time. */
   const catchUp = async id => {
     if (stream.asking) return;
@@ -166,7 +166,9 @@ export async function streamReplyRemote(chat, turn, { signal, onUpdate = () => {
     if (streamed || mark !== seen) {
       seen = mark; changed = Date.now();
       if (turnNow) onUpdate({ answer: turnNow.answer || '', reasoning: turnNow.reasoning || '', activity: turnNow.activity || [],
-        sources: turnNow.sources || [], usage: { ...(turnNow.usage || {}), runtime: 'pocket-server' }, model: turnNow.model || turn?.model, phase: turnNow.phase || 'requesting', ...(turnNow.blocks ? { blocks: turnNow.blocks } : {}) });
+        sources: turnNow.sources || [], usage: { ...(turnNow.usage || {}), runtime: 'pocket-server' }, model: turnNow.model || turn?.model, phase: turnNow.phase || 'requesting', ...(turnNow.blocks ? { blocks: turnNow.blocks } : {}),
+        // What the person sent into the reply, where it stands (`pos` in the answer, `block` among the streamed blocks).
+        ...(Array.isArray(turnNow.steers) ? { steers: turnNow.steers } : {}) });
     }
     // The chat was busy on the server (another tab or device): the message was accepted and waits its turn there.
     if (run.status === 'waiting' || run.status === 'held') throw Object.assign(new Error('Pip is still answering in this chat. Your message waits its turn.'), { code: 'queued' });
@@ -294,15 +296,17 @@ const chatHeader = chat => ({ uid: chat.uid, title: chat.title, titled: Boolean(
 
 /**
  * Sends a message while a reply runs in the chat: the server keeps it and answers it next (docs/pip-message-flow.md,
- * "A message sent while Pip replies waits its turn"). Nothing is added to the chat here; the server writes the turn
- * when it starts. A retried command keeps its request id, so it is the same message. Answers the run (`waiting`).
+ * "A message sent while Pip replies waits its turn"). With `steer` (the turn this tab sees running) it goes into that
+ * reply instead, at its next step, and waits its turn only if the reply ends first (docs/pip-agent-runtime.md,
+ * "Steering"). Nothing is added to the chat here; the server writes the turn when it starts. A retried command keeps
+ * its request id, so it is the same message. Answers the run (`waiting`).
  */
-export async function queueReply(chat, { text, context = [] }, storage = globalThis.localStorage) {
+export async function queueReply(chat, { text, context = [], steer = '' }, storage = globalThis.localStorage) {
   const owner = account();
   if (!owner) throw new Error('Sign in to Pocket to send while Pip is answering.');
   const id = crypto.randomUUID();
   return command({ action: 'submit', accountId: owner.id, requestId: id, attempt: id, turnUid: crypto.randomUUID(), device: deviceId(storage), chatUid: chat.uid,
-    text, context, grants: access(chat.config, storage), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, chat: chatHeader(chat) });
+    text, context, grants: access(chat.config, storage), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, chat: chatHeader(chat), ...(steer ? { steer } : {}) });
 }
 
 /** The messages waiting their turn in a chat (the whole one big chat for a home segment), and what its reply is doing. */
