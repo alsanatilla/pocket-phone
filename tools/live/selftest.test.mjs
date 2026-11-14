@@ -82,10 +82,11 @@ test('research-then-card needs a card after the refused lookups, with the canned
     say('', [call('search_web', { query: 'Bosphorus short tour Eminönü' })]),
     say('', [call('read_web_page', { url: PAGES[0].url }, 'call_a'), call('read_web_page', { url: PAGES[1].url }, 'call_b')]),
     say('The city ferry tour is cheaper.\n\n[card: Table “Tours”]')]);
-  assert.match(failed(bad, 'card after').reason, /no card drawn after the lookups were refused/);
+  assert.match(failed(bad, 'card').reason, /no card drawn after the lookups were refused/);
   assert.match(failed(bad, 'cites').reason, /cites none/);
-  const never = await run('research-then-card', [say('', [call('search_web', { query: 'Bosphorus' })]), say('It is cheaper.', [call('show_card', table)]), say('Done.')]);
-  assert.match(failed(never, 'refused').reason, /cap was never reached/);
+  // A model that answers from the search passages reaches no cap: the card and its sources are still asked for.
+  const never = await run('research-then-card', [say('', [call('search_web', { query: 'Bosphorus' })]), say('It is cheaper.', [call('show_card', table)]), say('Sources: ' + PAGES[0].url + ' and ' + PAGES[1].url)]);
+  passes(never);
 });
 
 test('update-card passes update_card with the stored id, and fails a second card', async () => {
