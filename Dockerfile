@@ -1,6 +1,6 @@
 # Pocket on one Node server (Fly.io): the web app and Pip's worker in one image, one build, one code version.
 #   fly deploy           (fly.toml in the repository root)
-FROM node:22-bookworm-slim AS build
+FROM node:24.16.0-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -10,7 +10,7 @@ COPY . .
 ENV POCKET_TARGET=node POCKET_ALLOW_PROXY=1
 RUN npm run build && npm prune --omit=dev
 
-FROM node:22-bookworm-slim
+FROM node:24.16.0-bookworm-slim
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules

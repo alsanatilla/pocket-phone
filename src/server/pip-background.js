@@ -489,7 +489,7 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
     pendingChange = next.catch(() => {}); return next;
   };
   // Imported here: the agent runtime and provider adapters load only when a routine runs.
-  const { streamChat } = await import('../client/pip-stream.js');
+  const { streamChat } = await import('./pip-agent.js');
   let revised = false;
   try {
     const reply = await streamChat(view, turn, { value, body, key, fetcher, signal, deadlineMs: RUN_DEADLINE, coverage: contextCoverage(view, turn),

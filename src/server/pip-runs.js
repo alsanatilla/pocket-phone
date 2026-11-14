@@ -561,7 +561,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
     // A continued run keeps the completed lookups as reusable observations.
     const observations = (turn.activity || []).filter(row => row.state === 'done' && row.result && !row.applied_href)
       .map(row => ({ name: row.name, input: row.input || '{}', result: row.result })).slice(-24);
-    const { streamChat } = await import('../client/pip-stream.js');
+    const { streamChat } = await import('./pip-agent.js');
     const judged = judging ? await judging : null;
     if (judged) effort = judged.level;
     // The level's sentence joins the date line: the model knows how much looking-up Pocket expects before it writes.

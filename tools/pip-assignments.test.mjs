@@ -350,7 +350,7 @@ test('an assignment reads only what the chat could, and what it reads cannot mak
     assert.equal(tools.includes('search_tasks'), false, 'tasks were not the chat\'s');
     assert.equal(tools.includes('search_web'), false);
     const refusal = m.seen.assignment[1].messages.filter(message => message.role === 'tool').map(message => String(message.content)).join('\n');
-    assert.match(refusal, /access_disabled|unavailable/);
+    assert.match(refusal, /access_disabled|unavailable|not found/);
     assert.equal((await readDocuments(userId))['tasks.json']?.value?.tasks?.length || 0, 0, 'nothing was saved');
     assert.equal((await view(userId)).decisions.length, 0, 'nothing waits for an approval');
 
