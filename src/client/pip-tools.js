@@ -85,6 +85,9 @@ function pageText(text, args) {
   if (query) { result.query = query; result.passages = at < 0 ? [] : [{ offset, text: result.text.slice(0, 600) }]; result.query_found = at >= 0; }
   return result;
 }
+/** A search result's passage as text: link targets, images and navigation rules go, the words and table cells stay. */
+const passage = (value, room) => String(value || "").replace(/!\[[^\]]*\]\([^)]*\)/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+  .split("\n").map(line => line.trim()).filter(line => line && !/^[-|←→*\s\ufeff]+$/.test(line)).join("\n").slice(0, room);
 async function web(value, name, args, signal, context) {
   if (!webTools(value)) return failure("access_disabled", "Web search is off.");
   const key = context.source.firecrawlKey(), headers = { "content-type": "application/json", ...(key ? { authorization: "Bearer " + key } : {}) };
@@ -98,7 +101,7 @@ async function web(value, name, args, signal, context) {
     const domains = args.domains || [], time = { day: "qdr:d", week: "qdr:w", month: "qdr:m", year: "qdr:y" }[args.time_range];
     const sources = args.sources || [], categories = args.categories || [];
     if (!query || domains.some(domain => !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(domain) || !publicUrl("https://" + domain))
-      || sources.some(source => !["web", "news", "images"].includes(source)) || categories.some(category => !["research", "pdf", "github"].includes(category))) return failure("invalid_arguments", "Use a short query, public domains without a protocol or path, and known sources or categories.");
+      || sources.some(source => !["web", "news", "images"].includes(source)) || categories.some(category => !["research", "pdf", "developer", "gov"].includes(category))) return failure("invalid_arguments", "Use a short query, public domains without a protocol or path, and known sources or categories.");
     // Firecrawl's documented filters: docs.firecrawl.dev/features/search.
     const response = await post("/search", { query, limit, timeout: 20000, ...(domains.length ? { includeDomains: domains.map(domain => domain.toLowerCase()) } : {}), ...(time ? { tbs: time } : {}), ...(sources.length ? { sources } : {}), ...(categories.length ? { categories } : {}) });
     if (!response.ok) return refused(response.status);
@@ -106,13 +109,17 @@ async function web(value, name, args, signal, context) {
     if (!found || found.success === false || found.error || !found.data || typeof found.data !== "object") return failure("web_unavailable", "Web search returned an unsuccessful response.");
     const groups = Array.isArray(found.data) ? [["web", found.data]] : Object.entries(found.data).filter(([kind, items]) => ["web", "news", "images"].includes(kind) && Array.isArray(items));
     const results = [], seen = new Set();
+    // Firecrawl's description is the passage of the page that matches the query, up to about 1,600 characters: often
+    // the timetable or the price itself. Cut to 400 it lost exactly that, and Pip then needed a page read it had no
+    // lookup left for. Five results at 1,200 fit one tool result (RESEARCH_LIMITS.result).
+    const room = Math.min(1200, Math.floor(6000 / limit));
     // Interleave groups: five web hits must not hide all the news hits in a mixed search.
     for (let index = 0; index < Math.max(0, ...groups.map(([, items]) => items.length)) && results.length < limit; index++) {
       for (const [kind, items] of groups) {
         const item = items[index], url = item && publicUrl(String(item.url || ""));
         if (!url || seen.has(url.href) || results.length >= limit) continue;
         seen.add(url.href);
-        results.push({ title: String(item.title || item.url).slice(0, 160), url: url.href, description: String(item.description || item.snippet || "").slice(0, 400), source_type: kind, ...(typeof item.date === "string" && item.date ? { date: item.date.slice(0, 120) } : {}) });
+        results.push({ title: String(item.title || item.url).slice(0, 160), url: url.href, description: passage(item.description || item.snippet, room), source_type: kind, ...(typeof item.date === "string" && item.date ? { date: item.date.slice(0, 120) } : {}) });
       }
     }
     return { source: "web:firecrawl", query, results };
