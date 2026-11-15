@@ -69,11 +69,14 @@ export async function gatewayChat({ chat, turn, value, body, execute, preview, d
   let text = durable?.checkpoint?.runtime === 'gateway' ? String(durable.checkpoint.answer || '') : '';
   let revised = false;
   const activity = [];
-  // The person's current message is part of the input; its answer is not (a resume continues the stored response).
-  const history = (chat.turns || []).map(item => item.uid === turn.uid ? { ...item, answer: '' } : item);
+  const history = (chat.turns || []).filter(item => item.uid !== turn.uid);
+  // The gateway keeps this chat's session (keyed by `user`), so only the new message is sent. A short recap keeps
+  // the thread after a restart, when the session starts empty. A resume continues the stored response instead.
+  const recap = history.slice(-6).map(item => 'Person: ' + String(item.text || '').slice(0, 400) + '\nPip: ' + String(item.answer || '').slice(0, 600)).join('\n\n');
   const result = await gatewayReply({
-    input: gatewayInput(history),
-    instructions: body.instructions,
+    input: [{ type: 'message', role: 'user', content: String(turn.text || '') }],
+    user: String(chat.uid || 'pocket'),
+    instructions: body.instructions + (recap ? '\n\nEarlier in this chat, for context:\n' + recap : ''),
     tools: gatewayTools(value, (body.tools || []).filter(name => name !== 'remember' && name !== 'forget')),
     writes, preview, durable, signal,
     onText: delta => { text += delta; onUpdate({ answer: text, phase: 'writing' }); },

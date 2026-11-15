@@ -43,8 +43,9 @@ test('a drawn card is placed where the reply stands, and the text follows it', a
   assert.equal(result.usage.output_tokens, 5);
   assert.ok(updates.some(update => String(update.answer).includes('pocket')));
   const input = requests[start].body.input;
-  assert.deepEqual(input.at(-1), { type: 'message', role: 'user', content: 'Now?' }, 'the current message is in the input');
-  assert.equal(input.some(item => item.role === 'assistant' && item.content === ''), false);
+  assert.deepEqual(input, [{ type: 'message', role: 'user', content: 'Now?' }], 'only the new message is sent');
+  assert.equal(requests[start].body.user, chat.uid, 'the chat keys the gateway session');
+  assert.match(requests[start].body.instructions, /Earlier in this chat/);
 });
 
 test('an update_card changes the card in an earlier turn of the same chat', async () => {
@@ -71,6 +72,7 @@ test('a chat reply places a card in its own answer and keeps the person\'s messa
   assert.ok(result.answer.indexOf('```pocket') < result.answer.indexOf('Done.'));
   assert.ok(updates.some(update => String(update.answer).includes('pocket')));
   const input = requests[start].body.input;
-  assert.deepEqual(input.at(-1), { type: 'message', role: 'user', content: 'Now?' }, 'the current message is in the input');
-  assert.equal(input.some(item => item.role === 'assistant' && item.content === ''), false);
+  assert.deepEqual(input, [{ type: 'message', role: 'user', content: 'Now?' }], 'only the new message is sent');
+  assert.equal(requests[start].body.user, chat.uid, 'the chat keys the gateway session');
+  assert.match(requests[start].body.instructions, /Earlier in this chat/);
 });

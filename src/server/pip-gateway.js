@@ -63,7 +63,7 @@ async function stream(body, { signal, onText }) {
  */
 const paused = () => Object.assign(new Error('Waiting for a decision'), { name: 'RunPaused' });
 
-export async function gatewayReply({ input, instructions, tools, execute, preview, approve, writes = [], durable, settled, onText = () => {}, onCall = () => {}, signal, maxSteps = 12 }) {
+export async function gatewayReply({ input, instructions, tools, execute, preview, approve, writes = [], durable, settled, user = '', onText = () => {}, onCall = () => {}, signal, maxSteps = 12 }) {
   let items = input, previous = '', answer = '', usage = {}, id = '';
   const saved = durable?.checkpoint?.runtime === 'gateway' ? durable.checkpoint : null;
   const decisions = settled || durable?.settled || null;
@@ -86,6 +86,7 @@ export async function gatewayReply({ input, instructions, tools, execute, previe
   for (let step = 0; step < maxSteps; step++) {
     const { calls, final } = await stream({
       model: model(), input: items, instructions, tools, stream: true,
+      ...(user ? { user } : {}),
       ...(previous ? { previous_response_id: previous } : {}),
     }, { signal, onText: delta => { answer += delta; onText(delta); } });
     if (!final) throw Object.assign(new Error('The gateway stopped before the reply finished.'), { status: 502, code: 'gateway_failed' });

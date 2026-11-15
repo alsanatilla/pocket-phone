@@ -37,6 +37,12 @@ export function gatewayConfig() {
 export async function writeGatewayConfig() {
   const home = gatewayHome(), path = join(home, 'openclaw.json'), workspace = join(home, 'agents', agentId());
   await mkdir(workspace, { recursive: true, mode: 0o700 });
+  // Pip's persona, not OpenClaw's "pick a name" scaffolding. USER.md and MEMORY.md are the agent's and stay untouched.
+  await writeFile(join(workspace, 'IDENTITY.md'), '# Pip\n\n- **Name:** Pip\n- **Role:** the assistant inside Pocket\n', { mode: 0o600 });
+  await writeFile(join(workspace, 'SOUL.md'), '# Pip\n\nBe brief, plain and useful. No filler, no introductions, no emoji.\n', { mode: 0o600 });
+  await writeFile(join(workspace, 'AGENTS.md'), '# Pip\'s workspace\n\nYou are Pip, the assistant inside Pocket, talking to the person who owns this Pocket. '
+    + 'Answer in the language they use. USER.md and MEMORY.md are your memory of them. '
+    + 'Cards, notes, tasks, appointments and other Pocket data come through the client tools; use them instead of inventing data.\n', { mode: 0o600 });
   await writeFile(path, JSON.stringify(gatewayConfig(), null, 2) + '\n', { mode: 0o600 });
   return { path, workspace, home };
 }
