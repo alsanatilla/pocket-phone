@@ -1,0 +1,18 @@
+# Pip's sandbox (see Dockerfile). No public service and no public address: only machines in the same Fly
+# organisation reach it, at pocket-pip-sandbox.internal:2222.
+app = "pocket-pip-sandbox"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[mounts]
+  source = "pip_workspace"
+  destination = "/workspace"
+
+[[restart]]
+  policy = "always"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
