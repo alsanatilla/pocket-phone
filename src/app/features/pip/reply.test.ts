@@ -20,6 +20,14 @@ describe("a reply's parts", () => {
     expect(changeLabel({ change: "complete_task", id: "a" })).toBe("mark done");
   });
 
+  it("marks an approval the native OpenClaw path froze, so it is approved as proposed, not edited", () => {
+    const rows = ledger(turn([
+      row({ name: "create_record", state: "awaiting", result: JSON.stringify({ kind: "approval", frozen: true, action: { title: "Blue car" } }), input: JSON.stringify({ kind: "note", title: "Blue car" }) }),
+      row({ name: "create_record", state: "awaiting", result: JSON.stringify({ kind: "approval", action: { title: "Dentist" } }), input: JSON.stringify({ kind: "note", title: "Dentist" }) }),
+    ], { status: "streaming" }), true);
+    expect(offersOf(rows).map(offer => offer.type === "approval" && offer.frozen === true)).toEqual([true, false]);
+  });
+
   it("shows a reply that stopped mid-way as interrupted, not still running", () => {
     const rows = ledger(turn([row({ state: "running" })], { status: "streaming" }), false);
     expect(rows[0]!.state).toBe("stopped");

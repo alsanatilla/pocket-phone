@@ -179,7 +179,7 @@ export function OfferCard({ offer, chatId, turnId, locked }: { offer: Offer; cha
   // A write waiting for approval right now.
   const waiting = approvalOf(turnId, offer.row.id);
   const decided = waiting?.decision;
-  const editable = offer.name === "create_record" && typeof offer.input.title === "string";
+  const editable = offer.name === "create_record" && typeof offer.input.title === "string" && !offer.frozen;
   return (
     <Frame kind={decided ? (decided.approved ? "approved" : "declined") : "needs your approval"} rows={[["title", offer.title]]}>
       {waiting && !decided ? (
@@ -238,7 +238,7 @@ export function ApprovalGroup({ offers, turnId }: { offers: Extract<Offer, { typ
   const shown = offers.find(offer => offer.row.id === reviewing);
   const days = new Set(offers.map(offer => approvalWhen(offer).day));
   const sharedDay = days.size === 1 ? [...days][0] ?? "" : "";
-  const editable = (offer: Extract<Offer, { type: "approval" }>) => offer.name === "create_record" && typeof offer.input.title === "string";
+  const editable = (offer: Extract<Offer, { type: "approval" }>) => offer.name === "create_record" && typeof offer.input.title === "string" && !offer.frozen;
   return (
     <Section label={"needs your approval" + (sharedDay ? " · " + sharedDay : "")}>
       <ul>

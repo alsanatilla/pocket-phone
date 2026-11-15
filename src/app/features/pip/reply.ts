@@ -15,7 +15,8 @@ export type Offer =
   | { type: "create"; row: ActivityRow; proposal: CreateProposal; saved?: string }
   | { type: "change"; row: ActivityRow; change: Change; before: { title: string; [key: string]: unknown }; saved?: string }
   | { type: "coros"; row: ActivityRow; title: string; tool: string; saved?: string }
-  | { type: "approval"; row: ActivityRow; name: string; title: string; input: Record<string, unknown> };
+  // `frozen`: the native OpenClaw path approves the call exactly as proposed (its approvals freeze the arguments).
+  | { type: "approval"; row: ActivityRow; name: string; title: string; input: Record<string, unknown>; frozen?: boolean };
 
 const json = (raw: string | undefined): Record<string, unknown> | null => {
   if (!raw) return null;
@@ -77,7 +78,7 @@ export function offersOf(rows: ActivityRow[]): Offer[] {
     const value = json(row.result);
     if (row.state === "awaiting") {
       const action = value?.action as { title?: string } | undefined;
-      offers.push({ type: "approval", row, name: row.name, title: action?.title || row.title, input: json(row.input) ?? {} });
+      offers.push({ type: "approval", row, name: row.name, title: action?.title || row.title, input: json(row.input) ?? {}, ...(value?.frozen === true ? { frozen: true } : {}) });
       continue;
     }
     if (row.state !== "done" || !value) continue;

@@ -42,6 +42,9 @@ const server = createServer((req, res) => {
     });
     return;
   }
+  // Pocket's tools for the OpenClaw gateway beside this process (PIP_OPENCLAW_NATIVE): loopback and a per-boot token,
+  // checked in src/server/pip-openclaw.js, which answers only for a session a running reply registered.
+  if (req.url === '/internal/pip-tools') { import('../../src/server/pip-openclaw.js').then(module => module.toolsEndpoint(req, res), () => res.writeHead(503).end()); return; }
   handler(req, res);
 });
 

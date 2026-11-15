@@ -25,6 +25,7 @@ import * as live from './pip-live.js';
 import { publish } from './pocket-events.js';
 import { compactFrame } from './pip-frames.js';
 import { compactChat } from './pip-compaction.js';
+import { nap, wake } from './pip-openclaw-tools.js';
 export { compactFrame };
 
 // Pip's shared conversations: the account's server runs each turn once for every device. A run holds its own
@@ -379,10 +380,12 @@ export async function decideRun(userId, body, { fetcher } = {}) {
   if (!await runRow(userId, runId)) throw no('This run is no longer available.', 404);
   const request = (await sql({ sql: 'SELECT * FROM pocket_pip_run_requests WHERE user_id = ? AND run_id = ? AND request_id = ?', args: [userId, runId, requestId] })).rows[0];
   if (!request) throw no('This change is no longer waiting for a decision.', 409);
+  // A native OpenClaw approval freezes the call's arguments: it is approved as proposed or declined, never edited.
+  if (body.input !== undefined && parse(request.payload)?.frozen) throw no('This change can only be approved as Pip proposed it, or declined.', 409, 'frozen');
   const { state, response } = decision(String(request.kind), body), now = Date.now();
   const settled = (await sql({ sql: `UPDATE pocket_pip_run_requests SET state = ?, response = ?, decided_by = ?, decided_at = ?
     WHERE user_id = ? AND run_id = ? AND request_id = ? AND state = 'pending' RETURNING request_id`, args: [state, response, device, now, userId, runId, requestId] })).rows[0];
-  if (settled) await event(userId, runId, 'decision', { request: requestId, state, device }, now);
+  if (settled) { await event(userId, runId, 'decision', { request: requestId, state, device }, now); wake(runId); }
   else {
     const kept = (await sql({ sql: 'SELECT state FROM pocket_pip_run_requests WHERE user_id = ? AND run_id = ? AND request_id = ?', args: [userId, runId, requestId] })).rows[0];
     // A stopped request stays stopped; one another device already answered keeps that answer, which the view shows.
@@ -392,14 +395,18 @@ export async function decideRun(userId, body, { fetcher } = {}) {
   return view(userId, await recover(userId, await runRow(userId, runId)), 0);
 }
 
-/** Continues a waiting run whose requests are all settled. Any device may ask; one request wins the claim. */
+/**
+ * Continues a waiting run whose requests are all settled. Any device may ask; one request wins the claim. A native
+ * OpenClaw reply waits for its decision while its stretch keeps the lease (drive's `approval`), so it is never
+ * claimed here unless that stretch died.
+ */
 export async function continueRun(userId, runId, { fetcher } = {}) {
   if (detached()) return await queueRun(userId, runId);
   const leaseId = randomUUID(), now = Date.now();
   const claimed = (await sql({ sql: `UPDATE pocket_pip_runs SET status = 'running', lease_id = ?, lease_until = ?, updated = ?
-    WHERE user_id = ? AND run_id = ? AND status = 'awaiting' AND NOT EXISTS (SELECT 1 FROM pocket_pip_run_requests r
+    WHERE user_id = ? AND run_id = ? AND status = 'awaiting' AND (lease_id = '' OR lease_until <= ?) AND NOT EXISTS (SELECT 1 FROM pocket_pip_run_requests r
       WHERE r.user_id = pocket_pip_runs.user_id AND r.run_id = pocket_pip_runs.run_id AND r.state = 'pending') RETURNING *`,
-    args: [leaseId, now + LEASE, now, userId, runId] })).rows[0];
+    args: [leaseId, now + LEASE, now, userId, runId, now] })).rows[0];
   if (!claimed) return false;
   await event(userId, runId, 'continued', {}, now);
   await executeStretch(userId, claimed, leaseId, { fetcher });
@@ -409,9 +416,9 @@ export async function continueRun(userId, runId, { fetcher } = {}) {
 /** Hands a settled, waiting run to a worker instead of continuing it inside this request. */
 async function queueRun(userId, runId, { now = Date.now() } = {}) {
   const moved = (await sql({ sql: `UPDATE pocket_pip_runs SET status = 'queued', lease_id = '', lease_until = 0, updated = ?
-    WHERE user_id = ? AND run_id = ? AND status = 'awaiting' AND NOT EXISTS (SELECT 1 FROM pocket_pip_run_requests r
+    WHERE user_id = ? AND run_id = ? AND status = 'awaiting' AND (lease_id = '' OR lease_until <= ?) AND NOT EXISTS (SELECT 1 FROM pocket_pip_run_requests r
       WHERE r.user_id = pocket_pip_runs.user_id AND r.run_id = pocket_pip_runs.run_id AND r.state = 'pending') RETURNING run_id`,
-    args: [now, userId, runId] })).rows[0];
+    args: [now, userId, runId, now] })).rows[0];
   if (!moved) return false;
   await enqueue(userId, runId, { now });
   await event(userId, runId, 'queued', { reason: 'continue' }, now);
@@ -564,6 +571,53 @@ async function drive(userId, run, leaseId, { fetcher }) {
     writing = job.then(() => {}, () => {});
     return job;
   };
+  // A native OpenClaw approval (pip-openclaw.js): the reply keeps running in the gateway while the person decides, so
+  // this stretch keeps its lease and heartbeat; the run shows `awaiting` with a pending request, exactly what every
+  // device already shows and answers (decideRun). Resolves to `{ approved }` once the request is settled. `signal`
+  // aborts when OpenClaw closed the approval itself (it allows ten minutes at most): the request is then declined.
+  let asking = 0;
+  const approval = async (request, signal) => {
+    await writing;
+    const at = Date.now();
+    asking++;
+    turn.phase = 'waiting for your approval';
+    try {
+      let moved = false;
+      await writeTransaction(async tx => {
+        moved = (await tx.execute({ sql: `UPDATE pocket_pip_runs SET status = 'awaiting', turn = ?, expires_at = ?, updated = ? WHERE ${owned} AND status IN ('running', 'awaiting')`,
+          args: [JSON.stringify(turn), at + WAIT_TTL, at, ...ownedArgs] })).rowsAffected > 0;
+        if (moved) await tx.execute({ sql: `INSERT INTO pocket_pip_run_requests (user_id, run_id, request_id, kind, tool, call_id, row_id, payload, state, created)
+          VALUES (?, ?, ?, 'write', ?, ?, ?, ?, 'pending', ?) ON CONFLICT(user_id, run_id, request_id) DO NOTHING`,
+          args: [userId, runId, request.approvalId, request.toolName, request.toolCallId, request.rowId, JSON.stringify(request.preview || {}), at] });
+      });
+      if (!moved) throw Object.assign(new Error('Stopped'), { name: 'AbortError' });
+      live.publish(runId, turn, meta);
+      await writeTurn(userId, chatUid, turn);
+      await event(userId, runId, 'awaiting', { requests: [{ id: request.approvalId, tool: request.toolName, kind: 'write' }] }, at);
+      const what = request.preview?.action?.title;
+      await tell(chat => waitingNotice(chat, [label(request.toolName, request.input || {}) + (what ? ' “' + what + '”' : '')]));
+      const either = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+      for (;;) {
+        const row = (await sql({ sql: 'SELECT state FROM pocket_pip_run_requests WHERE user_id = ? AND run_id = ? AND request_id = ?', args: [userId, runId, request.approvalId] })).rows[0];
+        const state = String(row?.state || 'stopped');
+        if (state !== 'pending') return { approved: state === 'approved' };
+        if (controller.signal.aborted) throw Object.assign(new Error('Stopped'), { name: 'AbortError' });
+        if (signal?.aborted) {
+          await sql({ sql: `UPDATE pocket_pip_run_requests SET state = 'declined', decided_by = 'expiry', decided_at = ? WHERE user_id = ? AND run_id = ? AND request_id = ? AND state = 'pending'`,
+            args: [Date.now(), userId, runId, request.approvalId] });
+          await event(userId, runId, 'expired', { requests: [request.approvalId] });
+          return { approved: false };
+        }
+        await nap(runId, 1000, either);
+      }
+    } finally {
+      if (!--asking) {
+        turn.phase = 'requesting';
+        await sql({ sql: `UPDATE pocket_pip_runs SET status = 'running', expires_at = 0, updated = ? WHERE ${owned} AND status = 'awaiting'`, args: [Date.now(), ...ownedArgs] }).catch(() => {});
+        if (!controller.signal.aborted) await event(userId, runId, 'continued', {}).catch(() => {});
+      }
+    }
+  };
   try {
     saved = await account(userId, snapshot, snapshot.grants, snapshot.timezone);
     if (!saved) return await end('failed', 'Pip on the server is no longer set up for this account.');
@@ -573,6 +627,27 @@ async function drive(userId, run, leaseId, { fetcher }) {
     const chat = assignment ? { uid: chatUid, title: String(assignment.title || 'Assignment'), created: Number(run.created), updated: Number(run.created), draft: '', context: [], turns: [turn], config: pipConfig(snapshot) }
       : await chatObject(userId, chatUid);
     if (!chat || chat.deleted) return await end('stopped', 'This chat was removed.');
+    // Native (PIP_OPENCLAW_NATIVE=1): OpenClaw owns the reply (pip-openclaw.js). Pocket builds no request and runs no
+    // compaction, effort judge or memory list; the gateway's session, workspace and memory are the context. Assignments
+    // and device tools keep the paths below for now.
+    if (!assignment && !deviceTools.length && process.env.PIP_OPENCLAW_NATIVE === '1' && process.env.PIP_GATEWAY_TOKEN) {
+      // The reply lived in the gateway's run; a stretch that died with it cannot pick it up again.
+      if (turn.usage?.engine === 'openclaw') return await end('failed', INTERRUPTED);
+      const { nativeReply } = await import('./pip-openclaw.js');
+      const source = await serverRecordSource(userId);
+      const usage = part => ({ ...total(part || {}), runtime: 'pocket-server', engine: 'openclaw' });
+      turn.usage = usage(); progress();
+      const reply = await nativeReply({ userId, chatUid, runId, turn, chat, signal: controller.signal, ask: approval, take,
+        execute: (name, input, toolSignal, eventId) => JOB_TOOLS.includes(name) ? jobTool(userId, name, input, { chat: chatUid, turn: turn.uid, eventId, value })
+          : WRITE_TOOLS.includes(name) ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId, name, input })
+          : runTool(value, name, input, toolSignal, { chat, turn, eventId, source }),
+        preview: (name, input, previewSignal) => JOB_TOOLS.includes(name) ? jobPreview(userId, name, input, value) : previewTool(value, name, input, previewSignal, source),
+        saveTurn: async changed => { if (!await writeTurn(userId, chatUid, changed)) throw new Error('The chat could not be saved.'); },
+        onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: usage(update.usage) }); live.publish(runId, turn, meta); progress(); } });
+      segment = reply.usage || segment;
+      Object.assign(turn, reply, { usage: usage(reply.usage) });
+      return await end('done');
+    }
     // JEV decides how much looking-up this message deserves; it answers while the run's source and requests are read.
     // An assignment is research by definition: it gets the thorough limits without asking JEV.
     let effort = typeof turn.usage?.effort === 'string' ? turn.usage.effort : assignment ? 'thorough' : '';
@@ -942,6 +1017,8 @@ async function queueMessage(userId, body, { uid, lane, header, clientConfig, tim
   finally { tx.close(); }
   if (!inserted) return view(userId, await requestRow(userId, requestId), 0);
   await event(userId, runId, 'waiting', { chat: uid, turn: turn.uid, device }, now);
+  // A native reply takes a message sent into it as soon as it hears of it.
+  if (request.steer) wake(request.steer);
   // The reply in front may have ended while this was written; then nothing else would start it.
   await startNext(userId, lane, { fetcher });
   return view(userId, await runRow(userId, runId), 0);

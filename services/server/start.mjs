@@ -8,6 +8,9 @@ const port = process.env.PORT || '8080';
 // The OpenClaw gateway owns Pip's workspace, memory and reply loop when it is on. It listens on loopback only.
 const gateway = process.env.PIP_GATEWAY === '1';
 if (gateway) process.env.PIP_GATEWAY_TOKEN ||= randomBytes(24).toString('hex');
+// Native Pip (PIP_OPENCLAW_NATIVE=1): the gateway's Pocket plugin calls the web process's /internal/pip-tools with this
+// token. It lives only as long as these processes, like the events secret below.
+if (gateway && process.env.PIP_OPENCLAW_NATIVE === '1') process.env.PIP_TOOLS_TOKEN ||= randomBytes(24).toString('hex');
 // The worker tells the web process what happened (a job's reply, a record it wrote), and the web process tells the
 // open tabs. The secret lives only as long as these two processes.
 const events = { POCKET_EVENTS_SECRET: randomBytes(24).toString('hex') };

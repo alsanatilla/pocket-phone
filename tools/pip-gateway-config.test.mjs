@@ -52,3 +52,27 @@ test('writing the config creates the workspace and puts the file where the gatew
   assert.match(text, /"mode": "local"/);
   assert.match(text, /"responses": \{\s*"enabled": true/);
 });
+
+test('native: Pocket\'s plugin is loaded, unused core tools are left out, and the cards skill is in the workspace', async () => {
+  process.env.PIP_OPENCLAW_NATIVE = '1';
+  try {
+    const { readFile } = await import('node:fs/promises');
+    const written = await writeGatewayConfig();
+    const cfg = JSON.parse(await readFile(written.path, 'utf8'));
+    assert.match(cfg.plugins.load.paths[0], /services\/gateway\/pocket-plugin$/);
+    const pocket = cfg.plugins.entries.pocket;
+    assert.equal(pocket.enabled, true);
+    assert.match(pocket.config.url, /^http:\/\/127\.0\.0\.1:\d+\/internal\/pip-tools$/);
+    assert.ok(pocket.config.tools.some(tool => tool.name === 'show_card' && tool.parameters.type === 'object'));
+    assert.ok(!pocket.config.tools.some(tool => ['remember', 'forget'].includes(tool.name)), 'OpenClaw memory replaces Pocket\'s');
+    assert.deepEqual(pocket.config.writes, ['create_record', 'change_record', 'remove_job']);
+    const manifest = JSON.parse(await readFile(join(cfg.plugins.load.paths[0], 'openclaw.plugin.json'), 'utf8'));
+    assert.deepEqual([...manifest.contracts.tools].sort(), pocket.config.tools.map(tool => tool.name).sort(), 'the manifest names every tool the plugin registers');
+    assert.equal(cfg.tools.profile, 'minimal'); assert.equal(cfg.tools.toolSearch, false);
+    assert.ok(cfg.tools.alsoAllow.includes('search_notes') && cfg.tools.alsoAllow.includes('group:memory'));
+    assert.deepEqual(cfg.agents.entries[agentId()].skills, ['pocket-cards']);
+    const skill = await readFile(join(written.workspace, 'skills', 'pocket-cards', 'SKILL.md'), 'utf8');
+    assert.match(skill, /^---\nname: pocket-cards\n/); assert.match(skill, /show_card/);
+    assert.match(await readFile(join(written.workspace, 'AGENTS.md'), 'utf8'), /pocket-cards skill/);
+  } finally { delete process.env.PIP_OPENCLAW_NATIVE; }
+});

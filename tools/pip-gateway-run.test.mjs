@@ -7,8 +7,11 @@ import { cardFence } from '../src/shared/pocket-card-tool.js';
 const card = cardFence({ root: 'main', elements: { main: { type: 'Text', props: { text: '72' }, children: [] } } }, { id: 'kcard123' });
 const changed = { root: 'main', elements: { main: { type: 'Text', props: { text: '58' }, children: [] } } };
 let script = [];
+const requests = [];
 const server = createServer((req, res) => {
-  req.resume(); req.on('end', () => {
+  let raw = '';
+  req.on('data', chunk => { raw += chunk; }); req.on('end', () => {
+    requests.push({ body: JSON.parse(raw || '{}') });
     const step = script.shift() || { text: 'done' };
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     const send = (event, data) => res.write('event: ' + event + '\ndata: ' + JSON.stringify(data) + '\n\n');
@@ -27,7 +30,7 @@ const { gatewayRoutine, gatewayChat, gatewayInput } = await import('../src/serve
 
 test('the chat becomes Responses input, one message per side of a turn', () => {
   assert.deepEqual(gatewayInput([{ text: 'Q one?', answer: 'A one.' }, { text: 'Q two?', answer: '' }]), [
-    { role: 'user', content: 'Q one?' }, { role: 'assistant', content: 'A one.' }, { role: 'user', content: 'Q two?' }]);
+    { type: 'message', role: 'user', content: 'Q one?' }, { type: 'message', role: 'assistant', content: 'A one.' }, { type: 'message', role: 'user', content: 'Q two?' }]);
 });
 
 test('a drawn card is placed where the reply stands, and the text follows it', async () => {
@@ -42,10 +45,6 @@ test('a drawn card is placed where the reply stands, and the text follows it', a
   assert.deepEqual(result.activity.map(row => row.name), ['show_card']);
   assert.equal(result.usage.output_tokens, 5);
   assert.ok(updates.some(update => String(update.answer).includes('pocket')));
-  const input = requests[start].body.input;
-  assert.deepEqual(input, [{ type: 'message', role: 'user', content: 'Now?' }], 'only the new message is sent');
-  assert.equal(requests[start].body.user, chat.uid, 'the chat keys the gateway session');
-  assert.match(requests[start].body.instructions, /Earlier in this chat/);
 });
 
 test('an update_card changes the card in an earlier turn of the same chat', async () => {
@@ -63,7 +62,7 @@ test('an update_card changes the card in an earlier turn of the same chat', asyn
 test('a chat reply places a card in its own answer and keeps the person\'s message in the input', async () => {
   script = [{ call: 'show_card', arguments: {} }, { text: 'Done.' }];
   const start = requests.length;
-  const chat = { turns: [{ uid: 'old', text: 'Earlier question', answer: 'Earlier answer' }, { uid: 't1', text: 'Now?', answer: '' }] };
+  const chat = { uid: 'chat-1', turns: [{ uid: 'old', text: 'Earlier question', answer: 'Earlier answer' }, { uid: 't1', text: 'Now?', answer: '' }] };
   const updates = [];
   const result = await gatewayChat({ chat, turn: chat.turns[1], value: {}, body: { instructions: 'Be brief.', tools: ['show_card'] },
     execute: async name => name === 'show_card' ? { card, id: 'kcard123' } : { error: 'unexpected' }, onUpdate: update => updates.push(update) });

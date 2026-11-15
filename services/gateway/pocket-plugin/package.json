@@ -1,0 +1,10 @@
+{
+  "name": "pocket-openclaw-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pocket's data tools for the OpenClaw gateway: every call runs in Pocket over loopback.",
+  "openclaw": {
+    "extensions": ["./index.js"]
+  }
+}

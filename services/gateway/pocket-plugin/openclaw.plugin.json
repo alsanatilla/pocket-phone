@@ -1,0 +1,32 @@
+{
+  "id": "pocket",
+  "name": "Pocket",
+  "description": "The person's Pocket: notes, tasks, calendar, thoughts, chat history, web lookups, cards, saves and jobs.",
+  "categories": ["productivity"],
+  "activation": { "onStartup": true },
+  "contracts": {
+    "tools": [
+      "search_notes", "read_note", "search_thoughts", "search_tasks", "read_task", "search_calendar", "search_pocket",
+      "read_chat_history", "search_web", "read_web_page", "show_card", "update_card", "create_record", "change_record",
+      "list_jobs", "create_job", "change_job", "remove_job"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["url", "tools"],
+    "properties": {
+      "url": { "type": "string" },
+      "writes": { "type": "array", "items": { "type": "string" } },
+      "sequential": { "type": "array", "items": { "type": "string" } },
+      "tools": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["name", "description", "parameters"],
+          "properties": { "name": { "type": "string" }, "label": { "type": "string" }, "description": { "type": "string" }, "parameters": { "type": "object" } }
+        }
+      }
+    }
+  }
+}
