@@ -628,17 +628,21 @@ async function drive(userId, run, leaseId, { fetcher }) {
       : await chatObject(userId, chatUid);
     if (!chat || chat.deleted) return await end('stopped', 'This chat was removed.');
     // Native (PIP_OPENCLAW_NATIVE=1): OpenClaw owns the reply (pip-openclaw.js). Pocket builds no request and runs no
-    // compaction, effort judge or memory list; the gateway's session, workspace and memory are the context. Assignments
-    // and device tools keep the paths below for now.
-    if (!assignment && !deviceTools.length && process.env.PIP_OPENCLAW_NATIVE === '1' && process.env.PIP_GATEWAY_TOKEN) {
+    // compaction, effort judge or memory list; the gateway's session, workspace and memory are the context.
+    // Device tools keep the paths below for now; assignments use the native path with read-only permissions.
+    if (!deviceTools.length && process.env.PIP_OPENCLAW_NATIVE === '1' && process.env.PIP_GATEWAY_TOKEN) {
       // The reply lived in the gateway's run; a stretch that died with it cannot pick it up again.
       if (turn.usage?.engine === 'openclaw') return await end('failed', INTERRUPTED);
       const { nativeReply } = await import('./pip-openclaw.js');
+      const { NATIVE_TOOLS, NATIVE_RESEARCH_TOOLS } = await import('./pip-openclaw-tools.js');
       const source = await serverRecordSource(userId);
       const usage = part => ({ ...total(part || {}), runtime: 'pocket-server', engine: 'openclaw' });
       turn.usage = usage(); progress();
       const reply = await nativeReply({ userId, chatUid, runId, turn, chat, signal: controller.signal, ask: approval, take,
-        execute: (name, input, toolSignal, eventId) => JOB_TOOLS.includes(name) ? jobTool(userId, name, input, { chat: chatUid, turn: turn.uid, eventId, value })
+        allowedTools: assignment ? NATIVE_RESEARCH_TOOLS : NATIVE_TOOLS.filter(name => name !== 'update_scratch'),
+        ...(assignment ? { message: turn.text + ASSIGNMENT_NOTE } : {}),
+        execute: (name, input, toolSignal, eventId) => name === 'start_assignment' ? assignmentTool(userId, input, { chat: chatUid, turn: turn.uid, eventId, value, fetcher })
+          : JOB_TOOLS.includes(name) ? jobTool(userId, name, input, { chat: chatUid, turn: turn.uid, eventId, value })
           : WRITE_TOOLS.includes(name) ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId, name, input })
           : runTool(value, name, input, toolSignal, { chat, turn, eventId, source }),
         preview: (name, input, previewSignal) => JOB_TOOLS.includes(name) ? jobPreview(userId, name, input, value) : previewTool(value, name, input, previewSignal, source),

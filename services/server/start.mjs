@@ -15,11 +15,11 @@ if (gateway && process.env.PIP_OPENCLAW_NATIVE === '1') process.env.PIP_TOOLS_TO
 // open tabs. The secret lives only as long as these two processes.
 const events = { POCKET_EVENTS_SECRET: randomBytes(24).toString('hex') };
 const children = [
-  spawn(process.execPath, ['services/server/web.mjs'], { stdio: 'inherit', env: { ...process.env, ...events, HOST: process.env.HOST || '0.0.0.0', PORT: port } }),
+  spawn(process.execPath, ['services/server/web.mjs'], { stdio: 'inherit', env: { ...process.env, ...events, HOST: process.env.HOST || '0.0.0.0', PORT: port, PIP_WORKER_TOOLS_URL: 'http://127.0.0.1:' + (process.env.PIP_WORKER_PORT || '8787') + '/internal/pip-tools' } }),
   // Replies run in the web process (PIP_RUNS_MODE); the worker executes what it claims itself, inside its own loop.
   spawn(process.execPath, ['services/pip/worker.mjs'], { stdio: 'inherit', env: { ...process.env, ...events, PIP_RUNS_MODE: '', POCKET_EVENTS_URL: 'http://127.0.0.1:' + port + '/internal/events' } }),
 ];
-/** The gateway is an upgrade, not a requirement: if it cannot run, Pocket keeps its in-process loop. */
+/** Native replies require the gateway: a failed child restarts the service with its siblings. */
 const optional = new Set();
 if (gateway) {
   const { writeGatewayConfig, gatewayHome, gatewayPort } = await import('../gateway/config.mjs');
@@ -29,7 +29,7 @@ if (gateway) {
   const stateDir = process.env.OPENCLAW_STATE_DIR || '/tmp/openclaw';
   const gatewayChild = spawn(process.execPath, ['node_modules/openclaw/dist/index.js', 'gateway', 'run'], { stdio: 'inherit',
     env: { ...process.env, OPENCLAW_CONFIG_PATH: path, OPENCLAW_STATE_DIR: stateDir, OPENCLAW_GATEWAY_PORT: String(gatewayPort()), OPENCLAW_GATEWAY_TOKEN: process.env.PIP_GATEWAY_TOKEN } });
-  optional.add(gatewayChild);
+  if (process.env.PIP_OPENCLAW_NATIVE !== '1') optional.add(gatewayChild);
   children.push(gatewayChild);
 }
 let stopping = false;

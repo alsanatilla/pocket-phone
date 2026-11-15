@@ -79,6 +79,10 @@ async function slot(index) {
 
 const health = port ? http.createServer(async (request, response) => {
   const url = String(request.url || '/');
+  if (url === '/internal/pip-tools') {
+    const { toolsEndpoint } = await import('../../src/server/pip-openclaw.js');
+    toolsEndpoint(request, response); return;
+  }
   if (url.startsWith('/healthz')) {
     try {
       const jobs = await jobStats();

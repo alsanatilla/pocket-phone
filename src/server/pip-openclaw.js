@@ -87,7 +87,7 @@ const sameToken = given => {
   return expected.length >= 16 && value.length === expected.length && timingSafeEqual(value, expected);
 };
 /** `/internal/pip-tools` on the web process: loopback only, the per-boot token, JSON in and out. */
-export function toolsEndpoint(req, res) {
+export function toolsEndpoint(req, res, { forwardUrl } = {}) {
   const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
   if (req.method !== 'POST' || !local || !sameToken(req.headers['x-pocket-tools'])) { res.writeHead(404).end(); return; }
   let raw = '';
@@ -95,7 +95,18 @@ export function toolsEndpoint(req, res) {
   req.on('data', chunk => { raw += chunk; if (raw.length > 1_000_000) req.destroy(); });
   req.on('end', async () => {
     let answer;
-    try { answer = await toolRequest(JSON.parse(raw)); }
+    try {
+      const body = JSON.parse(raw);
+      answer = await toolRequest(body);
+      // The worker owns scheduled replies and queued assignments. Forward only an unknown session,
+      // once, to the fixed loopback worker endpoint; the worker never forwards back.
+      if (answer?.error === 'session_unknown' && forwardUrl) {
+        const response = await fetch(forwardUrl, { method: 'POST', signal: AbortSignal.timeout(120000),
+          headers: { 'content-type': 'application/json', 'x-pocket-tools': process.env.PIP_TOOLS_TOKEN || '' }, body: raw });
+        if (!response.ok) throw new Error('The Pocket worker did not answer.');
+        answer = await response.json();
+      }
+    }
     catch (error) { answer = { error: 'data_unavailable', message: String(error?.message || 'The tool failed.').slice(0, 300) }; }
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(answer ?? { error: 'data_unavailable', message: 'The tool returned nothing.' }));
   });
@@ -118,7 +129,7 @@ const marks = (id, old) => ({ id, updated: Date.now(), ...(old?.pinned ? { pinne
  * `{ approved }`; `take({ pos })` takes the messages sent into the reply; `onUpdate` receives the turn's progress.
  * Resolves to the finished turn fields; rejects with AbortError when stopped.
  */
-export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, execute, preview, ask, take = async () => [], saveTurn, onUpdate = () => {} }) {
+export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, execute, preview, ask, take = async () => [], saveTurn, allowedTools = NATIVE_TOOLS, message, onUpdate = () => {} }) {
   const client = await gateway(), key = sessionKeyFor(userId, chatUid);
   if (state.sessions.has(key)) throw no('Pip is already answering in this chat.', 'run_active');
   const result = { answer: '', reasoning: String(turn.reasoning || ''), activity: [], phase: 'requesting', usage: {} };
@@ -172,6 +183,7 @@ export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, 
 
   const session = {
     async preview(tool, raw, callId) {
+      if (!allowedTools.includes(tool)) return { error: 'access_disabled', message: 'This tool is not allowed in this run.' };
       const parsed = SCHEMAS[tool].safeParse(raw ?? {});
       if (!parsed.success) return { error: 'invalid_arguments', message: 'Correct the arguments or use an available tool.' };
       const ready = await preview(tool, parsed.data, signal);
@@ -184,6 +196,7 @@ export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, 
       return { title, description: 'Pip asks before it saves this in Pocket: ' + title + '.' };
     },
     async execute(tool, raw, callId) {
+      if (!allowedTools.includes(tool)) return { error: 'access_disabled', message: 'This tool is not allowed in this run.' };
       last = Date.now();
       const parsed = SCHEMAS[tool].safeParse(raw ?? {});
       if (!parsed.success) return { error: 'invalid_arguments', message: 'Correct the arguments or use an available tool.' };
@@ -300,7 +313,7 @@ export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, 
     if (signal?.aborted) throw stopped();
     // Only the person's message and what they attached: the session holds everything before it.
     const context = (Array.isArray(turn.context) ? turn.context : []).map(source => '\n\n[Attached: ' + String(source.title || 'source') + ']\n' + String(source.text || '')).join('');
-    const ack = await client.request('chat.send', { sessionKey: key, message: String(turn.text || '') + context, idempotencyKey: 'pocket-' + runId });
+    const ack = await client.request('chat.send', { sessionKey: key, message: String(message ?? turn.text ?? '') + context, idempotencyKey: 'pocket-' + runId });
     if (typeof ack?.runId === 'string' && !ended.has(ack.runId)) active.add(ack.runId);
     await done;
   } finally {

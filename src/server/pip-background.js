@@ -442,12 +442,14 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   if (job) value.backgroundJob = true;
   const notes = job ? await readScratch(userId, routine.id) : '';
   // In the big chat the job reads the segment and the end of the one before it, as a reply of the person's does.
-  const view = { ...chat, config: value, ...(home ? { turns: [...homeTail(segments, chat), ...chat.turns] } : {}) }, body = requestBody(view, turn);
+  const native = process.env.PIP_OPENCLAW_NATIVE === '1' && Boolean(process.env.PIP_GATEWAY_TOKEN) && job;
+  const view = { ...chat, config: value, ...(home ? { turns: [...homeTail(segments, chat), ...chat.turns] } : {}) };
+  const body = native ? { instructions: '', tools: [] } : requestBody(view, turn);
   body.tools = body.tools.filter(name => !WRITE_TOOLS.includes(name) || (conversation ? ['coros_write', 'create_record', 'update_training_preferences'].includes(name) : training?.tools.includes(name)));
   // A job and the training conversation remember the person like a server reply does.
-  const remembered = memoryNote(await listMemory(userId));
+  const remembered = native ? '' : memoryNote(await listMemory(userId));
   if (remembered) body.instructions += '\n\n' + remembered;
-  body.instructions += '\n\n' + MEMORY_INSTRUCTIONS;
+  if (!native) body.instructions += '\n\n' + MEMORY_INSTRUCTIONS;
   if (job) body.instructions += JOB_NOTES(notes);
   body.instructions += conversation ? `\n\nThis is the user's ongoing training conversation with Pip. Answer their actual message naturally, in their language. Ask one useful follow-up when goals, availability or how a workout felt are unclear; do not demand a fixed prompt or issue a full report on every reply. Remember explicit goals, equipment, availability and constraints with update_training_preferences; keep temporary workout feedback dated. The saved preferences and this chat guide automatic reviews too. More recent corrections supersede old preferences. Use live reads when discussing workout performance; no COROS connection is needed just to talk. Automatic planning is currently ${routine.enabled && settings.enabled ? 'on' : 'paused'}. Only enable/resume it if the user asks. Use scoped workout writes when the user wants the plan adjusted; no per-workout confirmation is needed once automatic planning is enabled. Only saved tool results establish changes. Never schedule beyond the next two sessions within three days. Calendar appointments are unavailable.
 Remembered training brief: ${JSON.stringify(routine.prompt || 'Not set yet; learn it through conversation.')}
@@ -489,13 +491,28 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
     pendingChange = next.catch(() => {}); return next;
   };
   // Imported here: the agent runtime and provider adapters load only when a routine runs.
-  const { streamChat } = await import('./pip-agent.js');
+  const streamChat = native ? null : (await import('./pip-agent.js')).streamChat;
   const { gatewayConfigured } = await import('./pip-gateway.js');
   // Routines are read-only, so they are the first path on the gateway: no approval and no durable pause to map.
   const useGateway = process.env.PIP_GATEWAY_CLIENT === '1' && gatewayConfigured() && !conversation && !training;
   let revised = false;
   try {
-    const reply = useGateway
+    const reply = native ? await (async () => {
+      const { nativeReply } = await import('./pip-openclaw.js');
+      const { NATIVE_RESEARCH_TOOLS } = await import('./pip-openclaw-tools.js');
+      return nativeReply({ userId, chatUid: 'routine-' + routine.id, runId: 'routine-' + turn.uid, turn, chat: view,
+        message: turn.text + body.instructions, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(RUN_DEADLINE)]) : AbortSignal.timeout(RUN_DEADLINE),
+        allowedTools: [...NATIVE_RESEARCH_TOOLS, 'update_scratch'],
+        onUpdate: update => Object.assign(turn, update),
+        saveTurn: home ? changed => writeHomeTurn(userId, segments, changed) : () => { revised = true; },
+        execute: async (name, input, callSignal) => {
+          if (name === 'update_scratch') {
+            const kept = await writeScratch(userId, routine.id, input?.notes);
+            return { kind: 'scratch', saved: true, length: kept.length };
+          }
+          return runTool(value, name, input, callSignal, { chat: view, turn, source });
+        } });
+    })() : useGateway
       ? await (async () => {
           const { gatewayRoutine } = await import('./pip-gateway-run.js');
           const reply = await gatewayRoutine({ chat, turn, value, body, signal, onUpdate: update => Object.assign(turn, update),

@@ -129,6 +129,7 @@ test('a plain reply streams through the gateway into the stored turn', { skip, t
   timings.hiRequestChars = json.length; timings.hiInputTokensEstimate = Math.round(json.length / 4);
   timings.hiSystemChars = textOf(first.messages[0]).length; timings.hiToolSchemaChars = JSON.stringify(first.tools || []).length;
   timings.hiTools = (first.tools || []).map(tool => tool.function.name);
+  assert.ok(timings.hiTools.includes('start_assignment') && timings.hiTools.includes('update_scratch'));
   assert.ok(timings.hiTools.includes('search_notes') && timings.hiTools.includes('show_card'), 'Pocket\'s tools are offered directly');
   assert.ok(!timings.hiTools.includes('exec') && !timings.hiTools.includes('write'), 'no coding or shell tools');
   assert.ok(userTexts(requests[before]).some(text => text.includes('hi')));
@@ -253,4 +254,57 @@ test('a message sent while the reply runs reaches the running turn', { skip, tim
   assert.deepEqual(view.run.turn.steers.map(item => item.uid), ['turn-steer-2']);
   assert.equal((await runs.runView(userId, { runId: steered.run.runId })).run.status, 'steered');
   assert.equal(view.run.turn.answer, '21,000 euros.');
+});
+
+test('native research reads notes but cannot save or start nested work', { skip, timeout: 120000 }, async () => {
+  const userId = await account();
+  script.push({ calls: [{ name: 'read_note', input: { id: 'note-car' }, id: 'research-read' }] },
+    { calls: [{ name: 'create_record', input: { kind: 'note', title: 'Forbidden', text: 'No' }, id: 'research-write' }] },
+    { text: 'The blue car costs 21,000 euros.' });
+  const started = await runs.assignmentTool(userId, { title: 'Car research', brief: 'Find the price in my notes.' },
+    { chat: 'research-origin', turn: 'origin', eventId: 'research', value: { ...CONFIG, grants: ['notes'], assignments: true } });
+  assert.ok(started.id, JSON.stringify(started));
+  const view = await until('research to finish', async () => {
+    const view = await runs.runView(userId, { runId: started.id });
+    return ['done', 'failed'].includes(view?.run?.status) ? view : null;
+  }, 90000);
+  assert.equal(view.run.status, 'done', fail(view));
+  assert.equal(view.run.turn.usage.engine, 'openclaw');
+  assert.equal((await notesOf(userId)).length, 0);
+  assert.ok(view.run.turn.activity.some(row => row.name === 'create_record' && row.state === 'failed'));
+});
+
+test('native scheduled jobs read account data and keep their own scratch notes', { skip, timeout: 120000 }, async () => {
+  const userId = await account();
+  const background = await import('../src/server/pip-background.js');
+  const routine = background.backgroundRoutine({ kind: 'watch', title: 'Car watch', prompt: 'Read my car note.', every: 360, days: [0, 1, 2, 3, 4, 5, 6] });
+  await background.saveRoutine(userId, routine);
+  script.push({ calls: [{ name: 'read_note', input: { id: 'note-car' }, id: 'job-read' }] },
+    { calls: [{ name: 'update_scratch', input: { notes: 'Blue car: 21000 euros' }, id: 'job-scratch' }] },
+    { text: 'The blue car costs 21,000 euros.' });
+  const result = await background.runRoutine(userId, routine, { force: true });
+  assert.equal(result.status, 'done', JSON.stringify(result));
+  assert.equal(await background.readScratch(userId, routine.id), 'Blue car: 21000 euros');
+});
+
+
+test('tool endpoint forwards unknown sessions once and rejects unauthenticated calls', { skip }, async () => {
+  const { toolsEndpoint } = await import('../src/server/pip-openclaw.js');
+  let calls = 0;
+  const worker = createServer((req, res) => {
+    calls++;
+    assert.equal(req.headers['x-pocket-tools'], process.env.PIP_TOOLS_TOKEN);
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ worker: true }));
+  });
+  await new Promise(resolve => worker.listen(0, '127.0.0.1', resolve));
+  const web = createServer((req, res) => toolsEndpoint(req, res, { forwardUrl: 'http://127.0.0.1:' + worker.address().port }));
+  await new Promise(resolve => web.listen(0, '127.0.0.1', resolve));
+  try {
+    const url = 'http://127.0.0.1:' + web.address().port;
+    const options = { method: 'POST', body: JSON.stringify({ sessionKey: 'worker-session', tool: 'read_note', callId: 'read', action: 'execute' }) };
+    assert.equal((await fetch(url, options)).status, 404);
+    assert.equal(calls, 0);
+    assert.deepEqual(await (await fetch(url, { ...options, headers: { 'x-pocket-tools': process.env.PIP_TOOLS_TOKEN } })).json(), { worker: true });
+    assert.equal(calls, 1);
+  } finally { web.close(); worker.close(); }
 });

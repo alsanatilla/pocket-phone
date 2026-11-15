@@ -381,3 +381,24 @@ Chat replies (with routines and assignments moved to the gateway as well, since 
   drive the gateway). `tools/pip-budget.test.mjs` and `tools/pip-reliability.test.mjs` test the classic app's browser
   loop and go with it, not with this switch.
 - The sections "Limits", "Tools", "Steering" (delivery), "Approvals" (checkpoints) and "Compaction" above.
+
+### Native assignments and scheduled reports
+
+With `PIP_OPENCLAW_NATIVE=1`, research assignments and non-training scheduled reports use `nativeReply` too.
+Assignments accept a self-contained brief; jobs use a stable per-account, per-routine session and pass the job's
+instructions and scratch notes as their request. Neither constructs Pocket's conversation replay or injects the
+old memory list. `start_assignment` and `update_scratch` are declared in the plugin manifest as well as its config.
+Gym and COROS read tools remain available subject to the account's grants.
+
+Pocket enforces an allowed-tool list at both preview and execution: unattended runs cannot save records, change
+jobs, or start nested assignments. Only scheduled reports can update their scratch notes. The scheduler and report
+delivery still belong to Pocket; this does not migrate scheduling to OpenClaw cron.
+
+The plugin calls the web process. If that process does not own the session, it forwards once to the worker's
+`/internal/pip-tools`, on the configured worker port. Both endpoints require loopback and the per-boot token;
+the worker never forwards. In native mode a gateway child exit restarts the service instead of advertising a
+fallback that native replies do not use.
+
+Still outstanding before deleting the legacy modules: training conversations and automatic planning, device-tool
+replies, migration of scheduling itself, the sandbox connection, and production first-message profiling. The
+classic browser loop is also retained. Do not delete shared modules while those callers still use them.
