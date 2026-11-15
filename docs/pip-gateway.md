@@ -34,6 +34,18 @@ With a real model through the custom provider, one request
 A later request with no history ("What do I prefer to drink?") answered "Tea." from `USER.md`. Writes, injection and
 supersession are the gateway's, not Pocket's.
 
+## The client
+
+`src/server/pip-gateway.js` is the transport: `gatewayReply` streams `POST /v1/responses`, runs every function call
+through Pocket's own `execute`, sends the results back as `function_call_output` with `previous_response_id`, and
+returns the answer, the calls and usage. `gatewayTools` turns Pocket's offered tools into the gateway's client tools
+with the same schemas. A fake-SSE test (`tools/pip-gateway.test.mjs`) covers the text stream, the tool call, the
+follow-up and its input.
+
+What it does not do yet: place `show_card`/`update_card` in the answer (the card draft and its replacement), ask
+Pocket's approval before a write and pause a durable run on it, and carry a resumed run's pending calls. Those are
+the next layer; until then the current loop stays in charge.
+
 ## The reply loop Pocket still has to move
 
 1. `POST /v1/responses` with the chat's turns as `input`, Pocket's instructions, `stream: true`, and Pocket's tools
