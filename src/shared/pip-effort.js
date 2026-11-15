@@ -1,5 +1,6 @@
 // How much looking-up a message deserves, and whether what it found is enough: the questions Pocket puts to JEV
-// before and during a server reply, the state it asks about, and the limits and note that follow from the level.
+// before and during a server reply, the state it asks about, and the note that follows from the level. A level is
+// advice to the model, never a cap: a wrong guess must not refuse the lookups the answer needs.
 // The levels are Pocket's, not JEV's, so a missing or unusable answer leaves the reply on its usual limits.
 
 import { answerText } from './pip-reply.js';
@@ -14,7 +15,7 @@ export function effortQuestions() {
   return {
     effort: {
       type: 'choice',
-      instructions: 'How much looking-up does a good answer to this message need before the assistant writes?',
+      instructions: 'How much looking-up does a good answer to this message need before the assistant writes? A message that asks to try again, go on, refresh, correct or extend the previous answer ("try again", "versuchs nochmal", "and for last year?") needs what that answer needed: recent[].looked_up says how many lookups it made.',
       criteria: {
         none: 'It can be answered from the conversation and general knowledge: small talk, a rewrite, a calculation, an opinion, a follow-up on what was just said.',
         quick: 'It needs one or two lookups: one fact from the person\'s notes, tasks or calendar, or one web search for a current fact.',
@@ -23,6 +24,8 @@ export function effortQuestions() {
     },
   };
 }
+
+const lookupsOf = turn => (Array.isArray(turn?.activity) ? turn.activity : []).filter(row => row && row.name && !STATE_TOOLS.includes(row.name) && !WRITE_TOOLS.includes(row.name)).length;
 
 /**
  * The JEV state object for one message: its text, how many sources are attached, and the last two finished
@@ -36,7 +39,8 @@ export function effortState(turn, earlier) {
     assistant: 'A personal assistant that can read the person\'s notes, tasks and calendar and search the web.',
     message: brief(turn?.text, 2000),
     attached: Array.isArray(turn?.context) ? turn.context.length : 0,
-    recent: finished.map(item => ({ asked: brief(item.text, 400), answered: brief(answerText(item.answer), 400) })),
+    // How much the earlier answers looked up: "try again" alone says nothing about what it needs.
+    recent: finished.map(item => { const lookedUp = lookupsOf(item); return { asked: brief(item.text, 400), answered: brief(answerText(item.answer), 400), ...(lookedUp ? { looked_up: lookedUp } : {}) }; }),
   };
 }
 
@@ -46,19 +50,11 @@ export function effortFromAnswers(answers) {
   return effort?.type === 'choice' && EFFORT_LEVELS.includes(effort.choice) ? effort.choice : null;
 }
 
-/** The lookup and web-call limits a level allows, or null when it leaves today's limits alone. */
-export function effortLimits(level) {
-  if (level === 'none') return { lookups: 1, webCalls: 0 };
-  if (level === 'quick') return { lookups: 3, webCalls: 2 };
-  if (level === 'thorough') return { lookups: 10, webCalls: 5 };
-  return null;
-}
-
 /** The sentence the model reads for a level, or nothing for a level Pocket does not know. */
 export function effortNote(level) {
-  if (level === 'none') return 'Pocket judged that this message needs no looking-up: answer directly; look something up only if you cannot answer without it.';
-  if (level === 'quick') return 'Pocket judged that this message needs one or two lookups: make them and answer.';
-  if (level === 'thorough') return 'Pocket judged that this message deserves thorough looking-up: up to ten lookups. Search with other words only when the first words found nothing, read what you found once, then answer.';
+  if (level === 'none') return 'Pocket judged that this message needs no looking-up: answer directly; look something up only if you cannot answer well without it.';
+  if (level === 'quick') return 'Pocket judged that this message needs a lookup or two: make what the answer needs, then answer.';
+  if (level === 'thorough') return 'Pocket judged that this message deserves thorough looking-up. Search with other words only when the first words found nothing, read what you found once, then answer.';
   return '';
 }
 

@@ -278,3 +278,17 @@ POCKET_CHECK_KEY=… POCKET_CHECK_ONLY=plan-card,steer POCKET_CHECK_REPEAT=3 npm
   the server note is a copy of pip-runs.js's unexported `NOTE`; compaction, the effort and "enough" judges, and
   device tools are not exercised. `node --test tools/live/selftest.test.mjs` (part of `test:tools`) proves each
   check can fail, against a scripted fake provider.
+
+## What bounds research
+
+Nothing guesses in advance how many lookups a message needs. The judged effort level (none, quick, thorough) is one
+sentence of advice in the instructions and caps nothing: capped, "try again" was judged `none` and every search was
+refused. Research is bounded by what is real: 12 model requests per reply, 48,000 characters of lookup results, the
+five-minute deadline, and for thorough research the "is this enough?" judge on what was found.
+
+Going round in circles is decided by OpenClaw, not counted by Pocket: every lookup tool is wrapped with
+`wrapToolWithBeforeToolCallHook` from `openclaw/plugin-sdk/agent-harness-runtime` with loop detection on, scoped to
+the reply. It warns the model after 10 identical calls and blocks the call after 20 identical outcomes; a blocked
+call ends research for the reply. That module needs the pinned Node version; on an older local Node it cannot load,
+lookups run unguarded and one line is logged. Run the suites on the server's Node to exercise it:
+`npm exec --package=node@24.16.0 -- npm run test:tools`.

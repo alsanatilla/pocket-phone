@@ -6,7 +6,7 @@
 import { config, requestBody, contextCoverage } from '../../src/client/pip-core.js';
 import { execute, preview, recordSource } from '../../src/client/pip-tools.js';
 import { MEMORY_INSTRUCTIONS } from '../../src/server/pip-memory-store.js';
-import { effortLimits, effortNote } from '../../src/shared/pip-effort.js';
+import { effortNote } from '../../src/shared/pip-effort.js';
 
 export const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 /** YYYY-MM-DD in the check's timezone, `offset` days from now. */
@@ -124,6 +124,6 @@ export function chatRequest(value, { text, turns = [], effort = 'quick', researc
   body.instructions += '\n\n' + MEMORY_INSTRUCTIONS;
   const note = effortNote(effort);
   if (note) body.instructions += '\n\n' + note;
-  const limits = research || effortLimits(effort);
+  const limits = research || null;
   return { chat, turn, body, coverage: contextCoverage(chat, turn), ...(limits ? { research: limits } : {}) };
 }

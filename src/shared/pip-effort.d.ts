@@ -8,17 +8,15 @@ export function effortQuestions(): {
 /** The JEV state object for one message: its text, attachments and the last two finished turns before it. */
 export function effortState(
   turn: { text?: string; context?: unknown[] },
-  earlier?: Array<{ text?: string; answer?: string; status?: string }>,
+  earlier?: Array<{ text?: string; answer?: string; status?: string; activity?: Array<{ name?: string }> }>,
 ): {
   assistant: string;
   message: string;
   attached: number;
-  recent: Array<{ asked: string; answered: string }>;
+  recent: Array<{ asked: string; answered: string; looked_up?: number }>;
 };
 /** The level JEV chose, or null when its answer is not one of Pocket's levels. */
 export function effortFromAnswers(answers: unknown): EffortLevel | null;
-/** The lookup and web-call limits a level allows, or null when it leaves today's limits alone. */
-export function effortLimits(level: string | null | undefined): { lookups: number; webCalls: number } | null;
 /** The sentence the model reads for a level, or nothing for a level Pocket does not know. */
 export function effortNote(level: string | null | undefined): string;
 /** The JEV questions object for one "is this enough?" judgment: one choice named `enough`. */

@@ -20,6 +20,15 @@ import { createTransport, toCore } from './pip-agent-transport.js';
 export const MAX_REQUESTS = 12;
 /** A message cut off at the reply limit is written again at most this many times in a row. */
 const LENGTH_RETRIES = 2;
+/**
+ * OpenClaw's own guard against a reply that goes round in circles, loaded once: its tool wrapper counts lookups
+ * repeated with identical arguments and outcomes, warns the model and then blocks the call (openclaw's
+ * docs/tools/loop-detection). Pocket adds no counting of its own. The module needs the Node version the server is
+ * pinned to; where it cannot load (an older local Node) lookups run unguarded and that is logged once.
+ */
+let loopGuard;
+const loadLoopGuard = () => loopGuard ||= import('openclaw/plugin-sdk/agent-harness-runtime').then(module => module.wrapToolWithBeforeToolCallHook)
+  .catch(error => { console.warn('OpenClaw loop detection is unavailable here; lookups run without it: ' + String(error?.message || error).slice(0, 160)); return null; });
 const CEILING = `The reply reached its limit of ${MAX_REQUESTS} model requests. Continue when you’re ready.`;
 const LENGTH = 'The reply limit per message was reached. Continue when you’re ready.';
 /** What the "enough looked up" judge stops research with; only that stop is lifted by a message sent into the reply. */
@@ -151,13 +160,16 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   // Research stops for a reason (a limit, the judge, a cut-off message) or on the last request; lookups are then
   // refused with a result. Cards, plans and approved saves stay available: taking them away made models write
   // "[card: …]" stand-ins instead of drawing.
+  // No count of lookups is guessed in advance: a judged level capped them once (0 web calls for "try again", 2 for a
+  // question that needed a page read) and refused the work the person had asked for. What bounds research is real:
+  // the model requests of a reply, the characters of results the context holds, the deadline, the judge's "enough"
+  // on what was found, and being stuck, which OpenClaw's loop detection decides (see loadLoopGuard).
   const lastRequest = () => counters.requests >= MAX_REQUESTS;
   const researchStopped = () => Boolean(counters.finalReason) || counters.enoughStopped || lastRequest() || counters.requests > RESEARCH_LIMITS.continuations
-    || counters.calls >= RESEARCH_LIMITS.calls || counters.searches >= RESEARCH_LIMITS.webCalls || counters.toolData >= RESEARCH_LIMITS.toolData;
+    || counters.toolData >= RESEARCH_LIMITS.toolData;
   const budgetError = { error: 'research_budget_reached', message: 'The app’s lookup limit for this reply was reached. Answer with the collected observations; cards, plans and approved saves remain available.' };
   const refusal = (name, web) => {
     if (researchStopped()) return counters.finalReason || (lastRequest() ? 'Last model request of this reply' : 'Research limit reached');
-    if (research?.lookups !== undefined && counters.lookups >= research.lookups || web && research?.webCalls !== undefined && counters.searches >= research.webCalls) return 'Enough looked up for this message';
     return '';
   };
   const base = body.instructions.replace(SDK_RESEARCH_INSTRUCTIONS, 'Research tools report their limits in their results. Cards, plans and approved saves remain available after research stops. ');
@@ -254,7 +266,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       if (lookup) { counters.calls++; counters.lookups++; if (web) counters.searches++; }
       record(id, { name, state: 'running', title: label(name, input), input: kept(name, input) }); result.phase = label(name, input); publish();
       const signature = grantSignature(value, name), lookupKey = cacheKey(name, input), failed = failures.get(lookupKey), cached = lookup && cache.get(lookupKey);
-      if (failed?.signature === signature) { answer = { ...structuredClone(failed.answer), repeated: true, message: 'This identical call already failed. Correct its arguments or use the available observations.' }; counters.finalReason ||= 'An identical failed tool call was repeated'; }
+      if (failed?.signature === signature) answer = { ...structuredClone(failed.answer), repeated: true, message: 'This identical call already failed. Correct its arguments or use the available observations.' };
       else if (cached?.signature === signature) answer = { ...structuredClone(cached.answer), cached: true };
       else {
         let pending = lookup && inFlight.get(lookupKey); const duplicate = Boolean(pending);
@@ -301,7 +313,18 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     busy++; clearTimeout(idle);
     try { return packet(await call(name, callId, raw)); } finally { busy--; clock(); }
   };
-  const tools = offered.map(name => ({ name, label: name, description: definitions[name].description, parameters: z.toJSONSchema(SCHEMAS[name], { unrepresentable: 'any' }),
+  // Lookups go through OpenClaw's loop guard, scoped to this reply; a call it blocks ends research like any limit.
+  const loopHook = await loadLoopGuard(), guardContext = { sessionKey: 'pocket:' + (chat.uid || turn.uid), runId: turn.attempt || turn.uid, loopDetection: { enabled: true } };
+  const guarded = tool => {
+    if (!loopHook || !isLookup(tool.name)) return tool;
+    const wrapped = loopHook(tool, guardContext, { emitDiagnostics: false });
+    return { ...wrapped, execute: async (...args) => {
+      const out = await wrapped.execute(...args);
+      if (out?.details?.status === 'blocked' && out.details.deniedReason === 'tool-loop') counters.finalReason ||= 'The same lookup was repeated without progress';
+      return out;
+    } };
+  };
+  const tools = offered.map(name => guarded({ name, label: name, description: definitions[name].description, parameters: z.toJSONSchema(SCHEMAS[name], { unrepresentable: 'any' }),
     executionMode: isLookup(name) && !deviceTools.includes(name) ? 'parallel' : 'sequential', execute: (id, input) => run(name, id, input) }));
 
   // The reply as it streams: text, thinking, and a card while it is written.

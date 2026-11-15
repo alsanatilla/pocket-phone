@@ -14,7 +14,7 @@ const { syncDocuments } = await import('../src/server/workspace.js');
 const { saveBackground } = await import('../src/server/pip-background.js');
 const { saveKey } = await import('../src/server/pip-keys.js');
 const { JEV_ENDPOINT, JEV_MODEL } = await import('../src/shared/girder-jev.js');
-const { EFFORT_LEVELS, effortFromAnswers, effortLimits, effortNote, effortQuestions, effortState, enoughFromAnswers, enoughQuestions, enoughState } = await import('../src/shared/pip-effort.js');
+const { EFFORT_LEVELS, effortFromAnswers, effortNote, effortQuestions, effortState, enoughFromAnswers, enoughQuestions, enoughState } = await import('../src/shared/pip-effort.js');
 const runs = await import('../src/server/pip-runs.js');
 await ensureSchema();
 test.after(() => { database().close(); try { rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); } catch {} });
@@ -100,7 +100,7 @@ const lookups = (count, prefix = 'q') => compatibleMessage({ calls: Array.from({
 const CARD = { root: 'main', elements: [{ id: 'main', type: 'Metric', props: { label: 'Blue car', value: '21000', unit: 'EUR' }, children: [] }] };
 const rows = (view, name) => view.run.turn.activity.filter(item => item.name === name);
 
-test('the levels, their limits and their note are the ones the brief names', () => {
+test('the levels and their notes: a level is advice to the model and limits nothing', async () => {
   assert.deepEqual(EFFORT_LEVELS, ['none', 'quick', 'thorough']);
   const questions = effortQuestions();
   assert.equal(questions.effort.type, 'choice');
@@ -112,14 +112,14 @@ test('the levels, their limits and their note are the ones the brief names', () 
   assert.equal(effortFromAnswers({ effort: { type: 'choice' } }), null);
   assert.equal(effortFromAnswers({}), null);
   assert.equal(effortFromAnswers(null), null);
-  assert.deepEqual(effortLimits('none'), { lookups: 1, webCalls: 0 });
-  assert.deepEqual(effortLimits('quick'), { lookups: 3, webCalls: 2 });
-  assert.deepEqual(effortLimits('thorough'), { lookups: 10, webCalls: 5 });
-  assert.equal(effortLimits('unknown'), null);
-  assert.equal(effortLimits(null), null);
-  assert.equal(effortNote('none'), 'Pocket judged that this message needs no looking-up: answer directly; look something up only if you cannot answer without it.');
-  assert.equal(effortNote('quick'), 'Pocket judged that this message needs one or two lookups: make them and answer.');
-  assert.equal(effortNote('thorough'), 'Pocket judged that this message deserves thorough looking-up: up to ten lookups. Search with other words only when the first words found nothing, read what you found once, then answer.');
+  assert.equal((await import('../src/shared/pip-effort.js')).effortLimits, undefined, 'no level caps lookups any more');
+  // "Try again" is judged with how much the answer before it looked up.
+  const again = effortState({ text: 'Versuchs nochmal' }, [{ text: 'Bayern stats', answer: 'x', status: 'done', activity: [{ name: 'search_web', state: 'done' }, { name: 'read_web_page', state: 'failed' }, { name: 'show_card', state: 'done' }] }]);
+  assert.equal(again.recent[0].looked_up, 2);
+  assert.match(questions.effort.instructions, /try again/);
+  assert.equal(effortNote('none'), 'Pocket judged that this message needs no looking-up: answer directly; look something up only if you cannot answer well without it.');
+  assert.equal(effortNote('quick'), 'Pocket judged that this message needs a lookup or two: make what the answer needs, then answer.');
+  assert.equal(effortNote('thorough'), 'Pocket judged that this message deserves thorough looking-up. Search with other words only when the first words found nothing, read what you found once, then answer.');
 });
 
 test('the JEV state cuts long text and sends finished prose, never a card source or a streaming turn', () => {
@@ -141,7 +141,7 @@ test('the JEV state cuts long text and sends finished prose, never a card source
   assert.ok(!JSON.stringify(state).includes('Still writing'), 'a streaming turn is skipped');
 });
 
-test('none: one lookup runs, the next is refused, and the reply still finishes with the model’s text', async () => {
+test('none: the level is advice, so the lookups the model still asks for all run ("try again" was once refused every search)', async () => {
   const userId = await account(), sent = [], jev = [];
   const view = await runs.submitRun(userId, { requestId: 'req-effort-none', chat: header('chat-effort-none'), text: 'Danke, das reicht.', device: 'browser-1' },
     { fetcher: judged(sent, jev, 'none', lookups(2, 'none'), compatibleMessage({ text: 'Gern geschehen.' })) });
@@ -150,26 +150,23 @@ test('none: one lookup runs, the next is refused, and the reply still finishes w
   assert.equal(view.run.turn.usage.effort, 'none');
   const made = rows(view, 'search_notes');
   assert.equal(made.length, 2);
-  assert.equal(made[0].state, 'done', 'the first lookup runs');
-  assert.equal(made[1].state, 'failed', 'the second is refused');
-  assert.match(made[1].result, /research_budget_reached/);
+  assert.deepEqual(made.map(item => item.state), ['done', 'done'], 'a level judged too low refuses nothing');
   assert.match(String(sent[0].messages[0].content), /Pocket judged that this message needs no looking-up/);
   assert.equal(jev.length, 1, 'JEV is asked once');
 });
 
-test('quick: three lookups run, the fourth is refused, and a card after that still draws', async () => {
+test('quick: four lookups all run, and a card after them draws', async () => {
   const userId = await account(), sent = [], jev = [];
   const view = await runs.submitRun(userId, { requestId: 'req-effort-quick', chat: header('chat-effort-quick'), text: 'Vergleiche zwei Angebote.', device: 'browser-1' },
     { fetcher: judged(sent, jev, 'quick', lookups(4, 'quick'), compatibleMessage({ calls: [{ name: 'show_card', input: CARD, id: 'call_draw' }] }), compatibleMessage({ text: 'Hier ist das Ergebnis.' })) });
   assert.equal(view.run.status, 'done', view.run.turn.error);
   assert.equal(view.run.turn.usage.effort, 'quick');
   const made = rows(view, 'search_notes');
-  assert.deepEqual(made.map(item => item.state), ['done', 'done', 'done', 'failed']);
-  assert.match(made[3].result, /research_budget_reached/);
-  assert.equal(rows(view, 'show_card').length, 1, 'a card is never refused by the lookup limit');
+  assert.deepEqual(made.map(item => item.state), ['done', 'done', 'done', 'done']);
+  assert.equal(rows(view, 'show_card').length, 1);
   assert.match(view.run.turn.answer, /```pocket/);
   assert.ok(view.run.turn.answer.endsWith('Hier ist das Ergebnis.'), 'the reply still finishes with the model’s text');
-  assert.match(String(sent[0].messages[0].content), /needs one or two lookups: make them and answer/);
+  assert.match(String(sent[0].messages[0].content), /needs a lookup or two: make what the answer needs, then answer/);
 });
 
 test('thorough: five lookups all run, the instructions get the thorough note, and the level is kept in the usage', async () => {
@@ -180,8 +177,8 @@ test('thorough: five lookups all run, the instructions get the thorough note, an
   assert.equal(view.run.turn.usage.effort, 'thorough');
   const made = rows(view, 'search_notes');
   assert.equal(made.length, 5);
-  assert.ok(made.every(item => item.state === 'done'), 'today’s limits still allow five lookups');
-  assert.match(String(sent[0].messages[0].content), /deserves thorough looking-up: up to ten lookups/);
+  assert.ok(made.every(item => item.state === 'done'), 'five lookups run');
+  assert.match(String(sent[0].messages[0].content), /deserves thorough looking-up\. Search/);
 });
 
 test('the judge gets the OpenRouter key, the model, the message and the chat’s earlier turn', async () => {
@@ -230,7 +227,7 @@ test('without an OpenRouter key JEV is never asked', async () => {
   assert.equal('effort' in view.run.turn.usage, false);
 });
 
-test('a run paused for an approval is judged once, keeps its level, and counts its lookups across the pause', async () => {
+test('a run paused for an approval is judged once, keeps its level, and its lookups run on both sides of the pause', async () => {
   const userId = await account(), sent = [], jev = [];
   const round = compatibleMessage({ calls: [
     { name: 'search_notes', input: { query: 'before-0' }, id: 'call_before_0' },
@@ -250,8 +247,7 @@ test('a run paused for an approval is judged once, keeps its level, and counts i
   assert.equal(decided.run.status, 'done', 'continue failed: ' + decided.run.turn.error);
   assert.equal(jev.length, 1, 'the continued run keeps its level instead of asking JEV again');
   assert.equal(decided.run.turn.usage.effort, 'quick');
-  assert.deepEqual(rows(decided, 'search_notes').map(item => item.state), ['done', 'done', 'done', 'failed']);
-  assert.match(rows(decided, 'search_notes')[3].result, /research_budget_reached/);
+  assert.deepEqual(rows(decided, 'search_notes').map(item => item.state), ['done', 'done', 'done', 'done']);
   assert.equal(decided.run.turn.answer, 'Notiert.');
 });
 
@@ -384,18 +380,6 @@ test('the enough count and the lookups last asked about survive a pause', async 
   assert.equal('enoughAt' in decided.run.turn.usage, false);
 });
 
-test('a final round reached by the lookups’ ceiling refuses one more lookup instead of failing', async () => {
-  const userId = await account(), sent = [], jev = [];
-  const view = await runs.submitRun(userId, { requestId: 'req-late-ceiling', chat: header('chat-late-ceiling'), text: 'Vergleiche die zwei Angebote.', device: 'browser-1' },
-    { fetcher: judging(sent, jev, { effort: 'quick' }, lookups(4, 'ceiling'), lookups(1, 'after'), compatibleMessage({ text: 'Der blaue Wagen ist günstiger.' })) });
-  assert.equal(view.run.status, 'done', view.run.turn.error);
-  assert.equal(view.run.turn.answer, 'Der blaue Wagen ist günstiger.', 'the reply finishes with the model’s text');
-  const made = rows(view, 'search_notes');
-  assert.deepEqual(made.map(item => item.state), ['done', 'done', 'done', 'failed', 'failed']);
-  for (const refused of made.slice(3)) assert.match(refused.result, /research_budget_reached/);
-  assert.ok(sent[1].tools.some(tool => tool.function.name === 'search_notes'), 'the final round still offers the lookups, so the request reaches Pocket');
-});
-
 test('a final round reached by the continuation limit also refuses a late lookup instead of failing', async () => {
   const userId = await account(), sent = [], jev = [];
   const view = await runs.submitRun(userId, { requestId: 'req-late-continuation', chat: header('chat-late-continuation'), text: 'Recherchiere lange.', device: 'browser-1' },
@@ -409,33 +393,29 @@ test('a final round reached by the continuation limit also refuses a late lookup
   assert.ok(sent[8].tools.some(tool => tool.function.name === 'search_notes'), 'the ninth, final round still offers the lookups');
 });
 
-test('thorough: ten lookups run, the eleventh is refused, and the note says how many', async () => {
+test('thorough: eleven lookups over six rounds all run; no count of lookups ends research', async () => {
   const userId = await account(), sent = [], jev = [];
   const view = await runs.submitRun(userId, { requestId: 'req-thorough-ten', chat: header('chat-thorough-ten'), text: 'Recherchiere den Markt gründlich.', device: 'browser-1' },
     { fetcher: judging(sent, jev, { effort: 'thorough', enough: 'no' },
-      ...Array.from({ length: 5 }, (_, index) => lookups(2, 'ten' + index)), lookups(1, 'over'), compatibleMessage({ text: 'Zehn Quellen reichen.' })) });
+      ...Array.from({ length: 5 }, (_, index) => lookups(2, 'ten' + index)), lookups(1, 'over'), compatibleMessage({ text: 'Elf Quellen reichen.' })) });
   assert.equal(view.run.status, 'done', view.run.turn.error);
-  assert.equal(view.run.turn.answer, 'Zehn Quellen reichen.');
+  assert.equal(view.run.turn.answer, 'Elf Quellen reichen.');
   assert.equal(view.run.turn.usage.effort, 'thorough');
-  const made = rows(view, 'search_notes');
-  assert.deepEqual(made.map(item => item.state), [...Array(10).fill('done'), 'failed']);
-  assert.match(made[10].result, /research_budget_reached/);
-  assert.match(String(sent[0].messages[0].content), /deserves thorough looking-up: up to ten lookups/);
+  assert.deepEqual(rows(view, 'search_notes').map(item => item.state), Array(11).fill('done'));
+  assert.match(String(sent[0].messages[0].content), /deserves thorough looking-up\. Search/);
 });
 
-test('thorough: five web lookups run and the sixth is refused', async () => {
+test('thorough: six web searches in six rounds all run', async () => {
   const userId = await account(), sent = [], jev = [];
   const saved = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ success: true, data: { web: [{ title: 'Car', url: 'https://example.com/car', description: 'A car.' }] } }), { status: 200, headers: { 'content-type': 'application/json' } });
   try {
     const view = await runs.submitRun(userId, { requestId: 'req-web-five', chat: { ...header('chat-web-five'), config: { ...VAULT_CONFIG, webSearch: true } }, text: 'Suche im Netz nach dem Auto.', device: 'browser-1' },
       { fetcher: judging(sent, jev, { effort: 'thorough', enough: 'no' },
-        ...Array.from({ length: 5 }, (_, index) => compatibleMessage({ calls: [{ name: 'search_web', input: { query: 'car ' + index }, id: 'call_web' + index }] })), compatibleMessage({ calls: [{ name: 'search_web', input: { query: 'car over' }, id: 'call_web_over' }] }), compatibleMessage({ text: 'Fünf Suchen reichen.' })) });
+        ...Array.from({ length: 6 }, (_, index) => compatibleMessage({ calls: [{ name: 'search_web', input: { query: 'car ' + index }, id: 'call_web' + index }] })), compatibleMessage({ text: 'Sechs Suchen reichen.' })) });
     assert.equal(view.run.status, 'done', view.run.turn.error);
-    assert.equal(view.run.turn.answer, 'Fünf Suchen reichen.');
-    const made = rows(view, 'search_web');
-    assert.deepEqual(made.map(item => item.state), ['done', 'done', 'done', 'done', 'done', 'failed']);
-    assert.match(made[5].result, /research_budget_reached/);
+    assert.equal(view.run.turn.answer, 'Sechs Suchen reichen.');
+    assert.deepEqual(rows(view, 'search_web').map(item => item.state), Array(6).fill('done'));
   } finally {
     globalThis.fetch = saved;
   }

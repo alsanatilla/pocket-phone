@@ -27,7 +27,8 @@ export const SCENARIOS = [
     checks: run => [['done', check.done(run)], ['new card', check.cardDrawn(run, 'Table')], ['no stand-in', check.noStandIn(run)], ['clean prose', check.cleanProse(run)]] },
   { name: 'research-then-card', cost: 4, guards: 'a researched comparison is drawn as a card, also after lookups were refused at the cap, cites its sources and ends',
     text: 'Which Bosphorus tour from Eminönü is cheaper and shorter, the city ferries\' short tour or Turyol? Look both up on the web and show me the comparison.',
-    research: { lookups: 2, webCalls: 2 },
+    // Research is ended after the first round of lookups, as the "enough" judge ends it: the card must still come.
+    research: { enough: async () => true },
     checks: run => [['done', check.done(run)], ['card', check.lookupsRefused(run).pass ? check.cardAfterRefusal(run, ['Table', 'Chart']) : check.cardDrawn(run, ['Table', 'Chart'])], ['cites', check.citesUrls(run, TOURS)], ['requests', check.requestsAtMost(run, MAX_REQUESTS)], ['no stand-in', check.noStandIn(run)]] },
   { name: 'update-card', cost: 2, guards: 'a change to a card in an earlier reply goes through update_card with its id, not a second card',
     turns: [planTurn()], text: 'change the lunch to 13:00', effort: 'none',

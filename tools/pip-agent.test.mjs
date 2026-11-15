@@ -143,9 +143,9 @@ test('a busy provider shows that it is retrying', async () => {
 });
 
 // The regression that started the migration: cards stay drawable once lookups are refused.
-test('after the lookup limit, a lookup is refused with a result and a card is still drawn', async () => {
+test('after research stops, a lookup is refused with a result and a card is still drawn', async () => {
   const { chat, turn, options } = setup(['read_chat_history', 'show_card']), sent = [];
-  const result = await streamChat(chat, turn, { ...options, research: { lookups: 1, webCalls: 0 }, fetcher: provider(sent,
+  const result = await streamChat(chat, turn, { ...options, research: { enough: async () => true }, fetcher: provider(sent,
     lookup('call_1', 'distance'), lookup('call_2', 'more distance'),
     compatibleMessage({ text: 'Your weeks:', calls: [{ name: 'show_card', input: CHART, id: 'call_card' }] }),
     compatibleMessage({ text: 'Keep week three easy.' })) });
@@ -222,8 +222,8 @@ test('an identical failed lookup is answered from its failure, and an identical 
   const answers = result.activity.map(row => JSON.parse(row.result));
   assert.equal(answers[1].cached, true);
   assert.equal(answers[3].repeated, true);
-  // A repeated failure ends research, as in the browser loop: the next request is told so.
-  assert.match(systemText(sent[4]), /An identical failed tool call was repeated/);
+  // Repeats cost nothing and end nothing here: going round in circles is OpenClaw's loop guard to decide.
+  assert.doesNotMatch(systemText(sent[4]), /stopped research/);
 });
 
 test('a tool that throws becomes a tool result, not a failed reply', async () => {
@@ -298,4 +298,19 @@ test('a device tool the device did not answer is a result the model hears', asyn
     fetcher: provider(sent, lookup('call_device', 'x'), compatibleMessage({ text: 'The device did not answer.' })) });
   assert.equal(result.answer, 'The device did not answer.');
   assert.match(toolResults(sent[1])[0], /device_unavailable/);
+});
+
+// Going round in circles is decided by OpenClaw's loop detection, not counted by Pocket. Its module needs the Node
+// version the server runs on, so on an older local Node this is skipped (and lookups run unguarded, as logged).
+test('OpenClaw’s loop guard warns about and then blocks a lookup repeated without progress, and research ends', { skip: Number(process.versions.node.split('.')[0]) < 24 && 'OpenClaw’s harness runtime needs Node 24' }, async () => {
+  const { chat, turn, options } = setup(['read_chat_history']), sent = [];
+  const same = count => compatibleMessage({ calls: Array.from({ length: count }, (_, index) => ({ name: 'read_chat_history', input: { query: 'again' }, id: 'call_same_' + count + '_' + index })) });
+  const result = await streamChat({ ...chat, uid: 'chat-loop-guard' }, { ...turn, uid: 'turn-loop-guard' }, { ...options, // The guard decides when a call is admitted, and a message's lookups are admitted together: the repeats must
+  // span several messages for it to have seen their outcomes.
+    fetcher: provider(sent, same(7), same(8), same(9), same(10), compatibleMessage({ text: 'I kept asking the same thing.' })) });
+  const results = toolResults(sent[4]).join('\n');
+  assert.match(results, /Tool-loop warning after \d+ repeated calls/);
+  assert.match(results, /CRITICAL: Called read_chat_history with identical outcomes \d+ times/);
+  assert.match(systemText(sent[4]), /the app has stopped research.*The same lookup was repeated without progress/s);
+  assert.equal(result.answer, 'I kept asking the same thing.');
 });

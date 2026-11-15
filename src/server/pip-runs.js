@@ -16,7 +16,7 @@ import { execute as runTool, preview as previewTool, label, STATE_TOOLS, WRITE_T
 import { settle } from '../client/pip-activity.js';
 import { objectId, validObject } from '../shared/objects.js';
 import { HOME_TITLE, homeFull, homeSegments, homeTail } from '../shared/pip-home.js';
-import { effortLimits, effortNote } from '../shared/pip-effort.js';
+import { effortNote } from '../shared/pip-effort.js';
 import { replyNotice, waitingNotice } from '../shared/pip-notice.js';
 import { NOT_SET_UP, NO_TOKENS } from '../shared/pip-refusals.js';
 import { notify, watched, watching, unwatch, forgetWatches } from './pip-notify.js';
@@ -616,8 +616,8 @@ async function drive(userId, run, leaseId, { fetcher }) {
     // The level's sentence joins the date line: the model knows how much looking-up Pocket expects before it writes.
     const note = effort && effortNote(effort);
     if (note) body.instructions += '\n\n' + note;
-    const limits = effortLimits(effort);
-    const researchOption = effort === 'thorough' && !assignment ? { ...limits, enough } : limits;
+    // The level is advice in the note above; only thorough research is also asked "is this enough?" between rounds.
+    const researchOption = effort === 'thorough' && !assignment ? { enough } : null;
     const reply = await streamChat(conversationView, turn, { value, body, key, fetcher, deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
       ...(researchOption ? { research: researchOption } : {}), ...(assignment ? {} : { steering: { take } }),
       onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } }); live.publish(runId, turn, meta); progress(); },
