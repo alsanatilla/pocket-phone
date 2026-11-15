@@ -75,6 +75,15 @@ export function MemoryPage() {
       <p className="text-sm text-destructive">{memory.error}</p>
       <Button type="button" onClick={memory.reload}>try again</Button>
     </div>;
+  } else if (memory.gateway) {
+    // The gateway owns Pip's memory as files; the page shows them as they are and Pip edits them by talking.
+    body = <div className="mt-6 space-y-6">
+      <p className="text-sm text-muted-foreground">Pip keeps these files in its own workspace and reads them in every reply. Ask Pip to change or forget something.</p>
+      {memory.files.map(file => <section key={file.name}>
+        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{file.name}</h2>
+        <pre className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed">{file.text.trim() || "(empty)"}</pre>
+      </section>)}
+    </div>;
   } else {
     body = <>
       <Section className="mt-6 flex-1" label="remembered" count={newestFirst.length}>
@@ -96,7 +105,7 @@ export function MemoryPage() {
 
   return (
     <main className="flex min-h-[calc(100dvh-45px)] flex-col pb-4">
-      <PageTitle title="memory" meta="What pip remembers about you. It reads this in every reply." />
+      <PageTitle title="memory" meta={memory.gateway ? "What pip remembers about you, in the files it keeps." : "What pip remembers about you. It reads this in every reply."} />
       {body}
     </main>
   );

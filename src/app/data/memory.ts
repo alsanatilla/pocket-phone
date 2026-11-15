@@ -5,12 +5,14 @@ import * as cloud from "../../client/cloud.js";
 // the list; this module reads it once, again after a change it hears about, and sends each change back.
 
 export interface MemoryEntry { id: string; text: string; chat: string; created: number; updated: number }
+/** A file the OpenClaw gateway keeps for Pip, shown read-only on the page. */
+export interface MemoryFile { name: string; text: string }
 export type MemoryState = "loading" | "ready" | "signed-out" | "failed";
-export interface MemoryView { entries: MemoryEntry[]; state: MemoryState; error: string; reload: () => void }
+export interface MemoryView { entries: MemoryEntry[]; files: MemoryFile[]; gateway: boolean; state: MemoryState; error: string; reload: () => void }
 
-interface MemoryAnswer { accountId: string; entries: MemoryEntry[] }
+interface MemoryAnswer { accountId: string; entries?: MemoryEntry[]; gateway?: boolean; files?: MemoryFile[] }
 
-const entriesOf = (answer: MemoryAnswer): MemoryEntry[] => answer.entries;
+const entriesOf = (answer: MemoryAnswer): MemoryEntry[] => answer.entries ?? [];
 
 /** The account's memory, oldest first, as the server keeps it. */
 export function loadMemory(): Promise<MemoryEntry[]> {
@@ -38,6 +40,8 @@ export function forgetMemory(id: string): Promise<MemoryEntry[]> {
  */
 export function useMemory(): MemoryView {
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
+  const [files, setFiles] = useState<MemoryFile[]>([]);
+  const [gateway, setGateway] = useState(false);
   const [state, setState] = useState<MemoryState>("loading");
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
@@ -53,10 +57,12 @@ export function useMemory(): MemoryView {
     let cancelled = false;
     // A reload after an action keeps the list on screen; only the first read, or a retry, shows the shimmer.
     setState(current => current === "ready" ? current : "loading");
-    loadMemory()
-      .then(entries => {
+    cloud.request<MemoryAnswer>("/api/pip/memory")
+      .then(answer => {
         if (cancelled) return;
-        setEntries(entries);
+        setFiles(answer.files ?? []);
+        setGateway(Boolean(answer.gateway));
+        setEntries(answer.entries ?? []);
         setError("");
         setState("ready");
       })
@@ -74,5 +80,5 @@ export function useMemory(): MemoryView {
     return () => removeEventListener("pocket-memory-changed", changed);
   }, [reload]);
 
-  return { entries, state, error, reload };
+  return { entries, files, gateway, state, error, reload };
 }

@@ -1,10 +1,24 @@
 import type { APIRoute } from 'astro';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { signedIn } from '../../../server/auth.js';
 import { json, failure, sameOrigin, readJson } from '../../../server/http.js';
 import { listMemory, remember, forget } from '../../../server/pip-memory-store.js';
+/** When Pip's memory is the gateway's, the page reads the files the agent keeps, not Pocket's table. */
+async function gatewayFiles() {
+  if (process.env.PIP_GATEWAY !== '1') return null;
+  const dir = join(process.env.PIP_GATEWAY_HOME || '/data/openclaw', 'agents', process.env.PIP_GATEWAY_AGENT || 'pocket');
+  const files = [];
+  for (const name of ['USER.md', 'MEMORY.md']) {
+    try { files.push({ name, text: await readFile(join(dir, name), 'utf8') }); } catch { files.push({ name, text: '' }); }
+  }
+  return files;
+}
 export const GET: APIRoute = async ({ request }) => {
-  try { const user = await signedIn(request); return json({ accountId: user.id, entries: await listMemory(user.id) }); }
-  catch (error) { return failure(error); }
+  try {
+    const user = await signedIn(request), files = await gatewayFiles();
+    return json(files ? { accountId: user.id, gateway: true, files } : { accountId: user.id, entries: await listMemory(user.id) });
+  } catch (error) { return failure(error); }
 };
 export const POST: APIRoute = async ({ request }) => {
   try {
