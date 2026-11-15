@@ -43,7 +43,7 @@ test('a drawn card is placed where the reply stands, and the text follows it', a
   assert.equal(result.usage.output_tokens, 5);
   assert.ok(updates.some(update => String(update.answer).includes('pocket')));
   const input = requests[start].body.input;
-  assert.deepEqual(input.at(-1), { role: 'user', content: 'Now?' }, 'the current message is in the input');
+  assert.deepEqual(input.at(-1), { type: 'message', role: 'user', content: 'Now?' }, 'the current message is in the input');
   assert.equal(input.some(item => item.role === 'assistant' && item.content === ''), false);
 });
 
@@ -71,6 +71,6 @@ test('a chat reply places a card in its own answer and keeps the person\'s messa
   assert.ok(result.answer.indexOf('```pocket') < result.answer.indexOf('Done.'));
   assert.ok(updates.some(update => String(update.answer).includes('pocket')));
   const input = requests[start].body.input;
-  assert.deepEqual(input.at(-1), { role: 'user', content: 'Now?' }, 'the current message is in the input');
+  assert.deepEqual(input.at(-1), { type: 'message', role: 'user', content: 'Now?' }, 'the current message is in the input');
   assert.equal(input.some(item => item.role === 'assistant' && item.content === ''), false);
 });

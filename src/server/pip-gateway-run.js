@@ -7,8 +7,8 @@ import { gatewayReply, gatewayTools } from './pip-gateway.js';
 /** The chat's turns as Responses input: one message each, the assistant's answer after the person's request. */
 export function gatewayInput(turns) {
   return (turns || []).flatMap(item => {
-    const items = [{ role: 'user', content: String(item.text || '') }];
-    if (item.answer) items.push({ role: 'assistant', content: String(item.answer) });
+    const items = [{ type: 'message', role: 'user', content: String(item.text || '') }];
+    if (item.answer) items.push({ type: 'message', role: 'assistant', content: String(item.answer) });
     return items;
   }).filter(item => item.content.trim());
 }

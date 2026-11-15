@@ -34,6 +34,10 @@ With a real model through the custom provider, one request
 A later request with no history ("What do I prefer to drink?") answered "Tea." from `USER.md`. Writes, injection and
 supersession are the gateway's, not Pocket's.
 
+A chat reply through `gatewayChat` with the real gateway and model called Pocket's `show_card` client tool, Pocket
+placed the fence in the answer, and the model continued with its sentence — the client-tool loop works against the
+real agent. (Responses input items are `{type:"message", role, content}`; a bare `{role, content}` is rejected.)
+
 ## The client
 
 `src/server/pip-gateway.js` is the transport: `gatewayReply` streams `POST /v1/responses`, runs every function call
