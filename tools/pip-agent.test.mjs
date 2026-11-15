@@ -314,3 +314,19 @@ test('OpenClaw’s loop guard warns about and then blocks a lookup repeated with
   assert.match(systemText(sent[4]), /the app has stopped research.*The same lookup was repeated without progress/s);
   assert.equal(result.answer, 'I kept asking the same thing.');
 });
+
+test('server-owned sandbox tools reach OpenClaw and their results return to the model', async () => {
+  const { chat, turn, options, updates } = setup([]);
+  const sent = [], calls = [];
+  const sandboxFactory = async (userId, context) => {
+    assert.equal(userId, 'server-user'); assert.match(context.sessionKey, /server-user/);
+    return [{ name: 'exec', label: 'exec', description: 'Run code in the isolated workspace', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] }, execute: async (id, args) => { calls.push(args.command); return { content: [{ type: 'text', text: '42' }], details: { status: 'completed' } }; } }];
+  };
+  const replies = [compatibleMessage({ calls: [{ id: 'code', name: 'exec', input: { command: 'python3 -c "print(6*7)"' } }] }), compatibleMessage({ text: 'The result is 42.' })];
+  const result = await streamChat(chat, turn, { ...options, userId: 'server-user', sandboxFactory, fetcher: async (_url, request) => { sent.push(JSON.parse(request.body)); return response(replies.shift()); } });
+  assert.equal(calls.length, 1);
+  assert.ok(sent[0].tools.some(t => t.function.name === 'exec'));
+  assert.match(JSON.stringify(sent[1].messages), /42/);
+  assert.equal(result.answer, 'The result is 42.');
+  assert.ok(updates.some(u => u.activity.some(a => a.name === 'exec' && a.state === 'done')));
+});

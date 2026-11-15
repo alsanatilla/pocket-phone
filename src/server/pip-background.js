@@ -492,7 +492,7 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
   const { streamChat } = await import('./pip-agent.js');
   let revised = false;
   try {
-    const reply = await streamChat(view, turn, { value, body, key, fetcher, signal, deadlineMs: RUN_DEADLINE, coverage: contextCoverage(view, turn),
+    const reply = await streamChat(view, turn, { value, body, key, fetcher, signal, userId, deadlineMs: RUN_DEADLINE, coverage: contextCoverage(view, turn),
       onUpdate: update => Object.assign(turn, update),
       // A card changed in an earlier report: the chat is written when the run ends, even one that reports nothing new.
       // In the big chat it is written at once to the segment that holds it, which may be the one before.

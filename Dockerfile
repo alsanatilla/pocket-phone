@@ -11,6 +11,7 @@ ENV POCKET_TARGET=node POCKET_ALLOW_PROXY=1
 RUN npm run build && npm prune --omit=dev
 
 FROM node:24.16.0-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules

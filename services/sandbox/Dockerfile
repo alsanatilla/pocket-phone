@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && useradd --create-home --home-dir /home/pip --shell /bin/bash --uid 1000 pip \
     && usermod -p '*' pip \
     && mkdir -p /run/sshd /workspace && chown pip:pip /workspace
+RUN groupadd pip-sandbox
+COPY accounts.py /usr/local/bin/accounts.py
 COPY sshd_config /etc/ssh/sshd_config
 COPY start.sh /usr/local/bin/start.sh
 RUN chmod 755 /usr/local/bin/start.sh

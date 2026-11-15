@@ -7,10 +7,12 @@ set -eu
 umask 077
 printf '%s\n' "$SANDBOX_HOST_KEY" > /etc/ssh/ssh_host_ed25519_key
 mkdir -p /etc/ssh/authorized_keys
-printf '%s\n' "$SANDBOX_AUTHORIZED_KEY" > /etc/ssh/authorized_keys/pip
-chmod 755 /etc/ssh/authorized_keys && chmod 644 /etc/ssh/authorized_keys/pip
+printf '%s\n' "$SANDBOX_AUTHORIZED_KEY" > /etc/ssh/authorized_keys/accounts
+chmod 755 /etc/ssh/authorized_keys && chmod 644 /etc/ssh/authorized_keys/accounts
 # The volume arrives owned by root.
-chown pip:pip /workspace
+# Keep other accounts' process arguments and environments out of /proc.
+mount -o remount,hidepid=2 /proc
+python3 /usr/local/bin/accounts.py
 # sshd passes no secret on: its children start from a clean environment.
-unset SANDBOX_HOST_KEY SANDBOX_AUTHORIZED_KEY
+unset SANDBOX_HOST_KEY SANDBOX_AUTHORIZED_KEY SANDBOX_ACCOUNTS
 exec /usr/sbin/sshd -D -e

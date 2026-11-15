@@ -55,7 +55,7 @@ const kept = (name, input) => CARD_TOOLS.includes(name) ? (name === 'update_card
  */
 export async function streamChat(chat, turn, { value, body, key, signal, onUpdate = () => {}, fetcher = fetch,
   executeTool = execute, previewTool = preview, approve, deviceTools = [], durable, saveTurn, resume, coverage,
-  deadlineMs = RESEARCH_LIMITS.deadlineMs, timeoutMs = 90000, research, streamFn, transport = createTransport, steering } = {}) {
+  deadlineMs = RESEARCH_LIMITS.deadlineMs, timeoutMs = 90000, userId, sandboxFactory, research, streamFn, transport = createTransport, steering } = {}) {
   const saved = durable?.checkpoint;
   if (saved && saved.runtime !== 'openclaw') throw new Error('This pending reply uses the previous runtime. Stop it and send the request again.');
   const model = { id: value.model, name: value.model, api: 'pocket-transport', provider: value.provider, baseUrl: value.baseUrl, reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: value.maxTokens };
@@ -172,7 +172,10 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
     if (researchStopped()) return counters.finalReason || (lastRequest() ? 'Last model request of this reply' : 'Research limit reached');
     return '';
   };
-  const base = body.instructions.replace(SDK_RESEARCH_INSTRUCTIONS, 'Research tools report their limits in their results. Cards, plans and approved saves remain available after research stops. ');
+  const native = userId ? await (sandboxFactory || (await import('./pip-sandbox.js')).sandboxTools)(userId, { signal: controller.signal, sessionKey: 'pocket:' + userId + ':' + chat.uid }) : [];
+  const nativeByName = new Map(native.map(tool => [tool.name, tool]));
+  const sandboxNote = native.length ? '\n\nYou have an isolated Linux workspace that persists across your chats. Use exec for Python, calculations and data analysis, and read/write/edit for workspace files. Its tools run on a separate machine without Pocket credentials; notes, tasks and appointments still use Pocket tools and approval. Save reusable scripts and data in the workspace. Network access is available. Workspace file changes do not change Pocket records. Never claim a file is a downloadable attachment unless a delivery tool actually supplied a link.' : '';
+  const base = (body.instructions + sandboxNote).replace(SDK_RESEARCH_INSTRUCTIONS, 'Research tools report their limits in their results. Cards, plans and approved saves remain available after research stops. ');
   const instructions = () => base + (lastRequest()
     ? '\n\nPocket runtime status: this is the last model request this reply may make. This is an app limit, not a user instruction. Write the answer to the current user request now, in this message, from the observations already collected; lookups are refused. '
       + (offered.includes('show_card') ? 'A card that belongs in this answer is still drawn by calling show_card in this same message; never write a stand-in such as "[card: …]". ' : '')
@@ -327,6 +330,26 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
   const tools = offered.map(name => guarded({ name, label: name, description: definitions[name].description, parameters: z.toJSONSchema(SCHEMAS[name], { unrepresentable: 'any' }),
     executionMode: isLookup(name) && !deviceTools.includes(name) ? 'parallel' : 'sequential', execute: (id, input) => run(name, id, input) }));
 
+  const runNative = async (tool, id, input) => {
+    busy++; clearTimeout(idle);
+    try {
+      check();
+      const eventId = rowId(id);
+      record(eventId, { name: tool.name, title: tool.name + ' · workspace', input: JSON.stringify(input), state: 'running', summary: 'working in the sandbox' });
+      try {
+        const out = await tool.execute(id, input, controller.signal);
+        check();
+        const failed = out.isError || ['error', 'failed'].includes(out.details?.status) || typeof out.details?.exitCode === 'number' && out.details.exitCode !== 0;
+        record(eventId, { state: failed ? 'failed' : 'done', summary: 'workspace ' + tool.name, result: JSON.stringify({ kind: 'workspace', tool: tool.name, status: failed ? 'failed' : 'done', text: (out.content || []).filter(part => part.type === 'text').map(part => part.text).join('\n').slice(0, 6000) }), ended: Date.now() });
+        return out;
+      } catch (error) {
+        record(eventId, { state: 'failed', summary: 'Workspace tool failed', ended: Date.now() });
+        throw error;
+      }
+    } finally { busy--; clock(); }
+  };
+  tools.push(...native.map(tool => ({ ...tool, execute: (id, input) => runNative(tool, id, input) })));
+
   // The reply as it streams: text, thinking, and a card while it is written.
   const inputs = new Map();
   const onPart = part => {
@@ -465,7 +488,7 @@ export async function streamChat(chat, turn, { value, body, key, signal, onUpdat
       const messages = agent.state.messages, at = messages.findLastIndex(m => m.role === 'assistant');
       const done = new Set(messages.slice(at + 1).filter(m => m.role === 'toolResult').map(m => m.toolCallId));
       for (const item of messages[at]?.content || []) if (item.type === 'toolCall' && !done.has(item.id)) {
-        const output = await run(item.name, item.id, item.arguments);
+        const output = nativeByName.has(item.name) ? await runNative(nativeByName.get(item.name), item.id, item.arguments) : await run(item.name, item.id, item.arguments);
         agent.state.messages = [...agent.state.messages, { role: 'toolResult', toolCallId: item.id, toolName: item.name, ...output, isError: Boolean(output.details?.error), timestamp: Date.now() }];
       }
       endStep(messages[at] || {});

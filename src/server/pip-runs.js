@@ -618,7 +618,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
     if (note) body.instructions += '\n\n' + note;
     // The level is advice in the note above; only thorough research is also asked "is this enough?" between rounds.
     const researchOption = effort === 'thorough' && !assignment ? { enough } : null;
-    const reply = await streamChat(conversationView, turn, { value, body, key, fetcher, deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
+    const reply = await streamChat(conversationView, turn, { value, body, key, fetcher, ...(assignment ? {} : { userId }), deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
       ...(researchOption ? { research: researchOption } : {}), ...(assignment ? {} : { steering: { take } }),
       onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } }); live.publish(runId, turn, meta); progress(); },
       resume: { reasoning: turn.reasoning || '', activity: turn.activity || [], observations },
