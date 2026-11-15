@@ -79,3 +79,44 @@ test('Pocket tools become gateway client tools with their own schemas', () => {
   assert.match(tools[0].description, /note/i);
   assert.equal(tools[0].parameters.type, 'object');
 });
+
+test('a write pauses a durable run, and the resume runs what the person approved', async () => {
+  const start = requests.length;
+  script = [{ call: 'create_record', id: 'call_w', arguments: { kind: 'task', title: 'Original' } }];
+  let saved = null;
+  await assert.rejects(gatewayReply({ ...base, writes: ['create_record'],
+    preview: async (name, input) => ({ action: { tool: name, title: input.title } }),
+    execute: async () => ({ saved: true }),
+    durable: { checkpoint: null, settled: null, pause: async state => { saved = state; } } }), error => error.name === 'RunPaused');
+  assert.equal(saved.runtime, 'gateway');
+  assert.match(saved.responseId, /^resp_/);
+  assert.deepEqual(saved.pending.map(item => [item.toolName, item.input.title]), [['create_record', 'Original']]);
+  assert.equal(saved.previews.call_w.action.title, 'Original');
+
+  // The person approved with a new title: the resume executes that, not the model's original.
+  script = [{ text: 'Saved it.' }];
+  const executed = [];
+  const resumed = await gatewayReply({ ...base, writes: ['create_record'],
+    execute: async (id, name, input) => { executed.push([name, input]); return { saved: true }; },
+    durable: { checkpoint: saved, settled: new Map([['call_w', { approved: true, input: { kind: 'task', title: 'Edited' } }]]), pause: async () => {} } });
+  assert.deepEqual(executed, [['create_record', { kind: 'task', title: 'Edited' }]]);
+  assert.equal(resumed.answer, 'Saved it.');
+  const follow = requests[start + 1].body;
+  assert.equal(follow.previous_response_id, saved.responseId);
+  assert.deepEqual(JSON.parse(follow.input[0].output), { saved: true });
+});
+
+test('a declined write on resume runs nothing and the model hears it', async () => {
+  const saved = { runtime: 'gateway', responseId: 'resp_9', answer: 'Before.', usage: {},
+    calls: [{ call_id: 'call_d', name: 'create_record', arguments: '{"title":"No"}' }],
+    pending: [{ approvalId: 'gw-call_d', toolCallId: 'call_d', toolName: 'create_record', input: { title: 'No' }, rowId: 'call_d' }],
+    previews: { call_d: { action: { tool: 'create_record', title: 'No' } } } };
+  const start = requests.length;
+  script = [{ text: 'Okay.' }];
+  const ran = [];
+  const result = await gatewayReply({ ...base, writes: ['create_record'], execute: async (id, name) => { ran.push(name); return { saved: true }; },
+    durable: { checkpoint: saved, settled: new Map([['call_d', { approved: false }]]), pause: async () => {} } });
+  assert.deepEqual(ran, []);
+  assert.equal(result.answer, 'Before.Okay.');
+  assert.equal(JSON.parse(requests[start].body.input[0].output).action.status, 'declined');
+});

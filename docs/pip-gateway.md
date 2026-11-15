@@ -44,8 +44,10 @@ follow-up and its input.
 
 What it does: streaming, client tools, and a write that pauses for the person — `preview` says what will happen,
 `approve` returns the decision (and any edited input), the tool only runs when approved, and a declined write goes
-back to the model as declined. What it does not do yet: a durable run paused on that decision and resumed with the
-pending calls. That is the next layer; until then chat replies stay on the old loop.
+back to the model as declined. It also pauses a durable run: the calls, their previews and the response id are stored, the run is paused, and on
+resume the approved calls are executed (with any edited input) or declined, then the reply continues from
+`previous_response_id`. What it does not do yet: place cards in a live chat reply and drive the chat path's
+assignment/job/steering options. Until then chat replies stay on the old loop.
 
 ## The reply loop Pocket still has to move
 
