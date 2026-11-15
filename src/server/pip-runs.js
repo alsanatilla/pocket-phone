@@ -638,7 +638,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
       const source = await serverRecordSource(userId);
       const usage = part => ({ ...total(part || {}), runtime: 'pocket-server', engine: 'openclaw' });
       turn.usage = usage(); progress();
-      const reply = await nativeReply({ userId, chatUid, runId, turn, chat, signal: controller.signal, ask: approval, take,
+      const reply = await nativeReply({ userId, chatUid, runId, turn, chat, signal: controller.signal, ask: approval, take, createdAt: Number(run.created) || 0,
         allowedTools: assignment ? NATIVE_RESEARCH_TOOLS : NATIVE_TOOLS.filter(name => !['update_scratch', 'update_training_preferences'].includes(name)),
         waitingTools: deviceTools,
         ...(assignment ? { message: turn.text + ASSIGNMENT_NOTE } : {}),

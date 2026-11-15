@@ -44,7 +44,10 @@ export function gatewayConfig(native = null) {
     // Keyword memory: no embedding key is required, and the index stays fts-only instead of waiting for vectors.
     memory: { search: { provider: 'none', sources: ['memory'] } },
     models: { mode: 'merge', providers: {
-      [id]: { baseUrl, apiKey: key, api: 'openai-completions', authHeader: true,
+      // One routing session for every chat of this Pocket: OpenCode caches by it, and all chats share Pip's ~11,600
+      // tokens of instructions, so a new chat starts cached too (measured: first word 2.2–3.8 s uncached, ~1.3 s
+      // cached). OpenClaw's provider keeps a header it is given instead of the per-chat one.
+      [id]: { baseUrl, apiKey: key, api: 'openai-completions', authHeader: true, ...(go ? { headers: { 'x-opencode-session': 'pocket-' + agentId() + '-' + (env.FLY_APP_NAME || 'local') } } : {}),
         models: [{ id: name, name, api: 'openai-completions', reasoning: go, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192,
           ...(go ? { compat: { supportsUsageInStreaming: true, supportsReasoningEffort: true, maxTokensField: 'max_tokens', supportsDeveloperRole: false, supportsStrictMode: false } } : {}) }] },
     } },

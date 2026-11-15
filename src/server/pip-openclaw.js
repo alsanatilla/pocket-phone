@@ -129,7 +129,8 @@ const marks = (id, old) => ({ id, updated: Date.now(), ...(old?.pinned ? { pinne
  * `{ approved }`; `take({ pos })` takes the messages sent into the reply; `onUpdate` receives the turn's progress.
  * Resolves to the finished turn fields; rejects with AbortError when stopped.
  */
-export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, execute, preview, ask, take = async () => [], saveTurn, allowedTools = NATIVE_TOOLS, autoApproveTools = [], waitingTools = [], message, onUpdate = () => {} }) {
+export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, execute, preview, ask, take = async () => [], saveTurn, allowedTools = NATIVE_TOOLS, autoApproveTools = [], waitingTools = [], message, createdAt = 0, onUpdate = () => {} }) {
+  const timing = { start: Date.now(), created: Number(createdAt) || 0 };
   const client = await gateway(), key = sessionKeyFor(userId, chatUid);
   if (state.sessions.has(key)) throw no('Pip is already answering in this chat.', 'run_active');
   const result = { answer: '', reasoning: String(turn.reasoning || ''), activity: [], phase: 'requesting', usage: {} };
@@ -235,6 +236,7 @@ export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, 
         // `text` is the item's whole text so far, `delta` an append, `replace` a new text altogether.
         if (data.itemId && data.itemId !== item.id) { base = answer(); item = { id: data.itemId, text: '' }; }
         item.text = typeof data.text === 'string' ? data.text : data.replace ? String(data.delta || '') : item.text + String(data.delta || '');
+        if (!timing.firstWord) timing.firstWord = Date.now();
         result.phase = 'writing'; publish();
       } else if (payload.stream === 'usage' && Number.isFinite(data.outputTokens)) outputs = data.outputTokens;
       else if (payload.stream === 'tool' && data.toolCallId) {
@@ -317,10 +319,15 @@ export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, 
     if (signal?.aborted) throw stopped();
     // Only the person's message and what they attached: the session holds everything before it.
     const context = (Array.isArray(turn.context) ? turn.context : []).map(source => '\n\n[Attached: ' + String(source.title || 'source') + ']\n' + String(source.text || '')).join('');
+    timing.send = Date.now();
     const ack = await client.request('chat.send', { sessionKey: key, message: String(message ?? turn.text ?? '') + context, idempotencyKey: 'pocket-' + runId });
+    timing.accepted = Date.now();
     if (typeof ack?.runId === 'string' && !ended.has(ack.runId)) active.add(ack.runId);
     await done;
   } finally {
+    // One line per reply: where the time to the first word went (Pocket before the send, the gateway and model after).
+    const at = name => timing[name] ? timing[name] - timing.start : null;
+    console.log(JSON.stringify({ level: 'info', message: 'Native reply timing', runId, sinceRun: timing.created ? timing.start - timing.created : null, send: at('send'), accepted: at('accepted'), firstWord: at('firstWord'), done: Date.now() - timing.start }));
     clearInterval(timer); offWake();
     signal?.removeEventListener('abort', onAbort);
     if (state.sessions.get(key) === session) state.sessions.delete(key);
