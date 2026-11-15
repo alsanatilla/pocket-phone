@@ -1,5 +1,24 @@
 # Pip workspace on Fly
 
+Native gateway integration is configured in `services/gateway/sandbox.mjs` and `config.mjs`.
+Each explicitly provisioned account gets an OpenClaw agent, its own local workspace, and an SSH sandbox
+with agent scope so files survive across chats. Sessions route by the authenticated account, not model input.
+Unprovisioned accounts retain chat tools only. The old in-process adapter remains solely for non-native deployments.
+
+The gateway uses OpenClaw's SSH backend directly. Host keys are pinned, credentials are supplied from existing
+Fly secrets, elevated execution is disabled, and the plugin blocks requests to exec on the gateway or a node.
+OpenClaw creates its remote workspace below `/workspace/<account>/openclaw`; existing files elsewhere in the
+account directory are not deleted. SSH workspaces are seeded once; subsequent remote edits are not automatically
+copied to the local workspace. Each provisioned account starts a separate agent session and memory workspace;
+the old shared agent files are retained rather than copied across accounts.
+
+Run `node services/gateway/check-sandbox.mjs` in the deployed Pocket image to verify actual gateway exec,
+Unix account isolation, absence of Pocket credentials, and file persistence between two fresh chats. It creates
+and deletes one uniquely named marker. This uses two real model turns and does not change Pocket records.
+
+## Existing sandbox provisioning
+
+
 Pocket's server chat and scheduled reports offer OpenClaw's native `exec`, `read`,
 `write`, `edit`, and `apply_patch` tools to provisioned accounts. Assignments retain
 their existing restricted tool surface. The tools come from the public async

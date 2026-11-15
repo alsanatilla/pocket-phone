@@ -10,6 +10,7 @@
 // - approvals: the plugin's before_tool_call asks for a plugin approval; Pocket shows it as a run request (the same
 //   approval screen, decideRun) and resolves it with plugin.approval.resolve.
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { agentForUser } from '../../services/gateway/sandbox.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SCHEMAS } from '../client/pip-sdk-tools.js';
@@ -24,7 +25,6 @@ import { NATIVE_TOOLS, NATIVE_WRITES, onWake } from './pip-openclaw-tools.js';
 /** Sessions with a reply running in this process, and the one gateway connection. One copy for the whole process. */
 const state = globalThis.__pocketOpenClaw ??= { sessions: new Map(), connection: null };
 export const nativeOn = () => process.env.PIP_OPENCLAW_NATIVE === '1' && Boolean(process.env.PIP_GATEWAY_TOKEN);
-const agentId = () => process.env.PIP_GATEWAY_AGENT || 'pocket';
 const no = (message, code = 'openclaw_failed') => Object.assign(new Error(message), { status: 502, code });
 const stopped = () => Object.assign(new Error('Stopped'), { name: 'AbortError' });
 /** How long a reply may go without a single event from the gateway (not counting a wait for the person). */
@@ -34,7 +34,7 @@ const IDLE = Number(process.env.PIP_OPENCLAW_IDLE_MS) || 120000;
  * The OpenClaw session of one Pocket chat. Derived from the account as well as the chat, so a chat uid chosen to
  * match someone else's can never reach their session; Pocket keeps the reverse mapping only while a reply runs.
  */
-export const sessionKeyFor = (userId, chatUid) => 'agent:' + agentId() + ':pocket-' + createHash('sha256').update(userId + '\n' + chatUid).digest('hex').slice(0, 32);
+export const sessionKeyFor = (userId, chatUid) => 'agent:' + agentForUser(userId) + ':pocket-' + createHash('sha256').update(userId + '\n' + chatUid).digest('hex').slice(0, 32);
 
 function dispatch(frame) {
   const payload = frame?.payload || {}, key = payload.sessionKey || payload.request?.sessionKey;

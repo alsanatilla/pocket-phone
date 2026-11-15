@@ -10,7 +10,6 @@ import { applyApprovedWrite } from './pip-writes.js';
 import { jobTool, jobPreview, JOB_TOOLS } from './pip-job-tools.js';
 import { backgroundAccount, keyOf, chargeTokens, homeReport, localDay, tokensLeft, validTimezone, JOB_BUDGET } from './pip-background.js';
 import { readKey } from './pip-keys.js';
-import { judgeEffort, judgeEnough } from './pip-effort.js';
 import { config as pipConfig, requestBody, contextCoverage } from '../client/pip-core.js';
 import { execute as runTool, preview as previewTool, label, STATE_TOOLS, WRITE_TOOLS } from '../client/pip-tools.js';
 import { settle } from '../client/pip-activity.js';
@@ -24,7 +23,6 @@ import { enqueue, claimJob, finishJob, releaseJob } from './pip-queue.js';
 import * as live from './pip-live.js';
 import { publish } from './pocket-events.js';
 import { compactFrame } from './pip-frames.js';
-import { compactChat } from './pip-compaction.js';
 import { nap, wake } from './pip-openclaw-tools.js';
 export { compactFrame };
 
@@ -655,6 +653,8 @@ async function drive(userId, run, leaseId, { fetcher }) {
       Object.assign(turn, reply, { usage: usage(reply.usage) });
       return await end('done');
     }
+    // The legacy model runtime is never loaded by a native reply.
+    const [{ compactChat }, { judgeEffort, judgeEnough }] = await Promise.all([import('./pip-compaction.js'), import('./pip-effort.js')]);
     // JEV decides how much looking-up this message deserves; it answers while the run's source and requests are read.
     // An assignment is research by definition: it gets the thorough limits without asking JEV.
     let effort = typeof turn.usage?.effort === 'string' ? turn.usage.effort : assignment ? 'thorough' : '';

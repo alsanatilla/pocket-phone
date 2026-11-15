@@ -24,14 +24,3 @@ export const Answer = memo(function Answer({ text, blocks, streaming, onAsk, at 
     </div>
   );
 });
-
-/** Before the first words: the shape of a reply, softly lit, instead of an empty space or a spinner. */
-export function Thinking({ label }: { label: string }) {
-  return (
-    <div className="arrive space-y-2 py-1" role="status" aria-label={label}>
-      <div className="shimmer h-3.5 w-4/5 rounded-sm" />
-      <div className="shimmer h-3.5 w-3/5 rounded-sm" />
-      <p className="pt-1 text-xs text-muted-foreground">{label}</p>
-    </div>
-  );
-}

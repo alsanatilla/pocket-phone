@@ -90,3 +90,31 @@ test('OpenCode Go goes through OpenClaw\'s own provider, which sends the chat\'s
     assert.notDeepEqual(Object.keys(gatewayConfig().models.providers), ['opencode-go'], 'any other endpoint stays a plain compatible provider');
   } finally { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); }
 });
+
+test('native sandbox agents are isolated, pinned and provisioned explicitly', async () => {
+  const saved = { ...process.env };
+  try {
+    const { sandboxAccount, agentForUser } = await import('../services/gateway/sandbox.mjs');
+    const a = sandboxAccount('alice'), b = sandboxAccount('bob');
+    Object.assign(process.env, { PIP_OPENCLAW_NATIVE: '1', PIP_SANDBOX_ACCOUNTS: a + ',' + b,
+      PIP_SANDBOX_SSH_KEY: 'fixture-key\\n', PIP_SANDBOX_KNOWN_HOSTS: 'pocket-pip-sandbox ssh-ed25519 AAAATEST' });
+    const { nativePlugin } = await import('../services/gateway/config.mjs');
+    const cfg = gatewayConfig(await nativePlugin());
+    const alice = cfg.agents.entries[agentForUser('alice')], bob = cfg.agents.entries[agentForUser('bob')];
+    assert.notEqual(alice.workspace, bob.workspace);
+    assert.equal(agentForUser('unprovisioned'), 'pocket');
+    assert.equal(cfg.agents.entries.pocket.sandbox, undefined);
+    assert.equal(alice.sandbox.mode, 'all'); assert.equal(alice.sandbox.scope, 'agent');
+    assert.equal(alice.sandbox.ssh.target, a + '@pocket-pip-sandbox.internal:2222');
+    assert.match(alice.sandbox.ssh.knownHostsData, /^\[pocket-pip-sandbox.internal\]:2222 /);
+    assert.equal(alice.sandbox.ssh.strictHostKeyChecking, true);
+    assert.equal(alice.tools.exec.host, 'sandbox'); assert.equal(alice.tools.elevated.enabled, false);
+    assert.ok(alice.tools.sandbox.tools.allow.includes('show_card'));
+    const written = await writeGatewayConfig();
+    const { execFileSync } = await import('node:child_process');
+    execFileSync(process.execPath, ['node_modules/openclaw/dist/index.js', 'config', 'validate'], {
+      env: { ...process.env, OPENCLAW_CONFIG_PATH: written.path, OPENCLAW_STATE_DIR: join(home, 'validation') }, stdio: 'pipe' });
+    delete process.env.PIP_SANDBOX_SSH_KEY;
+    assert.throws(() => gatewayConfig({ names: [] }), /credentials/);
+  } finally { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); }
+});

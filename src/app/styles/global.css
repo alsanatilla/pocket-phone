@@ -292,3 +292,26 @@
 @media (pointer: coarse) {
   input, textarea, select, [contenteditable="true"] { font-size: max(16px, 1em); }
 }
+
+
+/* Pip's activity stays small and never delays streamed words. Only compositor-friendly properties move. */
+@layer components {
+  .pip-activity-mark { display: inline-flex; align-items: center; justify-content: center; gap: 3px; width: 18px; height: 16px; color: var(--primary); flex-shrink: 0; }
+  .pip-activity-mark i { display: block; width: 3px; height: 3px; border-radius: 2px; background: currentColor; opacity: .55; }
+  [data-pip-activity="working"] .pip-activity-mark i { height: 9px; }
+  [data-pip-activity="waiting"] .pip-activity-mark i { background: transparent; border: 1px solid currentColor; opacity: .65; }
+  [data-pip-activity="replying"] .pip-activity-mark i:not(:first-child) { display: none; }
+  [data-pip-activity="replying"] .pip-activity-mark i { width: 5px; height: 5px; }
+  @media (prefers-reduced-motion: no-preference) {
+    [data-pip-activity="thinking"] .pip-activity-mark i { animation: pip-think 1.2s cubic-bezier(.4, 0, .2, 1) infinite; }
+    [data-pip-activity="working"] .pip-activity-mark i { animation: pip-work .9s cubic-bezier(.4, 0, .2, 1) infinite; }
+    [data-pip-activity="replying"] .pip-activity-mark i { animation: pip-reply 1.2s ease-in-out infinite; }
+    .pip-activity-mark i:nth-child(2) { animation-delay: 120ms; }
+    .pip-activity-mark i:nth-child(3) { animation-delay: 240ms; }
+    [data-pip-activity="replied"] .pip-activity-mark { animation: pip-ack 180ms var(--ease-out) both; }
+  }
+}
+@keyframes pip-think { 0%, 65%, 100% { opacity: .4; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+@keyframes pip-work { 0%, 100% { opacity: .45; transform: scaleY(.45); } 50% { opacity: 1; transform: scaleY(1); } }
+@keyframes pip-reply { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+@keyframes pip-ack { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: scale(1); } }

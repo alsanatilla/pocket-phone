@@ -38,6 +38,10 @@ export default definePluginEntry({
         },
       }), { name: definition.name, workspaceAccess: false });
     }
+    api.on('before_tool_call', event => {
+      if (event.toolName === 'exec' && (event.params?.elevated || event.params?.host && event.params.host !== 'sandbox'))
+        return { block: true, blockReason: 'Code may run only in the remote sandbox.' };
+    }, { matcher: ['exec'] });
     api.on('before_tool_call', async (event, context) => {
       if (!writes.includes(event.toolName)) return;
       const ready = await pocket(url, { action: 'preview', sessionKey: context.sessionKey || '', tool: event.toolName, input: event.params ?? {}, callId: event.toolCallId || context.toolCallId || '' }, context.abortSignal);

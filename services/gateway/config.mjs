@@ -8,6 +8,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sandboxAccounts, sandboxAgent, sshSandbox, CODING_TOOLS } from './sandbox.mjs';
 
 const env = process.env;
 export const gatewayHome = () => env.PIP_GATEWAY_HOME || '/data/openclaw';
@@ -34,6 +35,10 @@ export function gatewayConfig(native = null) {
   const id = go ? 'opencode-go' : provider();
   const baseUrl = go ? OPENCODE_GO_URL : env.PIP_GATEWAY_BASE_URL;
   const workspace = join(gatewayHome(), 'agents', agentId());
+  const accounts = native ? sandboxAccounts() : [];
+  const sandboxEntries = Object.fromEntries(accounts.map(account => [sandboxAgent(account), { workspace: join(gatewayHome(), 'agents', sandboxAgent(account)), model: id + '/' + name, skills: ['pocket-cards'], sandbox: sshSandbox(account),
+    tools: { alsoAllow: CODING_TOOLS, elevated: { enabled: false }, exec: { host: 'sandbox', security: 'full', ask: 'off', timeoutSeconds: 60, applyPatch: { enabled: true, workspaceOnly: true } }, fs: { workspaceOnly: true },
+      sandbox: { tools: { allow: [...CODING_TOOLS, 'memory_search', 'memory_get', 'skills_read', ...native.names], deny: ['browser', 'canvas', 'nodes', 'gateway'] } } } }]));
   return {
     gateway: { mode: 'local', port: gatewayPort(), bind: 'loopback', auth: { mode: 'token', token: env.PIP_GATEWAY_TOKEN || '' },
       http: { endpoints: { responses: { enabled: true } } } },
@@ -58,8 +63,8 @@ export function gatewayConfig(native = null) {
     ...(native ? { tools: { profile: 'minimal', alsoAllow: ['group:memory', 'skills_read', ...native.names], deny: ['gateway', 'presence', 'session_status'], toolSearch: false } } : {}),
     // OpenClaw tells the model the date in the person's timezone (Pocket's own loop added a date line itself).
     // Chat answers without thinking first: DeepSeek otherwise spends ~80–150 tokens reasoning before "Hi".
-    agents: { defaults: { thinkingDefault: env.PIP_GATEWAY_THINKING || 'off', ...(env.PIP_GATEWAY_TIMEZONE ? { userTimezone: env.PIP_GATEWAY_TIMEZONE } : {}) },
-      entries: { [agentId()]: { workspace, model: id + '/' + name, ...(native ? { skills: ['pocket-cards'] } : {}) } } },
+    agents: { ...(accounts.length ? { ownership: 'explicit' } : {}), defaults: { thinkingDefault: env.PIP_GATEWAY_THINKING || 'off', ...(env.PIP_GATEWAY_TIMEZONE ? { userTimezone: env.PIP_GATEWAY_TIMEZONE } : {}) },
+      entries: { [agentId()]: { workspace, model: id + '/' + name, ...(native ? { skills: ['pocket-cards'] } : {}) }, ...sandboxEntries } },
   };
 }
 
@@ -103,21 +108,24 @@ export async function warmGateway({ tries = 120 } = {}) {
 export async function writeGatewayConfig() {
   const home = gatewayHome(), path = join(home, 'openclaw.json'), workspace = join(home, 'agents', agentId());
   const native = nativeOn() ? await nativePlugin() : null;
-  await mkdir(workspace, { recursive: true, mode: 0o700 });
-  // Pip's persona, not OpenClaw's "pick a name" scaffolding. USER.md and MEMORY.md are the agent's and stay untouched.
-  await writeFile(join(workspace, 'IDENTITY.md'), '# Pip\n\n- **Name:** Pip\n- **Role:** the assistant inside Pocket\n', { mode: 0o600 });
-  await writeFile(join(workspace, 'SOUL.md'), '# Pip\n\nBe brief, plain and useful. No filler, no introductions, no emoji.\n', { mode: 0o600 });
-  await writeFile(join(workspace, 'AGENTS.md'), native ? NATIVE_AGENTS : AGENTS, { mode: 0o600 });
-  if (native) {
-    // How and when Pip draws, as an OpenClaw skill: the model reads it when a reply wants a picture, instead of
-    // every request carrying it in the system text (CARDS_PROMPT, the same text the in-process loop sends).
-    const { CARDS_PROMPT } = await import('../../src/shared/pocket-cards.js');
-    const skill = join(workspace, 'skills', 'pocket-cards');
-    await mkdir(skill, { recursive: true, mode: 0o700 });
-    await writeFile(join(skill, 'SKILL.md'), '---\nname: pocket-cards\ndescription: Draw charts, tables, schedules, choices, forms or the person\'s tasks in a reply with show_card and update_card.\n---\n\n# Cards in Pocket\n\n'
-      + CARDS_PROMPT.replace(/\. (?=[A-Z"])/g, '.\n') + '\n', { mode: 0o600 });
+  const cfg = gatewayConfig(native);
+  for (const workspace of Object.values(cfg.agents.entries).map(entry => entry.workspace)) {
+    await mkdir(workspace, { recursive: true, mode: 0o700 });
+    // Pip's persona, not OpenClaw's "pick a name" scaffolding. USER.md and MEMORY.md are the agent's and stay untouched.
+    await writeFile(join(workspace, 'IDENTITY.md'), '# Pip\n\n- **Name:** Pip\n- **Role:** the assistant inside Pocket\n', { mode: 0o600 });
+    await writeFile(join(workspace, 'SOUL.md'), '# Pip\n\nBe brief, plain and useful. No filler, no introductions, no emoji.\n', { mode: 0o600 });
+    await writeFile(join(workspace, 'AGENTS.md'), native ? NATIVE_AGENTS + (workspace.endsWith('/' + agentId()) ? '' : '\nYou can run code and keep files with exec/read/write/edit/apply_patch in your private remote workspace. Execution must stay in the sandbox; never request elevated or gateway execution. Workspace files are not Pocket notes.\n') : AGENTS, { mode: 0o600 });
+    if (native) {
+      // How and when Pip draws, as an OpenClaw skill: the model reads it when a reply wants a picture, instead of
+      // every request carrying it in the system text (CARDS_PROMPT, the same text the in-process loop sends).
+      const { CARDS_PROMPT } = await import('../../src/shared/pocket-cards.js');
+      const skill = join(workspace, 'skills', 'pocket-cards');
+      await mkdir(skill, { recursive: true, mode: 0o700 });
+      await writeFile(join(skill, 'SKILL.md'), '---\nname: pocket-cards\ndescription: Draw charts, tables, schedules, choices, forms or the person\'s tasks in a reply with show_card and update_card.\n---\n\n# Cards in Pocket\n\n'
+        + CARDS_PROMPT.replace(/\. (?=[A-Z"])/g, '.\n') + '\n', { mode: 0o600 });
+    }
   }
-  await writeFile(path, JSON.stringify(gatewayConfig(native), null, 2) + '\n', { mode: 0o600 });
+  await writeFile(path, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
   return { path, workspace, home };
 }
 

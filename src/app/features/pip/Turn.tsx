@@ -5,14 +5,14 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Keys, Row } from "../../ui/kit.tsx";
-import { phaseLabel } from "../../../client/pip-activity.js";
 import { readChat, type ChatTurn } from "../../data/chats.ts";
 import { explain } from "./account.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 import { ApprovalGroup, OfferCard } from "./Offers.tsx";
+import { PipActivity } from "./PipActivity.tsx";
 import { AssignmentStatus } from "./AssignmentStatus.tsx";
 import { ASSIGNMENT_OWNER, reportTitle } from "../../data/today.ts";
-import { Answer, Thinking } from "./stream/Answer.tsx";
+import { Answer } from "./stream/Answer.tsx";
 import { Prose } from "./stream/Prose.tsx";
 import { assignmentsOf, jobsOf, ledger, memoryOf, offersOf, planOf, sourcesOf } from "./reply.ts";
 import { resume, retry, send } from "./runner.ts";
@@ -31,7 +31,7 @@ const clock = (at: number) => new Date(Number(at) || Date.now()).toLocaleTimeStr
 const STATE_ICON = { done: Check, running: LoaderCircle, awaiting: Circle, queued: Circle, failed: TriangleAlert, stopped: Minus } as const;
 function StateIcon({ state }: { state: string }) {
   const Icon = STATE_ICON[state as keyof typeof STATE_ICON] ?? Circle;
-  return <Icon aria-label={state} className={cn("inline size-3 shrink-0 align-[-2px]", state === "failed" ? "text-destructive" : state === "done" ? "text-dim" : "text-muted-foreground", state === "running" && "animate-spin")} />;
+  return <Icon aria-label={state} className={cn("inline size-3 shrink-0 align-[-2px]", state === "failed" ? "text-destructive" : state === "done" ? "text-dim" : "text-muted-foreground", state === "running" && "motion-safe:animate-spin")} />;
 }
 
 /** A fold is one key on a line; what it holds is plain text under it, with no rule beside it. */
@@ -215,6 +215,7 @@ function TurnView({ turn, live, blocks, chatId, latest, locked, pending = [], he
       </div>
 
       <div data-reply className="space-y-3">
+        <PipActivity active={streaming} phase={shown.phase} status={shown.status} />
         {rows.length ? (
           !streaming && rows.length > 3
             ? <Fold title={took ? steps + " · " + took + " s" : steps}><Steps rows={rows} /></Fold>
@@ -250,7 +251,6 @@ function TurnView({ turn, live, blocks, chatId, latest, locked, pending = [], he
             </div>
           )}
 
-        {streaming && !offers.length && (steers.length ? !parts.at(-1)?.filled : !shown.answer) ? <Thinking label={phaseLabel(shown.phase || "thinking")} /> : null}
 
         {/* What Pip took into its memory of the person with this reply: said, so nothing is remembered unseen. */}
         {!streaming && remembered.length ? (
