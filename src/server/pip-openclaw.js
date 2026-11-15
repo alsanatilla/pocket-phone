@@ -101,7 +101,7 @@ export function toolsEndpoint(req, res, { forwardUrl } = {}) {
       // The worker owns scheduled replies and queued assignments. Forward only an unknown session,
       // once, to the fixed loopback worker endpoint; the worker never forwards back.
       if (answer?.error === 'session_unknown' && forwardUrl) {
-        const response = await fetch(forwardUrl, { method: 'POST', signal: AbortSignal.timeout(120000),
+        const response = await fetch(forwardUrl, { method: 'POST', signal: AbortSignal.timeout(650000),
           headers: { 'content-type': 'application/json', 'x-pocket-tools': process.env.PIP_TOOLS_TOKEN || '' }, body: raw });
         if (!response.ok) throw new Error('The Pocket worker did not answer.');
         answer = await response.json();
@@ -129,7 +129,7 @@ const marks = (id, old) => ({ id, updated: Date.now(), ...(old?.pinned ? { pinne
  * `{ approved }`; `take({ pos })` takes the messages sent into the reply; `onUpdate` receives the turn's progress.
  * Resolves to the finished turn fields; rejects with AbortError when stopped.
  */
-export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, execute, preview, ask, take = async () => [], saveTurn, allowedTools = NATIVE_TOOLS, message, onUpdate = () => {} }) {
+export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, execute, preview, ask, take = async () => [], saveTurn, allowedTools = NATIVE_TOOLS, autoApproveTools = [], waitingTools = [], message, onUpdate = () => {} }) {
   const client = await gateway(), key = sessionKeyFor(userId, chatUid);
   if (state.sessions.has(key)) throw no('Pip is already answering in this chat.', 'run_active');
   const result = { answer: '', reasoning: String(turn.reasoning || ''), activity: [], phase: 'requesting', usage: {} };
@@ -163,7 +163,7 @@ export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, 
     cards.delete(callId);
     base = joined(answer(), card) + '\n\n'; item = { id: item.id, text: '' }; publish();
   };
-  /** update_card: the card changes where it stands, in this reply or an earlier one (as pip-gateway-run.js does). */
+  /** update_card: the card changes where it stands, in this reply or an earlier one. */
   const revise = async ({ id, spec, shows }) => {
     const here = replaceCard(base, id, cardFence(spec, marks(id, cardsIn(base).find(card => card.id === id))));
     if (here !== null) { base = here; publish(); return { kind: 'card', updated: true, id, shows }; }
@@ -189,6 +189,7 @@ export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, 
       const ready = await preview(tool, parsed.data, signal);
       if (!ready || ready.error) return ready || { error: 'data_unavailable', message: 'This change could not be checked.' };
       previews.set(callId, { tool, input: parsed.data, ready });
+      if (autoApproveTools.includes(tool)) { approved.add(callId); return { authorized: true }; }
       // Shown as the existing approval card; `frozen`: OpenClaw approves the arguments as proposed, so no editing.
       record(callId, { name: tool, title: label(tool, parsed.data), input: JSON.stringify(parsed.data), state: 'awaiting', summary: 'waiting for your approval',
         result: JSON.stringify({ kind: 'approval', frozen: true, ...ready }) });
@@ -201,10 +202,13 @@ export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, 
       const parsed = SCHEMAS[tool].safeParse(raw ?? {});
       if (!parsed.success) return { error: 'invalid_arguments', message: 'Correct the arguments or use an available tool.' };
       // A save runs only after the person approved this very call, and only once.
-      if (NATIVE_WRITES.includes(tool) && !approved.delete(callId)) return { error: 'approval_required', message: 'The person has not approved this change.' };
+      if (NATIVE_WRITES.includes(tool) && (previews.get(callId)?.tool !== tool || JSON.stringify(previews.get(callId)?.input) !== JSON.stringify(parsed.data) || !approved.delete(callId))) return { error: 'approval_required', message: 'The person has not approved this change.' };
       let out;
+      const waits = waitingTools.includes(tool);
+      if (waits) waiting++;
       try { out = await execute(tool, parsed.data, signal, rowId(callId)); }
       catch (error) { if (signal?.aborted) throw error; out = { error: 'data_unavailable', message: String(error?.message || 'The tool failed.').slice(0, 300) }; }
+      finally { if (waits) { waiting--; last = Date.now(); } }
       if (tool === 'show_card' && out?.card) { cards.set(callId, out.card); return { kind: 'card', drawn: true, id: out.id, shows: out.shows }; }
       if (tool === 'update_card' && out?.revise) return revise(out);
       return out ?? { error: 'data_unavailable', message: 'The tool returned nothing.' };

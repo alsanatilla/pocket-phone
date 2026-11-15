@@ -442,7 +442,7 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   if (job) value.backgroundJob = true;
   const notes = job ? await readScratch(userId, routine.id) : '';
   // In the big chat the job reads the segment and the end of the one before it, as a reply of the person's does.
-  const native = process.env.PIP_OPENCLAW_NATIVE === '1' && Boolean(process.env.PIP_GATEWAY_TOKEN) && job;
+  const native = process.env.PIP_OPENCLAW_NATIVE === '1' && Boolean(process.env.PIP_GATEWAY_TOKEN);
   const view = { ...chat, config: value, ...(home ? { turns: [...homeTail(segments, chat), ...chat.turns] } : {}) };
   const body = native ? { instructions: '', tools: [] } : requestBody(view, turn);
   body.tools = body.tools.filter(name => !WRITE_TOOLS.includes(name) || (conversation ? ['coros_write', 'create_record', 'update_training_preferences'].includes(name) : training?.tools.includes(name)));
@@ -463,7 +463,7 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
   }
   if (routine.kind === 'watch') body.instructions += '\n\nThis is a standing watch the user set up. If nothing new matches it, answer exactly SKIP. '
     + 'If an earlier report in this chat has a card with the figures you watch and only those figures moved, change that card with update_card and then answer exactly SKIP: the card is kept current without a new message. Write a new report only when the person should be told.';
-  if (training) body.messages.push({ role: 'user', content: training.prompt });
+  if (training && !native) body.messages.push({ role: 'user', content: training.prompt });
   const source = await serverSource(userId);
   const prepare = async (value, name, input) => {
     if (name === 'update_training_preferences') return { action: { tool: name, kind: 'training_preferences', title: 'Training preferences' } };
@@ -492,17 +492,16 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
   };
   // Imported here: the agent runtime and provider adapters load only when a routine runs.
   const streamChat = native ? null : (await import('./pip-agent.js')).streamChat;
-  const { gatewayConfigured } = await import('./pip-gateway.js');
-  // Routines are read-only, so they are the first path on the gateway: no approval and no durable pause to map.
-  const useGateway = process.env.PIP_GATEWAY_CLIENT === '1' && gatewayConfigured() && !conversation && !training;
   let revised = false;
   try {
     const reply = native ? await (async () => {
       const { nativeReply } = await import('./pip-openclaw.js');
       const { NATIVE_RESEARCH_TOOLS } = await import('./pip-openclaw-tools.js');
       return nativeReply({ userId, chatUid: 'routine-' + routine.id, runId: 'routine-' + turn.uid, turn, chat: view,
-        message: turn.text + body.instructions, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(RUN_DEADLINE)]) : AbortSignal.timeout(RUN_DEADLINE),
-        allowedTools: [...NATIVE_RESEARCH_TOOLS, 'update_scratch'],
+        message: turn.text + body.instructions + (training ? '\n\n' + training.prompt : ''), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(RUN_DEADLINE)]) : AbortSignal.timeout(RUN_DEADLINE),
+        allowedTools: [...NATIVE_RESEARCH_TOOLS, ...(job ? ['update_scratch'] : conversation ? ['coros_write', 'create_record', 'update_training_preferences'] : training?.tools || [])],
+        autoApproveTools: conversation ? ['coros_write', 'create_record', 'update_training_preferences'] : training?.tools || [],
+        preview: (name, input) => prepare(value, name, input),
         onUpdate: update => Object.assign(turn, update),
         saveTurn: home ? changed => writeHomeTurn(userId, segments, changed) : () => { revised = true; },
         execute: async (name, input, callSignal) => {
@@ -510,24 +509,14 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
             const kept = await writeScratch(userId, routine.id, input?.notes);
             return { kind: 'scratch', saved: true, length: kept.length };
           }
-          return runTool(value, name, input, callSignal, { chat: view, turn, source });
+          if (conversation && WRITE_TOOLS.includes(name)) return conversationWrite(name, input);
+          if (training?.isWrite(name)) return training.execute(name, input);
+          const result = await runTool(value, name, input, callSignal, { chat: view, turn, source });
+          if (name === 'coros_format') formats.push({ input, result });
+          training?.observe(name, input, result);
+          return result;
         } });
-    })() : useGateway
-      ? await (async () => {
-          const { gatewayRoutine } = await import('./pip-gateway-run.js');
-          const reply = await gatewayRoutine({ chat, turn, value, body, signal, onUpdate: update => Object.assign(turn, update),
-            execute: async (name, input, callSignal) => {
-              if (name === 'update_scratch') {
-                if (!job) return { error: 'unavailable', message: 'Only a scheduled job keeps notes.' };
-                const kept = await writeScratch(userId, routine.id, input?.notes);
-                return { kind: 'scratch', saved: true, length: kept.length };
-              }
-              return runTool(value, name, input, callSignal, { chat, turn });
-            } });
-          if (reply.revised) revised = true;
-          return reply;
-        })()
-      : await streamChat(view, turn, { value, body, key, fetcher, signal, userId, deadlineMs: RUN_DEADLINE, coverage: contextCoverage(view, turn),
+    })()      : await streamChat(view, turn, { value, body, key, fetcher, signal, userId, deadlineMs: RUN_DEADLINE, coverage: contextCoverage(view, turn),
       onUpdate: update => Object.assign(turn, update),
       // A card changed in an earlier report: the chat is written when the run ends, even one that reports nothing new.
       // In the big chat it is written at once to the segment that holds it, which may be the one before.

@@ -308,3 +308,56 @@ test('tool endpoint forwards unknown sessions once and rejects unauthenticated c
     assert.equal(calls, 1);
   } finally { web.close(); worker.close(); }
 });
+
+test('native calendar waits for the phone and continues in the same gateway run', { skip, timeout: 120000 }, async () => {
+  const userId = await account();
+  script.push({ calls: [{ name: 'search_calendar', input: { query: 'dentist' }, id: 'phone-calendar' }] }, { text: 'Dentist at ten.' });
+  const submitted = await send(userId, 'native-phone', 'native-phone-1', 'What is on my phone calendar?', { deviceTools: ['search_calendar'] });
+  const waiting = await until('the phone request', async () => {
+    const view = await runs.runView(userId, { runId: submitted.run.runId });
+    return view.run.status === 'awaiting' && view.requests.length ? view : null;
+  });
+  assert.equal(waiting.run.turn.usage.engine, 'openclaw');
+  assert.equal(waiting.run.turn.phase, 'waiting for your device');
+  assert.equal(waiting.requests[0].kind, 'device');
+  const result = { appointments: [{ id: 'phone-only', title: 'Dentist', when: '2026-11-16T10:00:00Z', href: '/calendar/phone-only' }] };
+  await runs.decideRun(userId, { runId: submitted.run.runId, requestId: waiting.requests[0].id, result, device: 'phone-1' });
+  const done = await until('native phone reply', async () => {
+    const view = await runs.runView(userId, { runId: submitted.run.runId });
+    return ['done', 'failed'].includes(view.run.status) ? view : null;
+  });
+  assert.equal(done.run.status, 'done', fail(done));
+  assert.match(toolTexts(requests.at(-1)), /phone-only/);
+});
+
+test('native training saves preferences while paused but refuses an unrelated record', { skip, timeout: 120000 }, async () => {
+  const userId = await account(), background = await import('../src/server/pip-background.js');
+  const { chat } = await background.openTrainingChat(userId);
+  const routine = (await background.backgroundState(userId)).routines.find(row => row.kind === 'training');
+  script.push({ calls: [{ name: 'update_training_preferences', input: { brief: 'Prepare for a 10 km race' }, id: 'training-preferences' }] },
+    { calls: [{ name: 'create_record', input: { kind: 'note', title: 'Unrelated', text: 'Must not save' }, id: 'training-unrelated' }] },
+    { text: 'I saved your training goal. Planning stays paused.' });
+  const result = await background.runClaimed(userId, routine.id, { force: true,
+    message: { chat, uid: 'training-message-1', attempt: 'training-attempt-1', text: 'Remember that I am preparing for a 10 km race.' } });
+  assert.equal(result.status, 'done', JSON.stringify(result));
+  const saved = (await background.backgroundState(userId)).routines.find(row => row.id === routine.id);
+  assert.equal(saved.prompt, 'Prepare for a 10 km race');
+  assert.equal(saved.enabled, false);
+  assert.equal((await notesOf(userId)).length, 0);
+  assert.ok(result.reply.activity.some(row => row.name === 'create_record' && row.state === 'failed'));
+});
+
+test('native automatic training saves only an authorized upcoming training task', { skip, timeout: 120000 }, async () => {
+  const userId = await account(), background = await import('../src/server/pip-background.js');
+  await background.saveBackground(userId, { ...SETTINGS, grants: ['gym', 'coros', 'tasks'] }, 'fixture-key-123456');
+  const routine = background.backgroundRoutine({ id: 'native-training-plan', kind: 'training', enabled: true,
+    prompt: 'Maintain fitness with gym and running.', time: '07:00', days: [0, 1, 2, 3, 4, 5, 6], trainingDays: [0, 1, 2, 3, 4, 5, 6] });
+  await background.saveRoutine(userId, routine);
+  script.push({ calls: [{ name: 'create_record', input: { kind: 'task', title: 'Gym · Upper body', due: '2026-11-16', text: 'Keep it easy.' }, id: 'training-task' }] },
+    { text: 'Your gym session is planned for tomorrow.' });
+  const result = await background.runClaimed(userId, routine.id, { force: true, now: Date.parse('2026-11-15T12:00:00Z'),
+    trainingServices: { read: async (_, name) => ({ text: ['queryTrainingSchedule', 'querySportRecords'].includes(name) ? '[]' : '{"recovery":80,"load":40}' }) } });
+  assert.equal(result.status, 'done', JSON.stringify(result));
+  const tasks = (await readDocuments(userId))['tasks.json'].value.tasks;
+  assert.ok(tasks.some(task => task.text === 'Gym · Upper body' && task.due === '2026-11-16'), JSON.stringify(tasks));
+});

@@ -578,29 +578,29 @@ async function drive(userId, run, leaseId, { fetcher }) {
   let asking = 0;
   const approval = async (request, signal) => {
     await writing;
-    const at = Date.now();
+    const at = Date.now(), device = request.kind === 'device', kind = device ? 'device' : 'write';
     asking++;
-    turn.phase = 'waiting for your approval';
+    turn.phase = device ? 'waiting for your device' : 'waiting for your approval';
     try {
       let moved = false;
       await writeTransaction(async tx => {
         moved = (await tx.execute({ sql: `UPDATE pocket_pip_runs SET status = 'awaiting', turn = ?, expires_at = ?, updated = ? WHERE ${owned} AND status IN ('running', 'awaiting')`,
           args: [JSON.stringify(turn), at + WAIT_TTL, at, ...ownedArgs] })).rowsAffected > 0;
         if (moved) await tx.execute({ sql: `INSERT INTO pocket_pip_run_requests (user_id, run_id, request_id, kind, tool, call_id, row_id, payload, state, created)
-          VALUES (?, ?, ?, 'write', ?, ?, ?, ?, 'pending', ?) ON CONFLICT(user_id, run_id, request_id) DO NOTHING`,
-          args: [userId, runId, request.approvalId, request.toolName, request.toolCallId, request.rowId, JSON.stringify(request.preview || {}), at] });
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?) ON CONFLICT(user_id, run_id, request_id) DO NOTHING`,
+          args: [userId, runId, request.approvalId, kind, request.toolName, request.toolCallId, request.rowId, JSON.stringify(device ? { input: request.input } : request.preview || {}), at] });
       });
       if (!moved) throw Object.assign(new Error('Stopped'), { name: 'AbortError' });
       live.publish(runId, turn, meta);
       await writeTurn(userId, chatUid, turn);
-      await event(userId, runId, 'awaiting', { requests: [{ id: request.approvalId, tool: request.toolName, kind: 'write' }] }, at);
+      await event(userId, runId, 'awaiting', { requests: [{ id: request.approvalId, tool: request.toolName, kind }] }, at);
       const what = request.preview?.action?.title;
-      await tell(chat => waitingNotice(chat, [label(request.toolName, request.input || {}) + (what ? ' “' + what + '”' : '')]));
+      if (!device) await tell(chat => waitingNotice(chat, [label(request.toolName, request.input || {}) + (what ? ' “' + what + '”' : '')]));
       const either = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
       for (;;) {
-        const row = (await sql({ sql: 'SELECT state FROM pocket_pip_run_requests WHERE user_id = ? AND run_id = ? AND request_id = ?', args: [userId, runId, request.approvalId] })).rows[0];
+        const row = (await sql({ sql: 'SELECT state, response FROM pocket_pip_run_requests WHERE user_id = ? AND run_id = ? AND request_id = ?', args: [userId, runId, request.approvalId] })).rows[0];
         const state = String(row?.state || 'stopped');
-        if (state !== 'pending') return { approved: state === 'approved' };
+        if (state !== 'pending') return device ? { answer: parse(row?.response) || { error: 'device_unavailable', message: 'The device did not answer.' } } : { approved: state === 'approved' };
         if (controller.signal.aborted) throw Object.assign(new Error('Stopped'), { name: 'AbortError' });
         if (signal?.aborted) {
           await sql({ sql: `UPDATE pocket_pip_run_requests SET state = 'declined', decided_by = 'expiry', decided_at = ? WHERE user_id = ? AND run_id = ? AND request_id = ? AND state = 'pending'`,
@@ -629,8 +629,8 @@ async function drive(userId, run, leaseId, { fetcher }) {
     if (!chat || chat.deleted) return await end('stopped', 'This chat was removed.');
     // Native (PIP_OPENCLAW_NATIVE=1): OpenClaw owns the reply (pip-openclaw.js). Pocket builds no request and runs no
     // compaction, effort judge or memory list; the gateway's session, workspace and memory are the context.
-    // Device tools keep the paths below for now; assignments use the native path with read-only permissions.
-    if (!deviceTools.length && process.env.PIP_OPENCLAW_NATIVE === '1' && process.env.PIP_GATEWAY_TOKEN) {
+    // Phone tools wait for the device; assignments use the native path with read-only permissions.
+    if (process.env.PIP_OPENCLAW_NATIVE === '1' && process.env.PIP_GATEWAY_TOKEN) {
       // The reply lived in the gateway's run; a stretch that died with it cannot pick it up again.
       if (turn.usage?.engine === 'openclaw') return await end('failed', INTERRUPTED);
       const { nativeReply } = await import('./pip-openclaw.js');
@@ -639,9 +639,12 @@ async function drive(userId, run, leaseId, { fetcher }) {
       const usage = part => ({ ...total(part || {}), runtime: 'pocket-server', engine: 'openclaw' });
       turn.usage = usage(); progress();
       const reply = await nativeReply({ userId, chatUid, runId, turn, chat, signal: controller.signal, ask: approval, take,
-        allowedTools: assignment ? NATIVE_RESEARCH_TOOLS : NATIVE_TOOLS.filter(name => name !== 'update_scratch'),
+        allowedTools: assignment ? NATIVE_RESEARCH_TOOLS : NATIVE_TOOLS.filter(name => !['update_scratch', 'update_training_preferences'].includes(name)),
+        waitingTools: deviceTools,
         ...(assignment ? { message: turn.text + ASSIGNMENT_NOTE } : {}),
-        execute: (name, input, toolSignal, eventId) => name === 'start_assignment' ? assignmentTool(userId, input, { chat: chatUid, turn: turn.uid, eventId, value, fetcher })
+        execute: async (name, input, toolSignal, eventId) => deviceTools.includes(name) && value.grants.includes('calendar')
+          ? (await approval({ kind: 'device', approvalId: eventId, toolCallId: eventId, rowId: eventId, toolName: name, input }, AbortSignal.timeout(600000))).answer || { error: 'device_unavailable', message: 'The device did not answer in time.' }
+          : name === 'start_assignment' ? assignmentTool(userId, input, { chat: chatUid, turn: turn.uid, eventId, value, fetcher })
           : JOB_TOOLS.includes(name) ? jobTool(userId, name, input, { chat: chatUid, turn: turn.uid, eventId, value })
           : WRITE_TOOLS.includes(name) ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId, name, input })
           : runTool(value, name, input, toolSignal, { chat, turn, eventId, source }),
@@ -690,7 +693,6 @@ async function drive(userId, run, leaseId, { fetcher }) {
     const observations = (turn.activity || []).filter(row => row.state === 'done' && row.result && !row.applied_href)
       .map(row => ({ name: row.name, input: row.input || '{}', result: row.result })).slice(-24);
     const { streamChat } = await import('./pip-agent.js');
-    const { gatewayConfigured } = await import('./pip-gateway.js');
     const judged = judging ? await judging : null;
     if (judged) effort = judged.level;
     // The level's sentence joins the date line: the model knows how much looking-up Pocket expects before it writes.
@@ -698,36 +700,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
     if (note) body.instructions += '\n\n' + note;
     // The level is advice in the note above; only thorough research is also asked "is this enough?" between rounds.
     const researchOption = effort === 'thorough' && !assignment ? { enough } : null;
-    // The gateway owns the reply when both flags are on. Assignments, device tools and thorough research are not
-    // mapped yet, so those keep the in-process loop.
-    const useGatewayChat = process.env.PIP_GATEWAY_CLIENT === '1' && process.env.PIP_GATEWAY_CHAT === '1' && gatewayConfigured()
-      && !assignment && !deviceTools.length && !researchOption;
-    let gatewayCall = null;
-    if (useGatewayChat) {
-      try {
-        gatewayCall = await (async () => {
-      const { gatewayChat } = await import('./pip-gateway-run.js');
-      const toolFor = (name, input, toolSignal, callId) => name === 'remember' || name === 'forget' ? memoryTool(userId, chatUid, name, input)
-        : JOB_TOOLS.includes(name) ? jobTool(userId, name, input, { chat: chatUid, turn: turn.uid, eventId: callId, value })
-        : WRITE_TOOLS.includes(name) ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId: callId, name, input })
-        : runTool(value, name, input, toolSignal, { chat: conversationView, turn, eventId: callId, source });
-      return gatewayChat({ chat: conversationView, turn, value, body, signal: controller.signal,
-        durable: { checkpoint: resumed, settled: resumed ? settlementMap(requests) : null, pause }, writes: WRITE_TOOLS,
-        preview: (name, input, previewSignal) => JOB_TOOLS.includes(name) ? jobPreview(userId, name, input, value) : previewTool(value, name, input, previewSignal, source),
-        execute: (name, input, toolSignal, callId) => toolFor(name, input, toolSignal, callId),
-        saveTurn: async changed => { if (!await writeTurn(userId, chatUid, changed)) throw new Error('The chat could not be saved.'); },
-        onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } }); live.publish(runId, turn, meta); progress(); } });
-        })();
-      } catch (error) {
-        // A paused reply is a pause, not a failure. Before any text, a gateway that cannot answer is skipped and the
-        // in-process loop runs; after text, the error is the reply's, so the person never sees two answers.
-        if (error?.name === 'RunPaused') throw error;
-        if (String(turn.answer || '').trim()) throw error;
-        console.warn(JSON.stringify({ level: 'warn', message: 'Pip gateway failed; using the in-process loop', error: String(error?.message || error).slice(0, 300) }));
-        gatewayCall = null;
-      }
-    }
-    const reply = gatewayCall ?? await streamChat(conversationView, turn, { value, body, key, fetcher, ...(assignment ? {} : { userId }), deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
+    const reply = await streamChat(conversationView, turn, { value, body, key, fetcher, ...(assignment ? {} : { userId }), deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
       ...(researchOption ? { research: researchOption } : {}), ...(assignment ? {} : { steering: { take } }),
       onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } }); live.publish(runId, turn, meta); progress(); },
       resume: { reasoning: turn.reasoning || '', activity: turn.activity || [], observations },

@@ -1,88 +1,45 @@
 # Pip on the OpenClaw gateway
 
-Pip's replies, workspace and memory are OpenClaw's. The gateway runs on the same Fly machine as Pocket, bound to
-`127.0.0.1`; Pocket is a client of it. This replaces the in-process `streamChat` loop and Pocket's own memory table
-once the client below is wired.
+Pip is an OpenClaw agent on the same Fly machine as Pocket. The gateway owns the model loop, sessions,
+compaction and memory; Pocket displays replies and provides its account-scoped data tools through a plugin.
 
-## Why the gateway and not the memory SDK
+## Runtime
 
-OpenClaw's memory is files (`USER.md`, `MEMORY.md`, `memory/YYYY-MM-DD.md`) plus a SQLite index, and the parts that
-keep it true — writing, watching, dreaming, promotion — live in the gateway. The plugin SDK exposes the search
-manager, but not the watcher: a file written by another process is not reindexed, and `openclaw memory index`
-refuses while the gateway owns the state. So memory is owned by the gateway, not embedded in Pocket.
+- `services/gateway/config.mjs` generates the loopback gateway config and Pip's workspace persona and card skill.
+- `services/server/start.mjs` starts web, worker and gateway together. In native mode a gateway exit restarts the
+  service. The workspace lives on the Fly volume; session databases remain on local disk.
+- `src/server/pip-openclaw.js` sends `chat.send` over OpenClaw's operator connection and maps streamed events to
+  Pocket's stored turns. `chat.abort` stops a reply; steering uses `queueMode: steer`.
+- `services/gateway/pocket-plugin` exposes Pocket's schemas. Calls go to the web process's authenticated loopback
+  `/internal/pip-tools`. Unknown sessions are forwarded once to the worker's endpoint.
+- Chats, research assignments, scheduled reports, training conversations and automatic training use the native
+  path when `PIP_OPENCLAW_NATIVE=1`. Phone-calendar calls wait for an existing device request to be answered.
 
-## What runs where
+## Permissions
 
-- `services/gateway/config.mjs` generates `openclaw.json` at boot from Pocket's environment: loopback gateway on
-  `PIP_GATEWAY_PORT` (default 18789), token auth, `memory-core` with FTS-only search (no embedding key needed), a
-  custom OpenAI-compatible provider, and one agent (`pocket`) whose workspace is `PIP_GATEWAY_HOME/agents/pocket`.
-- `services/server/start.mjs` starts the gateway beside the web process and worker when `PIP_GATEWAY=1`, with
-  `OPENCLAW_STATE_DIR`/`OPENCLAW_CONFIG_PATH` in `PIP_GATEWAY_HOME` (a Fly volume, so `USER.md` survives deploys).
-- The Responses API is enabled at `POST /v1/responses`; select the agent with `model: "openclaw/pocket"`.
+Ordinary writes require OpenClaw plugin approval, shown in Pocket. Approval is tied to the tool, arguments and
+call id and consumed once. Research and unattended reports have explicit tool allowlists. Training writes are
+preauthorized only by the server's training run policy, after a successful preview; execution rechecks the
+existing planner's current authorization, date range, session limits and ownership rules. An ordinary chat does
+not inherit this policy. Training preferences can be saved while automatic planning is paused.
 
-## Validated
+## Deployment
 
-With a real model through the custom provider, one request
-("Remember that I prefer tea over coffee") answered and wrote OpenClaw's user model by itself:
+`PIP_GATEWAY=1`, `PIP_OPENCLAW_NATIVE=1`, `PIP_GATEWAY_HOME`, `PIP_GATEWAY_PORT`, `PIP_GATEWAY_AGENT`,
+`PIP_GATEWAY_MODEL`, `PIP_GATEWAY_BASE_URL` and secret `PIP_GATEWAY_KEY` configure the runtime. Gateway and tool
+endpoint tokens are generated per boot when not supplied. This is a personal deployment with one agent/workspace;
+multiple users would need isolated agent workspaces as well as the existing account-scoped tool sessions.
 
-```md
-<!-- observed: 2026-11-15 | status: active -->
+The Responses adapter (`pip-gateway.js`, `pip-gateway-run.js`) and `PIP_GATEWAY_CLIENT`/`PIP_GATEWAY_CHAT` flags
+have been removed. The older in-process runtime still supports deployments without native mode and its tests;
+it is not used by production replies. The classic browser app retains its browser loop.
 
-- Prefer tea over coffee.
-```
+Pocket still owns job scheduling and delivery. Moving scheduling itself to OpenClaw, connecting the sandbox,
+removing the remaining non-native runtime and profiling production cold starts are outstanding.
 
-A later request with no history ("What do I prefer to drink?") answered "Tea." from `USER.md`. Writes, injection and
-supersession are the gateway's, not Pocket's.
+## Verification
 
-A chat reply through `gatewayChat` with the real gateway and model called Pocket's `show_card` client tool, Pocket
-placed the fence in the answer, and the model continued with its sentence — the client-tool loop works against the
-real agent. (Responses input items are `{type:"message", role, content}`; a bare `{role, content}` is rejected.)
-
-## The client
-
-`src/server/pip-gateway.js` is the transport: `gatewayReply` streams `POST /v1/responses`, runs every function call
-through Pocket's own `execute`, sends the results back as `function_call_output` with `previous_response_id`, and
-returns the answer, the calls and usage. `gatewayTools` turns Pocket's offered tools into the gateway's client tools
-with the same schemas. A fake-SSE test (`tools/pip-gateway.test.mjs`) covers the text stream, the tool call, the
-follow-up and its input.
-
-What it does: streaming, client tools, and a write that pauses for the person — `preview` says what will happen,
-`approve` returns the decision (and any edited input), the tool only runs when approved, and a declined write goes
-back to the model as declined. It also pauses a durable run: the calls, their previews and the response id are stored, the run is paused, and on
-resume the approved calls are executed (with any edited input) or declined, then the reply continues from
-`previous_response_id`.
-
-Chat replies can now run on it too, with `PIP_GATEWAY_CLIENT=1` and `PIP_GATEWAY_CHAT=1`: `gatewayChat` sends the
-chat as input, runs Pocket's tools (jobs, writes, reads), places `show_card` in the answer, applies `update_card` in
-this or an earlier turn through `writeTurn`, and pauses a write through the same durable state. Assignments, device
-tools and thorough research stay on the in-process loop; steering a running reply is not mapped yet.
-
-## The reply loop Pocket still has to move
-
-1. `POST /v1/responses` with the chat's turns as `input`, Pocket's instructions, `stream: true`, and Pocket's tools
-   as **client tools** (function definitions): cards (`show_card`, `update_card`), reads, changes, approvals,
-   device tools, `remember`/`forget` are gone — memory tools are the gateway's own.
-2. Map the SSE events to the turn Pocket already stores: text deltas into `answer`, function calls into `activity`,
-   usage into `usage`. `response.output_item.added` / `response.function_call_arguments.delta` /
-   `response.output_text.delta` / `response.completed` are the events to read.
-3. Execute a client tool in Pocket (the existing `execute`/`preview`), then send its result back as
-   `function_call_output` (with `previous_response_id`), continuing the same response. A write that waits for the
-   person pauses there: the approval is Pocket's UI, the tool output is what the gateway receives.
-4. Store the finished answer in the chat as today; memory is no longer written by Pocket and no list is injected.
-5. Background routines use the same client with their own agent session, so they read the person's memory too.
-6. The `/memory` page reads `USER.md`/`MEMORY.md` through the gateway (or a file read RPC) and edits them as files;
-   the `pocket_pip_memory` table and its API go away.
-
-The first production path is already switched, behind `PIP_GATEWAY_CLIENT=1`: scheduled routines (read-only, no
-approval, no durable pause) run on the gateway through `gatewayRoutine` in `src/server/pip-gateway-run.js`. It
-places drawn cards where the reply stands, applies `update_card` to this or an earlier turn (keeping the pin and
-threshold), records the calls as activity, and leaves `remember`/`forget` to the gateway. With the flag unset the old
-loop runs as before.
-
-## Operations
-
-- `PIP_GATEWAY=1`, `PIP_GATEWAY_TOKEN` (generated per boot when unset), `PIP_GATEWAY_MODEL`, `PIP_GATEWAY_BASE_URL`,
-  `PIP_GATEWAY_KEY`, optional `PIP_GATEWAY_HOME`, `PIP_GATEWAY_PORT`, `PIP_GATEWAY_AGENT`.
-- The gateway's config is generated, so change Pocket's environment, not `openclaw.json`.
-- One agent is enough for one person. A second Pocket account needs its own agent entry and workspace.
-- Keyword memory needs no embedding provider. Adding one later is `PIP_GATEWAY_*` config only.
+`tools/pip-openclaw-native.test.mjs` runs the real gateway against a scripted model and a temporary database:
+streaming, reads, cards, approve/decline, stop, steering, session reuse, research write restrictions, job scratch
+notes, worker endpoint forwarding, phone-calendar waits, and training preferences and write restrictions.
+Run on Node 24.16 or newer. The fixture does not contact a paid model or production accounts.

@@ -43,6 +43,8 @@ export default definePluginEntry({
       const ready = await pocket(url, { action: 'preview', sessionKey: context.sessionKey || '', tool: event.toolName, input: event.params ?? {}, callId: event.toolCallId || context.toolCallId || '' }, context.abortSignal);
       // An invalid or refused change is not put to the person: the model hears why and can correct it.
       if (ready.error) return { block: true, blockReason: String(ready.message || ready.error) };
+      // Only Pocket's trusted run policy can authorize a scoped training write in advance.
+      if (ready.authorized === true) return;
       return { requireApproval: { title: String(ready.title || 'Save a change').slice(0, 80), description: String(ready.description || ready.title || 'Pocket asks before it saves.').slice(0, 512),
         severity: 'info', allowedDecisions: ['allow-once', 'deny'], timeoutMs: 600000 } };
     }, { matcher: writes });

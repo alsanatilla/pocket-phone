@@ -399,6 +399,24 @@ The plugin calls the web process. If that process does not own the session, it f
 the worker never forwards. In native mode a gateway child exit restarts the service instead of advertising a
 fallback that native replies do not use.
 
-Still outstanding before deleting the legacy modules: training conversations and automatic planning, device-tool
-replies, migration of scheduling itself, the sandbox connection, and production first-message profiling. The
+Training conversations, automatic planning and phone-calendar waits now use the native path too.
+Still outstanding: migration of scheduling itself, the sandbox connection, production first-message profiling,
+and removal of the non-native runtime and its callers in deployments without the gateway. The
 classic browser loop is also retained. Do not delete shared modules while those callers still use them.
+
+
+### Training and device parity
+
+The native plugin also declares `coros_write` and `update_training_preferences`. Ordinary chat writes still ask
+for approval; training runs pass a server-owned `autoApproveTools` list. Their preview must pass the existing
+training policy before the plugin skips an interactive approval. Execution checks both the approved tool/arguments
+and the planner's current authorization. A paused training conversation can remember preferences, but cannot
+schedule workouts or save unrelated notes. Native runs also observe COROS format pages before scoped writes.
+
+Phone-calendar requests retain their device request rows and account checks while the gateway run waits. The
+request is answered through `decideRun`; stop cancels the wait, and a ten-minute timeout returns an unavailable
+result. No checkpoint/resume loop or model restart is needed for that wait.
+
+The intermediate Responses client and its tests have been deleted, along with `PIP_GATEWAY_CLIENT` and
+`PIP_GATEWAY_CHAT`. `docs/pip-gateway.md` describes the current runtime; the earlier phase-2 checklist above is
+historical and includes these now-removed files.

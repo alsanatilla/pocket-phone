@@ -2,15 +2,15 @@
 // woken. No imports: the gateway config generator reads these lists before anything else of Pocket is loaded.
 //
 // Not ported: remember/forget (OpenClaw's memory owns that), update_plan (OpenClaw keeps its own run state),
-// COROS writes (the training planner still owns them). Web search stays Pocket's: OpenClaw's Firecrawl
+// Web search stays Pocket's: OpenClaw's Firecrawl
 // provider is a separate plugin package, and Pocket's tools already use the account's Firecrawl key.
 export const NATIVE_TOOLS = ['search_notes', 'read_note', 'search_thoughts', 'search_tasks', 'read_task', 'search_calendar', 'search_pocket',
   'read_chat_history', 'search_web', 'read_web_page', 'show_card', 'update_card', 'create_record', 'change_record',
-  'list_jobs', 'create_job', 'change_job', 'remove_job', 'start_assignment', 'update_scratch', 'gym_summary', 'coros_summary', 'coros_read', 'coros_format'];
+  'list_jobs', 'create_job', 'change_job', 'remove_job', 'start_assignment', 'update_scratch', 'gym_summary', 'coros_summary', 'coros_read', 'coros_format', 'coros_write', 'update_training_preferences'];
 /** The calls the person approves first (a subset of pip-tools.js WRITE_TOOLS). */
-export const NATIVE_WRITES = ['create_record', 'change_record', 'remove_job'];
+export const NATIVE_WRITES = ['create_record', 'change_record', 'remove_job', 'coros_write', 'update_training_preferences'];
 /** Calls that change the answer or the person's data run one at a time, in order (as pip-agent.js does). */
-export const NATIVE_SEQUENTIAL = ['show_card', 'update_card', 'create_record', 'change_record', 'create_job', 'change_job', 'remove_job'];
+export const NATIVE_SEQUENTIAL = ['show_card', 'update_card', 'create_record', 'change_record', 'create_job', 'change_job', 'remove_job', 'coros_write', 'update_training_preferences'];
 
 // A native reply waits on things other requests change: a decision (decideRun) or a message sent into it
 // (queueMessage). Those requests wake it at once; the wait still looks again on its own, for a change made by another
