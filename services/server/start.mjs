@@ -16,11 +16,15 @@ const children = [
   // Replies run in the web process (PIP_RUNS_MODE); the worker executes what it claims itself, inside its own loop.
   spawn(process.execPath, ['services/pip/worker.mjs'], { stdio: 'inherit', env: { ...process.env, ...events, PIP_RUNS_MODE: '', POCKET_EVENTS_URL: 'http://127.0.0.1:' + port + '/internal/events' } }),
 ];
+/** The gateway is an upgrade, not a requirement: if it cannot run, Pocket keeps its in-process loop. */
+const optional = new Set();
 if (gateway) {
   const { writeGatewayConfig, gatewayHome, gatewayPort } = await import('../gateway/config.mjs');
   const { path } = await writeGatewayConfig();
-  children.push(spawn(process.execPath, ['node_modules/openclaw/dist/index.js', 'gateway', 'run'], { stdio: 'inherit',
-    env: { ...process.env, OPENCLAW_CONFIG_PATH: path, OPENCLAW_STATE_DIR: gatewayHome(), OPENCLAW_GATEWAY_PORT: String(gatewayPort()), OPENCLAW_GATEWAY_TOKEN: process.env.PIP_GATEWAY_TOKEN } }));
+  const gatewayChild = spawn(process.execPath, ['node_modules/openclaw/dist/index.js', 'gateway', 'run'], { stdio: 'inherit',
+    env: { ...process.env, OPENCLAW_CONFIG_PATH: path, OPENCLAW_STATE_DIR: gatewayHome(), OPENCLAW_GATEWAY_PORT: String(gatewayPort()), OPENCLAW_GATEWAY_TOKEN: process.env.PIP_GATEWAY_TOKEN } });
+  optional.add(gatewayChild);
+  children.push(gatewayChild);
 }
 let stopping = false;
 const stop = (signal = 'SIGTERM') => {
@@ -28,5 +32,12 @@ const stop = (signal = 'SIGTERM') => {
   for (const child of children) if (child.exitCode === null) child.kill(signal);
   setTimeout(() => process.exit(1), 25000).unref();
 };
-for (const child of children) child.on('exit', code => { if (!stopping) { console.error(JSON.stringify({ level: 'error', message: 'A Pocket process stopped', pid: child.pid, code })); stop(); } else if (children.every(item => item.exitCode !== null || item.signalCode)) process.exit(0); });
+for (const child of children) child.on('exit', code => {
+  if (optional.has(child)) {
+    console.error(JSON.stringify({ level: 'error', message: 'The OpenClaw gateway stopped; Pocket keeps its in-process loop', pid: child.pid, code }));
+    return;
+  }
+  if (!stopping) { console.error(JSON.stringify({ level: 'error', message: 'A Pocket process stopped', pid: child.pid, code })); stop(); }
+  else if (children.every(item => item.exitCode !== null || item.signalCode)) process.exit(0);
+});
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => stop(signal));

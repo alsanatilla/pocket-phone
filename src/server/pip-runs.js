@@ -623,7 +623,10 @@ async function drive(userId, run, leaseId, { fetcher }) {
     // mapped yet, so those keep the in-process loop.
     const useGatewayChat = process.env.PIP_GATEWAY_CLIENT === '1' && process.env.PIP_GATEWAY_CHAT === '1' && gatewayConfigured()
       && !assignment && !deviceTools.length && !researchOption;
-    const gatewayCall = useGatewayChat ? await (async () => {
+    let gatewayCall = null;
+    if (useGatewayChat) {
+      try {
+        gatewayCall = await (async () => {
       const { gatewayChat } = await import('./pip-gateway-run.js');
       const toolFor = (name, input, toolSignal, callId) => name === 'remember' || name === 'forget' ? memoryTool(userId, chatUid, name, input)
         : JOB_TOOLS.includes(name) ? jobTool(userId, name, input, { chat: chatUid, turn: turn.uid, eventId: callId, value })
@@ -635,7 +638,16 @@ async function drive(userId, run, leaseId, { fetcher }) {
         execute: (name, input, toolSignal, callId) => toolFor(name, input, toolSignal, callId),
         saveTurn: async changed => { if (!await writeTurn(userId, chatUid, changed)) throw new Error('The chat could not be saved.'); },
         onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } }); live.publish(runId, turn, meta); progress(); } });
-    })() : null;
+        })();
+      } catch (error) {
+        // A paused reply is a pause, not a failure. Before any text, a gateway that cannot answer is skipped and the
+        // in-process loop runs; after text, the error is the reply's, so the person never sees two answers.
+        if (error?.name === 'RunPaused') throw error;
+        if (String(turn.answer || '').trim()) throw error;
+        console.warn(JSON.stringify({ level: 'warn', message: 'Pip gateway failed; using the in-process loop', error: String(error?.message || error).slice(0, 300) }));
+        gatewayCall = null;
+      }
+    }
     const reply = gatewayCall ?? await streamChat(conversationView, turn, { value, body, key, fetcher, ...(assignment ? {} : { userId }), deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
       ...(researchOption ? { research: researchOption } : {}), ...(assignment ? {} : { steering: { take } }),
       onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } }); live.publish(runId, turn, meta); progress(); },
