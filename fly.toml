@@ -22,7 +22,9 @@ kill_timeout = "30s"
   # Pip's agent, workspace and memory are the OpenClaw gateway beside the web process; it is loopback only.
   PIP_GATEWAY = "1"
   PIP_GATEWAY_CLIENT = "1"
-  PIP_GATEWAY_CHAT = "1"
+  # Chat stays on the in-process loop until the gateway reuses a session per chat: every fresh gateway session costs
+  # seconds in setup before the model is even asked. Routines and memory still use the gateway.
+  PIP_GATEWAY_CHAT = "0"
   PIP_GATEWAY_HOME = "/data/openclaw"
   PIP_GATEWAY_PORT = "18789"
   PIP_GATEWAY_AGENT = "pocket"
