@@ -490,9 +490,27 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
   };
   // Imported here: the agent runtime and provider adapters load only when a routine runs.
   const { streamChat } = await import('./pip-agent.js');
+  const { gatewayConfigured } = await import('./pip-gateway.js');
+  // Routines are read-only, so they are the first path on the gateway: no approval and no durable pause to map.
+  const useGateway = process.env.PIP_GATEWAY_CLIENT === '1' && gatewayConfigured() && !conversation && !training;
   let revised = false;
   try {
-    const reply = await streamChat(view, turn, { value, body, key, fetcher, signal, userId, deadlineMs: RUN_DEADLINE, coverage: contextCoverage(view, turn),
+    const reply = useGateway
+      ? await (async () => {
+          const { gatewayRoutine } = await import('./pip-gateway-run.js');
+          const reply = await gatewayRoutine({ chat, turn, value, body, signal, onUpdate: update => Object.assign(turn, update),
+            execute: async (name, input, callSignal) => {
+              if (name === 'update_scratch') {
+                if (!job) return { error: 'unavailable', message: 'Only a scheduled job keeps notes.' };
+                const kept = await writeScratch(userId, routine.id, input?.notes);
+                return { kind: 'scratch', saved: true, length: kept.length };
+              }
+              return runTool(value, name, input, callSignal, { chat, turn });
+            } });
+          if (reply.revised) revised = true;
+          return reply;
+        })()
+      : await streamChat(view, turn, { value, body, key, fetcher, signal, userId, deadlineMs: RUN_DEADLINE, coverage: contextCoverage(view, turn),
       onUpdate: update => Object.assign(turn, update),
       // A card changed in an earlier report: the chat is written when the run ends, even one that reports nothing new.
       // In the big chat it is written at once to the segment that holds it, which may be the one before.

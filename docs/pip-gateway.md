@@ -62,7 +62,11 @@ the next layer; until then the current loop stays in charge.
 6. The `/memory` page reads `USER.md`/`MEMORY.md` through the gateway (or a file read RPC) and edits them as files;
    the `pocket_pip_memory` table and its API go away.
 
-Until step 1 is done the flag stays off and Pocket keeps its current loop.
+The first production path is already switched, behind `PIP_GATEWAY_CLIENT=1`: scheduled routines (read-only, no
+approval, no durable pause) run on the gateway through `gatewayRoutine` in `src/server/pip-gateway-run.js`. It
+places drawn cards where the reply stands, applies `update_card` to this or an earlier turn (keeping the pin and
+threshold), records the calls as activity, and leaves `remember`/`forget` to the gateway. With the flag unset the old
+loop runs as before.
 
 ## Operations
 
