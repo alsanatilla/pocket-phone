@@ -20,7 +20,9 @@ export function gatewayConfig() {
   return {
     gateway: { mode: 'local', port: gatewayPort(), bind: 'loopback', auth: { mode: 'token', token: env.PIP_GATEWAY_TOKEN || '' },
       http: { endpoints: { responses: { enabled: true } } } },
-    plugins: { slots: { memory: 'memory-core' }, entries: { 'memory-core': { enabled: true } } },
+    // Only the memory plugin: every other bundled plugin adds tools and prompt text this personal agent never uses.
+    plugins: { slots: { memory: 'memory-core' }, entries: { 'memory-core': { enabled: true } },
+      deny: ['anthropic', 'browser', 'canvas', 'cua-computer', 'device-pair', 'file-transfer', 'geolocation', 'github', 'linux-node', 'ollama', 'openai', 'talk-voice', 'xai'] },
     // Keyword memory: no embedding key is required, and the index stays fts-only instead of waiting for vectors.
     memory: { search: { provider: 'none', sources: ['memory'] } },
     models: { mode: 'merge', providers: {
