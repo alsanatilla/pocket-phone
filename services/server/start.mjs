@@ -21,8 +21,11 @@ const optional = new Set();
 if (gateway) {
   const { writeGatewayConfig, gatewayHome, gatewayPort } = await import('../gateway/config.mjs');
   const { path } = await writeGatewayConfig();
+  // Sessions, the agent database and the memory index live on the machine's own disk: SQLite on a network volume
+  // cost seconds per reply. The workspace (USER.md, MEMORY.md) stays on the volume and is what must survive.
+  const stateDir = process.env.OPENCLAW_STATE_DIR || '/tmp/openclaw';
   const gatewayChild = spawn(process.execPath, ['node_modules/openclaw/dist/index.js', 'gateway', 'run'], { stdio: 'inherit',
-    env: { ...process.env, OPENCLAW_CONFIG_PATH: path, OPENCLAW_STATE_DIR: gatewayHome(), OPENCLAW_GATEWAY_PORT: String(gatewayPort()), OPENCLAW_GATEWAY_TOKEN: process.env.PIP_GATEWAY_TOKEN } });
+    env: { ...process.env, OPENCLAW_CONFIG_PATH: path, OPENCLAW_STATE_DIR: stateDir, OPENCLAW_GATEWAY_PORT: String(gatewayPort()), OPENCLAW_GATEWAY_TOKEN: process.env.PIP_GATEWAY_TOKEN } });
   optional.add(gatewayChild);
   children.push(gatewayChild);
 }
