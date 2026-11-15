@@ -23,7 +23,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 process.env.PIP_GATEWAY_URL = 'http://127.0.0.1:' + server.address().port;
 process.env.PIP_GATEWAY_TOKEN = 'test-token';
 test.after(() => server.close());
-const { gatewayRoutine, gatewayInput } = await import('../src/server/pip-gateway-run.js');
+const { gatewayRoutine, gatewayChat, gatewayInput } = await import('../src/server/pip-gateway-run.js');
 
 test('the chat becomes Responses input, one message per side of a turn', () => {
   assert.deepEqual(gatewayInput([{ text: 'Q one?', answer: 'A one.' }, { text: 'Q two?', answer: '' }]), [
@@ -42,6 +42,9 @@ test('a drawn card is placed where the reply stands, and the text follows it', a
   assert.deepEqual(result.activity.map(row => row.name), ['show_card']);
   assert.equal(result.usage.output_tokens, 5);
   assert.ok(updates.some(update => String(update.answer).includes('pocket')));
+  const input = requests[start].body.input;
+  assert.deepEqual(input.at(-1), { role: 'user', content: 'Now?' }, 'the current message is in the input');
+  assert.equal(input.some(item => item.role === 'assistant' && item.content === ''), false);
 });
 
 test('an update_card changes the card in an earlier turn of the same chat', async () => {
@@ -54,4 +57,20 @@ test('an update_card changes the card in an earlier turn of the same chat', asyn
   assert.match(chat.turns[0].answer, /\/pinned/);
   assert.match(chat.turns[0].answer, /4242/);
   assert.equal(result.answer, 'Changed.');
+});
+
+test('a chat reply places a card in its own answer and keeps the person\'s message in the input', async () => {
+  script = [{ call: 'show_card', arguments: {} }, { text: 'Done.' }];
+  const start = requests.length;
+  const chat = { turns: [{ uid: 'old', text: 'Earlier question', answer: 'Earlier answer' }, { uid: 't1', text: 'Now?', answer: '' }] };
+  const updates = [];
+  const result = await gatewayChat({ chat, turn: chat.turns[1], value: {}, body: { instructions: 'Be brief.', tools: ['show_card'] },
+    execute: async name => name === 'show_card' ? { card, id: 'kcard123' } : { error: 'unexpected' }, onUpdate: update => updates.push(update) });
+  assert.match(result.answer, /```pocket/);
+  assert.match(result.answer, /Done\.$/);
+  assert.ok(result.answer.indexOf('```pocket') < result.answer.indexOf('Done.'));
+  assert.ok(updates.some(update => String(update.answer).includes('pocket')));
+  const input = requests[start].body.input;
+  assert.deepEqual(input.at(-1), { role: 'user', content: 'Now?' }, 'the current message is in the input');
+  assert.equal(input.some(item => item.role === 'assistant' && item.content === ''), false);
 });

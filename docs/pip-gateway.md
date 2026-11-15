@@ -46,8 +46,12 @@ What it does: streaming, client tools, and a write that pauses for the person â€
 `approve` returns the decision (and any edited input), the tool only runs when approved, and a declined write goes
 back to the model as declined. It also pauses a durable run: the calls, their previews and the response id are stored, the run is paused, and on
 resume the approved calls are executed (with any edited input) or declined, then the reply continues from
-`previous_response_id`. What it does not do yet: place cards in a live chat reply and drive the chat path's
-assignment/job/steering options. Until then chat replies stay on the old loop.
+`previous_response_id`.
+
+Chat replies can now run on it too, with `PIP_GATEWAY_CLIENT=1` and `PIP_GATEWAY_CHAT=1`: `gatewayChat` sends the
+chat as input, runs Pocket's tools (jobs, writes, reads), places `show_card` in the answer, applies `update_card` in
+this or an earlier turn through `writeTurn`, and pauses a write through the same durable state. Assignments, device
+tools and thorough research stay on the in-process loop; steering a running reply is not mapped yet.
 
 ## The reply loop Pocket still has to move
 

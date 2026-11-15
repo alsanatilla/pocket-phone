@@ -57,3 +57,46 @@ export async function gatewayRoutine({ chat, turn, value, body, execute, onUpdat
   });
   return { ...result, answer: answer.text, activity, revised };
 }
+
+/** The marks a changed card keeps: its pin and its threshold, with a new time. */
+const marksFor = (id, old) => ({ id, updated: Date.now(), ...(old?.pinned ? { pinned: old.pinned } : {}), ...(old?.alert ? { alert: old.alert } : {}) });
+
+/**
+ * One chat reply on the gateway. Pocket's tools run here, a write pauses the run for the person through `durable`,
+ * and a drawn card is placed where the model drew it — in this reply, or in an earlier one through `saveTurn`.
+ */
+export async function gatewayChat({ chat, turn, value, body, execute, preview, durable, saveTurn, onUpdate = () => {}, signal, writes = [] }) {
+  let text = durable?.checkpoint?.runtime === 'gateway' ? String(durable.checkpoint.answer || '') : '';
+  let revised = false;
+  const activity = [];
+  // The person's current message is part of the input; its answer is not (a resume continues the stored response).
+  const history = (chat.turns || []).map(item => item.uid === turn.uid ? { ...item, answer: '' } : item);
+  const result = await gatewayReply({
+    input: gatewayInput(history),
+    instructions: body.instructions,
+    tools: gatewayTools(value, (body.tools || []).filter(name => name !== 'remember' && name !== 'forget')),
+    writes, preview, durable, signal,
+    onText: delta => { text += delta; onUpdate({ answer: text, phase: 'writing' }); },
+    onCall: name => activity.push({ id: String(activity.length + 1), kind: 'tool', name, title: name, state: 'done' }),
+    execute: async (callId, name, args, callSignal) => {
+      const out = await execute(name, args, callSignal, callId);
+      if (name === 'show_card' && out?.card) {
+        text = text.replace(/\s+$/, '') + (text.trim() ? '\n\n' : '') + out.card + '\n\n';
+        onUpdate({ answer: text });
+      } else if (name === 'update_card' && out?.revise && out.id) {
+        const here = replaceCard(text, out.id, cardFence(out.spec, marksFor(out.id, cardsIn(text).find(card => card.id === out.id))));
+        if (here !== null) { text = here; onUpdate({ answer: text }); }
+        else for (const item of history) {
+          if (typeof item.answer !== 'string') continue;
+          const old = cardsIn(item.answer).find(card => card.id === out.id);
+          if (!old) continue;
+          const changed = replaceCard(item.answer, out.id, cardFence(out.spec, marksFor(out.id, old)));
+          if (changed !== null) { item.answer = changed; item.updated = Math.max(Date.now(), (item.updated || 0) + 1); revised = true; if (saveTurn) await saveTurn(item); }
+          break;
+        }
+      }
+      return out;
+    },
+  });
+  return { ...result, answer: text, activity, revised };
+}

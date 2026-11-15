@@ -611,6 +611,7 @@ async function drive(userId, run, leaseId, { fetcher }) {
     const observations = (turn.activity || []).filter(row => row.state === 'done' && row.result && !row.applied_href)
       .map(row => ({ name: row.name, input: row.input || '{}', result: row.result })).slice(-24);
     const { streamChat } = await import('./pip-agent.js');
+    const { gatewayConfigured } = await import('./pip-gateway.js');
     const judged = judging ? await judging : null;
     if (judged) effort = judged.level;
     // The level's sentence joins the date line: the model knows how much looking-up Pocket expects before it writes.
@@ -618,7 +619,24 @@ async function drive(userId, run, leaseId, { fetcher }) {
     if (note) body.instructions += '\n\n' + note;
     // The level is advice in the note above; only thorough research is also asked "is this enough?" between rounds.
     const researchOption = effort === 'thorough' && !assignment ? { enough } : null;
-    const reply = await streamChat(conversationView, turn, { value, body, key, fetcher, ...(assignment ? {} : { userId }), deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
+    // The gateway owns the reply when both flags are on. Assignments, device tools and thorough research are not
+    // mapped yet, so those keep the in-process loop.
+    const useGatewayChat = process.env.PIP_GATEWAY_CLIENT === '1' && process.env.PIP_GATEWAY_CHAT === '1' && gatewayConfigured()
+      && !assignment && !deviceTools.length && !researchOption;
+    const gatewayCall = useGatewayChat ? await (async () => {
+      const { gatewayChat } = await import('./pip-gateway-run.js');
+      const toolFor = (name, input, toolSignal, callId) => name === 'remember' || name === 'forget' ? memoryTool(userId, chatUid, name, input)
+        : JOB_TOOLS.includes(name) ? jobTool(userId, name, input, { chat: chatUid, turn: turn.uid, eventId: callId, value })
+        : WRITE_TOOLS.includes(name) ? applyApprovedWrite(userId, { chatId: chatUid, turnId: turn.uid, eventId: callId, name, input })
+        : runTool(value, name, input, toolSignal, { chat: conversationView, turn, eventId: callId, source });
+      return gatewayChat({ chat: conversationView, turn, value, body, signal: controller.signal,
+        durable: { checkpoint: resumed, settled: resumed ? settlementMap(requests) : null, pause }, writes: WRITE_TOOLS,
+        preview: (name, input, previewSignal) => JOB_TOOLS.includes(name) ? jobPreview(userId, name, input, value) : previewTool(value, name, input, previewSignal, source),
+        execute: (name, input, toolSignal, callId) => toolFor(name, input, toolSignal, callId),
+        saveTurn: async changed => { if (!await writeTurn(userId, chatUid, changed)) throw new Error('The chat could not be saved.'); },
+        onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } }); live.publish(runId, turn, meta); progress(); } });
+    })() : null;
+    const reply = gatewayCall ?? await streamChat(conversationView, turn, { value, body, key, fetcher, ...(assignment ? {} : { userId }), deadlineMs: RUN_DEADLINE, deviceTools, signal: controller.signal, coverage: contextCoverage(conversationView, turn),
       ...(researchOption ? { research: researchOption } : {}), ...(assignment ? {} : { steering: { take } }),
       onUpdate: update => { segment = update.usage || segment; Object.assign(turn, update, { usage: { ...total(segment), runtime: 'pocket-server', ...(effort ? { effort } : {}), ...(enoughAt ? { enoughAt } : {}), ...(enoughAsked ? { enoughAsked } : {}) } }); live.publish(runId, turn, meta); progress(); },
       resume: { reasoning: turn.reasoning || '', activity: turn.activity || [], observations },
