@@ -5,6 +5,9 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 
 const port = process.env.PORT || '8080';
+// The OpenClaw gateway owns Pip's workspace, memory and reply loop when it is on. It listens on loopback only.
+const gateway = process.env.PIP_GATEWAY === '1';
+if (gateway) process.env.PIP_GATEWAY_TOKEN ||= randomBytes(24).toString('hex');
 // The worker tells the web process what happened (a job's reply, a record it wrote), and the web process tells the
 // open tabs. The secret lives only as long as these two processes.
 const events = { POCKET_EVENTS_SECRET: randomBytes(24).toString('hex') };
@@ -13,6 +16,12 @@ const children = [
   // Replies run in the web process (PIP_RUNS_MODE); the worker executes what it claims itself, inside its own loop.
   spawn(process.execPath, ['services/pip/worker.mjs'], { stdio: 'inherit', env: { ...process.env, ...events, PIP_RUNS_MODE: '', POCKET_EVENTS_URL: 'http://127.0.0.1:' + port + '/internal/events' } }),
 ];
+if (gateway) {
+  const { writeGatewayConfig, gatewayHome, gatewayPort } = await import('../gateway/config.mjs');
+  const { path } = await writeGatewayConfig();
+  children.push(spawn(process.execPath, ['node_modules/openclaw/dist/index.js', 'gateway', 'run'], { stdio: 'inherit',
+    env: { ...process.env, OPENCLAW_CONFIG_PATH: path, OPENCLAW_STATE_DIR: gatewayHome(), OPENCLAW_GATEWAY_PORT: String(gatewayPort()), OPENCLAW_GATEWAY_TOKEN: process.env.PIP_GATEWAY_TOKEN } }));
+}
 let stopping = false;
 const stop = (signal = 'SIGTERM') => {
   if (stopping) return; stopping = true;
