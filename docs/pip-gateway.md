@@ -42,9 +42,10 @@ returns the answer, the calls and usage. `gatewayTools` turns Pocket's offered t
 with the same schemas. A fake-SSE test (`tools/pip-gateway.test.mjs`) covers the text stream, the tool call, the
 follow-up and its input.
 
-What it does not do yet: place `show_card`/`update_card` in the answer (the card draft and its replacement), ask
-Pocket's approval before a write and pause a durable run on it, and carry a resumed run's pending calls. Those are
-the next layer; until then the current loop stays in charge.
+What it does: streaming, client tools, and a write that pauses for the person — `preview` says what will happen,
+`approve` returns the decision (and any edited input), the tool only runs when approved, and a declined write goes
+back to the model as declined. What it does not do yet: a durable run paused on that decision and resumed with the
+pending calls. That is the next layer; until then chat replies stay on the old loop.
 
 ## The reply loop Pocket still has to move
 

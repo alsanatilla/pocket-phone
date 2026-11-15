@@ -61,7 +61,7 @@ async function stream(body, { signal, onText }) {
  * the model writes its answer. `execute(callId, name, input, signal)` is Pocket's tool runner; `onUpdate` receives
  * the text and the calls as they happen. Never runs more than `maxSteps` requests (the same guard as the old loop).
  */
-export async function gatewayReply({ input, instructions, tools, execute, onText = () => {}, onCall = () => {}, signal, maxSteps = 12 }) {
+export async function gatewayReply({ input, instructions, tools, execute, preview, approve, writes = [], onText = () => {}, onCall = () => {}, signal, maxSteps = 12 }) {
   let items = input, previous = '', answer = '', usage = {}, id = '';
   for (let step = 0; step < maxSteps; step++) {
     const { calls, final } = await stream({
@@ -74,10 +74,21 @@ export async function gatewayReply({ input, instructions, tools, execute, onText
     if (!calls.length) return { answer, usage, id, status: final.status || 'completed' };
     items = [];
     for (const call of calls) {
-      const args = (() => { try { return JSON.parse(call.arguments || '{}'); } catch { return {}; } })();
+      let args = (() => { try { return JSON.parse(call.arguments || '{}'); } catch { return {}; } })();
       onCall(call.name, args);
       let result;
-      try { result = await execute(call.call_id, call.name, args, signal); }
+      try {
+        // A write waits for the person, as it does in the in-process loop: preview, ask, then run what was approved.
+        if (writes.includes(call.name) && preview && approve) {
+          const ready = await preview(call.name, args, signal);
+          if (ready?.error) result = ready;
+          else {
+            const decision = (await approve([{ approvalId: 'gw-' + call.call_id, toolCallId: call.call_id, toolName: call.name, input: args, rowId: call.call_id }], signal))?.get(call.call_id);
+            if (!decision?.approved) result = { message: 'The user declined this change.', kind: 'action', action: { ...ready.action, status: 'declined' } };
+            else { if (decision.input) args = decision.input; result = await execute(call.call_id, call.name, args, signal); }
+          }
+        } else result = await execute(call.call_id, call.name, args, signal);
+      }
       catch (error) { result = { error: 'tool_failed', message: String(error?.message || error).slice(0, 500) }; }
       items.push({ type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(result ?? {}) });
     }
