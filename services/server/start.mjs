@@ -22,7 +22,7 @@ const children = [
 /** Native replies require the gateway: a failed child restarts the service with its siblings. */
 const optional = new Set();
 if (gateway) {
-  const { writeGatewayConfig, gatewayHome, gatewayPort } = await import('../gateway/config.mjs');
+  const { writeGatewayConfig, gatewayHome, gatewayPort, warmGateway } = await import('../gateway/config.mjs');
   const { path } = await writeGatewayConfig();
   // Sessions, the agent database and the memory index live on the machine's own disk: SQLite on a network volume
   // cost seconds per reply. The workspace (USER.md, MEMORY.md) stays on the volume and is what must survive.
@@ -31,6 +31,8 @@ if (gateway) {
     env: { ...process.env, OPENCLAW_CONFIG_PATH: path, OPENCLAW_STATE_DIR: stateDir, OPENCLAW_GATEWAY_PORT: String(gatewayPort()), OPENCLAW_GATEWAY_TOKEN: process.env.PIP_GATEWAY_TOKEN } });
   if (process.env.PIP_OPENCLAW_NATIVE !== '1') optional.add(gatewayChild);
   children.push(gatewayChild);
+  warmGateway().then(result => console.log(JSON.stringify({ level: 'info', message: 'OpenClaw gateway warmed', ...result })),
+    error => console.error(JSON.stringify({ level: 'error', message: 'OpenClaw gateway warm-up failed', error: String(error?.message || error).slice(0, 200) })));
 }
 let stopping = false;
 const stop = (signal = 'SIGTERM') => {

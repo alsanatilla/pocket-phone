@@ -65,7 +65,7 @@ test('native: Pocket\'s plugin is loaded, unused core tools are left out, and th
     assert.match(pocket.config.url, /^http:\/\/127\.0\.0\.1:\d+\/internal\/pip-tools$/);
     assert.ok(pocket.config.tools.some(tool => tool.name === 'show_card' && tool.parameters.type === 'object'));
     assert.ok(!pocket.config.tools.some(tool => ['remember', 'forget'].includes(tool.name)), 'OpenClaw memory replaces Pocket\'s');
-    assert.deepEqual(pocket.config.writes, ['create_record', 'change_record', 'remove_job']);
+    assert.deepEqual(pocket.config.writes, ['create_record', 'change_record', 'remove_job', 'coros_write', 'update_training_preferences']);
     const manifest = JSON.parse(await readFile(join(cfg.plugins.load.paths[0], 'openclaw.plugin.json'), 'utf8'));
     assert.deepEqual([...manifest.contracts.tools].sort(), pocket.config.tools.map(tool => tool.name).sort(), 'the manifest names every tool the plugin registers');
     assert.equal(cfg.tools.profile, 'minimal'); assert.equal(cfg.tools.toolSearch, false);
@@ -75,4 +75,18 @@ test('native: Pocket\'s plugin is loaded, unused core tools are left out, and th
     assert.match(skill, /^---\nname: pocket-cards\n/); assert.match(skill, /show_card/);
     assert.match(await readFile(join(written.workspace, 'AGENTS.md'), 'utf8'), /pocket-cards skill/);
   } finally { delete process.env.PIP_OPENCLAW_NATIVE; }
+});
+
+test('OpenCode Go goes through OpenClaw\'s own provider, which sends the chat\'s session, and chat does not think first', () => {
+  const saved = { ...process.env };
+  try {
+    process.env.PIP_GATEWAY_BASE_URL = 'https://opencode.ai/inference/go/openai/v1'; process.env.PIP_GATEWAY_KEY = 'k';
+    const cfg = gatewayConfig();
+    assert.deepEqual(Object.keys(cfg.models.providers), ['opencode-go']);
+    assert.equal(cfg.models.providers['opencode-go'].baseUrl, 'https://opencode.ai/zen/go/v1');
+    assert.match(cfg.agents.entries.pocket.model, /^opencode-go\//);
+    assert.equal(cfg.agents.defaults.thinkingDefault, 'off');
+    process.env.PIP_GATEWAY_BASE_URL = 'http://127.0.0.1:9/v1';
+    assert.notDeepEqual(Object.keys(gatewayConfig().models.providers), ['opencode-go'], 'any other endpoint stays a plain compatible provider');
+  } finally { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); }
 });
