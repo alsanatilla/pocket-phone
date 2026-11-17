@@ -348,11 +348,18 @@ export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, 
     // Only the person's message and what they attached: the session holds everything before it.
     const context = (Array.isArray(turn.context) ? turn.context : []).map(source => '\n\n[Attached: ' + String(source.title || 'source') + ']\n' + String(source.text || '')).join('');
     // The chat's chosen model becomes this gateway session's override: switching a chat's model switches the model
-    // here, on the next message. The gateway only accepts models its config carries (the OpenCode Go list).
+    // here, on the next message. The gateway only accepts models its config carries (the OpenCode Go list). A change
+    // made right after the previous reply can meet its still-settling run, so a short retry covers that race.
     const wanted = gatewayModelFor(chat?.config);
     if (wanted && state.models.get(key) !== wanted) {
-      try { await client.request('sessions.patch', { key, model: wanted }); state.models.set(key, wanted); }
-      catch (error) { throw no('This chat’s model is not available on the server (' + wanted + '). Choose the model again in the chat.', 'model_unavailable'); }
+      let refused;
+      for (const delay of [0, 250, 600]) {
+        if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+        try { await client.request('sessions.patch', { key, model: wanted }); refused = null; break; }
+        catch (error) { refused = error; }
+      }
+      if (refused) throw no('The chat’s model could not be set (' + wanted + '): ' + String(refused.message || 'the gateway refused it').slice(0, 160) + '. Choose another model in the chat.', 'model_unavailable');
+      state.models.set(key, wanted);
     }
     timing.send = Date.now();
     const ack = await client.request('chat.send', { sessionKey: key, message: String(message ?? turn.text ?? '') + context, idempotencyKey: 'pocket-' + runId });
