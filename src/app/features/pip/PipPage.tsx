@@ -4,7 +4,6 @@ import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Keys, Row } from "../../ui/kit.tsx";
 import { starters } from "../../../client/pip-presentation.js";
-import { PipSprite } from "./PipSprite.tsx";
 import { readAccess } from "../../data/ai.ts";
 import { useCollection } from "../../data/bus.ts";
 import { createChat, readChat, type Chat } from "../../data/chats.ts";
@@ -42,10 +41,7 @@ function Empty({ onAsk }: { onAsk: (prompt: string) => void }) {
   const ideas = starters({ enabled, overdue: due.filter(task => task.due < today()).length, thoughts: openThoughts().length });
   return (
     <div className="space-y-3 py-6">
-      <div className="flex items-start gap-3">
-        <PipSprite activity="wave" size={88} />
-        <p className="max-w-prose pt-1 text-sm text-muted-foreground">Ask about anything you keep in Pocket. Pip only reads what you allow in settings, and nothing is saved without you.</p>
-      </div>
+      <p className="max-w-prose text-sm text-muted-foreground">Ask about anything you keep in Pocket. Pip only reads what you allow in settings, and nothing is saved without you.</p>
       <div>
         {ideas.map(idea => <Row key={idea.label} onOpen={() => onAsk(idea.prompt)}>{idea.label}</Row>)}
       </div>
