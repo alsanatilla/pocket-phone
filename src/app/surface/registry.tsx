@@ -4,7 +4,7 @@ import * as controls from "./controls.tsx";
 import { cn } from "@/lib/utils";
 import { catalog } from "./catalog.ts";
 import { Figures } from "../ui/kit.tsx";
-import { Capture, Chart, Form, Gauge, Hero, Metric, Table, TaskList, ThoughtList, Timeline } from "./components.tsx";
+import { Capture, Chart, Form, Gauge, Hero, Metric, Picture, Table, TaskList, ThoughtList, Timeline } from "./components.tsx";
 
 // Catalog entries → components: layout and controls from controls.tsx (plain Terminal elements), readings, charts
 // and live lists from components.tsx. Adjusted for a phone-sized Pocket screen, in one place:
@@ -56,6 +56,7 @@ export const { registry } = defineRegistry(catalog, {
     Chart: ({ props }) => <Chart {...props} />,
     Table: ({ props }) => <Table {...props} />,
     Timeline: ({ props }) => <Timeline {...props} />,
+    Image: ({ props }) => <Picture {...props} />,
     TaskList: ({ props }) => <TaskList {...props} />,
     ThoughtList: ({ props }) => <ThoughtList {...props} />,
     // "ask" runs the askPip action, so Pip opens exactly as it does from a generated button.

@@ -109,6 +109,14 @@ export const catalog = defineCatalog(schema, {
       }),
       description: "A vertical timeline of the day or of a plan; the current item is highlighted.",
     },
+    Image: {
+      props: z.object({
+        src: z.string().describe("/api/media/<name> for a picture Pip saved to Pocket, or an https URL"),
+        alt: z.string().nullable().describe("What the picture shows, read out when it cannot load"),
+        caption: z.string().nullable().describe("One line under the picture"),
+      }),
+      description: "A picture, full width. Use only a src you were given: a media name Pocket saved for you, or an https URL of an image found on the web. Never invent an image URL.",
+    },
     TaskList: {
       props: z.object({
         title: z.string().nullable(),

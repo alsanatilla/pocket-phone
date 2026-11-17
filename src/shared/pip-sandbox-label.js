@@ -55,5 +55,7 @@ export function sandboxLabel(name, input = {}) {
   if (name === 'edit') return 'edit ' + baseName(input?.path);
   if (name === 'apply_patch') return 'edit files';
   if (name === 'ls') return 'list files';
+  // Looking at a picture is the one sandbox step a reply says out loud (the rest is plumbing, hidden by ledger).
+  if (name === 'view_image') return 'reading image';
   return '';
 }

@@ -1,0 +1,53 @@
+#!/bin/sh
+# pip-image — put a picture into Pocket from the sandbox, for the person whose chat runs here.
+#
+#   pip-image put shot.jpg ["what it shows"]
+#
+# Prints the URL to use as an Image card's src. The picture is stored for this
+# sandbox's Pocket account and is readable only by that signed-in person.
+#
+# The token and the endpoint come from the machine: /etc/pip-image-token (written
+# by start.sh from the Fly secret) and PIP_IMAGE_URL.
+set -eu
+
+TOKEN_FILE=/etc/pip-image-token
+BASE="${PIP_IMAGE_URL:-http://pocket-phone.internal:8080}"
+MAX=4194304
+
+die() { printf 'pip-image: %s\n' "$*" >&2; exit 1; }
+
+case "${1:-}" in
+  put) FILE="${2:-}" ;;
+  *) die "usage: pip-image put <file.jpg|file.png> [caption]" ;;
+esac
+[ -n "$FILE" ] || die "usage: pip-image put <file.jpg|file.png> [caption]"
+[ -f "$FILE" ] || die "no such file: $FILE"
+[ -r "$TOKEN_FILE" ] || die "no token at $TOKEN_FILE — pictures are not configured on this machine"
+
+SIZE=$(wc -c < "$FILE")
+[ "$SIZE" -le "$MAX" ] || die "keep the picture under 4 MB (it is $SIZE bytes)"
+[ "$SIZE" -gt 8 ] || die "that file is empty"
+
+# The type comes from the bytes, never from the file name.
+MAGIC=$(od -An -tx1 -N4 "$FILE" | tr -d ' \n')
+case "$MAGIC" in
+  89504e47*) TYPE=image/png ;;
+  ffd8ff*)   TYPE=image/jpeg ;;
+  *) die "only JPEG and PNG pictures (this file starts with $MAGIC)" ;;
+esac
+
+ACCOUNT=$(getent passwd "$(id -u)" | cut -d: -f1)
+printf '%s' "$ACCOUNT" | grep -qE '^p[0-9a-f]{24}$' || die "this user is not a sandbox account"
+
+RESPONSE=$(curl -sS --max-time 60 -X POST "$BASE/api/pip/media" \
+  -H "x-pocket-image-token: $(cat "$TOKEN_FILE")" \
+  -H "x-pocket-account: $ACCOUNT" \
+  -H "x-pocket-image-type: $TYPE" \
+  -H 'content-type: application/octet-stream' \
+  --data-binary "@$FILE") || die "could not reach Pocket at $BASE"
+
+URL=$(printf '%s' "$RESPONSE" | jq -r '.url // empty' 2>/dev/null)
+[ -n "$URL" ] || die "Pocket refused the picture: $RESPONSE"
+
+printf '%s\n' "$URL"
+printf 'Use it as an Image card: show_card with src "%s".\n' "$URL" >&2

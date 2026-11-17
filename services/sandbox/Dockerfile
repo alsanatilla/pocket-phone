@@ -5,7 +5,7 @@
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       openssh-server ca-certificates coreutils curl git jq unzip zip less file procps \
-      python3 python3-pip python3-venv python3-websocket python3-numpy python3-pandas python3-matplotlib python3-requests python3-bs4 python3-lxml \
+      python3 python3-pip python3-venv python3-websocket python3-numpy python3-pandas python3-matplotlib python3-requests python3-bs4 python3-lxml poppler-utils \
       nodejs npm sqlite3 \
       chromium xvfb fonts-liberation \
     && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
@@ -22,11 +22,22 @@ RUN XDG_BIN_HOME=/usr/local/bin curl -fsSL https://opencode.ai/browse/install | 
     && rm /tmp/browse-extension.zip \
     && test -f /opt/browse-extension/manifest.json
 RUN groupadd pip-sandbox
+# gog: Gmail, Calendar and Drive over the HTTPS API. SMTP is blocked here, and the
+# API is what Pip's mailbox uses. One binary, no runtime.
+ARG GOG_VERSION=0.48.1
+RUN curl -fsSL -o /tmp/gog.tgz "https://github.com/openclaw/gogcli/releases/download/v${GOG_VERSION}/gogcli_${GOG_VERSION}_linux_amd64.tar.gz" \
+    && tar -xzf /tmp/gog.tgz -C /usr/local/bin ./gog \
+    && rm /tmp/gog.tgz && chmod 755 /usr/local/bin/gog \
+    && /usr/local/bin/gog --version
 COPY accounts.py /usr/local/bin/accounts.py
 COPY browse.sh /usr/local/bin/browse
 COPY browse-pair.py /usr/local/bin/browse-pair.py
+COPY pip-mail /usr/local/bin/pip-mail
+COPY pip-mail-connect /usr/local/bin/pip-mail-connect
+COPY pip-image /usr/local/bin/pip-image
+COPY pip-file /usr/local/bin/pip-file
 COPY sshd_config /etc/ssh/sshd_config
 COPY start.sh /usr/local/bin/start.sh
-RUN chmod 755 /usr/local/bin/start.sh /usr/local/bin/browse /usr/local/bin/browse-pair.py
+RUN chmod 755 /usr/local/bin/start.sh /usr/local/bin/browse /usr/local/bin/browse-pair.py /usr/local/bin/pip-mail /usr/local/bin/pip-mail-connect /usr/local/bin/pip-image /usr/local/bin/pip-file
 EXPOSE 2222
 CMD ["/usr/local/bin/start.sh"]

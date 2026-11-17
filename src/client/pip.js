@@ -589,24 +589,71 @@ async function composerOptions(uid) {
   await ui.dialog('Pip options', body, [['close', null]]);
 }
 
+/** Files chosen in a chat but not sent yet. Kept outside the view so a re-render never loses them. */
+const pendingFiles = new Map();
+
 function composer(chat) {
   const field = ui.h('textarea', { id: 'pip-prompt', 'aria-label': 'Message Pip', placeholder: 'message Pip…', maxlength: 16000, rows: 1 });
   field.value = chat.draft;
   const draftStatus = ui.h('p', { class: 'meta warn pip-draft-status', role: 'status' });
+  const attachments = ui.h('div', { class: 'pip-attachments', 'aria-label': 'Attached files' });
   const resize = () => { field.style.height = 'auto'; field.style.height = Math.min(160, Math.max(48, field.scrollHeight)) + 'px'; };
-  const send = () => {
-    if (runner.active || !field.value.trim()) return;
-    return runner.send(chat.uid, { text: field.value, context: store.get(chat.uid).context });
-  };
+  const pending = () => pendingFiles.get(chat.uid) || [];
   const activeHere = runner.active?.chatId === chat.uid;
+  const send = () => {
+    const files = pending();
+    if (runner.active || (!field.value.trim() && !files.length)) return;
+    // The marker is what tells Pip in the sandbox that a file is waiting for it to pull and read.
+    const marker = files.length ? '\n\n[attached: ' + files.map(file => file.name).join(', ') + ']' : '';
+    const text = (field.value.trim() || (files.length ? 'See the attached file.' : '')) + marker;
+    pendingFiles.delete(chat.uid);
+    return runner.send(chat.uid, { text, context: store.get(chat.uid).context });
+  };
   const sendControl = activeHere ? button('stop', () => runner.stop(), { class: 'accent pip-send', id: 'pip-send' })
-    : button('send', send, { class: 'accent pip-send', id: 'pip-send', disabled: Boolean(runner.active) || !field.value.trim() });
+    : button('send', send, { class: 'accent pip-send', id: 'pip-send', disabled: Boolean(runner.active) || (!field.value.trim() && !pending().length) });
   const options = button('options', () => composerOptions(chat.uid), { class: 'pip-options-trigger', 'aria-label': 'Pip options', 'aria-haspopup': 'dialog' });
+  const upload = async file => {
+    const response = await fetch('/api/pip/attach', { method: 'POST', headers: { 'x-pocket-file-name': encodeURIComponent(file.name) }, body: file });
+    const value = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(value?.error || 'Upload failed.');
+    return value;
+  };
+  const drawAttachments = () => {
+    attachments.replaceChildren();
+    const files = pending();
+    attachments.hidden = !files.length;
+    for (const file of files) {
+      attachments.append(ui.h('span', { class: 'pip-attachment', title: file.name },
+        ui.h('span', { text: file.name }),
+        button('remove', () => {
+          pendingFiles.set(chat.uid, pending().filter(item => item.name !== file.name));
+          drawAttachments(); syncSend();
+        }, { class: 'pip-attachment-remove', 'aria-label': 'Remove ' + file.name })));
+    }
+  };
+  const syncSend = () => { if (!activeHere) sendControl.disabled = Boolean(runner.active) || (!field.value.trim() && !pending().length); };
+  const picker = ui.h('input', { type: 'file', hidden: true, multiple: true,
+    accept: '.pdf,.txt,.md,.csv,.tsv,.json,.xml,.yml,.yaml,.log,.html,.ics,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.gif',
+    onchange: async event => {
+      const chosen = [...event.target.files]; event.target.value = '';
+      for (const file of chosen) {
+        if (file.size > 10 * 1024 * 1024) { draftStatus.textContent = file.name + ' is over 10 MB.'; continue; }
+        draftStatus.textContent = 'Uploading ' + file.name + '…';
+        try {
+          const saved = await upload(file);
+          pendingFiles.set(chat.uid, [...pending(), { name: saved.name, size: saved.size, type: saved.type }]);
+          draftStatus.textContent = '';
+        } catch (error) { draftStatus.textContent = error.message; }
+      }
+      drawAttachments(); syncSend();
+    } });
+  const attach = button('attach', () => picker.click(), { class: 'pip-attach-trigger', 'aria-label': 'Send a file to Pip' });
+  pressMotion(attach);
   pressMotion(options); pressMotion(sendControl);
   field.oninput = () => {
     try { store.update(chat.uid, c => { c.draft = field.value; }); draftStatus.textContent = ''; }
     catch (error) { draftStatus.textContent = 'Draft could not be saved: ' + error.message; }
-    if (!activeHere) sendControl.disabled = Boolean(runner.active) || !field.value.trim();
+    syncSend();
     resize();
   };
   field.onkeydown = event => {
@@ -618,8 +665,10 @@ function composer(chat) {
     () => pocketAccess(chat), { class: 'pip-compose-scope', 'aria-label': 'Choose what Pip can read' });
   const form = ui.h('form', { class: 'pip-composer', onsubmit: event => event.preventDefault() },
     contextCards(chat.context, i => { store.update(chat.uid, c => c.context.splice(i, 1)); render(); }),
+    attachments,
     ui.h('div', { class: 'pip-compose-line' }, ui.h('span', { class: 'pip-glyph', text: '▌', 'aria-hidden': 'true' }), field, sendControl),
-    ui.h('div', { class: 'pip-compose-hint' }, scope, options), draftStatus);
+    ui.h('div', { class: 'pip-compose-hint' }, attach, picker, scope, options), draftStatus);
+  drawAttachments();
   requestAnimationFrame(() => { if (field.isConnected) resize(); });
   return form;
 }

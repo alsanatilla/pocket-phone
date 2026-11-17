@@ -24,6 +24,7 @@ export const CARD_COMPONENTS = {
   Table: [['title', 'columns', 'rows', 'note', 'source'], 'figures or facts to read row by row; columns [names], rows [[cells]] in column order, up to 40 rows'],
   Timeline: [['title', 'items'], 'a schedule or the steps of a plan; items [{time, title, detail}]'],
   TaskList: [['title', 'source', 'limit'], "the person's real tasks, live and checkable; source due|open|chosen"],
+  Image: [['src', 'alt', 'caption'], 'a picture; src is /api/media/<name> for one Pip saved to Pocket, or an https URL; alt says what it shows; caption is one line under it'],
   ThoughtList: [['title', 'source', 'limit'], "the person's parked thoughts, live; source ready|open"],
   Button: [['label', 'variant'], 'a choice; bind on.press to an action; variant primary|secondary'],
   Form: [['title', 'description', 'fields', 'submitLabel'], 'ask for a few answers at once; fields [{name, label, type: text|number|choice, options, placeholder, required}], one submit sends them to Pip as a message'],

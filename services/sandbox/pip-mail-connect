@@ -1,0 +1,92 @@
+#!/bin/sh
+# pip-mail-connect — link Pip's mailbox, in a shape that works inside a chat.
+#
+#   pip-mail-connect start <email> [cc-address]
+#       prints a Google consent URL. Nothing is stored yet.
+#
+#   pip-mail-connect finish '<redirect-url>'
+#       exchanges the consent, stores the token, and writes the mailbox config.
+#
+#   pip-mail-connect status
+#
+# The OAuth client comes from PIP_GOOGLE_CLIENT_JSON (the client_secret JSON as
+# a string) so no client secret is baked into the image.
+set -eu
+
+CONFIG="${PIP_MAIL_CONFIG:-}"
+if [ -z "$CONFIG" ]; then
+  # The Unix home, not $HOME: agent exec runs with HOME set to its OpenClaw
+  # workspace, which can be recreated. The token has to outlive that.
+  ACCOUNT_HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
+  [ -n "$ACCOUNT_HOME" ] && [ -d "$ACCOUNT_HOME" ] || ACCOUNT_HOME="${HOME:-/tmp}"
+  export HOME="$ACCOUNT_HOME"
+  CONFIG="$ACCOUNT_HOME/.config/pip-mail.json"
+fi
+CREDS="$HOME/.config/gogcli/credentials.json"
+KEY="$HOME/.config/gogcli/keyring.key"
+SERVICES="gmail,calendar"
+SCOPE="read-send"
+PENDING="$HOME/.local/state/pip-mail/pending-account"
+
+die() { printf 'pip-mail-connect: %s\n' "$*" >&2; exit 1; }
+
+prepare() {
+  mkdir -p "$HOME/.config/gogcli" "$HOME/.local/state/pip-mail"
+  chmod 700 "$HOME/.config/gogcli" "$HOME/.local/state/pip-mail"
+  [ -f "$KEY" ] || { head -c 32 /dev/urandom | base64 > "$KEY"; chmod 600 "$KEY"; }
+  GOG_KEYRING_PASSWORD="$(cat "$KEY")"; export GOG_KEYRING_PASSWORD
+  if [ ! -f "$CREDS" ]; then
+    RAW="$HOME/.config/gogcli/client_secret.json"
+    if [ -n "${PIP_GOOGLE_CLIENT_JSON:-}" ]; then
+      printf '%s' "$PIP_GOOGLE_CLIENT_JSON" > "$RAW"
+    elif [ -f /etc/pip-google-client.json ]; then
+      # The machine's client, written by start.sh from the Fly secret. It is the
+      # app's identity, not a person's: every account on this machine shares it.
+      cp /etc/pip-google-client.json "$RAW"
+    else
+      die "no OAuth client: PIP_GOOGLE_CLIENT_JSON is unset and /etc/pip-google-client.json is missing"
+    fi
+    chmod 600 "$RAW"
+    gog auth credentials "$RAW" >/dev/null || die "could not store the OAuth client"
+    rm -f "$RAW"
+  fi
+  command -v gog >/dev/null || die "gog not found on PATH"
+}
+
+case "${1:-}" in
+  start)
+    EMAIL="${2:-}"; CC="${3:-$EMAIL}"
+    [ -n "$EMAIL" ] || die "usage: pip-mail-connect start <email> [cc-address]"
+    prepare
+    printf '%s\n%s\n' "$EMAIL" "$CC" > "$PENDING"; chmod 600 "$PENDING"
+    URL="$(gog auth add "$EMAIL" --services "$SERVICES" --gmail-scope "$SCOPE" --force-consent --remote --step 1 2>/dev/null | awk -F'\t' '$1=="auth_url"{print $2}')"
+    [ -n "$URL" ] || die "gog did not return a consent URL"
+    printf 'Open this, approve, then send back the 127.0.0.1 URL it lands on:\n\n%s\n' "$URL"
+    ;;
+  finish)
+    URL="${2:-}"
+    [ -n "$URL" ] || die "usage: pip-mail-connect finish '<redirect-url>'"
+    [ -f "$PENDING" ] || die "no pending connection — run start first"
+    prepare
+    EMAIL="$(sed -n 1p "$PENDING")"; CC="$(sed -n 2p "$PENDING")"
+    gog auth add "$EMAIL" --services "$SERVICES" --gmail-scope "$SCOPE" --force-consent --remote --step 2 --auth-url "$URL" >/dev/null || die "consent exchange failed (the URL expires quickly; start over)"
+    mkdir -p "$(dirname "$CONFIG")"
+    python3 - "$CONFIG" "$EMAIL" "$CC" <<'PY'
+import json, sys
+path, account, cc = sys.argv[1:4]
+json.dump({"account": account, "ownerCc": cc, "mode": "send", "notify": "chat",
+           "sendRequiresExplicitApproval": False,
+           "pauseFor": ["payment", "contract", "identity", "account-creation"],
+           "maxSpendWithoutAsking": 0}, open(path, "w"), indent=2)
+open(path, "a").write("\n")
+PY
+    chmod 600 "$CONFIG"; rm -f "$PENDING"
+    printf 'connected %s (cc %s)\n' "$EMAIL" "$CC"
+    ;;
+  status)
+    [ -f "$CONFIG" ] && cat "$CONFIG" || echo "no mailbox configured"
+    ;;
+  *)
+    die "usage: pip-mail-connect {start <email> [cc] | finish '<redirect-url>' | status}"
+    ;;
+esac

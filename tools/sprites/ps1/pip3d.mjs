@@ -13,8 +13,6 @@ function faceTexture(accent, expr = 'open', look = [0, 0]) {
   // bezel and glass with a one-pixel corner cut
   rect(3, 2, 26, 20, 'b'); for (const [x, y] of [[3, 2], [28, 2], [3, 21], [28, 21]]) set(x, y, '.');
   rect(4, 3, 24, 18, 's'); for (const [x, y] of [[4, 3], [27, 3], [4, 20], [27, 20]]) set(x, y, 'b');
-  for (let y = 4; y < 20; y += 2) for (let x = 5; x < 27; x++) if (g[y][x] === 's') set(x, y, 'S');
-  for (const [x, y] of [[6, 5], [7, 5], [8, 5], [6, 6]]) set(x, y, 'r'); // reflection on the glass
   const [lx, ly] = look;
   for (const cx of [11, 20]) {
     const x = cx + lx, y = 9 + ly;
@@ -26,10 +24,6 @@ function faceTexture(accent, expr = 'open', look = [0, 0]) {
   if (expr === 'happy' || expr === 'open') { set(14, 16, 'e'); rect(15, 17, 3, 1, 'e'); set(18, 16, 'e'); }
   else if (expr === 'wide') rect(15, 16, 2, 2, 'e');
   else rect(15, 17, 3, 1, 'e');
-  // controls: d-pad, speaker slits, two buttons
-  rect(8, 25, 3, 9, 'k'); rect(5, 28, 9, 3, 'k'); set(8, 25, 'K'); set(9, 25, 'K'); set(5, 28, 'K'); set(9, 29, 'K');
-  for (const x of [15, 17, 19]) rect(x, 26, 1, 6, 'g');
-  for (const [cx, cy, c, hi] of [[25, 31, 'o', 'O'], [28, 26, 'w', 'W']]) { rect(cx - 1, cy - 2, 3, 5, c); rect(cx - 2, cy - 1, 5, 3, c); set(cx - 1, cy - 1, hi); }
   const dark = [.09, .1, .12];
   return texture(g.map(r => r.join('')), {
     '.': [...accent, 1], b: [...dark, 1], s: [.03, .06, .07, 1], S: [.06, .1, .11, 1], r: [.2, .28, .3, 1],
@@ -39,18 +33,8 @@ function faceTexture(accent, expr = 'open', look = [0, 0]) {
   });
 }
 
-/** The back: a battery cover with screws and a white label, as on a real handheld. */
-function backTexture(accent) {
-  const W = 32, H = 36, g = Array.from({ length: H }, () => Array(W).fill('.'));
-  const rect = (x, y, w, h, c) => { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if (g[y + j]) g[y + j][x + i] = c; };
-  rect(6, 18, 20, 13, 'd'); rect(7, 19, 18, 11, 'c'); for (let y = 21; y < 29; y += 2) rect(9, y, 14, 1, 'd');
-  rect(8, 4, 16, 9, 'w'); rect(9, 5, 14, 2, 'a'); rect(9, 8, 10, 1, 'g'); rect(9, 10, 7, 1, 'g');
-  for (const [x, y] of [[3, 3], [28, 3], [3, 32], [28, 32]]) { rect(x - 1, y - 1, 3, 3, 'd'); g[y][x] = 's'; }
-  return texture(g.map(row => row.join('')), { '.': [...accent, 1], d: [...accent.map(c => c * .55), 1], c: [...accent.map(c => c * .78), 1], w: [.9, .9, .88, 1], a: [...accent.map(c => c * .7), 1], g: [.55, .55, .55, 1], s: [.2, .2, .22, 1] });
-}
-
 // ── Meshes, built once ──
-export const BODY = slab(1, 1.12, .62, .2, 'shell', { frontMat: 'face', backMat: 'back' });
+export const BODY = slab(.8, 1.14, .56, .18, 'shell', { frontMat: 'face' });
 export const STEM = tube(.035, .03, .56, .8, 'limb', { sides: 5 });
 export const BULB = ball(.085, .085, .085, 'glow', { slices: 6, stacks: 4 });
 const ARM = tube(.075, .065, -.34, 0, 'limb', { sides: 6 });
@@ -65,7 +49,6 @@ export function materials(accent = ACCENT, face = {}, prop = {}) {
     ...propMaterials(accent, prop),
     shell: { id: 1, color: accent },
     face: { id: 2, color: [1, 1, 1], tex: faceTexture(accent, face.expr, face.look) },
-    back: { id: 8, color: [1, 1, 1], tex: backTexture(accent) },
     limb: { id: 3, color: [.3, .32, .37] },
     hand: { id: 4, color: [.92, .92, .9] },
     shoe: { id: 5, color: mix(accent, [0, 0, 0], .35) },

@@ -29,6 +29,26 @@ const { path } = await writeGatewayConfig();
 // Sessions, the agent database and the memory index live on the machine's own disk: SQLite on a network volume
 // cost seconds per reply. The workspace (USER.md, MEMORY.md) stays on the volume and is what must survive.
 const stateDir = process.env.OPENCLAW_STATE_DIR || '/tmp/openclaw';
+// The index is in that ephemeral state directory, so every start begins with an empty one: rebuild it from the
+// workspace's notes before the gateway takes the state lease (it refuses to let the CLI in once it is running).
+// One agent at a time, and only those with notes: a full run over every configured agent took 122 s and held the
+// start-up past its health check. A first index of one agent is seconds; the rest of the time is the embedding calls.
+{
+  const { spawnSync } = await import('node:child_process');
+  const { existsSync, readdirSync, readFileSync } = await import('node:fs');
+  const agents = Object.entries(JSON.parse(readFileSync(path, 'utf8')).agents?.entries || {});
+  const started = Date.now();
+  for (const [id, entry] of agents) {
+    const workspace = String(entry?.workspace || '');
+    const notes = workspace && existsSync(workspace) &&
+      (existsSync(join(workspace, 'MEMORY.md')) || (existsSync(join(workspace, 'memory')) && readdirSync(join(workspace, 'memory')).length > 0));
+    if (!notes) continue;
+    const indexed = spawnSync(process.execPath, ['node_modules/openclaw/openclaw.mjs', 'memory', 'index', '--agent', id], {
+      env: { ...process.env, OPENCLAW_CONFIG_PATH: path, OPENCLAW_STATE_DIR: stateDir }, encoding: 'utf8', timeout: 90000 });
+    const line = String(indexed.stdout || indexed.stderr || '').trim().split('\n').filter(Boolean).slice(-1)[0] || '';
+    console.log(JSON.stringify({ level: indexed.status === 0 ? 'info' : 'warn', message: 'Memory indexed', agent: id, code: indexed.status, ms: Date.now() - started, detail: line.slice(0, 200) }));
+  }
+}
 const gatewayChild = spawn(process.execPath, ['node_modules/openclaw/openclaw.mjs', 'gateway', 'run'], { stdio: 'inherit',
   env: { ...process.env, OPENCLAW_CONFIG_PATH: path, OPENCLAW_STATE_DIR: stateDir, OPENCLAW_GATEWAY_PORT: String(gatewayPort()), OPENCLAW_GATEWAY_TOKEN: process.env.PIP_GATEWAY_TOKEN } });
 children.push(gatewayChild);

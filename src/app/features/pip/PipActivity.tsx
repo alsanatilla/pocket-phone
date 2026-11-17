@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Check } from "lucide-react";
+import { PipSprite } from "./PipSprite.tsx";
 
 /** An honest, small sign of life: the run's phase, never a guessed emotion or fabricated progress. */
 export function PipActivity({ active, phase, status }: { active: boolean; phase?: string; status: string }) {
@@ -22,9 +23,9 @@ export function PipActivity({ active, phase, status }: { active: boolean; phase?
   const mode = !active ? "replied" : waiting ? "waiting" : phase === "writing" ? "replying" : thinking ? "thinking" : "working";
   const label = mode === "replied" ? "replied" : mode === "replying" ? "replying" : mode === "thinking" ? "thinking" : phase || "working";
   return (
-    <div className="pip-activity flex min-h-5 items-center gap-2 text-xs text-muted-foreground" data-pip-activity={mode} role="status" aria-live="polite" aria-atomic="true">
+    <div className="pip-activity flex min-h-9 items-center gap-2 text-xs text-muted-foreground" data-pip-activity={mode} role="status" aria-live="polite" aria-atomic="true">
       <span className="pip-activity-mark" aria-hidden="true">
-        {mode === "replied" ? <Check className="size-3.5" /> : <><i /><i /><i /></>}
+        {mode === "replied" ? <Check className="size-3.5" /> : <PipSprite activity={mode === "replying" ? "write" : "read"} size={36} />}
       </span>
       <span>{label}</span>
     </div>

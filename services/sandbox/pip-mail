@@ -1,0 +1,92 @@
+#!/bin/sh
+# pip-mail — send mail from Pip's own Gmail, always CCing the owner.
+#
+#   pip-mail send      --to alice@example.com --subject "..." --body "..."
+#   pip-mail reply     <messageId> --body "..."
+#   pip-mail reply-all <messageId> --body "..."
+#
+# The wrapper owns the audit copy: it injects --cc from the config, refuses to
+# run when the account or the CC address is missing, rejects a caller-supplied
+# --cc, and logs every message. Config lives beside the agent's workspace, so
+# each sandbox account has its own mailbox and its own owner.
+set -eu
+
+CONFIG="${PIP_MAIL_CONFIG:-}"
+LOG="${PIP_MAIL_LOG:-}"
+if [ -z "$CONFIG" ]; then
+  # The Unix home, not $HOME: an agent's exec runs with HOME set to its OpenClaw
+  # workspace, which can be recreated. Credentials have to outlive that.
+  ACCOUNT_HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
+  [ -n "$ACCOUNT_HOME" ] && [ -d "$ACCOUNT_HOME" ] || ACCOUNT_HOME="${HOME:-/tmp}"
+  export HOME="$ACCOUNT_HOME"
+  CONFIG="$ACCOUNT_HOME/.config/pip-mail.json"
+  LOG="$ACCOUNT_HOME/.local/state/pip-mail/sent.jsonl"
+fi
+
+die() { printf 'pip-mail: %s\n' "$*" >&2; exit 1; }
+
+read_cfg() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],"") or "")' "$CONFIG" "$1"
+}
+
+[ -f "$CONFIG" ] || die "no mailbox configured for this account — connect one with: pip-mail-connect start <email>"
+ACCOUNT="$(read_cfg account)"
+OWNER_CC="$(read_cfg ownerCc)"
+
+[ -n "$ACCOUNT" ]  || die "account is unset in $CONFIG"
+[ -n "$OWNER_CC" ] || die "ownerCc is unset in $CONFIG — refusing to send without an audit copy"
+
+CMD="${1:-}"; shift || true
+case "$CMD" in
+  send)      GOG_CMD="gmail send" ;;
+  reply)     GOG_CMD="gmail reply" ;;
+  reply-all) GOG_CMD="gmail reply-all" ;;
+  *) die "usage: pip-mail {send|reply|reply-all} [gog flags...]" ;;
+esac
+
+# The caller cannot set or clear the audit copy.
+SUBJECT_ARG=""; PREV=""
+for arg in "$@"; do
+  case "$arg" in
+    --cc|--cc=*) die "--cc is managed by pip-mail (always $OWNER_CC)" ;;
+    --subject=*) SUBJECT_ARG="${arg#--subject=}" ;;
+  esac
+  [ "$PREV" = "--subject" ] && SUBJECT_ARG="$arg"
+  PREV="$arg"
+done
+
+command -v gog >/dev/null || die "gog not found on PATH"
+
+# Headless keyring: gog's file backend needs its password from somewhere.
+if [ -z "${GOG_KEYRING_PASSWORD:-}" ] && [ -f "$HOME/.config/gogcli/keyring.key" ]; then
+  GOG_KEYRING_PASSWORD="$(cat "$HOME/.config/gogcli/keyring.key")"
+  export GOG_KEYRING_PASSWORD
+fi
+
+mkdir -p "$(dirname "$LOG")"
+OUT="$(mktemp)"; ERR="$(mktemp)"
+trap 'rm -f "$OUT" "$ERR"' EXIT
+
+# shellcheck disable=SC2086
+if ! gog --account "$ACCOUNT" $GOG_CMD \
+      --cc "$OWNER_CC" --html-from-text --json "$@" >"$OUT" 2>"$ERR"; then
+  cat "$ERR" >&2
+  die "send failed"
+fi
+
+ID="$(jq -r '.id // .message.id // .messageId // "unknown"' <"$OUT" 2>/dev/null || echo unknown)"
+SUBJECT="$(jq -r '.subject // empty' <"$OUT" 2>/dev/null || true)"
+[ -n "$SUBJECT" ] || SUBJECT="$SUBJECT_ARG"
+
+printf '%s\n' "$(jq -c -n \
+  --arg ts "$(date -u +%FT%TZ)" \
+  --arg cmd "$CMD" \
+  --arg account "$ACCOUNT" \
+  --arg cc "$OWNER_CC" \
+  --arg id "$ID" \
+  --arg subject "$SUBJECT" \
+  --arg args "$*" \
+  --arg result "$(cat "$OUT")" \
+  '{ts:$ts,cmd:$cmd,account:$account,cc:$cc,id:$id,subject:$subject,args:$args,result:$result}')" >>"$LOG"
+
+printf 'sent via %s, cc %s, message id %s\n' "$ACCOUNT" "$OWNER_CC" "$ID"

@@ -978,6 +978,15 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
 #pip-prompt { background: none; border: 0; padding: 0; min-height: 44px; font: 15px/1.5 var(--mono); }
 #pip-prompt:focus-visible { outline: none; }
 .pip-compose-hint { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.pip-attach-trigger { font: 11px/1.4 var(--mono); color: var(--dim); background: none; border: 0; padding: 6px 0; min-height: 32px; }
+.pip-attach-trigger:hover { color: var(--accent); }
+/* Files waiting to be sent: one line each, removable before send. */
+.pip-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
+.pip-attachments[hidden] { display: none; }
+.pip-attachment { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); padding: 4px 8px; font: 11px/1.4 var(--mono); color: var(--dim); max-width: 100%; }
+.pip-attachment > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pip-attachment-remove { font: 11px/1 var(--mono); color: var(--dim); background: none; border: 0; padding: 2px; }
+.pip-attachment-remove:hover { color: var(--accent); }
 .pip-compose-scope, .pip-options-trigger { font: 11px/1.4 var(--mono); color: var(--dim); background: none; border: 0; padding: 6px 0; min-height: 32px; }
 .pip-compose-scope:hover, .pip-options-trigger:hover { color: var(--accent); }
 /* Empty state: the sprite beside one sentence, then what you could ask. */

@@ -101,3 +101,5 @@ export async function writeObject(userId, collection, incoming, { appendTurns = 
   }
 }
 export const validMedia = value => typeof value === 'string' && /^zine-(?:source|thumb)-[a-zA-Z0-9_-]{1,100}\.jpg$/.test(value);
+/** A picture Pip saved for a reply: written by the sandbox, read by the chat that asked for it. */
+export const validPipMedia = value => typeof value === 'string' && /^pip-[a-f0-9]{32}\.(?:jpg|png)$/.test(value);

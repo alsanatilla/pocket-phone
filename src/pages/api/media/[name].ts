@@ -2,14 +2,15 @@ import type { APIRoute } from 'astro';
 import { signedIn } from '../../../server/auth.js';
 import { database } from '../../../server/database.js';
 import { json, failure, sameOrigin } from '../../../server/http.js';
-import { validMedia } from '../../../server/objects.js';
+import { validMedia, validPipMedia } from '../../../server/objects.js';
 import { objectId } from '../../../shared/objects.js';
 export const GET: APIRoute = async ({ request, params }) => {
   try {
-    const user = await signedIn(request); if (!validMedia(params.name)) return json({ error: 'Unknown photo.' }, 400);
-    const rows = await database().execute({ sql: 'SELECT content FROM pocket_media WHERE user_id = ? AND name = ?', args: [user.id, params.name] });
+    const user = await signedIn(request);
+    if (!validMedia(params.name) && !validPipMedia(params.name)) return json({ error: 'Unknown photo.' }, 400);
+    const rows = await database().execute({ sql: 'SELECT content, content_type FROM pocket_media WHERE user_id = ? AND name = ?', args: [user.id, params.name] });
     if (!rows.rows.length) return json({ error: 'Photo not found.' }, 404);
-    return new Response(rows.rows[0].content as ArrayBuffer, { headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
+    return new Response(rows.rows[0].content as ArrayBuffer, { headers: { 'Content-Type': String(rows.rows[0].content_type || 'image/jpeg'), 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
   } catch (error) { return failure(error); }
 };
 export const PUT: APIRoute = async ({ request, params }) => {

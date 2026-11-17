@@ -8,7 +8,9 @@ export const sandboxAccounts = (env = process.env) => [...new Set((env.PIP_SANDB
 export const sandboxAgent = (account, env = process.env) => (env.PIP_GATEWAY_AGENT || 'pocket') + '-' + account;
 export const agentForUser = (userId, env = process.env) => sandboxAccounts(env).includes(sandboxAccount(userId))
   ? sandboxAgent(sandboxAccount(userId), env) : env.PIP_GATEWAY_AGENT || 'pocket';
-export const CODING_TOOLS = ['exec', 'read', 'write', 'edit', 'apply_patch'];
+// view_image is what lets Pip look at a picture instead of guessing at it: without it, a screenshot or a photo can
+// only be read by OCR round trips, which is many tool calls and a worse answer.
+export const CODING_TOOLS = ['exec', 'read', 'write', 'edit', 'apply_patch', 'view_image'];
 export function sshSandbox(account, env = process.env) {
   const host = env.PIP_SANDBOX_HOST || 'pocket-pip-sandbox.internal', port = env.PIP_SANDBOX_PORT || '2222';
   if (!/^[a-zA-Z0-9.-]+$/.test(host) || !/^\d+$/.test(port) || +port < 1 || +port > 65535) throw new Error('Invalid sandbox endpoint');

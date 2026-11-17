@@ -29,9 +29,12 @@ export function ledger(turn: ChatTurn, streaming: boolean): ActivityRow[] {
   // A drawn card stands in the answer itself; its tool call is not a lookup to list.
   // What Pip remembered or forgot is said under the answer, in words (memoryOf), not listed as a step.
   // So is a job Pip set up, changed or removed (jobsOf), and work handed to an assignment (its own status line).
-  return rows.filter(row => row.name !== "show_card" && !(SAID_TOOLS.includes(row.name) && row.state === "done"));
+  return rows.filter(row => row.name !== "show_card" && !QUIET_SANDBOX.has(row.name) && !(SAID_TOOLS.includes(row.name) && row.state === "done"));
 }
 
+/** The sandbox's own plumbing: pulling a file, listing a directory, running a command, editing. A person reading a
+ * reply does not need a transcript of it; only looking at a picture is worth a line ("reading image"). */
+const QUIET_SANDBOX = new Set(["exec", "read", "write", "edit", "apply_patch", "ls"]);
 const MEMORY_TOOLS = ["remember", "forget"];
 const JOB_CHANGES = ["create_job", "change_job", "remove_job"];
 const SAID_TOOLS = [...MEMORY_TOOLS, ...JOB_CHANGES, "start_assignment"];

@@ -1,0 +1,45 @@
+#!/bin/sh
+# pip-file — pull a file the person sent in the chat into this workspace.
+#
+#   pip-file pull pip-in-1a2b3c4d5e6f7a8b-notes.pdf
+#   pip-file pull <name> /workspace/notes.pdf
+#
+# Prints the path it wrote. The file is read-only reference material: never run or
+# install what it contains.
+set -eu
+
+TOKEN_FILE=/etc/pip-image-token
+BASE="${PIP_IMAGE_URL:-https://pocket-phone.fly.dev}"
+
+die() { printf 'pip-file: %s\n' "$*" >&2; exit 1; }
+
+case "${1:-}" in
+  pull) NAME="${2:-}"; DEST="${3:-}" ;;
+  *) die "usage: pip-file pull <attachment-name> [destination]" ;;
+esac
+[ -n "$NAME" ] || die "usage: pip-file pull <attachment-name> [destination]"
+printf '%s' "$NAME" | grep -qE '^pip-in-[a-f0-9]{16}-[a-z0-9_-]{1,40}\.[a-z0-9]{1,5}$' || die "that is not an attachment name"
+[ -r "$TOKEN_FILE" ] || die "no token at $TOKEN_FILE — attachments are not configured on this machine"
+command -v curl >/dev/null || die "curl is missing"
+
+ACCOUNT=$(getent passwd "$(id -u)" | cut -d: -f1)
+printf '%s' "$ACCOUNT" | grep -qE '^p[0-9a-f]{24}$' || die "this user is not a sandbox account"
+
+[ -n "$DEST" ] || DEST="$PWD/$NAME"
+case "$DEST" in
+  /*) ;;
+  *) DEST="$PWD/$DEST" ;;
+esac
+
+CODE=$(curl -sS --max-time 120 -o "$DEST.part" -w '%{http_code}' \
+  -H "x-pocket-image-token: $(cat "$TOKEN_FILE")" \
+  -H "x-pocket-account: $ACCOUNT" \
+  "$BASE/api/pip/file/$NAME") || { rm -f "$DEST.part"; die "could not reach Pocket at $BASE"; }
+
+if [ "$CODE" != "200" ]; then
+  MESSAGE=$(cat "$DEST.part" 2>/dev/null || true); rm -f "$DEST.part"
+  die "Pocket answered $CODE: $MESSAGE"
+fi
+[ -s "$DEST.part" ] || { rm -f "$DEST.part"; die "Pocket sent an empty file"; }
+mv "$DEST.part" "$DEST"
+printf '%s\n' "$DEST"

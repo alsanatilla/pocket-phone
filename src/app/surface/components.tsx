@@ -38,7 +38,23 @@ export function Hero({ eyebrow, value, unit, caption }: { eyebrow?: string | nul
 }
 
 /**
- * A reading in a group of figures. A metric that opens an area is a Row, so the whole line is the target and it
+ * A picture from a reply: a screenshot Pip took, a photo it saved, or an image it found online. No frame of its own;
+ * the picture is the content and one line under it says what it is.
+ */
+export function Picture({ src, alt, caption }: { src: string; alt?: string | null; caption?: string | null }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <figure className="arrive">
+      {failed
+        ? <p className="text-sm text-muted-foreground">{alt || "This picture could not be loaded."}</p>
+        : <img src={src} alt={alt ?? ""} loading="lazy" onError={() => setFailed(true)}
+            className="w-full rounded-md border border-border/60 object-contain" />}
+      {caption ? <figcaption className="mt-1 text-xs text-dim">{caption}</figcaption> : null}
+    </figure>
+  );
+}
+
+/** A reading in a group of figures. A metric that opens an area is a Row, so the whole line is the target and it
  * ends in ›; the figure's spans are repeated here because Row's body is a span and a Figure's paragraphs cannot
  * sit inside one (kit limitation reported with the task).
  */
