@@ -110,6 +110,10 @@ test('native sandbox agents are isolated, pinned and provisioned explicitly', as
     assert.equal(alice.sandbox.ssh.strictHostKeyChecking, true);
     assert.equal(alice.tools.exec.host, 'sandbox'); assert.equal(alice.tools.elevated.enabled, false);
     assert.ok(alice.tools.sandbox.tools.allow.includes('show_card'));
+    // The sandbox agent must keep Pip's Pocket tools: without the profile they were not offered at all.
+    assert.equal(alice.tools.profile, 'minimal');
+    for (const name of ['show_card', 'search_notes', 'create_record', 'exec', 'read']) assert.ok(alice.tools.alsoAllow.includes(name), name);
+    assert.ok(!alice.tools.alsoAllow.includes('browser'));
     const written = await writeGatewayConfig();
     const { execFileSync } = await import('node:child_process');
     execFileSync(process.execPath, ['node_modules/openclaw/dist/index.js', 'config', 'validate'], {

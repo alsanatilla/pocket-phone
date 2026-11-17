@@ -26,6 +26,21 @@ const toolsUrl = () => env.PIP_TOOLS_URL || 'http://127.0.0.1:' + (env.PORT || '
  * The config the gateway reads: loopback, token auth, memory-core, and the account's model as a custom provider.
  * `native` (from nativePlugin) adds Pocket's plugin and the trimmed tool surface.
  */
+/**
+ * Pip's tool surface, for the plain agent and for each sandboxed account agent. The minimal profile drops the
+ * coding, shell, file, messaging and session tools (about 15 KB of schemas and their prompt lines per request); Pip
+ * keeps memory, reading its skills, and Pocket's own tools. Tool Search is off: twenty schemas are cheaper than a
+ * search/describe/dispatch round trip, and a small model calls direct tools more reliably.
+ *
+ * The sandbox agents need this too: without the profile their Pocket tools were not offered at all, so a provisioned
+ * account's Pip could run code but no longer read notes, tasks or calendar, or draw a card.
+ */
+const nativeTools = (native, extra = []) => ({
+  profile: 'minimal',
+  alsoAllow: ['group:memory', 'skills_read', ...native.names, ...extra],
+  deny: ['gateway', 'presence', 'session_status'],
+});
+
 export function gatewayConfig(native = null) {
   const name = model(), key = env.PIP_GATEWAY_KEY || '';
   // OpenCode Go goes through OpenClaw's own opencode-go provider: it sends the session as `x-opencode-session`, so
@@ -37,8 +52,8 @@ export function gatewayConfig(native = null) {
   const workspace = join(gatewayHome(), 'agents', agentId());
   const accounts = native ? sandboxAccounts() : [];
   const sandboxEntries = Object.fromEntries(accounts.map(account => [sandboxAgent(account), { workspace: join(gatewayHome(), 'agents', sandboxAgent(account)), model: id + '/' + name, skills: ['pocket-cards'], sandbox: sshSandbox(account),
-    tools: { alsoAllow: CODING_TOOLS, elevated: { enabled: false }, exec: { host: 'sandbox', security: 'full', ask: 'off', timeoutSeconds: 60, applyPatch: { enabled: true, workspaceOnly: true } }, fs: { workspaceOnly: true },
-      sandbox: { tools: { allow: [...CODING_TOOLS, 'memory_search', 'memory_get', 'skills_read', ...native.names], deny: ['browser', 'canvas', 'nodes', 'gateway'] } } } }]));
+    tools: { ...nativeTools(native, CODING_TOOLS), elevated: { enabled: false }, exec: { host: 'sandbox', security: 'full', ask: 'off', timeoutSeconds: 60, applyPatch: { enabled: true, workspaceOnly: true } }, fs: { workspaceOnly: true },
+      sandbox: { tools: { allow: [...CODING_TOOLS, 'group:memory', 'skills_read', ...native.names], deny: ['browser', 'canvas', 'nodes', 'gateway'] } } } }]));
   return {
     gateway: { mode: 'local', port: gatewayPort(), bind: 'loopback', auth: { mode: 'token', token: env.PIP_GATEWAY_TOKEN || '' },
       http: { endpoints: { responses: { enabled: true } } } },
@@ -57,13 +72,14 @@ export function gatewayConfig(native = null) {
           ...(go ? { compat: { supportsUsageInStreaming: true, supportsReasoningEffort: true, maxTokensField: 'max_tokens', supportsDeveloperRole: false, supportsStrictMode: false } } : {}) }] },
     } },
     // Native: the minimal profile drops the coding, shell, file, messaging and session tools (about 15 KB of schemas
-    // and their prompt lines per request); Pip keeps memory, reading its skills, and Pocket's own tools. Tool Search
-    // is off: twenty schemas are cheaper than a search/describe/dispatch round trip, and a small model calls direct
-    // tools more reliably.
-    ...(native ? { tools: { profile: 'minimal', alsoAllow: ['group:memory', 'skills_read', ...native.names], deny: ['gateway', 'presence', 'session_status'], toolSearch: false } } : {}),
+    // and their prompt lines per request); Pip keeps memory, reading its skills, and Pocket's own tools.
+    ...(native ? { tools: { ...nativeTools(native), toolSearch: false } } : {}),
     // OpenClaw tells the model the date in the person's timezone (Pocket's own loop added a date line itself).
     // Chat answers without thinking first: DeepSeek otherwise spends ~80–150 tokens reasoning before "Hi".
-    agents: { ...(accounts.length ? { ownership: 'explicit' } : {}), defaults: { thinkingDefault: env.PIP_GATEWAY_THINKING || 'off', ...(env.PIP_GATEWAY_TIMEZONE ? { userTimezone: env.PIP_GATEWAY_TIMEZONE } : {}) },
+    agents: { ...(accounts.length ? { ownership: 'explicit' } : {}), defaults: { thinkingDefault: env.PIP_GATEWAY_THINKING || 'off', ...(env.PIP_GATEWAY_TIMEZONE ? { userTimezone: env.PIP_GATEWAY_TIMEZONE } : {}),
+      // The gateway's own background work (memory consolidation) needs an owner; without one memory-core logs a
+      // reconcile failure every minute. Pip is that owner in this personal deployment.
+      systemAgent: { agentId: agentId() } },
       entries: { [agentId()]: { workspace, model: id + '/' + name, ...(native ? { skills: ['pocket-cards'] } : {}) }, ...sandboxEntries } },
   };
 }
