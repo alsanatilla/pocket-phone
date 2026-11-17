@@ -115,6 +115,11 @@ test('native sandbox agents are isolated, pinned and provisioned explicitly', as
     for (const name of ['show_card', 'search_notes', 'create_record', 'exec', 'read']) assert.ok(alice.tools.alsoAllow.includes(name), name);
     assert.ok(!alice.tools.alsoAllow.includes('browser'));
     const written = await writeGatewayConfig();
+    const { readFile } = await import('node:fs/promises');
+    // The sandbox agent learns that a headless browser is installed beside its workspace.
+    const persona = await readFile(join(home, 'agents', agentForUser('alice'), 'AGENTS.md'), 'utf8');
+    assert.match(persona, /browse navigate/);
+    assert.match(persona, /headless Chromium/);
     const { execFileSync } = await import('node:child_process');
     execFileSync(process.execPath, ['node_modules/openclaw/dist/index.js', 'config', 'validate'], {
       env: { ...process.env, OPENCLAW_CONFIG_PATH: written.path, OPENCLAW_STATE_DIR: join(home, 'validation') }, stdio: 'pipe' });

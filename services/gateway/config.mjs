@@ -130,7 +130,10 @@ export async function writeGatewayConfig() {
     // Pip's persona, not OpenClaw's "pick a name" scaffolding. USER.md and MEMORY.md are the agent's and stay untouched.
     await writeFile(join(workspace, 'IDENTITY.md'), '# Pip\n\n- **Name:** Pip\n- **Role:** the assistant inside Pocket\n', { mode: 0o600 });
     await writeFile(join(workspace, 'SOUL.md'), '# Pip\n\nBe brief, plain and useful. No filler, no introductions, no emoji.\n', { mode: 0o600 });
-    await writeFile(join(workspace, 'AGENTS.md'), native ? NATIVE_AGENTS + (workspace.endsWith('/' + agentId()) ? '' : '\nYou can run code and keep files with exec/read/write/edit/apply_patch in your private remote workspace. Execution must stay in the sandbox; never request elevated or gateway execution. Workspace files are not Pocket notes.\n') : AGENTS, { mode: 0o600 });
+    await writeFile(join(workspace, 'AGENTS.md'), native ? NATIVE_AGENTS + (workspace.endsWith('/' + agentId()) ? '' : '\nYou can run code and keep files with exec/read/write/edit/apply_patch in your private remote workspace. Execution must stay in the sandbox; never request elevated or gateway execution. Workspace files are not Pocket notes.\n'
+      // A real headless browser is installed beside the workspace: one per account, started on first use. It has no
+      // person's logins, so it opens public pages; there is nobody to complete a login or a captcha in the sandbox.
+      + '\nYou also have a headless Chromium in the sandbox, driven by browse: run `browse navigate <url>` with exec (it prints a tab id), then `browse snapshot --tab <id>` to read the page; the other browse commands click, type and screenshot. It starts on first use and is signed in to nothing, so use it for public pages, not for anyone\'s account.\n') : AGENTS, { mode: 0o600 });
     if (native) {
       // How and when Pip draws, as an OpenClaw skill: the model reads it when a reply wants a picture, instead of
       // every request carrying it in the system text (CARDS_PROMPT, the same text the in-process loop sends).
