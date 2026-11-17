@@ -25,6 +25,9 @@ const GROUPS: { provider: ProviderKey; label: string }[] = [
 export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
   const [open, setOpen] = useState(false), [query, setQuery] = useState("");
   const [models, setModels] = useState<FreeModel[]>([FREE_ROUTER]);
+  // The server's models, when the OpenClaw gateway owns the reply. Null until asked, so the browser list shows only
+  // where the gateway is not in charge.
+  const [serverModels, setServerModels] = useState<ModelChoice[] | null>(null);
   const [loading, setLoading] = useState(false), [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [connections, setConnections] = useState<Partial<Record<ProviderKey, boolean>>>({});
@@ -35,6 +38,17 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
       .then(entries => { if (!cancelled) setConnections(Object.fromEntries(entries)); });
     return () => { cancelled = true; };
   }, [open, attempt]);
+  useEffect(() => {
+    if (!open || serverModels !== null) return;
+    let cancelled = false;
+    fetch("/api/pip/models").then(response => response.ok ? response.json() : null).then(value => {
+      if (cancelled) return;
+      setServerModels(value?.native && Array.isArray(value.models)
+        ? value.models.map((model: { id: string; name: string; note?: string; thinking?: boolean }) => ({ provider: "opencode" as const, id: model.id, name: model.name, note: model.note, thinking: Boolean(model.thinking), tools: true }))
+        : []);
+    }).catch(() => { if (!cancelled) setServerModels([]); });
+    return () => { cancelled = true; };
+  }, [open, serverModels]);
   const isOpenRouter = chat.config.baseUrl === "https://openrouter.ai/api/v1";
   useEffect(() => {
     if (!open && !isOpenRouter) return;
@@ -52,18 +66,20 @@ export function ModelPicker({ chat, busy }: { chat: Chat; busy: boolean }) {
     try { chooseModel(chat.uid, model); setOpen(false); setQuery(""); } catch (error) { toastError(error); }
   };
   const custom = customEndpoint();
-  const choices: ModelChoice[] = [
+  const native = Boolean(serverModels?.length);
+  const choices: ModelChoice[] = native ? serverModels! : [
     ...CURATED.opencode, ...CURATED.anthropic,
     ...models.map(model => ({ ...model, provider: "openrouter" as const, free: true })), ...CURATED.openrouter,
     ...(custom ? [{ provider: "custom" as const, id: custom.model, name: custom.model }] : []),
   ];
   const needle = query.toLowerCase().trim();
   const filtered = choices.filter(model => (model.name + " " + model.id + " " + PROVIDER_NAMES[model.provider]).toLowerCase().includes(needle));
-  const groups = GROUPS.map(group => ({ ...group, models: filtered.filter(model => model.provider === group.provider) })).filter(group => group.models.length);
+  const groups = (native ? [{ provider: "opencode" as ProviderKey, label: "This Pocket" }] : GROUPS)
+    .map(group => ({ ...group, models: filtered.filter(model => model.provider === group.provider) })).filter(group => group.models.length);
   const providerName = PROVIDER_NAMES[providerOf(chat.config)];
   const current = [providerName, selected?.context ? `${tokenSize(selected.context)} context` : "", `${tokenSize(chat.config.maxTokens)} reply limit`, chat.config.thinking ? "reasoning on" : ""].filter(Boolean).join(" · ");
-  const connectedGroups = groups.filter(group => connections[group.provider] !== false);
-  const unconnected = GROUPS.filter(group => connections[group.provider] === false && (group.provider !== "custom" || custom));
+  const connectedGroups = native ? groups : groups.filter(group => connections[group.provider] !== false);
+  const unconnected = native ? [] : GROUPS.filter(group => connections[group.provider] === false && (group.provider !== "custom" || custom));
   return (
     <div className="flex min-w-0 items-center gap-3 text-xs">
       <span className={cn("flex min-h-11 shrink-0 items-center gap-1.5 transition-colors sm:min-h-0", chat.config.webSearch ? "text-hi" : "text-dim")}>

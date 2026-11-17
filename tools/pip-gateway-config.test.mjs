@@ -77,13 +77,19 @@ test('native: Pocket\'s plugin is loaded, unused core tools are left out, and th
   } finally { delete process.env.PIP_OPENCLAW_NATIVE; }
 });
 
-test('OpenCode Go goes through OpenClaw\'s own provider, which sends the chat\'s session, and chat does not think first', () => {
+test('OpenCode Go goes through OpenClaw\'s own provider, which sends the chat\'s session, and chat does not think first', async () => {
   const saved = { ...process.env };
   try {
     process.env.PIP_GATEWAY_BASE_URL = 'https://opencode.ai/inference/go/openai/v1'; process.env.PIP_GATEWAY_KEY = 'k';
     const cfg = gatewayConfig();
     assert.deepEqual(Object.keys(cfg.models.providers), ['opencode-go']);
     assert.equal(cfg.models.providers['opencode-go'].baseUrl, 'https://opencode.ai/zen/go/v1');
+    const { GATEWAY_MODELS } = await import('../src/shared/pip-gateway-models.js');
+    const ids = cfg.models.providers['opencode-go'].models.map(model => model.id);
+    for (const entry of GATEWAY_MODELS) assert.ok(ids.includes(entry.id), entry.id + ' is configured so a chat can switch to it');
+    assert.ok(ids.includes('fixture-model'), 'the agent\'s own default is configured too');
+    const { gatewayModels } = await import('../services/gateway/config.mjs');
+    assert.deepEqual(gatewayModels().map(model => model.id), GATEWAY_MODELS.map(model => model.id));
     assert.match(cfg.agents.entries.pocket.model, /^opencode-go\//);
     assert.equal(cfg.agents.defaults.thinkingDefault, 'off');
     process.env.PIP_GATEWAY_BASE_URL = 'http://127.0.0.1:9/v1';

@@ -9,6 +9,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sandboxAccounts, sandboxAgent, sshSandbox, CODING_TOOLS } from './sandbox.mjs';
+import { GATEWAY_MODELS, GATEWAY_PROVIDER, isOpencodeBase } from '../../src/shared/pip-gateway-models.js';
 
 const env = process.env;
 export const gatewayHome = () => env.PIP_GATEWAY_HOME || '/data/openclaw';
@@ -16,7 +17,11 @@ export const gatewayPort = () => Number(env.PIP_GATEWAY_PORT) || 18789;
 export const agentId = () => env.PIP_GATEWAY_AGENT || 'pocket';
 const provider = () => env.PIP_GATEWAY_PROVIDER || 'compatible';
 const model = () => env.PIP_GATEWAY_MODEL || 'deepseek-v4.1-flash';
-const OPENCODE_GO_URL = 'https://opencode.ai/zen/go/v1', OPENCODE_GO = /^https:\/\/opencode\.ai\/(?:zen|inference)\/go\b/;
+const OPENCODE_GO_URL = 'https://opencode.ai/zen/go/v1';
+/** The models a chat may switch to on this deployment, or none when the gateway's provider is not OpenCode Go. */
+export const gatewayModels = () => isOpencodeBase(env.PIP_GATEWAY_BASE_URL || OPENCODE_GO_URL)
+  ? GATEWAY_MODELS.map(entry => ({ id: entry.id, name: entry.name, note: entry.note, thinking: Boolean(entry.thinking) }))
+  : [];
 export const pluginDir = () => join(dirname(fileURLToPath(import.meta.url)), 'pocket-plugin');
 /** Where the plugin reaches Pocket's web process: loopback, the port the web process listens on. */
 const toolsUrl = () => env.PIP_TOOLS_URL || 'http://127.0.0.1:' + (env.PORT || '8080') + '/internal/pip-tools';
@@ -45,8 +50,8 @@ export function gatewayConfig(native = null) {
   // OpenCode Go goes through OpenClaw's own opencode-go provider: it sends the session as `x-opencode-session`, so
   // a chat's requests reach the same backend and its ~12,000-token prompt is served from cache (measured: 2.9 s
   // uncached, 1.6 s cached). The generic provider sent no session at all, and no request was ever cached.
-  const go = OPENCODE_GO.test(env.PIP_GATEWAY_BASE_URL || OPENCODE_GO_URL);
-  const id = go ? 'opencode-go' : provider();
+  const go = isOpencodeBase(env.PIP_GATEWAY_BASE_URL || OPENCODE_GO_URL);
+  const id = go ? GATEWAY_PROVIDER : provider();
   const baseUrl = go ? OPENCODE_GO_URL : env.PIP_GATEWAY_BASE_URL;
   const workspace = join(gatewayHome(), 'agents', agentId());
   const accounts = native ? sandboxAccounts() : [];
@@ -67,8 +72,11 @@ export function gatewayConfig(native = null) {
       // tokens of instructions, so a new chat starts cached too (measured: first word 2.2–3.8 s uncached, ~1.3 s
       // cached). OpenClaw's provider keeps a header it is given instead of the per-chat one.
       [id]: { baseUrl, apiKey: key, api: 'openai-completions', authHeader: true, ...(go ? { headers: { 'x-opencode-session': 'pocket-' + agentId() + '-' + (env.FLY_APP_NAME || 'local') } } : {}),
-        models: [{ id: name, name, api: 'openai-completions', reasoning: go, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192,
-          ...(go ? { compat: { supportsUsageInStreaming: true, supportsReasoningEffort: true, maxTokensField: 'max_tokens', supportsDeveloperRole: false, supportsStrictMode: false } } : {}) }] },
+        // Every curated model is configured: a chat may switch between them per session (sessions.patch). A default
+        // outside the list (a fixture, a custom deployment) is still configured, so the agent's own model exists.
+        models: (go ? [...GATEWAY_MODELS, ...(GATEWAY_MODELS.some(entry => entry.id === name) ? [] : [{ id: name, name }])] : [{ id: name, name }]).map(entry => ({ id: entry.id, name: entry.name, api: 'openai-completions', reasoning: go, input: ['text'],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192,
+          ...(go ? { compat: { supportsUsageInStreaming: true, supportsReasoningEffort: true, maxTokensField: 'max_tokens', supportsDeveloperRole: false, supportsStrictMode: false } } : {}) })) },
     } },
     // Native: the minimal profile drops the coding, shell, file, messaging and session tools (about 15 KB of schemas
     // and their prompt lines per request); Pip keeps memory, reading its skills, and Pocket's own tools.

@@ -17,6 +17,15 @@ compaction and memory; Pocket displays replies and provides its account-scoped d
 - Chats, research assignments, scheduled reports, training conversations and automatic training all use the native
   path. Phone-calendar calls wait for an existing device request to be answered.
 
+## Models in a chat
+
+The gateway configures the models this deployment can run (OpenCode Go's list, one `models.providers` entry per id).
+`GET /api/pip/models` returns that list to the app, and the picker in a chat shows exactly it. Choosing a model writes
+the chat's config; before the next message `pip-openclaw.js` sets the gateway session's override with
+`sessions.patch { key, model }` (once per change). The override lives on the session, so later messages keep it, and
+new chats fall back to the agent default (`PIP_GATEWAY_MODEL`). A model the deployment does not carry (another
+provider, a custom endpoint, an id outside the list) leaves the default in place rather than failing the reply.
+
 ## Permissions
 
 Ordinary writes require OpenClaw plugin approval, shown in Pocket. Approval is tied to the tool, arguments and

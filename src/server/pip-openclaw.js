@@ -23,9 +23,10 @@ import { cardsIn } from '../shared/pocket-card-edit.js';
 import { normalizeAnswer } from '../shared/pip-reply.js';
 import { answerPieces, joinPieces, steerText } from '../shared/pip-steer.js';
 import { NATIVE_TOOLS, NATIVE_WRITES, onWake } from './pip-openclaw-tools.js';
+import { gatewayModelFor } from '../shared/pip-gateway-models.js';
 
 /** Sessions with a reply running in this process, and the one gateway connection. One copy for the whole process. */
-const state = globalThis.__pocketOpenClaw ??= { sessions: new Map(), connection: null };
+const state = globalThis.__pocketOpenClaw ??= { sessions: new Map(), connection: null, models: new Map() };
 const no = (message, code = 'openclaw_failed') => Object.assign(new Error(message), { status: 502, code });
 const stopped = () => Object.assign(new Error('Stopped'), { name: 'AbortError' });
 /** How long a reply may go without a single event from the gateway (not counting a wait for the person). */
@@ -346,6 +347,13 @@ export async function nativeReply({ userId, chatUid, runId, turn, chat, signal, 
     if (signal?.aborted) throw stopped();
     // Only the person's message and what they attached: the session holds everything before it.
     const context = (Array.isArray(turn.context) ? turn.context : []).map(source => '\n\n[Attached: ' + String(source.title || 'source') + ']\n' + String(source.text || '')).join('');
+    // The chat's chosen model becomes this gateway session's override: switching a chat's model switches the model
+    // here, on the next message. The gateway only accepts models its config carries (the OpenCode Go list).
+    const wanted = gatewayModelFor(chat?.config);
+    if (wanted && state.models.get(key) !== wanted) {
+      try { await client.request('sessions.patch', { key, model: wanted }); state.models.set(key, wanted); }
+      catch (error) { throw no('This chat’s model is not available on the server (' + wanted + '). Choose the model again in the chat.', 'model_unavailable'); }
+    }
     timing.send = Date.now();
     const ack = await client.request('chat.send', { sessionKey: key, message: String(message ?? turn.text ?? '') + context, idempotencyKey: 'pocket-' + runId });
     timing.accepted = Date.now();

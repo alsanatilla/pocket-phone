@@ -49,6 +49,24 @@ describe("composer model picker", () => {
     expect(screen.getByRole("button", { name: "retry" })).toBeTruthy();
   });
 
+  it("lists the server's models when the gateway owns the reply, and applies one", async () => {
+    const fetchMock = vi.fn(async (url: string) => String(url).includes("/api/pip/models")
+      ? new Response(JSON.stringify({ native: true, models: [{ id: "glm-5.3", name: "GLM 5.3", note: "x" }, { id: "kimi-k3.1-pro", name: "Kimi K3.1 Pro", thinking: true }] }), { status: 200, headers: { "content-type": "application/json" } })
+      : new Response("{}", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const chat = chats.create();
+      render(<ModelPicker chat={chat} busy={false} />);
+      fireEvent.click(screen.getByRole("button", { name: "Choose model" }));
+      expect(await screen.findByRole("heading", { name: "This Pocket" })).toBeTruthy();
+      // The browser accounts are irrelevant when the server runs the model: no connect rows.
+      expect(screen.queryByRole("link", { name: /connect/ })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: /Kimi K3.1 Pro/ }));
+      expect(chats.get(chat.uid)?.config.model).toBe("kimi-k3.1-pro");
+      expect(chats.get(chat.uid)?.config.baseUrl).toBe("https://opencode.ai/inference/go/openai/v1");
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it("locks provider and web changes while a reply runs", () => {
     render(<ModelPicker chat={chats.create()} busy />);
     expect(screen.getByRole("button", { name: "Choose model" }).hasAttribute("disabled")).toBe(true);
