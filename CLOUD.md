@@ -1,6 +1,6 @@
 # Pocket storage and sync
 
-Pocket saves edits locally first. Signing in to a Pocket account connects the phone and browser through the Astro API on [Vercel](https://pocket-phone.vercel.app/) and a libSQL/Turso database. The database token stays on the server. Browser sessions use cookies; the phone encrypts its session token with Android Keystore. Passwords are hashed by Better Auth and are never stored on the phone.
+Pocket saves edits locally first. Signing in to a Pocket account connects the phone and browser through the Astro API on [Fly.io](https://pocket-phone.fly.dev/) and a libSQL/Turso database. The database token stays on the server. Browser sessions use cookies; the phone encrypts its session token with Android Keystore. Passwords are hashed by Better Auth and are never stored on the phone.
 
 ## Shared workspace
 
@@ -30,7 +30,7 @@ In the browser, open **Apps → Account & devices** for the full account screen.
 
 **Bring this browser’s workspace** imports guest records and chats into the chosen account’s local copy and transfers an existing guest COROS connection to the account. It does not copy provider keys. Account copies stay separate. Switching or signing out reloads the workspace, and other open tabs reload when the selected account changes.
 
-On the phone, open **Settings → set up pocket → link this phone** (or **storage & devices** on ROM builds). Open the supplied browser link or enter the short code at [Pocket’s link page](https://pocket-phone.vercel.app/link), sign in to the same Pocket account, and approve the displayed code. The phone receives its own session and starts sync; it does not create another account or need its own passkey. Password sign-in remains available. Codes expire after ten minutes.
+On the phone, open **Settings → set up pocket → link this phone** (or **storage & devices** on ROM builds). Open the supplied browser link or enter the short code at [Pocket’s link page](https://pocket-phone.fly.dev/link), sign in to the same Pocket account, and approve the displayed code. The phone receives its own session and starts sync; it does not create another account or need its own passkey. Password sign-in remains available. Codes expire after ten minutes.
 
 The account screen lists device sessions and can sign out another session. Removing a passkey removes that sign-in key; the last key cannot be removed from an account without another sign-in method. The phone’s personal workspace is bound to its first Pocket account; signing in with another account is refused so existing phone records cannot be sent to another person. Turning sync off keeps the local copy and saved session. Signing out revokes the session and keeps local records.
 
@@ -60,20 +60,19 @@ Search covers Notes, Tasks and their steps/source text, parked Thoughts, Paper t
 
 Signed-in Notes offer **history** in the editor and **recently deleted** in the notes list. History keeps up to 60 text checkpoints per note. Edits within a ten-minute editing session coalesce while preserving the initial text. Restoring a version preserves the text being replaced, including a local draft that has not synced yet; a conflicting newer edit requires reviewing history again. Notes deleted within the last 30 days can be restored as new notes, keeping the old deletion marker intact.
 
-## Deploy on Vercel
+## Deploy on Fly.io
 
-The repository root is an Astro project. vercel.json selects Astro, npm ci and npm run build. The adapter creates static client assets and server functions for authentication, workspace/object sync, private photos, COROS, account search and note history.
+The repository root is an Astro project on Astro's Node adapter (`astro.config.mjs`): one long-running server, built by the Dockerfile. `fly deploy` builds it from the repository root and starts `services/server/start.mjs`, which runs the web app and Pip's worker side by side in the same machine; `fly.toml` names the app, the Frankfurt region, the volume and the health check. There is no serverless target and no per-request limit: a reply may take as long as it needs.
 
-Set these server environment variables in Vercel for Production, and for Preview if preview deployments should use that database:
+Set these as secrets on the Fly app:
 
-~~~dotenv
-TURSO_DATABASE_URL=libsql://your-database.turso.io
-TURSO_AUTH_TOKEN=your-private-token
+~~~sh
+fly secrets set TURSO_DATABASE_URL=libsql://your-database.turso.io TURSO_AUTH_TOKEN=your-private-token
 ~~~
 
 Do not use PUBLIC_ prefixes. .env is ignored by Git. For local development, copy .env.example to .env, fill in the values, then run npm ci and npm run dev. npm run db:setup checks the connection and creates missing Pocket tables. The API also creates them on first use. Schema setup is additive and uses pocket_ table names.
 
-Optional BETTER_AUTH_SECRET separates session signing from the database token. Without it, the application derives a signing secret from TURSO_AUTH_TOKEN, so the two supplied variables are sufficient. Changing that token without a separate signing secret expires existing sessions. Optional BETTER_AUTH_URL fixes the canonical origin; otherwise authentication uses the request origin. No additional key or environment variable is required for passkeys, device linking, search or history. Keep the production origin stable: passkeys registered for pocket-phone.vercel.app are tied to that hostname, and unrelated preview hostnames do not share them. Use the production URL when linking devices.
+Optional BETTER_AUTH_SECRET separates session signing from the database token. Without it, the application derives a signing secret from TURSO_AUTH_TOKEN, so the two supplied variables are sufficient. Changing that token without a separate signing secret expires existing sessions. BETTER_AUTH_URL fixes the canonical origin; without it authentication uses the request origin. No additional key or environment variable is required for passkeys, device linking, search or history. Keep the production origin stable: passkeys are tied to their hostname, so moving Pocket to another domain means registering them again. Use the production URL when linking devices.
 
 Queries are parameterized and always scoped to the authenticated user. Browser writes check the request origin and account ID. Native writes use a bearer session and account ID. The server merges records in one write transaction rather than replacing a document with a device’s old copy. Sign-in and account creation use database-backed rate limits. API responses and private photos are not cached by the offline worker.
 
@@ -81,9 +80,9 @@ Queries are parameterized and always scoped to the authenticated user. Browser w
 
 For an existing phone Drive workspace, sync it once with Drive, then sign in to Pocket. The next sync merges the current local records into the new account. Drive remains a selectable legacy phone transport.
 
-In the browser, **import from Drive** reads the existing seven collections and Paper photos into the signed-in Pocket account. It never writes to Drive. The public OAuth client in src/client/config.js needs the Vercel origin in its Google authorized JavaScript origins. The Google sign-in script loads only when importing.
+In the browser, **import from Drive** reads the existing seven collections and Paper photos into the signed-in Pocket account. It never writes to Drive. The public OAuth client in src/client/config.js needs the production origin (pocket-phone.fly.dev) in its Google authorized JavaScript origins. The Google sign-in script loads only when importing.
 
-GitHub Pages and Vercel are different browser origins. Open the [old Pages URL](https://alsanatilla.github.io/pocket-phone/) in the browser that holds the old copy, choose **download this browser’s workspace**, then use **restore backup** in the Vercel app. That export contains the seven workspace JSON collections. Existing chats and zines stay in the old origin’s storage; this export does not transfer them.
+GitHub Pages and Pocket’s server are different browser origins. Open the [old Pages URL](https://alsanatilla.github.io/pocket-phone/) in the browser that holds the old copy, choose **download this browser’s workspace**, then use **restore backup** in the Pocket app. That export contains the seven workspace JSON collections. Existing chats and zines stay in the old origin’s storage; this export does not transfer them.
 
 **Download backup** exports the current workspace JSON collections, including deletion markers, plus Travel values and local recovery artifacts. Restoring merges workspace records and creates new private trip copies; it never rewrites a shared trip or restores an invitation. Recovery artifacts stay local. Backups exclude photo bytes, chats, zines, passwords and provider keys. **Forget this browser’s copy** removes only the current account’s local storage; server records and other accounts remain. Signed-in chats, zines and trips are restored from the account after clearing browser data; guest copies are not.
 

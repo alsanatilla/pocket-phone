@@ -1,8 +1,8 @@
 # Pip worker (detached runs)
 
 Pip's replies can run inside the web request (the default) or on a separate worker process. The worker removes the
-request timeout, keeps running when the tab closes, and lets a free-tier or home server do the model work while the
-web app stays on Vercel.
+request timeout, keeps running when the tab closes, and lets a separate box do the model work while the
+web app serves the page.
 
 There is no external queue service. **Turso is the queue**: `pocket_pip_jobs` holds one row per queued stretch,
 `pocket_pip_runs` remains the authority on the reply, and a lease decides which process may write.
@@ -32,8 +32,8 @@ npm run worker:once       # drain the queue and exit (cron / free CI)
 ```
 
 **Restart the worker after every change to the server code.** It loads the run logic and the prompts once at
-startup and never reloads them. Because the queue is shared, this also covers replies submitted on the Vercel
-deployment: with `PIP_RUNS_DETACHED=1` a reply written on pocket-phone.vercel.app is answered by this process, so a
+startup and never reloads them. Because the queue is shared, this also covers replies submitted on the live
+deployment: with `PIP_RUNS_DETACHED=1` a reply written on pocket-phone.fly.dev is answered by this process, so a
 worker started before a deploy keeps writing replies with the old code until it is restarted. `/healthz` reports the
 pid and uptime, which tells you whether the restart happened.
 

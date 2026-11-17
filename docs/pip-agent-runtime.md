@@ -181,7 +181,7 @@ must cover exactly that for the coverage block to stay true.
 ## Deployment
 
 Deployment requires Node >=24.16.0 <25 or >=26.1.0. The Fly Dockerfile pins Node
-24.16.0. Install with `npm ci` and build with `POCKET_TARGET=node npm run build`.
+24.16.0. Install with `npm ci` and build with `npm run build`.
 Pending checkpoints made by the previous runtime must be stopped and resubmitted;
 they are rejected explicitly rather than interpreted as OpenClaw transcripts.
 The OpenClaw Node package is never loaded into browsers.

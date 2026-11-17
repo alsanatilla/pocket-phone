@@ -7,7 +7,7 @@ RUN npm ci
 COPY . .
 # Behind Fly's proxy the server sees http while browsers send https; Pocket's own routes check the origin
 # against BETTER_AUTH_URL, so Astro's own origin check stands down (see astro.config.mjs).
-ENV POCKET_TARGET=node POCKET_ALLOW_PROXY=1
+ENV POCKET_ALLOW_PROXY=1
 RUN npm run build && npm prune --omit=dev
 
 FROM node:24.16.0-bookworm-slim

@@ -5,11 +5,11 @@ Status: not implemented or enabled. Hosted-app registration and ChatGPT plan-usa
 ## Registration brief
 
 - Application: Pocket
-- Website: https://pocket-phone.vercel.app
+- Website: https://pocket-phone.fly.dev
 - Source: https://github.com/alsanatilla/pocket-phone (MIT)
 - Requested capability: each signed-in Pocket user connects their own ChatGPT account and explicitly authorizes use of their plan for Pip requests.
 - Use case: a personal assistant with streamed conversation, research, charts and follow-up buttons. Existing Pocket read permissions and write approvals must continue to apply.
-- Proposed production callback: `https://pocket-phone.vercel.app/api/pip/chatgpt/callback` (not implemented yet; register the exact agreed URL).
+- Proposed production callback: `https://pocket-phone.fly.dev/api/pip/chatgpt/callback` (not implemented yet; register the exact agreed URL).
 - Request hosted, multi-user ChatGPT plan usage, not only OpenID Connect identity sign-in.
 
 OpenAI must supply the registered client ID, callback configuration, token-endpoint authentication method, permitted inference scopes and hosted inference contract. A confidential client additionally needs a server-side client secret; never include that secret in this repository or chat.

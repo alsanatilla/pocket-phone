@@ -2,7 +2,7 @@
 //
 // Models write cards in many shapes: fenced as asked, without the fence, as a nested tree, with tool-call tags
 // after them. segmentAnswer finds them while a reply streams (pure, cheap, keys stable as the text grows).
-// normalizeAnswer runs once when a reply ends, wherever it ran (tab, Vercel, worker): every card becomes a fenced
+// normalizeAnswer runs once when a reply ends, wherever it ran (tab, server, worker): every card becomes a fenced
 // block of flat JSON Lines and the debris goes, so every reader (chat, classic app, push text, search, the
 // model's own history) gets the same clean answer and none of them has to repair it again.
 

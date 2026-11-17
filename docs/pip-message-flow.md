@@ -11,7 +11,7 @@ the rework proposed at the end, not a description of a target.
 | 2 | Choose a path | `ReplyRunner.send`: `remote.available(chat)` → `serverRuns()` in `src/client/pip-remote.js` → `serverRunState` in `src/server/pip-runs.js` | Silent, per message. Server run if the account has a usable key for the chat's endpoint; otherwise the tab runs the reply. |
 | 3 | Choose a key | Tab: `resolve()` in `src/client/pip-credentials.js` (account vault via relay, else tab key). Server: `account()` in `src/server/pip-runs.js` (vault key for the chat's endpoint, else the background key for the same endpoint). | Two separate resolvers with different rules. |
 | 4 | Build the request | `requestBody` in `src/client/pip-core.js`: system prompt (`SYSTEM` + `CARDS_PROMPT` from `src/shared/pocket-cards.js` + date), replayed history, tool names from `toolNames()` in `src/client/pip-tools.js`. Jobs add text in `runRoutine` (`src/server/pip-background.js`). | Same builder everywhere, extended by string concatenation per caller. |
-| 5 | Call the model | `streamChat` in `src/client/pip-stream.js` (AI SDK `ToolLoopAgent`), provider from `providerModel` in `src/client/pip-provider.js` | One engine. It runs in three runtimes: the browser bundle, Vercel functions, and the worker. |
+| 5 | Call the model | `streamChat` in `src/client/pip-stream.js` (AI SDK `ToolLoopAgent`), provider from `providerModel` in `src/client/pip-provider.js` | One engine. It runs in three runtimes: the browser bundle, the web server, and the worker. |
 | 6 | Tools | `execute` / `preview` in `src/client/pip-tools.js`; writes wait for approval (`approve`), devices answer device tools | Shared. |
 | 7 | Output | `onPart` in `streamChat` appends raw `text-delta` to `result.answer`; when the reply ends, `normalizeAnswer` (`src/shared/pip-reply.js`) stores it in one clean form | Every card becomes a ```pocket fence of flat JSON Lines; tool-call debris and empty cards go. Since the output-filter commit. |
 | 8 | Store | Tab: `this.store.save(chat)` → sync to the account. Server: `writeTurn` in `src/server/pip-runs.js` (Turso `pocket_objects`) | Two writers of the same chat object. |
@@ -23,8 +23,8 @@ the rework proposed at the end, not a description of a target.
 | Path | Model called from | Key | Runtime that runs the code |
 |---|---|---|---|
 | Tab, direct | the browser | tab-only key | browser bundle |
-| Tab, relay | the browser through `/api/pip/relay` | account vault, added by Vercel | browser bundle (+ relay on Vercel) |
-| Server run | Vercel queues it (`PIP_RUNS_DETACHED=1`), `services/pip/worker.mjs` runs it | vault key, else background key | **the worker**, whatever code it started with |
+| Tab, relay | the browser through `/api/pip/relay` | account vault, added by the server | browser bundle (+ relay on the server) |
+| Server run | the web server queues it (`PIP_RUNS_DETACHED=1`), `services/pip/worker.mjs` runs it | vault key, else background key | **the worker**, whatever code it started with |
 | Background job | the worker's scheduler (`runPipJob`) | background key / account key | the worker |
 
 Production queues server runs (`PIP_RUNS_DETACHED=1`): every signed-in reply is answered by the worker process,
@@ -32,7 +32,7 @@ which at the time of writing runs on a development sandbox and loads its code on
 
 ## What goes wrong because of it (observed on 2026-11-09)
 
-1. **Version skew.** Vercel served the fixed key selection while the worker still ran the old one; an OpenRouter
+1. **Version skew.** The web deployment served the fixed key selection while the worker still ran the old one; an OpenRouter
    chat was sent with the OpenCode background key and failed with 401.
 2. **Invisible path.** The same chat can run in the tab one message and on the server the next; an error does not
    say where it came from.
@@ -48,8 +48,8 @@ which at the time of writing runs on a development sandbox and loads its code on
 
 ## Measured (2026-11-09)
 
-A Turso round trip takes about 120 ms from the worker's sandbox in Oregon (database in AWS eu-west-1). Vercel sets
-no region, so its functions run in its default region. Each progress write, queue claim and follower poll pays
+A Turso round trip takes about 120 ms from the worker's sandbox in Oregon (database in AWS eu-west-1). The web
+deployment set no region, so its functions ran in their default region. Each progress write, queue claim and follower poll pays
 that; the worker writes progress every 700 ms and followers poll every 250 ms with the whole turn in each frame.
 
 ## Proposed shape
@@ -61,8 +61,8 @@ that; the worker writes progress every 700 ms and followers poll every 250 ms wi
    (React, classic, push, search, replay) reads that, none parses raw text.
 3. **One error shape**: `{ code, where, action }` (e.g. `key_unreadable`, `vault`, `reconnect`) from where it
    happens to the screen, worded once in the client.
-4. **The worker deployed with the app** (same commit as Vercel, on a host made for it), or server runs inside the
-   Vercel functions (`PIP_RUNS_DETACHED` unset) until then.
+4. **The worker deployed with the app** (same commit as the web app, on a host made for it), or server runs inside the
+   web process (`PIP_RUNS_DETACHED` unset) until then.
 
 ## Transport (since the live-socket commit)
 
@@ -78,7 +78,7 @@ cookie and Pocket's own origin. The server pushes what happens in the account (`
 The worker runs in its own process and forwards its events to the web process over a loopback endpoint with a
 per-boot secret (reply progress at most every 400 ms). Pip's run commands (submit, decide, continue, stop) go over
 the socket too, as requests (`pip.runs`) that the web process hands to `/api/pip/runs` with the socket's session and
-origin, so they are checked exactly like a POST. Without the socket (Vercel, dev server, a dropped connection) a
+origin, so they are checked exactly like a POST. Without the socket (the web server, the dev server, a dropped connection) a
 tab sends them as POSTs, follows a reply over its SSE stream and syncs on its usual schedule.
 
 A message sent while a reply runs in the chat waits its turn on the server (see the last section). Only a retry or
@@ -339,7 +339,7 @@ started in.
 
 Who calls `startNext`: on the long-running server (`PIP_RUNS_MODE=inprocess`) the process that ran the reply, in the
 background; with a worker (`PIP_RUNS_DETACHED=1`) the worker step that ended it, which hands the next one to the
-worker queue (`queued`); elsewhere (Vercel, dev) the request that ran the reply runs the next one too, within the same
+worker queue (`queued`); elsewhere (the web server, dev) the request that ran the reply runs the next one too, within the same
 request, one stretch per reply.
 
 **Survives a restart.** The rows are in the database. A reply that was running when the process stopped is continued
@@ -517,7 +517,7 @@ is taken from the model: what the assignment may read, its provider, model and k
 
 **Where it runs.** Production (Fly, `PIP_RUNS_MODE=inprocess`) runs it in the web process that received the chat
 reply, detached from it: the chat reply returns at once. With a worker (`PIP_RUNS_DETACHED=1`) it is queued for the
-worker. Elsewhere (Vercel, the dev server without that mode) it waits for the next sweep (`/api/jobs/pip` or the
+worker. Elsewhere (the web server, the dev server without that mode) it waits for the next sweep (`/api/jobs/pip` or the
 worker's routine timer), because starting it inside the chat's request would make the chat wait for it.
 
 **What a screen reads.** `POST /api/pip/runs { action: 'assignments' }` (also over the socket) answers

@@ -136,7 +136,7 @@ public final class SetupActivity extends PocketActivity {
         if (complete) { action("devices & sign out", () -> startActivity(new Intent(this, CloudActivity.class))); return; }
         // Account screens finish themselves once this phone is signed in, which brings the person back here.
         primary("link this phone", () -> startActivity(new Intent(this, CloudActivity.class).putExtra("setup", "link"))).setTag("setup_link_phone");
-        body.addView(label("Shows a code. Type it on pocket-phone.vercel.app where you're signed in, or create the account there first.", PocketDesign.META, GRAY));
+        body.addView(label("Shows a code. Type it on pocket-phone.fly.dev where you're signed in, or create the account there first.", PocketDesign.META, GRAY));
         action("sign in or create with email", () -> startActivity(new Intent(this, CloudActivity.class).putExtra("setup", "password")));
         later("account", skip, "use pocket without an account");
     }

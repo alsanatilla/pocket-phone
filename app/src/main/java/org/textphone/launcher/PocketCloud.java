@@ -16,7 +16,7 @@ import org.json.JSONArray;
 
 /** Phone transport for the same authenticated Astro API used by the browser. */
 final class PocketCloud {
-    private static final String ORIGIN = "https://pocket-phone.vercel.app";
+    private static final String ORIGIN = "https://pocket-phone.fly.dev";
     private static final OkHttpClient HTTP = new OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build();
     private static final String USER_AGENT = "Pocket Android (Android " + android.os.Build.VERSION.RELEASE + ")";
     private static final Object LINK_LOCK = new Object();

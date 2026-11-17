@@ -17,7 +17,7 @@ Android 0.19.1 uses the browser's COROS cockpit and activity-detail formats. No 
 
 ## Data flow
 
-With a Pocket account, Android reads `/api/coros/state` and refreshes through `/api/coros/refresh`. The existing Vercel service owns COROS authorization and Turso persistence. Its rich `cockpit` and `activities.list` augment the compact `native` snapshot; older snapshots still work.
+With a Pocket account, Android reads `/api/coros/state` and refreshes through `/api/coros/refresh`. The Pocket server owns COROS authorization and Turso persistence. Its rich `cockpit` and `activities.list` augment the compact `native` snapshot; older snapshots still work.
 
 Standalone connections still use the phone's sealed COROS authorization. They now request optional recovery, fitness, training-load, sleep and device readings as well as score inputs. A failed optional read keeps its previous value; failed mandatory reads preserve the previous complete snapshot.
 

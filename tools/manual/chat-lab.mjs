@@ -4,7 +4,7 @@
 // /internal/events, so no model is called.
 //
 // Build the Node target first (this script does not build):
-//   POCKET_TARGET=node POCKET_ALLOW_PROXY=1 npx astro build
+//   POCKET_ALLOW_PROXY=1 npx astro build
 // Then, with a browser library outside the repo:
 //   PUPPETEER_MODULE=/path/to/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js \
 //     node tools/manual/chat-lab.mjs [--out <dir>] [--only <state>]
@@ -1645,7 +1645,7 @@ async function startServer(origin, dir) {
 
 async function main() {
   if (!existsSync(join(ROOT, 'dist/server/entry.mjs'))) {
-    console.error('dist/server/entry.mjs is missing. Build the Node target first:\n  POCKET_TARGET=node POCKET_ALLOW_PROXY=1 npx astro build');
+    console.error('dist/server/entry.mjs is missing. Build first:\n  POCKET_ALLOW_PROXY=1 npx astro build');
     process.exit(1);
   }
   const argv = process.argv.slice(2);

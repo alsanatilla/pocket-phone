@@ -1,6 +1,6 @@
 # App status — Pocket Android 0.19.1
 
-Pocket is a launcher and native apps on Nothing OS, plus an Astro browser workspace on [Vercel](https://pocket-phone.vercel.app/). Android owns system gestures and Recents. The connections between apps are described in [WORKFLOW.md](WORKFLOW.md).
+Pocket is a launcher and native apps on Nothing OS, plus an Astro browser workspace on [Fly.io](https://pocket-phone.fly.dev/). Android owns system gestures and Recents. The connections between apps are described in [WORKFLOW.md](WORKFLOW.md).
 
 | App | Available behavior | Current limit |
 | --- | --- | --- |

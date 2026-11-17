@@ -20,7 +20,7 @@ jobs:
           if (!process.env.POCKET_JOB_SECRET) throw new Error('POCKET_COROS_CRON_SECRET is missing.');
           let more = true;
           for (let page = 0; more && page < 6; page++) {
-            const response = await fetch('https://pocket-phone.vercel.app/api/jobs/coros', {
+            const response = await fetch('https://pocket-phone.fly.dev/api/jobs/coros', {
               headers: { Authorization: 'Bearer ' + process.env.POCKET_JOB_SECRET },
               signal: AbortSignal.timeout(290000),
             });

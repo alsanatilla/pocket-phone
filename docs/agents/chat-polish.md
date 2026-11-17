@@ -47,7 +47,7 @@ Rules for the script:
   `PUPPETEER_MODULE=/tmp/claude-1000/-data-workspace-pocket-phone/c5f48c1b-1c82-4368-b6cd-2b17434fdce7/scratchpad/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js`
   (check that path exists; if the file is elsewhere under that `node_modules/puppeteer-core`, use the entry its
   `package.json` names).
-- It needs the Node build: `POCKET_TARGET=node POCKET_ALLOW_PROXY=1 npx astro build`. The script checks that
+- It needs the Node build: `POCKET_ALLOW_PROXY=1 npx astro build`. The script checks that
   `dist/server/entry.mjs` exists and says how to build when it does not. It does not build by itself.
 - A scratch libSQL file in a temp directory, a free port, the server stopped and the directory removed in `finally`,
   also when a state fails. Nothing touches `.env`, the real database or the network (no model is called: replies
@@ -269,7 +269,7 @@ not.
 
 ### Measure
 
-Build (`POCKET_TARGET=node POCKET_ALLOW_PROXY=1 npx astro build`) and run the lab before your change and after it:
+Build (`POCKET_ALLOW_PROXY=1 npx astro build`) and run the lab before your change and after it:
 
 ```
 PUPPETEER_MODULE=/tmp/claude-1000/-data-workspace-pocket-phone/c5f48c1b-1c82-4368-b6cd-2b17434fdce7/scratchpad/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js \

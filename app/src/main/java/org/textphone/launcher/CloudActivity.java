@@ -50,7 +50,7 @@ public final class CloudActivity extends PocketActivity {
             section("LINK THIS PHONE");
             TextView code = label(link.displayCode(), 52, PocketDesign.accent(this)); code.setTypeface(PocketFonts.pixel(this));
             code.setGravity(android.view.Gravity.CENTER); code.setPadding(0, dp(28), 0, dp(28)); code.setTextIsSelectable(true); body.addView(code);
-            TextView address = label("pocket-phone.vercel.app/link", PocketDesign.SMALL, GRAY); address.setGravity(android.view.Gravity.CENTER); body.addView(address);
+            TextView address = label("pocket-phone.fly.dev/link", PocketDesign.SMALL, GRAY); address.setGravity(android.view.Gravity.CENTER); body.addView(address);
             action("open browser", () -> openWeb(link.browser));
             action("copy code", () -> { ((android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(android.content.ClipData.newPlainText("Pocket phone code", link.displayCode())); message("Copied."); });
             if (!linkError.isEmpty()) {

@@ -49,7 +49,7 @@ const detached = () => process.env.PIP_RUNS_DETACHED === '1' && !inProcess();
 /**
  * On a long-running server (PIP_RUNS_MODE=inprocess, the Fly.io deployment) a run executes in the web process that
  * received it, detached from that request: followers connected to the same process get every change at once
- * (pip-live.js), and the database keeps checkpoints. Elsewhere a request executes its stretch (Vercel) or a worker
+ * (pip-live.js), and the database keeps checkpoints. Elsewhere a request executes its stretch (the web process) or a worker
  * picks it from the queue (PIP_RUNS_DETACHED=1).
  */
 const inProcess = () => process.env.PIP_RUNS_MODE === 'inprocess';

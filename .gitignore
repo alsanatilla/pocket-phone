@@ -12,7 +12,6 @@ local.properties
 node_modules/
 dist/
 .astro/
-.vercel/
 *.db
 *.db-shm
 *.db-wal

@@ -1,6 +1,6 @@
 # Pocket Phone
 
-Pocket 0.19.2 is a native launcher and personal workspace for the Nothing Phone (3a), with an Astro browser app hosted on [Vercel](https://pocket-phone.vercel.app/). Warm Console connects both with cream monospace text, quiet color, pixel artwork and Pip's console sprite. Pip can research across permitted Pocket content and the web, show a plan, and prepare editable proposals for new records or changes to existing ones, applied only after your approval. The workflow is **capture → decide → plan → act → review**. See [WORKFLOW.md](WORKFLOW.md) for each app’s purpose and connections.
+Pocket 0.19.2 is a native launcher and personal workspace for the Nothing Phone (3a), with an Astro browser app hosted on [Fly.io](https://pocket-phone.fly.dev/). Warm Console connects both with cream monospace text, quiet color, pixel artwork and Pip's console sprite. Pip can research across permitted Pocket content and the web, show a plan, and prepare editable proposals for new records or changes to existing ones, applied only after your approval. The workflow is **capture → decide → plan → act → review**. See [WORKFLOW.md](WORKFLOW.md) for each app’s purpose and connections.
 
 **Today, Thoughts, Tasks and Notes** share a workspace. Thoughts stay undecided until you choose an action. Notes hold context; Tasks hold chosen actions. On the phone a task can reserve time in Pocket Calendar, start Focus and record completion in Activity. Movement and Gym stay separate. Camera leads to Photos; Paper leads to source-linked Notes; selected messages can lead to Tasks.
 
@@ -34,14 +34,14 @@ cp .env.example .env
 npm run dev
 ~~~
 
-Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in the ignored .env file. The same two names must exist in the Vercel project’s Production environment. They are read only by server code; never prefix them with PUBLIC_. Optional BETTER_AUTH_SECRET gives session signing its own stable secret. See [CLOUD.md](CLOUD.md).
+Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in the ignored .env file. The same two names must be set as secrets on the Fly app. They are read only by server code; never prefix them with PUBLIC_. Optional BETTER_AUTH_SECRET gives session signing its own stable secret. See [CLOUD.md](CLOUD.md).
 
 ~~~sh
 npm run db:setup
 npm run build
 ~~~
 
-Vercel builds from the repository root using vercel.json and the Astro adapter. Source lives in src/client, src/styles, src/pages, src/shared and src/server; static fonts and the offline worker live in public. GitHub Pages now provides a migration page for exporting the old origin’s workspace.
+The Dockerfile builds from the repository root with the Astro Node adapter; `fly deploy` (fly.toml) runs it. Source lives in src/client, src/styles, src/pages, src/shared and src/server; static fonts and the offline worker live in public. GitHub Pages now provides a migration page for exporting the old origin’s workspace.
 
 ### Detached Pip worker (optional)
 

@@ -37,7 +37,7 @@ import org.json.JSONObject;
  */
 final class CloudSync {
     static final String SCOPE = "https://www.googleapis.com/auth/drive.appdata";
-    static final String WEB = "https://pocket-phone.vercel.app/";
+    static final String WEB = "https://pocket-phone.fly.dev/";
     static final String ACTION_SYNCED = "org.textphone.launcher.SYNCED";
     static final String[] FILES = {"parking.json", "receipt.json", "dice.json", "notes.json", "tasks.json", "journal.json", "gym.json", "agenda.json", "clock.json", "drafts.json", "preferences.json"};
     static final int JOB_SOON = 7301, JOB_PERIODIC = 7302;
