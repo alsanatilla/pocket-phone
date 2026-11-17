@@ -9,7 +9,11 @@ set -eu
 BIN=/usr/local/bin/browse-bin
 PAIR=/usr/local/bin/browse-pair.py
 uid=$(id -u)
-home=${HOME:-/workspace/$(id -un)}
+# The Unix user's home, not $HOME: an agent's exec runs with HOME set to its OpenClaw workspace, which can be
+# recreated. The browser profile and the relay's pairing must live with the account and survive that.
+home=$(getent passwd "$uid" | cut -d: -f6)
+[ -n "$home" ] && [ -d "$home" ] && [ -w "$home" ] || home=${HOME:-/workspace/$(id -un)}
+export HOME="$home"
 state="$home/.browse"
 log="$state/logs"
 port=$((19990 + (uid % 8)))

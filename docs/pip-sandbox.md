@@ -23,7 +23,8 @@ The sandbox image ships [browse](https://opencode.ai/product/browse) so an agent
 real Chromium: its relay/MCP server, the unpacked extension (`/opt/browse-extension`, id
 `lojchoakeilecchdlgcpblpieghlpnmk`), Chromium and Xvfb. `/usr/local/bin/browse` is a wrapper around the real
 `browse-bin`; it starts, on demand and once per account, an Xvfb display and a Chromium profile under
-`~/.browse/chromium`, then pairs the extension with that account's relay on first use.
+`/workspace/<account>/.browse` (the Unix home, not the agent workspace, which is recreated), then pairs the extension
+with that account's relay on first use.
 
 Everything is per account: the profile (and the extension's pairing key), the relay port
 (`19990 + uid % 8`) and the DevTools port (`9200 + uid % 100`) live in the account's home on the volume, so one
