@@ -97,7 +97,12 @@ export async function closeGateway() {
 /** One plugin request: run or preview a Pocket tool for the reply that owns the session, or refuse. */
 export async function toolRequest(body) {
   const session = state.sessions.get(String(body?.sessionKey || ''));
-  if (!session) return { error: 'session_unknown', message: 'Pocket is not running a reply in this conversation.' };
+  if (!session) {
+    // A key that no reply owns is a bug in the key the gateway passes to the plugin, not a caller error. Name both
+    // sides (session keys are not secrets) so the mismatch can be seen in production logs.
+    console.log(JSON.stringify({ level: 'warn', message: 'Pocket tool called with an unknown session', given: String(body?.sessionKey || '').slice(0, 160), known: [...state.sessions.keys()].map(key => key.slice(0, 160)) }));
+    return { error: 'session_unknown', message: 'Pocket is not running a reply in this conversation.' };
+  }
   const tool = String(body.tool || ''), callId = String(body.callId || '');
   if (!NATIVE_TOOLS.includes(tool) || !callId) return { error: 'tool_unavailable', message: 'This tool is not offered here.' };
   if (body.action === 'preview') return session.preview(tool, body.input, callId);
