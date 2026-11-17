@@ -15,4 +15,5 @@ primary_region = "fra"
 
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "512mb"
+  # Each account can run its own headless Chromium (browse): 512 MB could not hold one, 2 GB holds one comfortably.
+  memory = "2048mb"

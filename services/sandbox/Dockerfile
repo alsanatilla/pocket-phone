@@ -4,17 +4,29 @@
 #   fly deploy -c services/sandbox/fly.toml        (from the repository root)
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      openssh-server ca-certificates coreutils curl git jq unzip zip less file \
-      python3 python3-pip python3-venv python3-numpy python3-pandas python3-matplotlib python3-requests python3-bs4 python3-lxml \
+      openssh-server ca-certificates coreutils curl git jq unzip zip less file procps \
+      python3 python3-pip python3-venv python3-websocket python3-numpy python3-pandas python3-matplotlib python3-requests python3-bs4 python3-lxml \
       nodejs npm sqlite3 \
+      chromium xvfb fonts-liberation \
     && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
     && useradd --create-home --home-dir /home/pip --shell /bin/bash --uid 1000 pip \
     && usermod -p '*' pip \
     && mkdir -p /run/sshd /workspace && chown pip:pip /workspace
+# browse: the relay/MCP server plus its unpacked extension, so every account gets a headless Chromium of its own.
+# The wrapper (/usr/local/bin/browse) starts that browser on demand; browse-bin is the real binary.
+RUN XDG_BIN_HOME=/usr/local/bin curl -fsSL https://opencode.ai/browse/install | XDG_BIN_HOME=/usr/local/bin sh -s -- --no-setup \
+    && mv /usr/local/bin/browse /usr/local/bin/browse-bin \
+    && mkdir -p /opt/browse-extension \
+    && curl -fsSL -o /tmp/browse-extension.zip https://anoma.ly/release/browse/extension/stable/chromium \
+    && unzip -q /tmp/browse-extension.zip -d /opt/browse-extension \
+    && rm /tmp/browse-extension.zip \
+    && test -f /opt/browse-extension/manifest.json
 RUN groupadd pip-sandbox
 COPY accounts.py /usr/local/bin/accounts.py
+COPY browse.sh /usr/local/bin/browse
+COPY browse-pair.py /usr/local/bin/browse-pair.py
 COPY sshd_config /etc/ssh/sshd_config
 COPY start.sh /usr/local/bin/start.sh
-RUN chmod 755 /usr/local/bin/start.sh
+RUN chmod 755 /usr/local/bin/start.sh /usr/local/bin/browse /usr/local/bin/browse-pair.py
 EXPOSE 2222
 CMD ["/usr/local/bin/start.sh"]

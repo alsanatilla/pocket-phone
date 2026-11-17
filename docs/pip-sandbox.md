@@ -16,6 +16,26 @@ Run `node services/gateway/check-sandbox.mjs` in the deployed Pocket image to ve
 Unix account isolation, absence of Pocket credentials, and file persistence between two fresh chats. It creates
 and deletes one uniquely named marker. This uses two real model turns and does not change Pocket records.
 
+
+## Browse in every account
+
+The sandbox image ships [browse](https://opencode.ai/product/browse) so an agent working in an account can drive a
+real Chromium: its relay/MCP server, the unpacked extension (`/opt/browse-extension`, id
+`lojchoakeilecchdlgcpblpieghlpnmk`), Chromium and Xvfb. `/usr/local/bin/browse` is a wrapper around the real
+`browse-bin`; it starts, on demand and once per account, an Xvfb display and a Chromium profile under
+`~/.browse/chromium`, then pairs the extension with that account's relay on first use.
+
+Everything is per account: the profile (and the extension's pairing key), the relay port
+(`19990 + uid % 8`) and the DevTools port (`9200 + uid % 100`) live in the account's home on the volume, so one
+account's browser and cookies are invisible to another. Nothing starts at boot; a browser costs ~250 MB only while
+that account uses it, which is why the machine has 2 GB. Auto-update is off so a running sandbox does not change
+under an agent.
+
+The browser is fresh and unauthenticated: it has no person's logins, and browse handoffs (a login, 2FA, a captcha)
+need a person at the keyboard, so an agent should use it for public pages and for automation, not for accounts that
+belong to someone. Pairing is automatic; `~/.browse/logs/` holds the Chromium, Xvfb and pairing logs, and deleting
+`~/.browse/paired` makes the next call pair again.
+
 ## Existing sandbox provisioning
 
 
