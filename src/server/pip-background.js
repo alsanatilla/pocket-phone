@@ -6,10 +6,9 @@ import { readDocuments } from './workspace.js';
 import { writeObject } from './objects.js';
 import { corosState, corosTool, corosCatalog } from './coros.js';
 import { EMPTY } from '../shared/workspace.js';
-import { config as pipConfig, requestBody, contextCoverage } from '../client/pip-core.js';
+import { config as pipConfig } from '../client/pip-core.js';
 import { execute as runTool, recordSource, WRITE_TOOLS } from '../client/pip-tools.js';
 import { trainingRuntime, trainingObservation, trainingCheckpoint, trainingChanged, rememberTraining, sweepMissedSessions, TRAINING_GRANTS, TRAINING_CHECK_INTERVAL } from './pip-training.js';
-import { listMemory, memoryNote, memoryTool, MEMORY_INSTRUCTIONS } from './pip-memory-store.js';
 import { trainingChatRoutine } from '../shared/pip-training-chat.js';
 import { sweepRuns, homeSegmentsOf } from './pip-runs.js';
 import { currentHome, homeFull, homeTail, HOME_TITLE } from '../shared/pip-home.js';
@@ -442,14 +441,10 @@ export async function runRoutine(userId, routine, { fetcher = fetch, now = Date.
   if (job) value.backgroundJob = true;
   const notes = job ? await readScratch(userId, routine.id) : '';
   // In the big chat the job reads the segment and the end of the one before it, as a reply of the person's does.
-  const native = process.env.PIP_OPENCLAW_NATIVE === '1' && Boolean(process.env.PIP_GATEWAY_TOKEN);
   const view = { ...chat, config: value, ...(home ? { turns: [...homeTail(segments, chat), ...chat.turns] } : {}) };
-  const body = native ? { instructions: '', tools: [] } : requestBody(view, turn);
-  body.tools = body.tools.filter(name => !WRITE_TOOLS.includes(name) || (conversation ? ['coros_write', 'create_record', 'update_training_preferences'].includes(name) : training?.tools.includes(name)));
+  // OpenClaw owns the reply; only the extra instructions below are Pocket's.
+  const body = { instructions: '' };
   // A job and the training conversation remember the person like a server reply does.
-  const remembered = native ? '' : memoryNote(await listMemory(userId));
-  if (remembered) body.instructions += '\n\n' + remembered;
-  if (!native) body.instructions += '\n\n' + MEMORY_INSTRUCTIONS;
   if (job) body.instructions += JOB_NOTES(notes);
   body.instructions += conversation ? `\n\nThis is the user's ongoing training conversation with Pip. Answer their actual message naturally, in their language. Ask one useful follow-up when goals, availability or how a workout felt are unclear; do not demand a fixed prompt or issue a full report on every reply. Remember explicit goals, equipment, availability and constraints with update_training_preferences; keep temporary workout feedback dated. The saved preferences and this chat guide automatic reviews too. More recent corrections supersede old preferences. Use live reads when discussing workout performance; no COROS connection is needed just to talk. Automatic planning is currently ${routine.enabled && settings.enabled ? 'on' : 'paused'}. Only enable/resume it if the user asks. Use scoped workout writes when the user wants the plan adjusted; no per-workout confirmation is needed once automatic planning is enabled. Only saved tool results establish changes. Never schedule beyond the next two sessions within three days. Calendar appointments are unavailable.
 Remembered training brief: ${JSON.stringify(routine.prompt || 'Not set yet; learn it through conversation.')}
@@ -463,7 +458,6 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
   }
   if (routine.kind === 'watch') body.instructions += '\n\nThis is a standing watch the user set up. If nothing new matches it, answer exactly SKIP. '
     + 'If an earlier report in this chat has a card with the figures you watch and only those figures moved, change that card with update_card and then answer exactly SKIP: the card is kept current without a new message. Write a new report only when the person should be told.';
-  if (training && !native) body.messages.push({ role: 'user', content: training.prompt });
   const source = await serverSource(userId);
   const prepare = async (value, name, input) => {
     if (name === 'update_training_preferences') return { action: { tool: name, kind: 'training_preferences', title: 'Training preferences' } };
@@ -491,10 +485,10 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
     pendingChange = next.catch(() => {}); return next;
   };
   // Imported here: the agent runtime and provider adapters load only when a routine runs.
-  const streamChat = native ? null : (await import('./pip-agent.js')).streamChat;
+  // Imported here: the gateway client loads only when a routine runs.
   let revised = false;
   try {
-    const reply = native ? await (async () => {
+    const reply = await (async () => {
       const { nativeReply } = await import('./pip-openclaw.js');
       const { NATIVE_RESEARCH_TOOLS } = await import('./pip-openclaw-tools.js');
       return nativeReply({ userId, chatUid: 'routine-' + routine.id, runId: 'routine-' + turn.uid, turn, chat: view,
@@ -516,26 +510,7 @@ Recent dated feedback: ${JSON.stringify(routine.feedback || [])}` : training ? '
           training?.observe(name, input, result);
           return result;
         } });
-    })()      : await streamChat(view, turn, { value, body, key, fetcher, signal, userId, deadlineMs: RUN_DEADLINE, coverage: contextCoverage(view, turn),
-      onUpdate: update => Object.assign(turn, update),
-      // A card changed in an earlier report: the chat is written when the run ends, even one that reports nothing new.
-      // In the big chat it is written at once to the segment that holds it, which may be the one before.
-      saveTurn: home ? changed => writeHomeTurn(userId, segments, changed) : () => { revised = true; },
-      ...(training || conversation ? { previewTool: prepare, approve: async requests => new Map(requests.map(request => [request.toolCallId, { approved: true }])) } : {}),
-      executeTool: async (value, name, input, signal, context) => {
-        if (name === 'remember' || name === 'forget') return memoryTool(userId, chat.uid, name, input);
-        if (name === 'update_scratch') {
-          if (!job) return { error: 'unavailable', message: 'Only a scheduled job keeps notes.' };
-          const kept = await writeScratch(userId, routine.id, input?.notes);
-          return { kind: 'scratch', saved: true, length: kept.length };
-        }
-        if (conversation && WRITE_TOOLS.includes(name)) return conversationWrite(name, input);
-        if (training?.isWrite(name)) return training.execute(name, input);
-        const result = await runTool(value, name, input, signal, { ...context, source });
-        if (name === 'coros_format') formats.push({ input, result });
-        training?.observe(name, input, result);
-        return result;
-      } });
+    })();
     Object.assign(turn, reply, { status: 'done' });
   } catch (error) { Object.assign(turn, { status: 'failed', phase: 'failed', error: String(error?.message || 'The scheduled reply failed.').slice(0, 500) }); }
   // A watch that found nothing answers SKIP; the chat stays empty and no notification is sent.

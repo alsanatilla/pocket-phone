@@ -112,47 +112,6 @@ test('the home mark is kept and valid, survives the log, and a tombstone stays a
   assert.equal((await chatOf(userId, 'chat-home')).home, true);
 });
 
-test('a server reply in a new home segment reads the tail of the previous one before its own question', async () => {
-  const userId = await account();
-  await writeObject(userId, 'chats', chat('home-before', { created: 1000, updated: 1000, home: true, turns: [turn('bruno', 'My dog is called Bruno.', 'Noted.', 'done', 1000)] }));
-  await writeObject(userId, 'chats', chat('home-now', { created: 2000, updated: 2000, home: true, turns: [] }));
-
-  const sent = [];
-  const { count, result: submitted } = await countHomeReads(() => runs.submitRun(userId, { requestId: 'req-home-tail', chat: header('home-now'), text: 'What is my dog called?', device: 'browser-1' },
-    { fetcher: provider(sent, compatibleMessage({ text: 'Bruno.' })) }));
-  assert.equal(submitted.run.status, 'done', submitted.run.turn.error);
-  assert.equal(count, 1);
-  const messages = plain(sent[0].messages);
-  assert.deepEqual(messages.slice(0, 2), [{ role: 'user', content: 'My dog is called Bruno.' }, { role: 'assistant', content: 'Noted.' }]);
-  assert.equal(messages.length, 3);
-  assert.equal(messages[2].role, 'user');
-  assert.match(String(messages[2].content), /What is my dog called\?/);
-
-  const stored = await chatOf(userId, 'home-now');
-  assert.equal(stored.home, true);
-  assert.equal(stored.turns.length, 1);
-  assert.equal(stored.turns[0].uid, submitted.run.turn.uid);
-  assert.equal(stored.turns[0].text, 'What is my dog called?');
-  assert.equal(stored.turns.some(turn => turn.uid === 'bruno'), false);
-});
-
-test('a server reply in an ordinary chat reads no home segments and its request keeps only its own turns', async () => {
-  const userId = await account();
-  await writeObject(userId, 'chats', chat('ordinary', { created: 3000, updated: 3000, turns: [turn('o1', 'My dog is called Bruno.', 'Noted.'), turn('o2', 'What is my dog called?', 'Bruno.')] }));
-  await writeObject(userId, 'chats', chat('home-other', { created: 4000, updated: 4000, home: true, turns: [turn('h1', 'Home only', 'Home only answer')] }));
-
-  const sent = [];
-  const { count, result: submitted } = await countHomeReads(() => runs.submitRun(userId, { requestId: 'req-ordinary', chat: header('ordinary'), text: 'And again?' },
-    { fetcher: provider(sent, compatibleMessage({ text: 'Bruno.' })) }));
-  assert.equal(submitted.run.status, 'done', submitted.run.turn.error);
-  assert.equal(count, 0);
-  assert.deepEqual(plain(sent[0].messages), [
-    { role: 'user', content: 'My dog is called Bruno.' }, { role: 'assistant', content: 'Noted.' },
-    { role: 'user', content: 'What is my dog called?' }, { role: 'assistant', content: 'Bruno.' },
-    { role: 'user', content: 'And again?' },
-  ]);
-});
-
 test('a new chat takes the home mark from its header only when it is exactly true', async () => {
   const userId = await account();
   await runs.submitRun(userId, { requestId: 'req-mark-home', chat: { ...header('chat-marked'), home: true }, text: 'Hello' },

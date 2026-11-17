@@ -1,0 +1,21 @@
+version: 2
+# OpenClaw is pinned exactly on purpose (package.json). An update arrives as a PR, and CI boots the real gateway
+# before it can be merged; a green PR is the only way a protocol or plugin-SDK change reaches production.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      openclaw:
+        patterns:
+          - openclaw
+          - '@openclaw/*'
+      dependencies:
+        patterns:
+          - '*'
+        exclude-patterns:
+          - openclaw
+          - '@openclaw/*'

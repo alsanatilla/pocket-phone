@@ -6,16 +6,16 @@ compaction and memory; Pocket displays replies and provides its account-scoped d
 ## Runtime
 
 - `services/gateway/config.mjs` generates the loopback gateway config and Pip's workspace persona and card skill.
-- `services/server/start.mjs` starts web, worker and gateway together. In native mode a gateway exit restarts the
-  service. The workspace lives on the Fly volume; session databases remain on local disk.
+- `services/server/start.mjs` starts web, worker and gateway together; a gateway exit restarts the service. The
+  workspace lives on the Fly volume; session databases remain on local disk.
 - `src/server/pip-openclaw.js` sends `chat.send` over OpenClaw's operator connection and maps streamed events to
   Pocket's stored turns. `chat.abort` stops a reply; steering uses `queueMode: steer`. Its gateway client keeps a
   device identity in a directory of its own, one per Unix user under `/tmp`; a diagnostic run as another user must
   never be able to lock the web process out of its identity (a root-owned directory made every reply time out).
 - `services/gateway/pocket-plugin` exposes Pocket's schemas. Calls go to the web process's authenticated loopback
   `/internal/pip-tools`. Unknown sessions are forwarded once to the worker's endpoint.
-- Chats, research assignments, scheduled reports, training conversations and automatic training use the native
-  path when `PIP_OPENCLAW_NATIVE=1`. Phone-calendar calls wait for an existing device request to be answered.
+- Chats, research assignments, scheduled reports, training conversations and automatic training all use the native
+  path. Phone-calendar calls wait for an existing device request to be answered.
 
 ## Permissions
 
@@ -27,17 +27,28 @@ not inherit this policy. Training preferences can be saved while automatic plann
 
 ## Deployment
 
-`PIP_GATEWAY=1`, `PIP_OPENCLAW_NATIVE=1`, `PIP_GATEWAY_HOME`, `PIP_GATEWAY_PORT`, `PIP_GATEWAY_AGENT`,
-`PIP_GATEWAY_MODEL`, `PIP_GATEWAY_BASE_URL` and secret `PIP_GATEWAY_KEY` configure the runtime. Gateway and tool
-endpoint tokens are generated per boot when not supplied. This is a personal deployment with one agent/workspace;
-multiple users would need isolated agent workspaces as well as the existing account-scoped tool sessions.
+`PIP_GATEWAY_HOME`, `PIP_GATEWAY_PORT`, `PIP_GATEWAY_AGENT`, `PIP_GATEWAY_MODEL`, `PIP_GATEWAY_BASE_URL` and secret
+`PIP_GATEWAY_KEY` configure the runtime. Gateway and tool endpoint tokens are generated per boot. This is a personal
+deployment with one agent per account; multiple users would need isolated agent workspaces as well as the existing
+account-scoped tool sessions.
 
-The Responses adapter (`pip-gateway.js`, `pip-gateway-run.js`) and `PIP_GATEWAY_CLIENT`/`PIP_GATEWAY_CHAT` flags
-have been removed. The older in-process runtime still supports deployments without native mode and its tests;
-it is not used by production replies. The classic browser app retains its browser loop.
+There is **one** reply runtime: the gateway. The in-process model loop (`pip-agent.js`, `pip-agent-transport.js`,
+`pip-compaction.js`, the server effort judge), the Responses adapter and the `PIP_GATEWAY*` mode flags have been
+removed, and with them the tests that only exercised them. The classic browser page still runs its own loop in the
+tab, which is a different surface and does not use the server runtime.
 
-Pocket still owns job scheduling and delivery. Moving scheduling itself to OpenClaw, connecting the sandbox,
-removing the remaining non-native runtime and profiling production cold starts are outstanding.
+Pocket still owns job scheduling and delivery. Moving scheduling itself to OpenClaw and profiling cold starts are
+outstanding.
+
+## Upgrades
+
+OpenClaw is pinned exactly in `package.json`; the version is logged at boot. The contract is
+`tools/pip-openclaw-native.test.mjs`: it boots the real gateway with the generated config and Pocket's plugin, runs a
+scripted model through streaming, reads, cards, approve/decline, stop, steering, session reuse, research and training
+restrictions, and speaks to the real tool endpoint. CI (`.github/workflows/ci.yml`) runs it with the type check and the
+app tests on every push and PR; Dependabot proposes pin bumps as PRs, so a protocol or plugin-SDK change can only
+reach production through a green contract test. The config is also validated by OpenClaw's own
+`openclaw config validate` in the config test.
 
 ## Verification
 

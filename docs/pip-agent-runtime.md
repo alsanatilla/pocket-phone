@@ -295,7 +295,10 @@ lookups run unguarded and one line is logged. Run the suites on the server's Nod
 
 ## Native OpenClaw path
 
-`PIP_OPENCLAW_NATIVE=1` (with `PIP_GATEWAY=1`) makes Pip a real OpenClaw agent. A chat reply in `drive`
+> The in-process server loop described below was removed. Production has one reply runtime, the OpenClaw gateway
+> (`docs/pip-gateway.md`); this document is kept for the shared concepts and the browser page's own loop.
+
+Pip is a real OpenClaw agent. A chat reply in `drive`
 (`src/server/pip-runs.js`) then goes through the gateway's WebSocket operator protocol instead of the in-process loop
 or the Responses client-tools path, which both stay as they are and are selected exactly as before when the flag is
 off. Assignments and replies with device tools keep the old paths for now.
@@ -384,7 +387,7 @@ Chat replies (with routines and assignments moved to the gateway as well, since 
 
 ### Native assignments and scheduled reports
 
-With `PIP_OPENCLAW_NATIVE=1`, research assignments and non-training scheduled reports use `nativeReply` too.
+Research assignments and non-training scheduled reports use `nativeReply` too.
 Assignments accept a self-contained brief; jobs use a stable per-account, per-routine session and pass the job's
 instructions and scratch notes as their request. Neither constructs Pocket's conversation replay or injects the
 old memory list. `start_assignment` and `update_scratch` are declared in the plugin manifest as well as its config.

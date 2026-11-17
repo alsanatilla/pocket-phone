@@ -19,11 +19,8 @@ kill_timeout = "30s"
   # A reply runs in the web process that received it; followers get it live from memory (src/server/pip-live.js).
   # The worker beside it runs scheduled jobs and anything another deployment queued.
   PIP_RUNS_MODE = "inprocess"
-  # Pip's agent, workspace and memory are the OpenClaw gateway beside the web process; it is loopback only.
-  PIP_GATEWAY = "1"
-  # Chat replies run natively on OpenClaw (src/server/pip-openclaw.js): the gateway owns the loop and the session,
-  # Pocket's tools come from its plugin. The classic browser app keeps its own loop.
-  PIP_OPENCLAW_NATIVE = "1"
+  # Pip's agent, workspace, memory and reply loop are the OpenClaw gateway beside the web process; it is loopback
+  # only, and Pocket's tools come from its plugin (src/server/pip-openclaw.js). There is no second runtime.
   PIP_GATEWAY_HOME = "/data/openclaw"
   PIP_GATEWAY_PORT = "18789"
   PIP_GATEWAY_AGENT = "pocket"

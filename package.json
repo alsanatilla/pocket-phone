@@ -15,8 +15,7 @@
     "db:setup": "node --env-file=.env scripts/db-setup.mjs",
     "typecheck": "tsc -p tsconfig.app.json",
     "test": "vitest run",
-    "test:tools": "node --test \"tools/**/*.test.mjs\"",
-    "check:live": "node tools/live/run.mjs"
+    "test:tools": "node --test \"tools/**/*.test.mjs\""
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.78",

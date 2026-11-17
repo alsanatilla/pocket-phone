@@ -121,7 +121,7 @@ test('native sandbox agents are isolated, pinned and provisioned explicitly', as
     assert.match(persona, /browse navigate/);
     assert.match(persona, /headless Chromium/);
     const { execFileSync } = await import('node:child_process');
-    execFileSync(process.execPath, ['node_modules/openclaw/dist/index.js', 'config', 'validate'], {
+    execFileSync(process.execPath, ['node_modules/openclaw/openclaw.mjs', 'config', 'validate'], {
       env: { ...process.env, OPENCLAW_CONFIG_PATH: written.path, OPENCLAW_STATE_DIR: join(home, 'validation') }, stdio: 'pipe' });
     delete process.env.PIP_SANDBOX_SSH_KEY;
     assert.throws(() => gatewayConfig({ names: [] }), /credentials/);

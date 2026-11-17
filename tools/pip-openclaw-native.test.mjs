@@ -90,7 +90,7 @@ test.before(async () => {
   const { writeGatewayConfig } = await import('../services/gateway/config.mjs');
   const { path } = await writeGatewayConfig();
   const booting = Date.now();
-  gatewayChild = spawn(process.execPath, ['node_modules/openclaw/dist/index.js', 'gateway', 'run'], { stdio: ['ignore', 'pipe', 'pipe'],
+  gatewayChild = spawn(process.execPath, ['node_modules/openclaw/openclaw.mjs', 'gateway', 'run'], { stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, OPENCLAW_CONFIG_PATH: path, OPENCLAW_STATE_DIR: join(folder, 'state'), OPENCLAW_GATEWAY_PORT: String(port), OPENCLAW_GATEWAY_TOKEN: process.env.PIP_GATEWAY_TOKEN } });
   for (const stream of [gatewayChild.stdout, gatewayChild.stderr]) stream.on('data', chunk => { gatewayLog.push(String(chunk)); if (gatewayLog.length > 400) gatewayLog.shift(); });
   await until('the gateway to listen', async () => gatewayChild.exitCode === null ? Boolean(await fetch('http://127.0.0.1:' + port + '/health').catch(() => null)) : (() => { throw new Error('The gateway exited:\n' + gatewayLog.join('').slice(-3000)); })(), 180000);

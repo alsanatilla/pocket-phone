@@ -26,7 +26,6 @@ import { NATIVE_TOOLS, NATIVE_WRITES, onWake } from './pip-openclaw-tools.js';
 
 /** Sessions with a reply running in this process, and the one gateway connection. One copy for the whole process. */
 const state = globalThis.__pocketOpenClaw ??= { sessions: new Map(), connection: null };
-export const nativeOn = () => process.env.PIP_OPENCLAW_NATIVE === '1' && Boolean(process.env.PIP_GATEWAY_TOKEN);
 const no = (message, code = 'openclaw_failed') => Object.assign(new Error(message), { status: 502, code });
 const stopped = () => Object.assign(new Error('Stopped'), { name: 'AbortError' });
 /** How long a reply may go without a single event from the gateway (not counting a wait for the person). */
