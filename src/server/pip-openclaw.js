@@ -9,6 +9,8 @@
 //   answered only for a session a running reply registered, with that reply's account and access.
 // - approvals: the plugin's before_tool_call asks for a plugin approval; Pocket shows it as a run request (the same
 //   approval screen, decideRun) and resolves it with plugin.approval.resolve.
+import { constants } from 'node:fs';
+import { access, mkdir } from 'node:fs/promises';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { agentForUser } from '../../services/gateway/sandbox.mjs';
 import { tmpdir } from 'node:os';
@@ -36,6 +38,25 @@ const IDLE = Number(process.env.PIP_OPENCLAW_IDLE_MS) || 120000;
  */
 export const sessionKeyFor = (userId, chatUid) => 'agent:' + agentForUser(userId) + ':pocket-' + createHash('sha256').update(userId + '\n' + chatUid).digest('hex').slice(0, 32);
 
+/**
+ * Where OpenClaw's gateway client keeps its device identity. One directory per Unix user: a diagnostic run as root
+ * once left a root-owned 0700 directory behind, the web process (uid 1000) could not open it, and every reply failed
+ * with "The OpenClaw gateway did not answer." after the handshake timed out. A directory another user owns may never
+ * be reused, so the default is per-uid and the path is checked before the client starts.
+ */
+export const clientStateDir = () => process.env.PIP_OPENCLAW_CLIENT_STATE
+  || join(tmpdir(), 'pocket-openclaw-client-' + (typeof process.getuid === 'function' ? process.getuid() : 'user'));
+export async function prepareClientState() {
+  const dir = clientStateDir();
+  try {
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await access(dir, constants.W_OK | constants.X_OK);
+  } catch (error) {
+    throw no('Pip cannot use its gateway client directory ' + dir + ' (' + (error.code || error.message) + ').', 'openclaw_client_state');
+  }
+  return dir;
+}
+
 function dispatch(frame) {
   const payload = frame?.payload || {}, key = payload.sessionKey || payload.request?.sessionKey;
   const session = typeof key === 'string' && state.sessions.get(key);
@@ -46,13 +67,15 @@ function dispatch(frame) {
 export function gateway() {
   return state.connection ||= (async () => {
     const { GatewayClient } = await import('openclaw/plugin-sdk/gateway-runtime');
+    // Fail with the directory's problem, not a 60-second handshake timeout, when it is not ours to write.
+    const clientState = await prepareClientState();
     return await new Promise((resolve, reject) => {
       const client = new GatewayClient({ url: process.env.PIP_GATEWAY_WS || 'ws://127.0.0.1:' + (process.env.PIP_GATEWAY_PORT || '18789'), token: process.env.PIP_GATEWAY_TOKEN,
         // A trusted local backend on loopback with the shared token; Pocket renders tool events and plugin approvals.
         clientName: 'gateway-client', clientDisplayName: 'Pocket', mode: 'backend', role: 'operator',
         scopes: ['operator.read', 'operator.write', 'operator.approvals'], caps: ['tool-events', 'plugin-approvals'],
         // Its device identity lives apart from the gateway's own state.
-        env: { ...process.env, OPENCLAW_STATE_DIR: process.env.PIP_OPENCLAW_CLIENT_STATE || join(tmpdir(), 'pocket-openclaw-client') },
+        env: { ...process.env, OPENCLAW_STATE_DIR: clientState },
         onHelloOk: () => { clearTimeout(timer); resolve(client); },
         onEvent: dispatch,
         // Events lost while reconnecting cannot be replayed into a running reply: those replies fail and can be retried.

@@ -9,7 +9,9 @@ compaction and memory; Pocket displays replies and provides its account-scoped d
 - `services/server/start.mjs` starts web, worker and gateway together. In native mode a gateway exit restarts the
   service. The workspace lives on the Fly volume; session databases remain on local disk.
 - `src/server/pip-openclaw.js` sends `chat.send` over OpenClaw's operator connection and maps streamed events to
-  Pocket's stored turns. `chat.abort` stops a reply; steering uses `queueMode: steer`.
+  Pocket's stored turns. `chat.abort` stops a reply; steering uses `queueMode: steer`. Its gateway client keeps a
+  device identity in a directory of its own, one per Unix user under `/tmp`; a diagnostic run as another user must
+  never be able to lock the web process out of its identity (a root-owned directory made every reply time out).
 - `services/gateway/pocket-plugin` exposes Pocket's schemas. Calls go to the web process's authenticated loopback
   `/internal/pip-tools`. Unknown sessions are forwarded once to the worker's endpoint.
 - Chats, research assignments, scheduled reports, training conversations and automatic training use the native
