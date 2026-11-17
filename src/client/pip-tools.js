@@ -5,6 +5,7 @@ import { agenda } from './planner.js';
 import { readChatHistory } from './pip-memory.js';
 import { applyProposal, applyChange, applyCoros } from './pip-actions.js';
 import { drawCard, reviseCard } from '../shared/pocket-card-tool.js';
+import { sandboxLabel } from '../shared/pip-sandbox-label.js';
 
 // Web search runs through Firecrawl for every provider: search_web and read_web_page. Works without a key at low volume;
 // a Firecrawl key (API settings) raises the limits. The key stays in this tab, like provider keys.
@@ -359,6 +360,9 @@ export async function execute(value, name, args = {}, signal, context = {}) {
 /** "querySleepHrv" → "sleep hrv" for activity labels. */
 const corosName = tool => String(tool || "").replace(/^(query|get)/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().slice(0, 60) || "data";
 export function label(name, input = {}) {
+  // exec/read/write/edit/apply_patch: what the command or file actually does, not the bare tool name.
+  const sandbox = sandboxLabel(name, input);
+  if (sandbox) return sandbox;
   const query = typeof input?.query === "string" ? input.query.slice(0, 200) : "";
   if (name === "read_chat_history") return "read chat history" + (query ? " · “" + query + "”" : "");
   if (name === "web_search" || name === "search_web") return "search web" + (query ? " · “" + query + "”" : "");
