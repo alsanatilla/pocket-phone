@@ -5,6 +5,7 @@ import { chats } from "../../data/chats.ts";
 import type { MemoryEntry } from "../../data/memory.ts";
 
 vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => vi.fn(),
   Link: ({ to, search, children, className }: { to: string; search?: { chat?: string }; children?: ReactNode; className?: string }) => (
     <a href={"#" + to + (search?.chat ? "?chat=" + search.chat : "")} className={className}>{children}</a>
   ),

@@ -105,6 +105,7 @@ export function JobsPage() {
   if (error) {
     return (
       <main className="pb-4">
+        <div className="-mb-2 pt-4"><Button variant="ghost" onClick={() => void navigate({ to: "/settings" })}>‹ settings</Button></div>
         <PageTitle title="jobs" meta="pip on its own" />
         <div className="mt-6 space-y-2">
           <p className="text-sm text-destructive">{error}</p>
@@ -119,6 +120,7 @@ export function JobsPage() {
   const limit = state.settings?.dailyTokens ?? 0;
   return (
     <main className="pb-4">
+      <div className="-mb-2 pt-4"><Button variant="ghost" onClick={() => void navigate({ to: "/settings" })}>‹ settings</Button></div>
       <PageTitle title="jobs" meta={on ? `today ${tokens(state.usedToday)} of ${tokens(limit)} tokens` : "pip on its own · off"}>
         <Button type="button" onClick={() => setPicking(true)}>+ new job</Button>
       </PageTitle>

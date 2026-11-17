@@ -3,6 +3,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { chats, type ChatTurn } from "../../data/chats.ts";
+import { createNote } from "../../data/notes.ts";
 import { ChatList } from "./ChatList.tsx";
 
 const turn = (uid: string): ChatTurn => ({ uid, text: "question", answer: "answer", created: 1, status: "done" });
@@ -59,5 +60,67 @@ describe("the chat list's rows", () => {
     expect(names.some(text => text!.includes("Training"))).toBe(true);
     expect(names.some(text => text!.includes("Open and empty"))).toBe(true);
     expect(names.some(text => text!.includes("Empty one"))).toBe(false);
+  });
+
+  it("says how a chat stands: writing, failed, or a draft not sent", () => {
+    const writing = seed("Writing", 1);
+    const failed = seed("Failed", 1);
+    const draft = seed("Draft", 1);
+    chats.update(writing, chat => { chat.turns[0]!.status = "streaming"; });
+    chats.update(failed, chat => { chat.turns[0]!.status = "failed"; });
+    chats.update(draft, chat => { chat.draft = "half a thought"; });
+
+    render(<ChatList open onOpenChange={() => {}} current={null} homeCurrent={false} onPick={() => {}} onHome={() => {}} onNew={() => {}} />);
+    expect(screen.getByText("writing")).toBeTruthy();
+    expect(screen.getByText("failed")).toBeTruthy();
+    expect(screen.getByText("draft")).toBeTruthy();
+  });
+
+  it("brings the chat that is open into view, however far down the list it is", () => {
+    seed("Older", 2);
+    const current = seed("Reading now", 2);
+    const intoView = vi.spyOn(Element.prototype, "scrollIntoView");
+
+    render(<ChatList open onOpenChange={() => {}} current={current} homeCurrent={false} onPick={() => {}} onHome={() => {}} onNew={() => {}} />);
+    expect(intoView).toHaveBeenCalled();
+    expect((intoView.mock.contexts[0] as HTMLElement).textContent).toContain("Reading now");
+  });
+});
+
+describe("the chat list's field", () => {
+  it("puts the conversations away and shows what matches, chats first", () => {
+    seed("Training", 4);
+    seed("Groceries", 2);
+    createNote("Roof repair\nThe neighbour knows about the leak.");
+
+    render(<ChatList open onOpenChange={() => {}} current={null} homeCurrent={false} onPick={() => {}} onHome={() => {}} onNew={() => {}}
+      onResult={() => {}} />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find a chat or anything" }), { target: { value: "groceries" } });
+
+    expect(screen.getByRole("button", { name: /Groceries/ })).toBeTruthy();
+    expect(screen.queryByText("Training")).toBeNull();
+    expect(screen.queryByText(/ongoing/)).toBeNull();
+  });
+
+  it("finds a note by what it says, and opens the hit", () => {
+    const note = createNote("Roof repair\nThe neighbour knows about the leak.");
+    const onResult = vi.fn();
+
+    render(<ChatList open onOpenChange={() => {}} current={null} homeCurrent={false} onPick={() => {}} onHome={() => {}} onNew={() => {}}
+      onResult={onResult} />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find a chat or anything" }), { target: { value: "leak" } });
+    fireEvent.click(screen.getByRole("button", { name: /Roof repair/ }));
+
+    expect(onResult).toHaveBeenCalledWith(expect.objectContaining({ kind: "note", uid: note.uid }));
+  });
+
+  it("says when nothing matches, and the clear key brings the list back", () => {
+    seed("Training", 4);
+    render(<ChatList open onOpenChange={() => {}} current={null} homeCurrent={false} onPick={() => {}} onHome={() => {}} onNew={() => {}} />);
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find a chat or anything" }), { target: { value: "zzzz" } });
+    expect(screen.getByText(/Nothing matches/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "clear" }));
+    expect(screen.getByText("Training")).toBeTruthy();
   });
 });

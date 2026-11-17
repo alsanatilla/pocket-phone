@@ -80,6 +80,9 @@ export const router = createRouter({
   routeTree,
   history: createHashHistory(),
   defaultPreload: "intent",
+  // Back from a note, a task or a search result returns to the line of the list it was opened from. A chat keeps
+  // its own place (PipPage remembers it), because a conversation is followed at its end rather than at a scroll height.
+  scrollRestoration: ({ location }) => location.pathname !== "/pip",
   // A quick change shows nothing; a slow one shows the skeleton for long enough not to flicker.
   defaultPendingMs: 200,
   defaultPendingMinMs: 300,

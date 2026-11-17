@@ -13,13 +13,16 @@ import { listChats, readChat } from "../../data/chats.ts";
 import { homeForSend } from "../../data/home.ts";
 import { BRIEF_KINDS, clockAt, dailyNote, dayAppointments, dayOf, dayPart, dayTasks, dayTitle, fromPip, JOB_OWNER, lastVisit, latestBrief, markVisit, type PipItem } from "../../data/today.ts";
 import { loadJobs, type JobsState } from "../../data/jobs.ts";
-import { completeTask, listTasks, today } from "../../data/tasks.ts";
+import { lists } from "../../data/lists.ts";
+import { parseTask } from "../../data/parse.ts";
+import { completeTask, createTask, listTasks, today } from "../../data/tasks.ts";
 import { noteTitle } from "../../data/notes.ts";
 import { hrefFor } from "../../lib/classic.ts";
 import { useSyncState } from "../../runtime.ts";
 import { Keys, Row, RowMenu, Section, SectionLabel, Tick } from "../../ui/kit.tsx";
 import { PageTitle } from "../../ui/PageTitle.tsx";
 import { SendButton } from "../../ui/SendButton.tsx";
+import { prompt } from "../../ui/dialog/dialog.ts";
 import { toastError } from "../../ui/toast/toast.ts";
 import { Answer } from "../pip/stream/Answer.tsx";
 import { busy, canQueue, queueSend, send } from "../pip/runner.ts";
@@ -49,6 +52,7 @@ export function TodayPage() {
 }
 
 function TodayView({ account, signedIn, local }: { account: string; signedIn: boolean; local: boolean }) {
+  const navigate = useNavigate();
   const now = useMinute(), part = dayPart(now);
   const work = useAssignments();
   // The last visit is read once: what arrives while the page is open stays until the person leaves it.
@@ -88,13 +92,20 @@ function TodayView({ account, signedIn, local }: { account: string; signedIn: bo
 
         {tasks.length ? (
           <Section label="tasks">
-            {tasks.map(({ task, note: when, late }) => (
-              <Row key={task.uid} dim={task.done}
-                lead={<Tick checked={task.done} label={(task.done ? "Not done: " : "Done: ") + task.text} onChange={() => attempt(() => completeTask(task.uid))} />}
-                end={when ? <span className={cn(late && "text-destructive")}>{when}</span> : undefined}>
-                {task.text}
-              </Row>
-            ))}
+            <ul>
+              {tasks.map(({ task, note: when, late }) => (
+                // The tick sits outside the row because the row itself opens the task (as in the tasks list).
+                <li key={task.uid} className="flex items-start gap-2.5">
+                  <span className="flex min-h-11 shrink-0 items-center sm:min-h-0">
+                    <Tick checked={task.done} label={(task.done ? "Not done: " : "Done: ") + task.text} onChange={() => attempt(() => completeTask(task.uid))} />
+                  </span>
+                  <Row onOpen={() => void navigate({ to: "/tasks/$taskId", params: { taskId: task.uid } })} arrow={false} dim={task.done} className="min-w-0 flex-1"
+                    end={when ? <span className={cn(late && "text-destructive")}>{when}</span> : undefined}>
+                    {task.text}
+                  </Row>
+                </li>
+              ))}
+            </ul>
           </Section>
         ) : null}
 
@@ -229,7 +240,8 @@ function AssignmentRow({ item, assignment: current }: { item: PipItem; assignmen
   return <Row sub={current.state === "failed" ? "Failed: " + item.note : item.note} subTone={current.state === "failed" ? "error" : undefined} end={end}>{item.title}</Row>;
 }
 
-/** The page's one field: what is written here goes to the big chat with Pip, which then opens. */
+/** The page's one field: what is written here goes to the big chat with Pip, which then opens. Above it, the two
+ * things a day needs before Pip is asked anything at all: a task and a note. */
 function AskPip() {
   const navigate = useNavigate();
   const [text, setText] = useState("");
@@ -240,6 +252,18 @@ function AskPip() {
     node.style.height = "auto";
     node.style.height = Math.min(node.scrollHeight, 160) + "px";
   }, [text]);
+  // A task is added the way the tasks page adds one: a date or an ! in the words is read as you write them.
+  const addTask = async () => {
+    const written = await prompt({ title: "New task", placeholder: "call the bank tomorrow", maxLength: 500 });
+    if (!written?.trim()) return;
+    attempt(() => {
+      const parsed = parseTask(written, { lists: lists() });
+      if (!parsed.text.trim()) throw new Error("A task needs some words of its own.");
+      // A task captured on Today is today's unless its words say another day.
+      createTask(parsed.text, { due: parsed.due ?? today(), important: parsed.important, list: parsed.list });
+    });
+  };
+  const addNote = () => void navigate({ to: "/notes/$noteId", params: { noteId: crypto.randomUUID() }, search: { fresh: true } });
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
     const value = text.trim();
@@ -259,6 +283,10 @@ function AskPip() {
   };
   return (
     <div className="sticky bottom-0 bg-background pt-2 pb-3">
+      <div className="flex items-center gap-2 pb-1">
+        <Button type="button" variant="ghost" onClick={() => { void addTask(); }}>+ task</Button>
+        <Button type="button" variant="ghost" onClick={addNote}>+ note</Button>
+      </div>
       <form onSubmit={submit} className="border-t pt-1">
         <div className="flex items-start gap-2">
           <span aria-hidden="true" className="pt-2.5 font-medium text-primary">›</span>

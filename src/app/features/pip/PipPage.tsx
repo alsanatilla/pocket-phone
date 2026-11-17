@@ -4,13 +4,14 @@ import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Keys, Row } from "../../ui/kit.tsx";
 import { starters } from "../../../client/pip-presentation.js";
+import { PipSprite } from "./PipSprite.tsx";
 import { readAccess } from "../../data/ai.ts";
 import { useCollection } from "../../data/bus.ts";
 import { createChat, readChat, type Chat } from "../../data/chats.ts";
 import { homeChat, homeChats, homeForSend, isHome } from "../../data/home.ts";
 import { daySummary, listTasks, today } from "../../data/tasks.ts";
 import { openThoughts } from "../../data/thoughts.ts";
-import { ChatList } from "./ChatList.tsx";
+import { openChats } from "./chats-sheet.ts";
 import { PipComposer } from "./PipComposer.tsx";
 import { threadOf } from "./thread.ts";
 import { QueuedTurn, Turn } from "./Turn.tsx";
@@ -41,7 +42,10 @@ function Empty({ onAsk }: { onAsk: (prompt: string) => void }) {
   const ideas = starters({ enabled, overdue: due.filter(task => task.due < today()).length, thoughts: openThoughts().length });
   return (
     <div className="space-y-3 py-6">
-      <p className="max-w-prose text-sm text-muted-foreground">Ask about anything you keep in Pocket. Pip only reads what you allow in settings, and nothing is saved without you.</p>
+      <div className="flex items-start gap-3">
+        <PipSprite activity="wave" size={88} />
+        <p className="max-w-prose pt-1 text-sm text-muted-foreground">Ask about anything you keep in Pocket. Pip only reads what you allow in settings, and nothing is saved without you.</p>
+      </div>
       <div>
         {ideas.map(idea => <Row key={idea.label} onOpen={() => onAsk(idea.prompt)}>{idea.label}</Row>)}
       </div>
@@ -51,6 +55,9 @@ function Empty({ onAsk }: { onAsk: (prompt: string) => void }) {
 
 /** What the address opened: a separate chat, or home with every home segment oldest first. */
 interface Screen { chat: Chat | null; segments: Chat[]; homeLink: boolean }
+
+/** Where each conversation was left on screen; switching or leaving and coming back returns to that line. */
+const LEFT_AT = new Map<string, number>();
 
 export function PipPage() {
   const { chat: picked, ask } = useSearch({ from: "/pip" });
@@ -67,14 +74,13 @@ export function PipPage() {
   const chat = screen.chat ?? screen.segments.at(-1) ?? null;
   const screenKey = home ? "home" : chat?.uid ?? "none";
   const live = useLiveReply();
-  const [listOpen, setListOpen] = useState(false);
   const [shown, setShown] = useState(30);
+  const [atBottom, setAtBottom] = useState(true);
   const thread = useRef<HTMLDivElement>(null);
   const following = useRef(true);
+  const leftAt = useRef<string | null>(null);
   const height = useRef<number | null>(null);
-  const open = (uid: string) => { setListOpen(false); void navigate({ search: { chat: uid } }); };
-  const goHome = () => { setListOpen(false); void navigate({ search: {} }); };
-  const start = () => open(createChat().uid);
+  const start = () => void navigate({ search: { chat: createChat().uid } });
   // The page reloads when the account changes, so reading it in each render is enough.
   const guest = !activeAccount();
 
@@ -95,16 +101,30 @@ export function PipPage() {
   useEffect(() => {
     const node = thread.current;
     if (!node) return;
-    const onScroll = () => { following.current = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 120; };
+    const onScroll = () => {
+      const bottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 120;
+      following.current = bottom;
+      setAtBottom(bottom);
+      if (leftAt.current) LEFT_AT.set(leftAt.current, window.scrollY);
+    };
     const observer = new ResizeObserver(() => { if (following.current) window.scrollTo({ top: document.documentElement.scrollHeight }); });
     observer.observe(node);
     addEventListener("scroll", onScroll, { passive: true });
     return () => { observer.disconnect(); removeEventListener("scroll", onScroll); };
   }, []);
-  // A new message always brings the end into view; showing earlier messages does not. The effect names which
-  // conversation is on screen and how many turns it has in total, never how many of them are shown.
+  // A new message always brings the end into view, and so does another conversation; a conversation this tab has
+  // shown before returns to the line it was left at (the scroll handler above keeps that line). The effect names
+  // which conversation is on screen and how many turns it has in total, never how many of them are shown.
   const total = screen.chat ? screen.chat.turns.length : screen.segments.reduce((count, segment) => count + segment.turns.length, 0);
-  useLayoutEffect(() => { following.current = true; window.scrollTo({ top: document.documentElement.scrollHeight }); }, [screenKey, total]);
+  useLayoutEffect(() => {
+    const moved = leftAt.current !== screenKey;
+    leftAt.current = screenKey;
+    const saved = moved ? LEFT_AT.get(screenKey) : undefined;
+    const target = saved ?? document.documentElement.scrollHeight;
+    // Landed at the end: the reply is followed as it arrives. Landed on an older line: it is not.
+    following.current = target >= document.documentElement.scrollHeight - window.innerHeight - 120;
+    window.scrollTo({ top: target });
+  }, [screenKey, total]);
   // Showing earlier messages keeps the message that was first on screen where it is: measure before `shown`
   // changes, then scroll by exactly the height the messages added above it.
   useLayoutEffect(() => {
@@ -148,8 +168,8 @@ export function PipPage() {
     <main className="flex min-h-[calc(100dvh-45px)] flex-col">
       {/* One quiet line under the header: which conversation this is (it opens the list), then the two actions. */}
       <div className="sticky top-[45px] z-[5] mb-3 flex items-center gap-2 bg-background pt-2 pb-1">
-        <Button variant="ghost" onClick={() => setListOpen(true)} aria-expanded={listOpen} aria-label="All chats"
-          className="max-w-[65%] min-w-0 justify-start gap-1.5 text-xs text-dim">
+        <Button variant="default" onClick={() => openChats()} aria-label="All chats" title="All chats"
+          className="max-w-[65%] min-w-0 justify-start gap-1.5 text-xs">
           <span className="truncate">{chat?.title || "pip"}</span>
           <ChevronDown className="size-3.5 shrink-0" />
         </Button>
@@ -191,12 +211,16 @@ export function PipPage() {
       </div>
 
       <div className="sticky bottom-0 bg-background pt-2 pb-3">
+        {/* Reading back through the conversation: one key returns to the end, where the reply arrives. */}
+        {joined.items.length > 0 && !atBottom ? (
+          <div className="flex justify-end pb-1">
+            <Button type="button" variant="ghost" onClick={() => { following.current = true; setAtBottom(true); window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" }); }}>latest</Button>
+          </div>
+        ) : null}
         {guest ? (joined.items.length ? <SignedOut /> : null) : chat
           ? <PipComposer key={chat.uid + (ask ?? "")} chat={chat} busy={locked} queueing={queueing} note={note} initial={ask} onSend={sendFromComposer} onStop={stop} />
           : null}
       </div>
-
-      <ChatList open={listOpen} onOpenChange={setListOpen} current={home ? null : chat?.uid ?? null} homeCurrent={home} onPick={open} onHome={goHome} onNew={start} />
     </main>
   );
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const navigate = vi.fn();
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }));
@@ -18,10 +18,11 @@ import { refresh, retry, stop, useAssignments, type Assignment, type Assignments
 import { chats, type ChatTurn } from "../../data/chats.ts";
 import { homeChat } from "../../data/home.ts";
 import { loadJobs, type JobsState } from "../../data/jobs.ts";
-import { completeTask, createTask, getTask } from "../../data/tasks.ts";
+import { completeTask, createTask, getTask, listTasks } from "../../data/tasks.ts";
 import { markVisit } from "../../data/today.ts";
 import { useSyncState } from "../../runtime.ts";
 import { send } from "../pip/runner.ts";
+import { DialogHost } from "../../ui/dialog/DialogHost.tsx";
 import { TodayPage } from "./TodayPage.tsx";
 
 // Today with its real stores (tasks, agenda, chats) and the server's parts stubbed: the assignments list, the jobs and
@@ -163,5 +164,34 @@ describe("Today", () => {
     expect(send).toHaveBeenCalledWith(homeChat().uid, "Is the dentist at 10:30?");
     expect(navigate).toHaveBeenCalledWith({ to: "/pip" });
     expect((field as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("opens a task when its row is pressed, without spending the tick", () => {
+    const late = createTask("Submit the tax return", { due: "2026-11-07" });
+    render(<TodayPage />);
+    fireEvent.click(screen.getByText("Submit the tax return"));
+    expect(navigate).toHaveBeenCalledWith({ to: "/tasks/$taskId", params: { taskId: late.uid } });
+    expect(getTask(late.uid)?.done).toBe(false);
+  });
+
+  it("adds a task with a date in its words, and a note, from the field's two keys", async () => {
+    render(<><TodayPage /><DialogHost /></>);
+    fireEvent.click(screen.getByRole("button", { name: "+ task" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "New task" }), { target: { value: "Call the bank tomorrow !" } });
+    fireEvent.click(screen.getByRole("button", { name: "save" }));
+
+    await waitFor(() => expect(listTasks().some(task => task.text === "Call the bank")).toBe(true));
+    const added = listTasks().find(task => task.text === "Call the bank");
+    expect(added?.due).toBe("2026-11-10");
+    expect(added?.important).toBe(true);
+
+    // Words without a day mean today: a task captured on Today shows on Today.
+    fireEvent.click(screen.getByRole("button", { name: "+ task" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "New task" }), { target: { value: "Buy milk" } });
+    fireEvent.click(screen.getByRole("button", { name: "save" }));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Done: Buy milk" })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "+ note" }));
+    expect(navigate).toHaveBeenCalledWith({ to: "/notes/$noteId", params: { noteId: expect.any(String) }, search: { fresh: true } });
   });
 });

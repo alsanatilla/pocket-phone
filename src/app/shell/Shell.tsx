@@ -1,14 +1,20 @@
 import { useEffect } from "react";
-import { Link, Outlet, useRouterState } from "@tanstack/react-router";
+import { Link, Outlet, useLocation, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { DialogHost } from "../ui/dialog/DialogHost.tsx";
 import { classicHref, isClassicArea } from "../lib/classic.ts";
+import { dropSheetEntry, hasSheetEntry, useSheetBack } from "../lib/sheet-history.ts";
 import { cn } from "@/lib/utils";
 import { useSyncState } from "../runtime.ts";
+import { createChat } from "../data/chats.ts";
+import { ChatList } from "../features/pip/ChatList.tsx";
+import { closeChats, openChats, useChatsSheet } from "../features/pip/chats-sheet.ts";
+import type { Hit, PagePath } from "../features/pip/chat-search.ts";
 
-// The frame around every page: brand, sections, a way back to the classic app for what has not moved yet.
+// The frame around every page: brand, sections, a way back to the classic app for what has not moved yet, and the
+// chats sheet, which any page opens (Pip's line, ⌘K, or the back key closing it).
 
 const SECTIONS = [
   { to: "/today", label: "today" },
@@ -32,6 +38,40 @@ function SyncLine() {
 }
 
 export function Shell() {
+  const sheet = useChatsSheet();
+  const navigate = useNavigate();
+  const path = useLocation({ select: state => state.pathname });
+  // Home has no chat in its address, so "" here means the big chat and null means another page entirely.
+  const picked = useLocation({ select: state => state.pathname === "/pip" ? String((state.search as { chat?: unknown }).chat ?? "") : "" });
+  // The sheet is in the history, so the phone's back key closes it instead of leaving the page.
+  useSheetBack(sheet.open, closeChats);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openChats(true); }
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, []);
+
+  /** A sheet closed by tapping beside it or Escape goes back over its own entry; picking something drops it. */
+  const requestClose = (open: boolean) => {
+    if (open) return;
+    if (hasSheetEntry()) history.back(); else closeChats();
+  };
+  const openChat = (uid: string) => { dropSheetEntry(); closeChats(); void navigate({ to: "/pip", search: { chat: uid } }); };
+  const goHome = () => { dropSheetEntry(); closeChats(); void navigate({ to: "/pip", search: {} }); };
+  const openHit = (hit: Hit) => {
+    dropSheetEntry();
+    closeChats();
+    switch (hit.kind) {
+      case "chat": if (hit.uid === "home") void navigate({ to: "/pip", search: {} }); else void navigate({ to: "/pip", search: { chat: hit.uid } }); break;
+      case "note": void navigate({ to: "/notes/$noteId", params: { noteId: hit.uid } }); break;
+      case "task": void navigate({ to: "/tasks/$taskId", params: { taskId: hit.uid } }); break;
+      case "page": void navigate({ to: hit.uid as PagePath }); break;
+    }
+  };
+
   return (
     <div className="mx-auto max-w-3xl px-4 pb-[env(safe-area-inset-bottom)]">
       <header className="sticky top-0 z-10 flex items-center gap-3.5 border-b bg-background">
@@ -49,6 +89,9 @@ export function Shell() {
       <Outlet />
       <Toaster position="bottom-center" />
       <DialogHost />
+      <ChatList open={sheet.open} focusSearch={sheet.searching} onOpenChange={requestClose}
+        current={picked || null} homeCurrent={path === "/pip" && !picked}
+        onPick={openChat} onHome={goHome} onNew={() => openChat(createChat().uid)} onResult={openHit} />
     </div>
   );
 }

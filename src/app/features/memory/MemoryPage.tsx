@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { readChat } from "../../data/chats.ts";
@@ -34,6 +34,7 @@ function Entry({ entry, busy, onEdit, onForget }: { entry: MemoryEntry; busy: bo
 }
 
 export function MemoryPage() {
+  const navigate = useNavigate();
   const memory = useMemory();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState("");
@@ -105,6 +106,8 @@ export function MemoryPage() {
 
   return (
     <main className="flex min-h-[calc(100dvh-45px)] flex-col pb-4">
+      {/* Memory sits under settings in the app's shape, so its way back says so. */}
+      <div className="-mb-2 pt-4"><Button variant="ghost" onClick={() => void navigate({ to: "/settings" })}>‹ settings</Button></div>
       <PageTitle title="memory" meta={memory.gateway ? "What pip remembers about you, in the files it keeps." : "What pip remembers about you. It reads this in every reply."} />
       {body}
     </main>
