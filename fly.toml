@@ -27,9 +27,9 @@ kill_timeout = "30s"
   PIP_GATEWAY_HOME = "/data/openclaw"
   PIP_GATEWAY_PORT = "18789"
   PIP_GATEWAY_AGENT = "pocket"
-  # Measured from the Fly machine: first token 0.24 s vs 0.9–1.2 s for DeepSeek, and the whole app path
-  # 1.5 s per message in an open chat. OpenCode Go includes it on the same plan.
-  PIP_GATEWAY_MODEL = "kimi-k3.1-pro"
+  # Fastest on Pip's real ~12k-token prompt, measured from the Fly machine: 1.08 s to first token, against 1.21 s
+  # for Kimi K3.1 Pro, 1.36 s for MiniMax M3.1 Flash and 6.7 s for GLM 5.3. A short prompt made Kimi look faster.
+  PIP_GATEWAY_MODEL = "deepseek-v4.1-flash"
   PIP_GATEWAY_BASE_URL = "https://opencode.ai/inference/go/openai/v1"
   PIP_ROUTINES_EVERY_MS = "60000"
   PIP_WORKER_CONCURRENCY = "2"
