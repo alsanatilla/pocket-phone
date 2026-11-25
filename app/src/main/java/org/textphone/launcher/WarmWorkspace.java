@@ -49,10 +49,16 @@ final class WarmWorkspace {
             else if ("search".equals(kind)) { outline(canvas,2,2,12,12); rect(canvas,11,11,14,14); rect(canvas,13,13,16,16); }
             else if ("apps".equals(kind) || "group".equals(kind)) { rect(canvas,2,2,7,7);rect(canvas,11,2,16,7);rect(canvas,2,11,7,16);rect(canvas,11,11,16,16); }
             else if ("today".equals(kind)) { rect(canvas,2,8,4,16);rect(canvas,14,8,16,16);rect(canvas,4,14,14,16);rect(canvas,7,10,11,16);for(int i=0;i<6;i++){rect(canvas,3+i,7-i,5+i,9-i);rect(canvas,10+i,2+i,12+i,4+i);} }
-            else if ("calendar".equals(kind) || "agenda".equals(kind) || "clock".equals(kind)) { outline(canvas,2,3,16,16);rect(canvas,2,6,16,8);rect(canvas,5,1,7,5);rect(canvas,11,1,13,5);rect(canvas,5,10,7,12);rect(canvas,10,10,12,12); }
+            else if ("clock".equals(kind)) { rect(canvas,6,2,12,3);rect(canvas,6,15,12,16);rect(canvas,2,6,3,12);rect(canvas,15,6,16,12);rect(canvas,4,3,6,4);rect(canvas,12,3,14,4);rect(canvas,3,4,4,6);rect(canvas,14,4,15,6);rect(canvas,3,12,4,14);rect(canvas,14,12,15,14);rect(canvas,4,14,6,15);rect(canvas,12,14,14,15);rect(canvas,8,5,10,10);rect(canvas,10,8,13,10); }
+            else if ("gym".equals(kind)) { rect(canvas,5,8,13,10);rect(canvas,3,5,5,13);rect(canvas,13,5,15,13);rect(canvas,1,7,3,11);rect(canvas,15,7,17,11); }
+            else if ("focus".equals(kind)) { outline(canvas,2,2,16,16);outline(canvas,5,5,13,13);rect(canvas,8,8,10,10); }
+            else if ("activity".equals(kind)) { rect(canvas,3,2,15,3);rect(canvas,3,3,4,14);rect(canvas,14,3,15,14);rect(canvas,3,14,15,15);rect(canvas,4,15,6,16);rect(canvas,8,15,10,16);rect(canvas,12,15,14,16);rect(canvas,6,5,12,6);rect(canvas,6,8,12,9);rect(canvas,6,11,10,12); }
+            else if ("paper".equals(kind)) { for(int i=0;i<10;i++)rect(canvas,5+i,11-i,8+i,14-i);rect(canvas,3,14,5,16); }
+            else if ("brief".equals(kind)) { rect(canvas,6,6,12,12);rect(canvas,8,1,10,4);rect(canvas,8,14,10,17);rect(canvas,1,8,4,10);rect(canvas,14,8,17,10);rect(canvas,3,3,5,5);rect(canvas,13,3,15,5);rect(canvas,3,13,5,15);rect(canvas,13,13,15,15); }
+            else if ("calendar".equals(kind) || "agenda".equals(kind)) { outline(canvas,2,3,16,16);rect(canvas,2,6,16,8);rect(canvas,5,1,7,5);rect(canvas,11,1,13,5);rect(canvas,5,10,7,12);rect(canvas,10,10,12,12); }
             else if ("tasks".equals(kind)) { rect(canvas,2,5,5,7);rect(canvas,4,3,6,7);rect(canvas,6,2,8,4);rect(canvas,10,4,16,6);rect(canvas,2,12,5,14);rect(canvas,4,10,6,14);rect(canvas,6,9,8,11);rect(canvas,10,11,16,13); }
             else if ("thoughts".equals(kind)) { outline(canvas,2,2,16,12);rect(canvas,7,12,11,15);rect(canvas,6,16,12,18); }
-            else if ("movement".equals(kind) || "gym".equals(kind)) { rect(canvas,2,9,5,11);rect(canvas,5,5,7,11);rect(canvas,7,3,9,7);rect(canvas,9,5,11,15);rect(canvas,11,10,13,15);rect(canvas,13,9,16,11); }
+            else if ("movement".equals(kind)) { rect(canvas,2,9,5,11);rect(canvas,5,5,7,11);rect(canvas,7,3,9,7);rect(canvas,9,5,11,15);rect(canvas,11,10,13,15);rect(canvas,13,9,16,11); }
             else if ("phone".equals(kind) || "contacts".equals(kind)) { outline(canvas,5,1,13,17);rect(canvas,8,13,10,15); }
             else if ("messages".equals(kind) || "pip".equals(kind)) { outline(canvas,2,3,16,13);rect(canvas,4,13,7,16);rect(canvas,5,7,13,9); }
             else if ("camera".equals(kind) || "photos".equals(kind)) { outline(canvas,2,5,16,15);rect(canvas,6,2,12,5);outline(canvas,6,7,12,13); }
