@@ -23,6 +23,10 @@ export const TILE_KINDS = Object.freeze({
   'K': { name: 'keycard door', walk: 'all', sight: 'door', sound: 1, locked: true },
   'O': { name: 'data terminal', walk: 'none', sight: 'low' },
   'P': { name: 'camera panel', walk: 'none', sight: 'low' },
+  'W': { name: 'wreck', walk: 'none', sight: 'low' },
+  'Y': { name: 'drums', walk: 'none', sight: 'low' },
+  'S': { name: 'sandbags', walk: 'none', sight: 'low' },
+  'x': { name: 'fire barrel', walk: 'none', sight: 'low' },
   '.': { name: 'floor', walk: 'all', sight: 'clear', sound: 1 },
   ':': { name: 'metal grating', walk: 'all', sight: 'clear', sound: 1.7 },
   ',': { name: 'grass', walk: 'all', sight: 'clear', sound: .7, outdoor: true },
@@ -31,6 +35,16 @@ export const TILE_KINDS = Object.freeze({
   '=': { name: 'road', walk: 'all', sight: 'clear', sound: 1, outdoor: true },
   'X': { name: 'extraction pad', walk: 'all', sight: 'clear', sound: 1, outdoor: true },
 });
+
+// Yard props: rendered sprites (tools/sprites/shadow/props.mjs) standing on blocking tiles.
+// Low cover: a crouched body behind one is hidden, a standing one is not.
+export const PROPS = Object.freeze([
+  { sprite: 'car', tx: 2, ty: 26, w: 3, h: 2, ch: 'W' },
+  { sprite: 'van', tx: 12, ty: 27, w: 2, h: 2, ch: 'W' },
+  { sprite: 'drums', tx: 15, ty: 25, w: 2, h: 1, ch: 'Y' },
+  { sprite: 'sandbags', tx: 14, ty: 29, w: 2, h: 1, ch: 'S' },
+  { sprite: 'fireBarrel', tx: 8, ty: 28, w: 1, h: 1, ch: 'x' },
+]);
 
 function build() {
   const g = Array.from({ length: ROWS }, () => Array(COLS).fill(','));
@@ -100,7 +114,8 @@ function build() {
   fill(46, 2, 47, 3, 'C'); fill(60, 9, 61, 10, 'C'); fill(48, 9, 49, 9, 'C'); fill(61, 3, 61, 4, 'C');
 
   // South yard: west lot, checkpoint and parking.
-  fill(2, 26, 4, 27, 'C'); fill(12, 27, 13, 28, 'C'); fill(15, 25, 16, 25, 'C');
+  // The west lot is a junkyard: wrecks, drums, sandbags and a fire barrel (PROPS).
+  for (const prop of PROPS) fill(prop.tx, prop.ty, prop.tx + prop.w - 1, prop.ty + prop.h - 1, prop.ch);
   fill(1, 28, 3, 30, '"'); fill(7, 29, 10, 30, '"');
   fill(30, 25, 33, 30, '=');
   box(35, 26, 39, 29); put(35, 28, 'D'); put(37, 27, 'B');
@@ -170,6 +185,8 @@ export const LAMPS = Object.freeze([
   { x: 55, y: 6, r: 8, s: .85 }, { x: 31.5, y: 11, r: 4, s: .6 }, { x: 52, y: 11, r: 4, s: .55 },
   { x: 58, y: 15, r: 4, s: .5 }, { x: 58, y: 21, r: 4, s: .4 }, { x: 50, y: 18, r: 3, s: .18 },
   { x: 50, y: 27, r: 6, s: .55 }, { x: 10, y: 3, r: 4, s: .35 }, { x: 38, y: 2, r: 4, s: .4 },
+  // The fire barrel in the west lot: firelight you can be seen in.
+  { x: 8.5, y: 28.6, r: 6, s: .85, fire: true },
 ]);
 export const AMBIENT = Object.freeze({ outdoor: .2, indoor: .24 });
 

@@ -16,29 +16,30 @@ function contact() {
   const sim = new ShadowSim({ seed: 4 });
   sim.net.lastSeen = { x: 36.5 * level.TILE, y: 14.5 * level.TILE, zone: 'corr_e', at: sim.t, heading: 0, pace: 'running' };
   const situation = commander.buildSituation(sim, 'contact');
-  return { sim, situation, answers: commander.localAnswers('contact', situation, () => .5) };
+  return { sim, situation, answers: commander.atomicAnswers('contact', situation, () => .5) };
 }
 
 test('null, boolean and string model numbers never become tactical orders', () => {
-  const { situation, answers } = contact();
+  const { situation } = contact();
   for (const invalid of [null, '', '1', false, true, NaN, Infinity]) {
     const response = { intercept: { type: 'noul', noul: invalid }, level: { type: 'score', score: invalid } };
     assert.equal(contract.readAnswers('contact', response, situation), null);
-    assert.equal(contract.readAnswers('contact', response, situation, answers), answers);
+    assert.equal(contract.readCompleteAnswers('contact', response, situation), null);
   }
 });
 
-test('partial relay answers preserve the original local fallback for unanswered questions', () => {
+test('partial answers stay partial and cannot issue orders', () => {
   const { situation, answers } = contact();
-  const partial = contract.readAnswers('contact', { response: { type: 'choice', choice: 'contain', confidence: .8 } }, situation);
-  assert.deepEqual(Object.keys(partial), ['response']);
-  const merged = contract.readAnswers('contact', partial, situation, answers);
-  assert.equal(merged.heading, answers.heading);
-  assert.equal(merged.level, answers.level);
-  assert.equal(merged.response.choice, 'contain');
-  const noConfidence = contract.readAnswers('contact', { response: { type: 'choice', choice: 'contain' } }, situation);
-  assert.equal(noConfidence.response.confidence, null, 'missing provider confidence stays unknown');
-  assert.deepEqual(noConfidence.response.probabilities, {}, 'no probabilities are fabricated');
+  const partial = contract.readAnswers('contact', { intent: { type: 'choice', choice: 'server', confidence: .8 } }, situation);
+  assert.deepEqual(Object.keys(partial), ['intent']);
+  assert.equal(partial.plan, undefined, 'nothing is invented for unanswered questions');
+  assert.equal(partial.doors, undefined);
+  assert.equal(partial.intent.choice, 'server');
+  assert.equal(contract.readCompleteAnswers('contact', partial, situation), null);
+  const noConfidence = contract.readAnswers('contact', { intent: { type: 'choice', choice: 'server' } }, situation);
+  assert.equal(noConfidence.intent.confidence, null, 'missing provider confidence stays unknown');
+  assert.deepEqual(noConfidence.intent.probabilities, {}, 'no probabilities are fabricated');
+  assert.equal(contract.readCompleteAnswers('contact', answers, situation), null, 'atomic answers are not a complete live reply');
 });
 
 test('a two-guard containment keeps the requested interception slot', () => {
@@ -127,22 +128,30 @@ test('relay validates situations before sending and preserves typed provider rep
   }
   assert.equal(relay.calls.length, 0);
   const { situation } = contact();
-  const partial = { response: { type: 'choice', choice: 'pincer', confidence: .8, probabilities: { pincer: .8, contain: .2 } } };
-  relay.reply({ answers: partial, model: 'typesafe/jev-1.14-fixture', usage: { cost: .001 } });
+  const complete = commander.localAnswers('contact', situation, () => .5);
+  const pincer = situation.candidates.plans.find(item => item.id.endsWith(':pincer'));
+  complete.plan = { type: 'choice', choice: pincer.id, confidence: .8, probabilities: { [pincer.id]: .8 } };
+  relay.reply({ answers: complete, model: 'typesafe/jev-1.14-fixture', usage: { cost: .001 } });
   const success = await relay.post({ kind: 'contact', situation });
   assert.equal(success.status, 200);
-  assert.deepEqual(Object.keys(success.body.answers), ['response']);
-  assert.equal(success.body.answers.response.choice, 'pincer');
+  assert.deepEqual(Object.keys(success.body.answers).sort(), ['camera', 'doors', 'intent', 'lights', 'plan']);
+  assert.equal(success.body.answers.plan.choice, pincer.id);
   assert.equal(relay.calls[0].url, contract.JEV_ENDPOINT);
   assert.equal(relay.calls[0].body.model, contract.JEV_MODEL);
-  assert.equal(relay.calls[0].body.questions.level.type, 'score');
-  assert.equal(relay.calls[0].body.questions.intercept.type, 'noul');
+  assert.equal(relay.calls[0].body.questions.intent.type, 'choice');
+  assert.equal(relay.calls[0].body.questions.plan.type, 'choice');
+  assert.ok(relay.calls[0].body.questions.plan.criteria[pincer.id]);
+  assert.equal(relay.calls[0].body.questions.doors.type, 'choice');
+  assert.equal(relay.calls[0].body.questions.lights.type, 'choice');
+  assert.equal(relay.calls[0].body.questions.camera.type, 'choice');
   assert.equal(success.body.cost, .001);
+  relay.reply({ answers: { intent: complete.intent } });
+  assert.equal((await relay.post({ kind: 'contact', situation })).status, 502, 'partial orders are rejected');
   relay.reply({ error: 'upstream rate limit' }, 429);
   assert.equal((await relay.post({ kind: 'contact', situation })).status, 429);
   relay.reply('invalid upstream json');
   assert.equal((await relay.post({ kind: 'contact', situation })).status, 502);
-  relay.reply({ answers: { intercept: { type: 'noul', noul: null } } });
+  relay.reply({ answers: { plan: { type: 'choice', choice: 'contact:nope' } } });
   assert.equal((await relay.post({ kind: 'contact', situation })).status, 502);
   const malformed = clone(situation);
   malformed.candidates.posts = [{ id: 'constructor' }];
